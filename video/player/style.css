@@ -85,6 +85,7 @@ body.rec .chapters { bottom: 40px; }
 .badge--gld { background: var(--gld-bg); color: var(--gld-fg); }
 .badge--slv { background: var(--slv-bg); color: var(--slv-fg); }
 .badge--main { background: #2e2f6b; color: #c7c9ff; }   /* Main: layers.json colour #6366f1 */
+.badge--nk { background: #3b2a5c; color: #cdb4ff; }   /* natural key (ModelNode's NK badge) */
 .badge--only { background: var(--amber); color: #1a1405; }
 .icon { display: inline-block; flex: none; }
 

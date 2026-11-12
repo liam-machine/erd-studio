@@ -1,30 +1,30 @@
 // The README's hero GIF (media/demo.gif), drawn by ../hero-gif.mjs from player/hero.html with the
-// video's own pieces (editor.js, lib.js). One project, one change, followed from the code to the
-// business: shop-analytics, a dbt project whose design lives beside its SQL as DBML files, under a
-// caption band that says one short thing per beat (CAPTIONS):
-//   1. "Your model, as DBML files": the Explorer's .erd-studio tree beside the orders diagram; the
-//      table files light one by one with their tables, then fct_order.dbml's text shows.
-//   2. "Import what you have": the Explorer scrolls to sales.dbml and the editor switches to the
-//      draft an Import DBML… of it opens (its summary, before anything is written), and back.
-//   3. "The SQL changes": in models/, a new dim_store.sql and a store_key in fct_order.sql (its
-//      diff shows). "Compare it with dbt": the pointer clicks Compare with dbt, and the canvas marks
-//      what dbt has and the design lacks, the way packages/renderer draws it: store_key as a ghost
-//      row under "only in physical", and the comparison panel's counts. It clicks Stop comparing.
-//   4. "Your AI updates the model": Claude Code in the terminal is asked, in plain words, to bring
-//      the design in line; it loads the erd-studio skill and edits the DBML files; the new table and
-//      its relationship land on the canvas. "Design and SQL, in sync": Compare with dbt again, and
-//      the panel says All matched.
+// video's own pieces (editor.js, lib.js): ERD Studio in a plain folder (no stage tabs, nothing to
+// compare, neutral tables and lines), the orders diagram beside its .erd-studio files, under a
+// caption band that says one short thing per beat (CAPTIONS). An ad that loops: the diagram moving
+// first, then the three ways to change it, then who reads it.
+//   1. "Data modelling in VS Code": the pointer rests on fct_order and the canvas does what the
+//      product's hover preview does (HOVER): its lines light in the layer colour and carry the moving
+//      arrows.
+//   2. "Draw a relationship": the pointer presses fct_return's date_key, drags the dashed line to
+//      dim_date's date_key and lets go; the New Relationship dialog opens filled in (a picture of the
+//      real one), Create Relationship, and the line is there.
+//   3. "Type it: plain DBML files": fct_order.dbml's text, one column typed into it, and the column
+//      lands on the table.
+//   4. "Or ask your AI": Claude Code in the terminal is asked for a table in plain words; it loads
+//      the erd-studio skill and edits the DBML files; the table and its relationship land.
 //   5. "Business reads it in Confluence": a Confluence page carrying a real render of the same
 //      files, as ERD Studio for Confluence draws them from GitHub.
-// Beats 3 and 4 are staged from a real run (record/heroRun.mjs → record/hero-run.json): the SQL
-// change, the comparison's results before and after, the prompt, the files Claude Code wrote and
-// where it put the table are that run's, and `npm test` checks them against its record.
+// Beats 2 to 5 are staged from a real run (record/heroRun.mjs → record/hero-run.json): the drag was
+// made in the real canvas and the dialog is its picture, the typed line is read back by
+// @erd-studio/core, and the prompt, the files Claude Code wrote, the table and where it put it are
+// that run's. `npm test` checks every constant here against the record.
 // A seamless loop. render(t) is pure, like the video's.
-import { appIcon, card, caret, COLORS, easeInOut, easeOut, esc, ICON, node, nodeHeight, path, pointer, seg, toolbar, typed } from './lib.js';
-import { DRAFT_NODE_W, SALES_DRAFT, activityBar, dbmlLine, draftPage, fileTree } from './editor.js';
+import { appIcon, card, caret, clamp, COLORS, easeInOut, easeOut, esc, ICON, node, nodeHeight, path, pointer, seg, toolbar, typed } from './lib.js';
+import { activityBar, dbmlLine, fileTree } from './editor.js';
 
 /** The frame: a caption band (CAP_H) over the VS Code window. */
-export const HERO = { w: 1440, h: 1010, fps: 12, loop: 26 };
+export const HERO = { w: 1440, h: 1010, fps: 12, loop: 22.5 };
 const CAP_H = 130;
 const WIN = { x: 20, y: CAP_H, w: HERO.w - 40, h: HERO.h - CAP_H - 20 };
 const ACTW = 72, SIDEW = 420;
@@ -32,39 +32,32 @@ const EDX = ACTW + SIDEW;                       // editor area left, in body px
 const BODYW = WIN.w - 2, BODYH = WIN.h - 66;    // the window's body (card border, 64 px head)
 
 // ---- The loop -----------------------------------------------------------------------------------
-const LIGHT0 = 0.4, LIGHT_STEP = 0.45;          // the table files light, one by one
-const CODE_IN = 2.5, CODE_OUT = 4.0;            // fct_order.dbml's text
-const SCROLL_AT = 4.2;                          // the Explorer scrolls down to the rest of the folder
-const DRAFT_IN = 4.7, DRAFT_OUT = 7.5;          // Import DBML…'s draft of sales.dbml
-/** The dbt side changes: dim_store.sql appears, fct_order.sql gains store_key. Its diff shows until SQL_CARD_OUT. */
-export const SQL_AT = 8.1;
-const SQL_CARD_OUT = 10.3;
 const CLICK = 0.22;
+/** By hand: the press on the FK column, the long press that starts the drag (ModelNode.tsx: 220 ms), the drop, and the click on Create Relationship. */
+export const PRESS_AT = 3.5, LONG_PRESS = 0.22, DROP_AT = 5.05, CREATE_CLICK = 6.2;
+const DRAG_FROM = PRESS_AT + LONG_PRESS;
+/** The relationship is on the canvas from the click's mouse-up. */
+export const CREATE_ON = CREATE_CLICK + CLICK;
+/** As text: fct_order.dbml's card, the line typed into it, and the moment it is saved and the canvas follows. */
+const TEXT_IN = 7.8, TYPE_FROM = 8.4, TYPE_CPS = 16, TEXT_OUT = 11.3;
+export const TYPED_AT = 10;
+/** With AI: the terminal opens, the prompt is typed, each step lands, the canvas follows the last. */
+export const AI = { open: 11.7, type: 12.05, cps: 40, steps: [13.5, 13.9, 14.3, 14.7, 15.1], done: 15.5, close: 16.25 };
 /**
- * The pointer's three presses of the toolbar's Compare button: Compare with dbt (the difference
- * shows), Stop comparing (before the terminal opens), and Compare with dbt again once Claude Code
- * is done (All matched). Each takes effect as the mouse comes up.
+ * The Confluence page covers the window from CONF_IN to CONF_OUT; behind it the project goes back
+ * to its start. Both are cuts: a cross-fade of the whole window costs the GIF more bytes than a
+ * beat does.
  */
-export const COMPARE_CLICKS = [10.6, 13.1, 19.3];
-const [COMPARE_ON, COMPARE_OFF, COMPARE_AGAIN] = COMPARE_CLICKS.map((c) => c + CLICK);
-const MARK_AT = COMPARE_ON + 0.1;
-/**
- * The Confluence page covers the window from CONF_IN to CONF_OUT; behind it, at RESET_AT, the project
- * goes back to its start. Both are cuts, like the draft's tab: a cross-fade of the whole window
- * costs the GIF more bytes than a beat does.
- */
-const CONF_IN = 21, RESET_AT = CONF_IN, CONF_OUT = 25.2;
+const CONF_IN = 17.7, CONF_OUT = 21.8;
 
 /** One caption per beat, ≤ 5 words, from `at` (the first also runs into the seam); `em` is lit in blue. */
 export const CAPTIONS = [
-  { at: 0, text: 'Your model, as DBML files', em: 'DBML files' },
-  { at: 4.2, text: 'Import what you have', em: 'Import' },
-  { at: 7.9, text: 'The SQL changes', em: 'SQL' },
-  { at: 10.3, text: 'Compare it with dbt', em: 'Compare' },
-  { at: 13.6, text: 'Your AI updates the model', em: 'AI' },
-  { at: 19.3, text: 'Design and SQL, in sync', em: 'in sync' },
-  { at: 21, text: 'Business reads it in Confluence', em: 'Confluence' },
-  { at: 25.2, text: 'Your model, as DBML files', em: 'DBML files' },
+  { at: 0, text: 'Data modelling in VS Code', em: 'VS Code' },
+  { at: 3.3, text: 'Draw a relationship', em: 'Draw' },
+  { at: 7.6, text: 'Type it: plain DBML files', em: 'DBML files' },
+  { at: 11.6, text: 'Or ask your AI', em: 'AI' },
+  { at: 17.7, text: 'Business reads it in Confluence', em: 'Confluence' },
+  { at: 21.8, text: 'Data modelling in VS Code', em: 'VS Code' },
 ];
 const CAP_FADE = 0.3;
 
@@ -83,8 +76,15 @@ function captionBand(t) {
 }
 
 // ---- The real run (record/hero-run.json; `npm test` checks every constant here against it) ------
+/** By hand: the column dragged and the one it was dropped on (record/heroRun.mjs DRAG), [table, column]. */
+export const DRAG = { from: ['fct_return', 'date_key'], to: ['dim_date', 'date_key'] };
+/** The dialog the real canvas opened on the drop, as it drew it (record/heroRun.mjs DIALOG_SHOT, at 2x), and its primary button. */
+export const DIALOG = { file: 'hero-new-relationship.png', w: 420, h: 660, button: 'Create Relationship', buttonAt: { x: 333, y: 633 } };
+/** As text: the line typed into fct_order.dbml (record/heroRun.mjs TYPED_LINE), and the column the canvas reads from it. */
+export const TYPED_LINE = '  quantity     INTEGER';
+export const TYPED_COLUMN = { table: 'fct_order', after: 'product_key', col: [null, 'quantity', 'INTEGER'] };
 /** What Claude Code was asked, word for word (record/heroRun.mjs PROMPT). */
-export const AI_PROMPT = 'dbt has a new dim_store model. Add it to the orders diagram and link fct_order to it.';
+export const AI_PROMPT = 'Add a dim_store table and link fct_order to it.';
 /**
  * What it did, as Claude Code lists it: the skill it loaded, then each file it changed, in the
  * run's order. Left out: the files it only read, a second edit to a file already listed, and its
@@ -97,35 +97,21 @@ export const AI_STEPS = [
   ['Update', '.erd-studio/main/diagrams/orders.dbml'],
   ['Write', '.erd-studio/main/tables/main/dim_store.dbml'],
 ];
-/** The table it added (its dim_store.dbml) and where its diagram edit put it (erd_layout), and the key it added to fct_order, after product_key. */
-export const AI_TABLE = { name: 'dim_store', x: 520, y: 640, cols: [['PK', 'store_key', 'INTEGER'], [null, 'store_name', 'VARCHAR'], [null, 'city', 'VARCHAR']] };
+/** The table it added (its dim_store.dbml: the grain and the natural key are its own) and where its diagram edit put it (erd_layout), and the key it added to fct_order, after product_key. */
+export const AI_TABLE = { name: 'dim_store', x: 0, y: 320, grain: 'One row per store', cols: [['PK', 'store_key', 'INTEGER'], ['NK', 'store_id', 'VARCHAR'], [null, 'name', 'VARCHAR']] };
 export const AI_COLUMN = { table: 'fct_order', after: 'product_key', col: ['FK', 'store_key', 'INTEGER'] };
-/** The comparison (the CLI's diff, which shares the canvas's code): before the AI's edit, and after. */
-export const COMPARED = {
-  sqlChanged: { matched: 5, colDiffs: 1, table: 'fct_order', column: 'store_key', type: 'integer' },
-  afterAi: { matched: 6 },
-};
-/** models/fct_order.sql after the SQL change, whole; `added` is the line the change added. */
-export const SQL_CARD = {
-  path: 'models/fct_order.sql',
-  lines: ['select', '    order_id,', '    customer_key,', '    date_key,', '    product_key,', '    store_key,', '    amount', "from {{ source('shop', 'orders') }}"],
-  added: 5,
-};
-/** The AI beat's clock: the terminal opens, the prompt is typed, each step lands, the canvas follows the last. */
-export const AI = { open: 13.8, type: 14.2, cps: 50, steps: [16.1, 16.55, 16.95, 17.35, 17.75], done: 18.15, close: 18.85 };
 
-/** Where the project is at t: in step with dbt, the SQL ahead of the design, or the design brought in line. */
-export const phaseAt = (t) => (t < SQL_AT || t >= RESET_AT ? 'inStep' : t < AI.done ? 'sqlChanged' : 'afterAi');
-export const comparingAt = (t) => (t >= COMPARE_ON && t < COMPARE_OFF) || (t >= COMPARE_AGAIN && t < RESET_AT);
+/** Where the project is at t: as it started, with the relationship drawn by hand, with the typed column, or with the AI's table. */
+export const phaseAt = (t) => (t < CREATE_ON || t >= CONF_IN ? 'start' : t < TYPED_AT ? 'dragged' : t < AI.done ? 'typed' : 'after');
 
 // ---- The Explorer ---------------------------------------------------------------------------------
 /**
  * The folder's rows, in VS Code's order (folders first, then names without regard to case):
- * [depth, kind, label, closed?, id]; depth 0 is the folder's top level. `sql`: the dbt change has
- * landed (dim_store.sql); `store`: Claude Code has written dim_store.dbml. The folder is the one
- * record/heroRun.mjs makes: .claude holds the helper's skill, logs and target are dbt's.
+ * [depth, kind, label, closed?, id]; depth 0 is the folder's top level. `store`: Claude Code has
+ * written dim_store.dbml. The folder is the one record/heroRun.mjs makes: the design beside the
+ * code that loads the warehouse; .claude holds the helper's skill.
  */
-export function heroTree({ sql = false, store = false } = {}) {
+export function heroTree({ store = false } = {}) {
   const f = (d, kind, label, id) => [d, kind, label, false, id ?? label];
   return [
     [0, 'folder', '.claude', true, '.claude'],
@@ -145,35 +131,22 @@ export function heroTree({ sql = false, store = false } = {}) {
     f(4, 'dbml', 'fct_return.dbml', 't:fct_return'),
     f(1, 'json', 'layers.json'),
     f(1, 'md', 'README.md', 'erd-readme'),
-    [0, 'folder', 'logs', true, 'logs'],
-    f(0, 'folder', 'models'),
-    f(1, 'sql', 'dim_customer.sql', 'm:dim_customer'),
-    f(1, 'sql', 'dim_date.sql', 'm:dim_date'),
-    f(1, 'sql', 'dim_product.sql', 'm:dim_product'),
-    ...(sql ? [f(1, 'sql', 'dim_store.sql', 'm:dim_store')] : []),
-    f(1, 'sql', 'fct_order.sql', 'm:fct_order'),
-    f(1, 'sql', 'fct_return.sql', 'm:fct_return'),
-    f(1, 'yml', 'schema.yml', 'm:schema'),
-    f(1, 'yml', 'sources.yml', 'm:sources'),
-    [0, 'folder', 'target', true, 'target'],
+    f(0, 'folder', 'pipelines'),
+    f(1, 'other', 'load_orders.py'),
+    f(1, 'sql', 'orders.sql'),
     f(0, 'other', '.gitignore'),
-    f(0, 'yml', 'dbt_project.yml'),
-    f(0, 'yml', 'profiles.yml'),
     f(0, 'md', 'README.md'),
-    f(0, 'dbml', 'sales.dbml', 'sales'),
   ];
 }
 /** The folder at the loop's start. */
 export const HERO_TREE = heroTree();
-const ROW_H = 33, TREE_TOP = 84;
-/** Rows scrolled off the top once the Explorer has scrolled down (sales.dbml, models/ and the table files all in view). */
-const SCROLL_ROWS = HERO_TREE.length - Math.floor((BODYH - TREE_TOP) / ROW_H);
+const ROW_H = 32, TREE_TOP = 84;
 /** When Claude Code's Write of dim_store.dbml lands (its row appears). */
 const STORE_FILE_AT = AI.steps[4] + 0.25;
-/** Source Control's letters: what the SQL change and then Claude Code left uncommitted ([id, letter, from]). */
+/** Source Control's letters: what each edit left uncommitted ([id, letter, from]). */
 const GIT = [
-  ['m:dim_store', 'U', SQL_AT], ['m:fct_order', 'M', SQL_AT], ['m:schema', 'M', SQL_AT], ['m:sources', 'M', SQL_AT],
-  ['t:fct_order', 'M', AI.steps[1] + 0.25], ['rels', 'M', AI.steps[2] + 0.25], ['diagram', 'M', AI.steps[3] + 0.25], ['t:dim_store', 'U', STORE_FILE_AT],
+  ['rels', 'M', CREATE_ON], ['t:fct_order', 'M', TYPED_AT],
+  ['diagram', 'M', AI.steps[3] + 0.25], ['t:dim_store', 'U', STORE_FILE_AT],
 ];
 const GIT_COLOUR = { U: '#73c991', M: '#e2c08d' };
 
@@ -186,22 +159,19 @@ const T = [
   { name: 'dim_product', x: 1040, y: 0, cols: [['PK', 'product_key', 'INTEGER'], [null, 'product_name', 'VARCHAR'], [null, 'price', 'DECIMAL(10,2)']] },
   { name: 'fct_return', x: 1040, y: 540, cols: [['PK', 'return_id', 'INTEGER'], ['FK', 'order_id', 'INTEGER'], ['FK', 'date_key', 'INTEGER'], [null, 'refunded', 'DECIMAL(18,2)']] },
 ];
-/** The tables once Claude Code's edits are in: fct_order with its new key, and dim_store. */
-const T_AFTER = [
-  ...T.map((tb) => {
-    if (tb.name !== AI_COLUMN.table) return tb;
-    const at = tb.cols.findIndex(([, n]) => n === AI_COLUMN.after) + 1;
-    return { ...tb, cols: [...tb.cols.slice(0, at), AI_COLUMN.col, ...tb.cols.slice(at)] };
-  }),
-  AI_TABLE,
-];
+const withColumn = (tables, { table, after, col }) => tables.map((tb) => {
+  if (tb.name !== table) return tb;
+  const at = tb.cols.findIndex(([, n]) => n === after) + 1;
+  return { ...tb, cols: [...tb.cols.slice(0, at), col, ...tb.cols.slice(at)] };
+});
+/** The tables in each phase: the typed column, then the AI's key (which it put before it) and table. */
+const T_TYPED = withColumn(T, TYPED_COLUMN);
+const TABLES = { start: T, dragged: T, typed: T_TYPED, after: [...withColumn(T_TYPED, AI_COLUMN), AI_TABLE] };
 const NW = 350;
-/** The canvas: local coordinates drawn at CS from (CX, CY) in body px, below the toolbar and its stage tabs. One body px is one flow px. */
-const CX = EDX + 24, CY = 152, CS = 0.62;
-/** The table files, in the order they light (fct_order last: its text shows). */
-const FILE_ORDER = ['dim_customer', 'dim_date', 'dim_product', 'fct_return', 'fct_order'];
+/** The canvas: local coordinates drawn at CS from (CX, CY) in body px. One body px is one flow px. */
+const CX = EDX + 24, CY = 104, CS = 0.62;
 
-/** fct_order.dbml as ERD Studio writes it, before the change (formatDbml aligns the types; `npm test` checks it). */
+/** fct_order.dbml as ERD Studio writes it, at the start (formatDbml aligns the types; `npm test` checks it). */
 export const FCT_DBML = [
   'Table main.fct_order {',
   '  order_id     INTEGER [pk]',
@@ -211,6 +181,8 @@ export const FCT_DBML = [
   '  amount       "DECIMAL(18,2)"',
   '}',
 ];
+/** The line of FCT_DBML the typed line goes under (product_key's). */
+const TYPED_UNDER = 4;
 
 // ---- The lines, routed and drawn as packages/renderer draws them --------------------------------
 // (`npm test` checks every number here against the renderer's source.)
@@ -226,8 +198,9 @@ export const FCT_DBML = [
 //     casing (7 px, the canvas colour) and the under line is cut 4.5 px either side. A treatment
 //     keeps 3 px from a corner and 4 px from the line's ends, and goes to the other line when it has
 //     no room.
-//   - FkEdge.css: lines 2 px, in the stage's colour (a dbt project's Logical stage: blue). Drawn
-//     here 1.25×, as the rest of this frame.
+//   - FkEdge.css: lines 2 px, 2.5 px while their table is hovered, in the neutral line colour (a
+//     plain folder has no stage colours). Drawn here 1.25×, as the rest of this frame, and the
+//     hover's arrows sized as the product sizes them at 50 % zoom (glyphScaleForZoom(0.5)).
 export const ROUTE = {
   pathGap: 20, labelOffset: 8,
   roundedRadius: 8, curveRadius: 40, curveRatio: 2, curveEndKeep: 4, curveClearance: 6, kappa: 0.5523,
@@ -240,8 +213,8 @@ export const LINE_STYLE_OPTIONS = {
 const STROKE_K = 1.25;
 
 /** Flow px of each table's box. */
-const rectsOf = (tables) => tables.map((tb) => ({ id: tb.name, x: tb.x * CS, y: tb.y * CS, w: NW * CS, h: nodeHeight(tb.cols.length, false) * CS }));
-const RECTS = rectsOf(T), RECTS_AFTER = rectsOf(T_AFTER);
+const rectsOf = (tables) => tables.map((tb) => ({ id: tb.name, x: tb.x * CS, y: tb.y * CS, w: NW * CS, h: nodeHeight(tb.cols.length, !!tb.grain) * CS }));
+const RECTS = Object.fromEntries(Object.entries(TABLES).map(([k, tables]) => [k, rectsOf(tables)]));
 /** A point on a table's side, `at` flow px along it from its top or left end. */
 function anchor(rects, name, side, at) {
   const r = rects.find((x) => x.id === name);
@@ -253,46 +226,38 @@ const push = (a, d) => ({ x: a.x + OUT[a.side][0] * d, y: a.y + OUT[a.side][1] *
 
 /**
  * The relationships: each from the FK's table (`*`, the path's start) to the key's table (`1`), by
- * the sides the product's router takes for this layout (the Confluence beat's real render of the
- * same files shows them: fct_order's top to dim_customer, its side to dim_product's bottom,
- * fct_return's top to fct_order, and fct_return's line to dim_date dipping under dim_store once
- * that is there). The corner points between are laid by hand in the router's manner (`mids`, flow
- * px: a number is the x of a vertical run, [x, y] a corner, a null y level with the line's start).
+ * the sides the product's router takes for this layout in each phase (seen in the real canvas with
+ * the run's files: fct_order's side to dim_customer's bottom, its top to dim_product's side, its
+ * bottom to dim_date; fct_return's side to fct_order's bottom, and to its side from fct_return's
+ * top once dim_store is there; the two straight lines). One corner each, where the two ends'
+ * directions meet; none when they face each other on one level.
  */
 const MID = NW * CS / 2;
-const RELS = [
-  { from: ['fct_order', 'top', MID], to: ['dim_customer', 'right', 64], mids: [] },
-  { from: ['fct_order', 'left', 93], to: ['dim_date', 'right', 43], mids: [262] },
-  { from: ['fct_order', 'right', 93], to: ['dim_product', 'bottom', MID], mids: [] },
-  { from: ['fct_return', 'top', MID], to: ['fct_order', 'right', 135], mids: [] },
-  { from: ['fct_return', 'left', 78], to: ['dim_date', 'right', 85], mids: [284] },
-];
-const RELS_AFTER = [
-  ...RELS.slice(0, 4),
-  { from: ['fct_return', 'left', 78], to: ['dim_date', 'right', 85], mids: [[592, null], [592, 556], [284, 556]] },
-  { from: ['fct_order', 'bottom', MID], to: ['dim_store', 'top', MID], mids: [] },
-];
+const R_CUSTOMER = { from: ['fct_order', 'left', 70], to: ['dim_customer', 'bottom', MID] };
+const R_PRODUCT = { from: ['fct_order', 'top', MID], to: ['dim_product', 'left', 64] };
+const R_DATE = { from: ['fct_order', 'bottom', 88], to: ['dim_date', 'right', 85] };
+const R_RETURN = { from: ['fct_return', 'left', 50], to: ['fct_order', 'bottom', 128] };
+/** The one drawn by hand: straight across, fct_return's side to dim_date's. */
+const R_DRAWN = { from: ['fct_return', 'left', 105], to: ['dim_date', 'right', 43] };
+/** The AI's: straight across, fct_order's side to dim_store's. */
+const R_STORE = { from: ['fct_order', 'left', 170], to: ['dim_store', 'right', 77] };
+const RELS = {
+  start: [R_CUSTOMER, R_PRODUCT, R_DATE, R_RETURN],
+  dragged: [R_CUSTOMER, R_PRODUCT, R_DATE, R_RETURN, R_DRAWN],
+  typed: [R_CUSTOMER, R_PRODUCT, R_DATE, R_RETURN, R_DRAWN],
+  after: [R_CUSTOMER, R_PRODUCT, R_DATE, { from: ['fct_return', 'top', MID], to: ['fct_order', 'right', 150] }, R_DRAWN, R_STORE],
+};
 const buildLines = (rels, rects) => rels.map((r) => {
   const [fn, fs, fa] = r.from;
   const [tn, ts, ta] = r.to;
   const sa = anchor(rects, fn, fs, fa), ea = anchor(rects, tn, ts, ta);
   const s = push(sa, ROUTE.pathGap), e = push(ea, ROUTE.pathGap);
-  const pts = [s];
   const horizontal = (side) => side === 'left' || side === 'right';
-  if (!r.mids.length) {
-    // one corner where the two ends' directions meet (none when they face each other on one line)
-    if (horizontal(fs) !== horizontal(ts)) pts.push(horizontal(fs) ? { x: e.x, y: s.y } : { x: s.x, y: e.y });
-  } else if (typeof r.mids[0] === 'number') {
-    pts.push({ x: r.mids[0], y: s.y }, { x: r.mids[0], y: e.y });
-  } else {
-    for (const [x, y] of r.mids) pts.push({ x, y: y ?? s.y });   // null: level with the line's start
-    pts.push({ x: pts.at(-1).x, y: e.y });
-  }
-  pts.push(e);
+  const pts = horizontal(fs) !== horizontal(ts) ? [s, horizontal(fs) ? { x: e.x, y: s.y } : { x: s.x, y: e.y }, e] : [s, e];
   return { id: `${fn}-${tn}`, from: fn, to: tn, cardinality: 'many-to-one', pts, many: push(sa, ROUTE.labelOffset), one: push(ea, ROUTE.labelOffset) };
 });
-export const LINES = buildLines(RELS, RECTS);
-export const LINES_AFTER = buildLines(RELS_AFTER, RECTS_AFTER);
+/** Each phase's lines, and how they are drawn. */
+export const LINES = Object.fromEntries(Object.keys(RELS).map((k) => [k, buildLines(RELS[k], RECTS[k])]));
 
 /** corners.ts cornerRadii: how much of each segment each corner takes. */
 function cornerRadii(pts, mode, rects) {
@@ -454,98 +419,230 @@ function renderOne(pts, corners, radii, treatment, segEvents, half) {
 /** The line style in use throughout: the default (the toolbar's switch shows it chosen). */
 export const LINE_STYLE = 'curved';
 export const LINE_STYLES = ['curved', 'hops'];
-/** The drawn lines, worked out once: before the change, and once Claude Code's edits are in. */
-export const DRAWN = renderLines(LINE_STYLE, LINES, RECTS);
-export const DRAWN_AFTER = renderLines(LINE_STYLE, LINES_AFTER, RECTS_AFTER);
+export const DRAWN = Object.fromEntries(Object.keys(LINES).map((k) => [k, renderLines(LINE_STYLE, LINES[k], RECTS[k])]));
 
-/**
- * The draft page's diagram (Import DBML…'s draft of sales.dbml) is the same renderer in a read-only
- * canvas, so it draws Curved lines too: SALES_DRAFT's tables (editor.js, DRAFT_NODE_W wide, drawn at
- * DRAFT_SCALE), routed around its cards. Its relationships are SALES_DRAFT.rels, in that order.
- */
-const DRAFT_SCALE = 0.6;
-const DRAFT_RECTS = SALES_DRAFT.tables.map((tb) => ({ id: tb.name, x: tb.x * DRAFT_SCALE, y: tb.y * DRAFT_SCALE, w: DRAFT_NODE_W * DRAFT_SCALE, h: nodeHeight(tb.cols.length, false) * DRAFT_SCALE }));
-const dh = (name, k) => DRAFT_RECTS.find((r) => r.id === name).h * k;
-const DRAFT_RELS = [
-  { from: ['fct_sale', 'left', dh('fct_sale', 0.3)], to: ['dim_branch', 'right', dh('dim_branch', 0.5)], mids: [270] },
-  { from: ['fct_sale', 'left', dh('fct_sale', 0.75)], to: ['dim_staff', 'right', dh('dim_staff', 0.5)], mids: [270] },
-  { from: ['fct_sale', 'right', dh('fct_sale', 0.3)], to: ['dim_calendar', 'left', dh('dim_calendar', 0.5)], mids: [594] },
-  { from: ['fct_refund', 'left', dh('fct_refund', 0.5)], to: ['fct_sale', 'right', dh('fct_sale', 0.75)], mids: [594] },
-];
-export const DRAFT_LINES = buildLines(DRAFT_RELS, DRAFT_RECTS);
-export const DRAFT_DRAWN = renderLines(LINE_STYLE, DRAFT_LINES, DRAFT_RECTS);
-
-/** One relationship line as FkEdge draws it (flow px): the casing (Curved), the stroke, `*` / `1`. */
-function drawLine(line, drawn, { colour, op = 1 }) {
-  const stroke = drawn.strokeD ?? drawn.d;
-  const label = (txt, p, size) => `<text x="${f2(p.x)}" y="${f2(p.y)}" fill="${colour}" font-size="${size}" font-weight="800" font-family="JetBrains Mono" text-anchor="middle" dominant-baseline="central">${txt}</text>`;
-  return `<g opacity="${op.toFixed(3)}"><path d="${stroke}" fill="none" stroke="var(--card)" stroke-width="${ROUTE.haloWidth * STROKE_K}"/>
-    <path d="${stroke}" fill="none" stroke="${colour}" stroke-width="${2 * STROKE_K}"/>${label('*', { x: line.many.x, y: line.many.y + 3 }, 24)}${label('1', line.one, 17)}</g>`;
-}
-/** The draft's lines, for draftPage: in its scaled diagram, so drawn at 1 / DRAFT_SCALE in flow px. */
-const DRAFT_EDGES = `<svg class="abs" style="left:0;top:0;overflow:visible" width="1" height="1"><g transform="scale(${(1 / DRAFT_SCALE).toFixed(4)})">${DRAFT_LINES.map((l, i) => drawLine(l, DRAFT_DRAWN[i], { colour: COLORS.logical })).join('')}</g></svg>`;
-
-// ---- The comparison, as the canvas draws it ----------------------------------------------------------
-//   - Toolbar.tsx: the button reads "Compare with dbt", and "Stop comparing" while the overlay is on.
-//   - ModelNode.tsx / .css: a column the compared stage has and this one lacks is a ghost row under
-//     a dashed "only in physical" separator: its name struck through in the ghost colour, the
-//     row at 0.45 and italic, dbt's type, and a "physical only" badge (both upper-cased by the CSS).
-//   - DiscrepancyPanel.tsx (bottom right of the canvas): "Logical (current) vs Physical (target)",
-//     ⊕ Sync while anything differs or "All matched", ×; the counts ("matched", "col diff"); then each
-//     table with a difference and its columns ("Only in Physical").
-/** The ghost row's ink: the product draws the row at 0.45; a little stronger here, so it survives the GIF's 800 px. */
-const GHOST_INK = 0.8;
-export const COMPARE = {
-  separator: 'only in physical', badge: 'physical only', ghost: '#9ca3af', ghostOpacity: 0.45,
-  title: ['Logical', '(current)', 'vs', 'Physical', '(target)'], sync: 'Sync', allMatched: 'All matched',
-  matched: 'matched', colDiff: 'col diff', onlyIn: 'Only in Physical',
+// ---- The hover preview, as packages/renderer draws it in a plain folder -----------------------
+//   - hoverIntent.ts: a table becomes the focus 120 ms after the pointer comes to rest on it, 60 ms
+//     when switching from another table; leaving clears it after 150 ms, unless the pointer is on
+//     one of the focus's lines (useHoverFocus.ts: following a bright line off the table keeps it).
+//   - canvasFocus.ts (`ownLinesOnly`): the table, every table one line away and the table's own
+//     lines stay bright; ModelNode.css / FkEdge.css fade the other tables to 0.22, the other lines
+//     to 0.15 and their `*` / `1` to 0.2, over 0.15 s (the casing under a line does not fade). The
+//     hovered table gets a 3 px ring in the neutral ring colour (no blue: a plain folder's canvas has
+//     no stage colours).
+//   - EdgeRouting.css "Colour on hover": the focused lines, their `*` / `1` and their arrows take
+//     the diagram's layer colour (Main: layerService.ts #6366f1); the lines go 2 → 2.5 px. Colour
+//     and width change at once (only opacity is transitioned).
+//   - edgeFlow.ts / EdgeFlow.tsx: the arrows follow the drawn path from fct_order's end (`*`) to the
+//     key's table (`1`); many-to-one is `reverse`, so they travel from the `1` end into the `*` end.
+//     56 px/s, one per 90 px (2–4), each fading in and out over the first and last 10 % of its
+//     pass, a filled notched chevron with a halo in the canvas colour.
+export const HOVER = {
+  enterDelay: 0.12, switchDelay: 0.06, leaveGrace: 0.15, fade: 0.15,
+  tableOpacity: 0.22, lineOpacity: 0.15, labelOpacity: 0.2,
+  layerColour: '#6366f1', ring: 'rgba(138,148,163,0.3)',
 };
-/** The Compare button's centre in body px (measured from a still: re-measure if the toolbar changes). */
-export const COMPARE_AT = { x: 977, y: 49 };
-const ON_BUTTON = { x: COMPARE_AT.x + 12, y: COMPARE_AT.y + 8 }, PARKED = { x: 1108, y: 302 }, OFF_RIGHT = { x: 1470, y: 250 };
-/**
- * The pointer (body px), in two visits: in from below the window to the Compare button, its click,
- * a rest clear of the tables while the difference is read, Stop comparing, and out past the right
- * edge; then back in for the last Compare with dbt, and out again.
- */
-export const POINTER = [
-  [{ t: 9.6, x: 1250, y: 860 }, { t: COMPARE_CLICKS[0] - 0.15, ...ON_BUTTON }, { t: COMPARE_CLICKS[0] + 0.45, ...ON_BUTTON },
-    { t: 11.5, ...PARKED }, { t: 12.5, ...PARKED }, { t: COMPARE_CLICKS[1] - 0.12, ...ON_BUTTON }, { t: COMPARE_CLICKS[1] + 0.4, ...ON_BUTTON }, { t: 14.1, ...OFF_RIGHT }],
-  [{ t: 18.6, ...OFF_RIGHT }, { t: COMPARE_CLICKS[2] - 0.12, ...ON_BUTTON }, { t: COMPARE_CLICKS[2] + 0.45, ...ON_BUTTON }, { t: 20.4, ...OFF_RIGHT }],
-];
-const press = (t) => { const c = COMPARE_CLICKS.find((x) => t >= x && t < x + CLICK); return c === undefined ? 0 : (t - c) / CLICK; };
+export const FLOW = { speed: 56, spacing: 90, minGlyphs: 2, maxGlyphs: 4, minDur: 1.6, maxDur: 7, durBucket: 0.5 };
+/** EdgeFlow.tsx CHEVRON_D: 8 × 9 flow px, pointing along +x. */
+export const CHEVRON_D = 'M -4,-4.5 L 4,0 L -4,4.5 L -1.75,0 Z';
+const GLYPH_SCALE = 2;
 
-/** The canvas's lines at t (flow px, under the tables). */
-function linesSvg(t) {
-  const after = phaseAt(t) === 'afterAi';
-  const lines = after ? LINES_AFTER : LINES, drawn = after ? DRAWN_AFTER : DRAWN;
-  const fresh = easeOut(seg(t, AI.done, AI.done + 0.4));
-  const h = lines.map((l, i) => drawLine(l, drawn[i], { colour: COLORS.logical, op: after && l.to === AI_TABLE.name ? fresh : 1 })).join('');
+
+// ---- The pointer ------------------------------------------------------------------------------------
+/** A column row's centre in body px. */
+const rowAt = (tables, [table, column]) => {
+  const tb = tables.find((x) => x.name === table), i = tb.cols.findIndex(([, n]) => n === column);
+  return { x: CX + tb.x * CS + NW * CS / 2, y: CY + (tb.y + 62 + (tb.grain ? 42 : 0) + 46 * i + 23) * CS };
+};
+const SRC = rowAt(T, DRAG.from), DST = rowAt(T, DRAG.to);
+/** The dialog: the real one's picture, drawn DIALOG_K× at the top centre of the canvas, as the product places it. */
+const DIALOG_K = 1.12;
+const DLG = { x: Math.round(EDX + (BODYW - EDX) / 2 - DIALOG.w * DIALOG_K / 2), y: 26, w: DIALOG.w * DIALOG_K, h: DIALOG.h * DIALOG_K };
+export const CREATE_AT = { x: DLG.x + DIALOG.buttonAt.x * DIALOG_K, y: DLG.y + DIALOG.buttonAt.y * DIALOG_K };
+const ON_FACT = { x: CX + 520 * CS + 150, y: CY + 170 * CS + 20 };
+/**
+ * The pointer (body px), one visit: in from below the window, a rest on fct_order's header (the
+ * hover), across to fct_return's date_key (pressed as it arrives), the drag to dim_date's date_key,
+ * the drop, down to Create Relationship, its click, and out past the right edge under the tables.
+ */
+export const HOVER_PATH = [
+  { t: 0.25, x: 1250, y: 860 }, { t: 0.95, ...ON_FACT }, { t: 2.75, ...ON_FACT },
+  { t: PRESS_AT, x: SRC.x - 90, y: SRC.y + 4 }, { t: DRAG_FROM + 0.1, x: SRC.x - 90, y: SRC.y + 4 },
+  { t: DROP_AT - 0.25, x: DST.x + 20, y: DST.y + 4 }, { t: DROP_AT + 0.2, x: DST.x + 20, y: DST.y + 4 },
+  { t: CREATE_CLICK - 0.2, x: CREATE_AT.x + 14, y: CREATE_AT.y + 6 }, { t: CREATE_CLICK + 0.45, x: CREATE_AT.x + 14, y: CREATE_AT.y + 6 },
+  { t: 7.4, x: 1470, y: 770 },
+];
+const press = (t) => (t >= CREATE_CLICK && t < CREATE_ON ? (t - CREATE_CLICK) / CLICK : 0);
+/** True while the column is being dragged: from the long press to the drop. */
+const draggingAt = (t) => t >= DRAG_FROM && t < DROP_AT;
+/** True while the dialog is up: from the drop to the click's mouse-up. */
+const dialogAt = (t) => t >= DROP_AT && t < CREATE_ON;
+
+/** Body px → flow px of the canvas. */
+const toFlow = (p) => ({ x: p.x - CX, y: p.y - CY });
+const tableAt = (p) => { const q = toFlow(p); return RECTS.start.find((r) => q.x >= r.x && q.x <= r.x + r.w && q.y >= r.y && q.y <= r.y + r.h)?.id ?? null; };
+/** True when the pointer is on a line's 16 px hit area (FkEdge's invisible wider path), off the tables. */
+function onLine(p, li) {
+  const q = toFlow(p), pts = DRAWN.start[li].flat;
+  for (let i = 1; i < pts.length; i++) {
+    const a = pts[i - 1], b = pts[i];
+    const l2 = (b.x - a.x) ** 2 + (b.y - a.y) ** 2;
+    const k = l2 ? clamp(((q.x - a.x) * (b.x - a.x) + (q.y - a.y) * (b.y - a.y)) / l2) : 0;
+    if (Math.hypot(q.x - (a.x + k * (b.x - a.x)), q.y - (a.y + k * (b.y - a.y))) <= 8) return true;
+  }
+  return false;
+}
+/** The tables and lines a table's hover preview keeps bright (computeCanvasFocus, ownLinesOnly). */
+function focusOf(id) {
+  if (!id) return null;
+  const lines = LINES.start.filter((l) => l.from === id || l.to === id);
+  return { node: id, nodes: new Set([id, ...lines.flatMap((l) => [l.from, l.to])]), lines: new Set(lines.map((l) => l.id)) };
+}
+
+/**
+ * When the focus changes: hoverIntent.ts's timers run against the pointer's path, sampled at 240 Hz.
+ * Computed once, so render(t) stays a pure lookup. [{ t, id }], id null when the preview clears.
+ */
+export const FOCUS_CHANGES = (() => {
+  const changes = [];
+  let current = null, enter = null, leave = null, inTable = null, onLines = new Set();
+  const commit = (t, id) => { if (id !== current) { current = id; changes.push({ t: +t.toFixed(4), id }); } };
+  const t0 = HOVER_PATH[0].t, t1 = PRESS_AT;   // a press ends the preview (and none shows while a column is dragged)
+  for (let k = 0; t0 + k / 240 <= t1; k++) {
+    const t = t0 + k / 240;
+    if (enter && t >= enter.at) { commit(enter.at, enter.id); enter = null; }
+    if (leave && t >= leave.at) { commit(leave.at, null); leave = null; }
+    const p = path(t, HOVER_PATH);
+    const table = tableAt(p);
+    // tables sit above the lines: a line under a table takes no pointer events
+    const lines = new Set(table ? [] : LINES.start.map((l, i) => (onLine(p, i) ? l.id : null)).filter(Boolean));
+    const bright = focusOf(current)?.lines ?? new Set();
+    if (table !== inTable) {
+      if (inTable) {                     // mouseleave: drop a pending enter, clear after the grace
+        enter = null;
+        leave = current ? { at: t + HOVER.leaveGrace } : null;
+      }
+      if (table) {                       // mouseenter
+        leave = null;
+        if (table === current) enter = null;
+        else if (!enter || enter.id !== table) enter = { id: table, at: t + (current ? HOVER.switchDelay : HOVER.enterDelay) };
+      }
+      inTable = table;
+    }
+    for (const id of lines) if (!onLines.has(id) && bright.has(id)) leave = null;                          // hold()
+    for (const id of onLines) if (!lines.has(id) && bright.has(id) && !table && current) leave = { at: t + HOVER.leaveGrace };   // leave()
+    onLines = lines;
+  }
+  commit(PRESS_AT, null);
+  return changes;
+})();
+
+/** The focus at t, and the one before it with when it changed (for the 0.15 s fades). */
+function focusAt(t) {
+  let i = -1;
+  while (i + 1 < FOCUS_CHANGES.length && FOCUS_CHANGES[i + 1].t <= t) i++;
+  return { now: focusOf(i >= 0 ? FOCUS_CHANGES[i].id : null), before: focusOf(i >= 1 ? FOCUS_CHANGES[i - 1].id : null), since: i >= 0 ? FOCUS_CHANGES[i].t : -Infinity };
+}
+/** CSS `ease` (cubic-bezier(.25,.1,.25,1)), close enough for a 0.15 s fade. */
+const ease = (p) => (p <= 0 ? 0 : p >= 1 ? 1 : 1 - Math.pow(1 - p, 2.2));
+/** An opacity the hover preview transitions: from its value under the previous focus to the current. */
+function faded(t, f, value) {
+  const a = value(f.before), b = value(f.now);
+  return a + (b - a) * ease((t - f.since) / HOVER.fade);
+}
+
+/** planEdgeFlow's moving chevrons for one drawn line: [{ at: 0..1 along the path, opacity, reverse }] at t. */
+export function flowGlyphs(drawn, line, t) {
+  const flowLen = Math.round(drawn.length / 8) * 8;   // EdgeFlow buckets the measured length
+  const dur = clamp(Math.round(flowLen / FLOW.speed / FLOW.durBucket) * FLOW.durBucket, FLOW.minDur, FLOW.maxDur);
+  const n = clamp(Math.round(flowLen / FLOW.spacing), FLOW.minGlyphs, FLOW.maxGlyphs);
+  const reverse = line.cardinality !== 'one-to-many';   // flowModeFor: many-to-one → reverse
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    // begin = -(i·dur/n): glyph i runs i/n of a pass ahead; keyPoints 0;1 or 1;0, opacity 0;1;1;0 at 0;.1;.9;1
+    const p = ((((t + (i * dur) / n) / dur) % 1) + 1) % 1;
+    out.push({ at: reverse ? 1 - p : p, opacity: Math.min(1, p / 0.1, (1 - p) / 0.1), reverse });
+  }
+  return out;
+}
+/** The point `at` (0..1) along a flattened path, and the path's direction there in degrees. */
+export function poseAt(pts, at) {
+  let total = 0;
+  for (let i = 1; i < pts.length; i++) total += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y);
+  let d = at * total;
+  for (let i = 1; i < pts.length; i++) {
+    const a = pts[i - 1], b = pts[i];
+    const l = Math.hypot(b.x - a.x, b.y - a.y);
+    if (d <= l || i === pts.length - 1) {
+      const k = l ? Math.min(1, d / l) : 0;
+      return { x: a.x + (b.x - a.x) * k, y: a.y + (b.y - a.y) * k, angle: (Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI };
+    }
+    d -= l;
+  }
+  return { x: pts[0].x, y: pts[0].y, angle: 0 };
+}
+
+/** One relationship line as FkEdge draws it (flow px): casing (Curved), stroke, arrows, `*` / `1`. */
+function drawLine(line, drawn, { halo, colour, width, lineOp, labelOp, glyphs }) {
+  const stroke = drawn.strokeD ?? drawn.d;
+  let h = '';
+  if (halo) h += `<path d="${stroke}" fill="none" stroke="var(--card)" stroke-width="${ROUTE.haloWidth * STROKE_K}"/>`;
+  h += `<path d="${stroke}" fill="none" stroke="${colour}" stroke-width="${width * STROKE_K}" opacity="${lineOp.toFixed(3)}"/>`;
+  for (const g of glyphs) {
+    const pose = poseAt(drawn.flat, g.at);
+    h += `<g transform="translate(${f2(pose.x)} ${f2(pose.y)}) rotate(${(pose.angle + (g.reverse ? 180 : 0)).toFixed(1)}) scale(${GLYPH_SCALE})" opacity="${g.opacity.toFixed(3)}"><path d="${CHEVRON_D}" fill="${colour}" stroke="var(--card)" stroke-width="1.5" paint-order="stroke fill" stroke-linejoin="round"/></g>`;
+  }
+  const label = (txt, p, size) => `<text x="${f2(p.x)}" y="${f2(p.y)}" fill="${colour}" font-size="${size}" font-weight="800" font-family="JetBrains Mono" text-anchor="middle" dominant-baseline="central" opacity="${labelOp.toFixed(3)}">${txt}</text>`;
+  return h + label('*', { x: line.many.x, y: line.many.y + 3 }, 24) + label('1', line.one, 17);
+}
+
+
+/** The canvas's lines at t (flow px, under the tables), with the hover's colour and arrows while it is on. */
+function linesSvg(t, f) {
+  const phase = phaseAt(t);
+  const lines = LINES[phase], drawn = DRAWN[phase];
+  let h = '';
+  for (const [i, line] of lines.entries()) {
+    const on = !!f.now?.lines.has(line.id);
+    // a line just made: by hand (from the click), by the AI (as its last edit lands)
+    const since = line.to === AI_TABLE.name ? AI.done : line.from === DRAG.from[0] && line.to === DRAG.to[0] ? CREATE_ON : null;
+    const fresh = since === null ? 0 : Math.sin(Math.PI * seg(t, since, since + 1.5));
+    if (fresh > 0) h += `<path d="${drawn[i].d}" fill="none" stroke="${since === AI.done ? '#22c55e' : '#60a5fa'}" stroke-width="${(9 * fresh).toFixed(2)}" stroke-linecap="round" opacity="${(0.55 * fresh).toFixed(3)}"/>`;
+    h += drawLine(line, drawn[i], {
+      halo: true,
+      colour: on ? HOVER.layerColour : COLORS.neutralLine,
+      width: on ? 2.5 : 2,
+      lineOp: faded(t, f, (x) => (!x || x.lines.has(line.id) ? 1 : HOVER.lineOpacity)) * (since === null ? 1 : easeOut(seg(t, since, since + 0.3))),
+      labelOp: faded(t, f, (x) => (!x || x.lines.has(line.id) ? 1 : HOVER.labelOpacity)) * (since === null ? 1 : easeOut(seg(t, since, since + 0.3))),
+      glyphs: on ? flowGlyphs(drawn[i], line, t) : [],
+    });
+  }
   return `<svg class="abs" style="left:${CX}px;top:${CY}px;overflow:visible" width="1" height="1">${h}</svg>`;
 }
 
-/** The comparison panel (bottom right of the canvas, above the terminal while that is open). */
-function comparePanel(t, bottom) {
-  const matched = phaseAt(t) === 'afterAi';
-  const since = matched ? COMPARE_AGAIN : COMPARE_ON;
-  const op = easeOut(seg(t, since, since + 0.3));
-  const c = matched ? COMPARED.afterAi : COMPARED.sqlChanged;
-  const [a, cur, vs, b, tgt] = COMPARE.title;
-  const small = 'font-size:15px;color:var(--text-3)';
-  const stat = (v, label, col) => `<span style="display:flex;align-items:baseline;gap:8px"><span style="font-size:28px;font-weight:800;color:${col}">${v}</span><span style="font-size:18px;color:var(--text-2)">${label}</span></span>`;
-  const flash = matched ? Math.sin(Math.PI * seg(t, COMPARE_AGAIN + 0.1, COMPARE_AGAIN + 1.3)) : 0;
-  const right = matched
-    ? `<span style="font-size:19px;font-weight:700;color:${COLORS.physical}">${COMPARE.allMatched}</span>`
-    : `<span style="display:flex;align-items:center;gap:6px;padding:3px 12px;border-radius:7px;border:1px solid #3a3d45;font-size:18px;font-weight:600"><svg class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><circle cx="12" cy="12" r="8"/><path d="M12 8v8M8 12h8"/></svg>${COMPARE.sync}</span>`;
-  const rows = matched ? '' : `<div style="margin-top:8px;padding-top:8px;border-top:1px solid #2c2c30;font-size:18px">
-      <div style="display:flex;align-items:center;gap:9px"><span style="width:9px;height:9px;border-radius:50%;background:${COLORS.physical}"></span><span class="mono" style="font-weight:600">${c.table}</span></div>
-      <div style="display:flex;align-items:center;gap:9px;margin:5px 0 0 18px"><span style="width:8px;height:8px;border-radius:50%;background:${COMPARE.ghost}"></span><span class="mono" style="color:var(--text-2)">${c.column}</span><span style="flex:1"></span><span style="font-size:16px;color:${COMPARE.ghost}">${COMPARE.onlyIn}</span></div></div>`;
-  return `<div class="abs" style="right:16px;bottom:${bottom.toFixed(1)}px;width:478px;border-radius:12px;background:#1c1e23;border:1px solid ${flash > 0 ? `rgba(32,192,90,${(0.35 + 0.65 * flash).toFixed(3)})` : '#3a3d45'};box-shadow:0 18px 44px #000a${flash > 0 ? `,0 0 0 ${(4 * flash).toFixed(1)}px rgba(32,192,90,${(0.3 * flash).toFixed(3)})` : ''};padding:10px 16px 12px;white-space:nowrap;opacity:${op.toFixed(3)};transform:translateY(${(12 * (1 - op)).toFixed(1)}px)">
-      <div style="display:flex;align-items:center;gap:7px;font-size:18px">
-        <span style="font-weight:700;color:${COLORS.logical}">${a}</span><span style="${small}">${cur}</span><span style="color:var(--text-2)">${vs}</span>
-        <span style="font-weight:700;color:${COLORS.physical}">${b}</span><span style="${small}">${tgt}</span><span style="flex:1"></span>${right}
-        <span style="color:var(--text-3);display:flex;margin-left:4px">${ICON.x({ size: 16 })}</span></div>
-      <div style="margin-top:6px;display:flex;align-items:center;gap:22px">${stat(c.matched, COMPARE.matched, 'var(--text)')}${matched ? '' : stat(c.colDiffs, COMPARE.colDiff, 'var(--amber)')}</div>${rows}</div>`;
+// ---- By hand: the drag, as the canvas draws it ----------------------------------------------------
+//   - ModelNode.tsx: a long press on a column (220 ms) starts the drag; the pressed row gets a 2 px
+//     inset outline in the focus colour (ModelNode.css `--dragging`), the row under the pointer the
+//     drop target's fill and glow (`--drop-target`).
+//   - DragLine.tsx / .css: a straight dashed line (8 4, 2 px, --edge-design: the Logical blue, on a
+//     neutral canvas too) from the pressed row's centre to the pointer, with an arrow head.
+//   - The drop opens New Relationship filled in (NewFkDialog.tsx), top centre of the canvas; its
+//     Create Relationship button adds the relationship. Seen and photographed in the real canvas
+//     (record/heroRun.mjs).
+export const DRAG_LINE = { colour: '#60a5fa', dash: '8 4', width: 2, focus: '#007fd4' };
+function dragLine(t) {
+  if (!draggingAt(t)) return '';
+  const p = path(t, HOVER_PATH);
+  const a = Math.atan2(p.y - SRC.y, p.x - SRC.x), len = Math.hypot(p.x - SRC.x, p.y - SRC.y);
+  if (len < 12) return '';
+  const head = `M0 0 L-13 -6 L-13 6 Z`;
+  return `<svg class="abs" style="left:0;top:0;overflow:visible" width="1" height="1"><line x1="${SRC.x.toFixed(1)}" y1="${SRC.y.toFixed(1)}" x2="${p.x.toFixed(1)}" y2="${p.y.toFixed(1)}" stroke="${DRAG_LINE.colour}" stroke-width="${DRAG_LINE.width * STROKE_K * 1.2}" stroke-dasharray="${DRAG_LINE.dash.split(' ').map((d) => d * 1.6).join(' ')}" opacity=".9"/>
+    <path d="${head}" fill="${DRAG_LINE.colour}" transform="translate(${p.x.toFixed(1)} ${p.y.toFixed(1)}) rotate(${(a * 180 / Math.PI).toFixed(1)})"/></svg>`;
+}
+function dialog(t) {
+  if (!dialogAt(t)) return '';
+  const op = easeOut(seg(t, DROP_AT, DROP_AT + 0.2));
+  return `<div class="abs" style="left:${DLG.x}px;top:${(DLG.y + 10 * (1 - op)).toFixed(1)}px;width:${DLG.w}px;height:${DLG.h}px;border-radius:9px;overflow:hidden;box-shadow:0 24px 60px #000c;opacity:${op.toFixed(3)}"><img src="/video/player/assets/${DIALOG.file}" width="${DLG.w}" height="${DLG.h}" style="display:block;width:${DLG.w}px;height:${DLG.h}px"></div>`;
 }
 
 /** The terminal panel's height: its tab row, the prompt and one row per step. */
@@ -570,98 +667,76 @@ function terminal(t) {
       <div style="height:${TERM.head}px;display:flex;align-items:center;gap:26px;padding:0 20px;font-size:15px;font-weight:600;letter-spacing:.06em;color:var(--text-3);white-space:nowrap">
         <span>PROBLEMS</span><span>OUTPUT</span><span style="color:var(--text);box-shadow:0 2px 0 var(--text);padding:8px 0">TERMINAL</span><span style="flex:1"></span>
         <span style="display:flex;align-items:center;gap:8px;letter-spacing:0;font-size:16px;color:var(--text-2)"><span style="color:var(--claude);display:flex">${ICON.claude({ size: 18 })}</span>Claude Code</span></div>
-      <div class="mono" style="padding:${TERM.pad / 2}px 20px 0;font-size:16.5px;color:var(--text)">${rows}</div></div>`;
+      <div class="mono" style="padding:${TERM.pad / 2}px 20px 0;font-size:18px;color:var(--text)">${rows}</div></div>`;
+}
+
+/** fct_order.dbml's text in a card at the canvas's bottom right, the new line typed into it. */
+function textCard(t) {
+  if (t < TEXT_IN || t >= TEXT_OUT + 0.3) return '';
+  const op = Math.min(1, easeOut(seg(t, TEXT_IN, TEXT_IN + 0.3))) * (1 - seg(t, TEXT_OUT, TEXT_OUT + 0.3));
+  const typing = t >= TYPE_FROM, end = TYPE_FROM + TYPED_LINE.length / TYPE_CPS, saved = t >= TYPED_AT;
+  const lines = [...FCT_DBML.slice(0, TYPED_UNDER + 1), ...(typing ? [null] : []), ...FCT_DBML.slice(TYPED_UNDER + 1)];
+  const body = lines.map((l, i) => {
+    const mine = l === null;
+    const text = mine ? `${dbmlLine(typed(TYPED_LINE, t, TYPE_FROM, TYPE_CPS))}${saved ? '' : caret(t, end)}` : dbmlLine(l);
+    return `<div style="display:flex;height:28px;align-items:center;${mine ? `background:rgba(96,165,250,${saved ? '.2' : '.1'});box-shadow:inset 4px 0 0 #60a5fa` : ''}"><span style="width:26px;text-align:right;margin-right:16px;color:var(--line-no)">${i + 1}</span><span style="white-space:pre">${text}</span></div>`;
+  }).join('');
+  const dot = typing && !saved ? '<span style="width:10px;height:10px;border-radius:50%;background:var(--text-2)"></span>' : saved ? `<span style="color:${GIT_COLOUR.M};font-weight:700">M</span>` : '';
+  return `<div class="abs" style="right:24px;bottom:22px;width:560px;border-radius:12px;background:#1b1c20;border:1px solid #3a3c42;box-shadow:0 18px 48px #000c;overflow:hidden;opacity:${op.toFixed(3)};transform:translateY(${(12 * (1 - op)).toFixed(1)}px)">
+      <div style="height:40px;display:flex;align-items:center;gap:10px;padding:0 16px;border-bottom:1px solid #2c2c30;font-size:18px;color:var(--text-2);white-space:nowrap"><span style="color:#5ca2f8;display:flex">${ICON.file({ size: 18 })}</span>.erd-studio/main/tables/main/fct_order.dbml<span style="flex:1"></span>${dot}</div>
+      <div class="mono" style="padding:8px 0 10px 4px;font-size:17px">${body}</div></div>`;
 }
 
 function ordersCanvas(t) {
-  const phase = phaseAt(t), comparing = comparingAt(t);
-  const lit = (name) => {
-    const k = FILE_ORDER.indexOf(name);
-    if (k < 0) return 0;
-    const at = LIGHT0 + k * LIGHT_STEP;
-    const last = k === FILE_ORDER.length - 1;
-    return Math.min(easeOut(seg(t, at, at + 0.25)), 1 - seg(t, at + LIGHT_STEP, at + LIGHT_STEP + 0.3) * (last ? 0 : 1)) * (1 - seg(t, CODE_OUT, CODE_OUT + 0.3));
-  };
-  // what the AI's edit put on the canvas: lit green as it lands, then at rest
-  const fresh = phase === 'afterAi' ? easeOut(seg(t, AI.done, AI.done + 0.35)) : 0;
-  const glow = phase === 'afterAi' ? 0.35 + 0.65 * (1 - seg(t, AI.done + 1.6, AI.done + 2.4)) : 0;
-  const mark = comparing && phase === 'sqlChanged' ? easeOut(seg(t, MARK_AT, MARK_AT + 0.3)) : 0;
+  const phase = phaseAt(t);
+  const f = focusAt(t);
+  // what an edit just put on the canvas: lit as it lands, then at rest
+  const lit = (since, hold) => (t >= since ? 0.3 + 0.7 * (1 - seg(t, since + hold, since + hold + 0.8)) : 0);
+  const typedGlow = phase === 'typed' || phase === 'after' ? lit(TYPED_AT, 1) * (phase === 'after' ? 0 : 1) : 0;
+  const aiGlow = phase === 'after' ? lit(AI.done, 1.2) : 0;
+  const aiIn = phase === 'after' ? easeOut(seg(t, AI.done, AI.done + 0.35)) : 0;
+  const dragging = draggingAt(t), pressed = t >= PRESS_AT && t < DROP_AT;
+  const p = path(t, HOVER_PATH);
+  const overTarget = dragging && Math.abs(p.x - DST.x) <= NW * CS / 2 && Math.abs(p.y - DST.y) <= 23 * CS;
   let inner = '';
-  for (const tb of phase === 'afterAi' ? T_AFTER : T) {
-    const g = lit(tb.name);
+  for (const tb of TABLES[phase]) {
     const isNew = tb.name === AI_TABLE.name;
-    const found = tb.name === COMPARED.sqlChanged.table ? Math.sin(Math.PI * seg(t, MARK_AT, MARK_AT + 1.4)) * (mark > 0 ? 1 : 0) : 0;
-    const shadow = g > 0 ? `0 0 0 ${(5 * g).toFixed(1)}px rgba(96,165,250,${(0.55 * g).toFixed(3)}),`
-      : found > 0 ? `0 0 0 ${(5 * found).toFixed(1)}px rgba(244,180,44,${(0.6 * found).toFixed(3)}),`
-      : isNew ? `0 0 0 ${(5 * glow).toFixed(1)}px rgba(34,197,94,${(0.6 * glow).toFixed(3)}),` : '';
-    const cols = tb.cols.map(([key, name, type]) => ({
-      key: key ?? undefined, name, type,
-      rowStyle: tb.name === AI_COLUMN.table && name === AI_COLUMN.col[1] ? `background:rgba(34,197,94,${(0.2 * glow).toFixed(3)});box-shadow:inset 5px 0 0 rgba(34,197,94,${glow.toFixed(3)})` : undefined,
-    }));
-    if (mark > 0 && tb.name === COMPARED.sqlChanged.table) {
-      // the ghost row: what dbt has and the design lacks (a ghost row has no key column: its name starts at the card's edge)
-      cols.push({ name: `<span style="margin-left:-56px;font-size:16px;font-weight:700;letter-spacing:.06em;color:${COMPARE.ghost}">${COMPARE.separator.toUpperCase()}</span>`, type: '', rowStyle: `height:${(32 * mark).toFixed(1)}px;overflow:hidden;opacity:${mark.toFixed(3)};border-top:1px dashed ${COMPARE.ghost};border-bottom:1px dashed ${COMPARE.ghost};background:rgba(156,163,175,.06)` });
-      cols.push({
-        name: `<span style="margin-left:-56px;font-size:21px;font-style:italic;text-decoration:line-through;color:${COMPARE.ghost};opacity:${GHOST_INK}">${COMPARED.sqlChanged.column}</span>`,
-        types: [['', COMPARED.sqlChanged.type, `rgba(156,163,175,${GHOST_INK})`]],
-        pill: `<span style="margin-left:-4px;padding:1px 6px;border-radius:5px;font-size:13px;font-weight:700;background:rgba(156,163,175,.2);color:${COMPARE.ghost}">${COMPARE.badge.toUpperCase()}</span>`,
-        rowStyle: `height:${(46 * mark).toFixed(1)}px;overflow:hidden;opacity:${mark.toFixed(3)}`,
-      });
-    }
-    const style = `${shadow ? `box-shadow:${shadow}0 18px 44px #0009;` : ''}${isNew && fresh < 1 ? `opacity:${fresh.toFixed(3)};` : ''}`;
-    inner += node({ x: tb.x, y: tb.y, w: NW, name: tb.name, stage: 'logical', cols, style });
+    const shadow = isNew ? `0 0 0 ${(5 * aiGlow).toFixed(1)}px rgba(34,197,94,${(0.6 * aiGlow).toFixed(3)}),`
+      : f.now?.node === tb.name ? `0 0 0 ${(3 / CS).toFixed(1)}px ${HOVER.ring},` : '';
+    const op = isNew ? aiIn : faded(t, f, (x) => (!x || x.nodes.has(tb.name) ? 1 : HOVER.tableOpacity));
+    const cols = tb.cols.map(([key, name, type]) => {
+      const is = ([table, column]) => table === tb.name && column === name;
+      const rowStyle = is(DRAG.from) && pressed ? `box-shadow:inset 0 0 0 ${(2 / CS).toFixed(1)}px ${DRAG_LINE.focus};opacity:${dragging ? 0.6 : 1}`
+        : is(DRAG.to) && overTarget ? `background:rgba(0,127,212,.18);box-shadow:inset 0 0 0 ${(2 / CS).toFixed(1)}px ${DRAG_LINE.focus}`
+        : is([TYPED_COLUMN.table, TYPED_COLUMN.col[1]]) && typedGlow > 0 ? `background:rgba(96,165,250,${(0.22 * typedGlow).toFixed(3)});box-shadow:inset 5px 0 0 rgba(96,165,250,${typedGlow.toFixed(3)})`
+        : is([AI_COLUMN.table, AI_COLUMN.col[1]]) && aiGlow > 0 ? `background:rgba(34,197,94,${(0.2 * aiGlow).toFixed(3)});box-shadow:inset 5px 0 0 rgba(34,197,94,${aiGlow.toFixed(3)})` : undefined;
+      return { key: key ?? undefined, name, type, rowStyle };
+    });
+    const style = `${shadow ? `box-shadow:${shadow}0 18px 44px #0009;` : ''}${op < 1 ? `opacity:${op.toFixed(3)};` : ''}`;
+    inner += node({ x: tb.x, y: tb.y, w: NW, name: tb.name, grain: tb.grain, cols, style });
   }
-  let h = `<div class="abs grid-bg" style="left:${EDX}px;top:0;right:0;bottom:0;background-color:var(--card)"></div>
-    ${linesSvg(t)}
+  return `<div class="abs grid-bg" style="left:${EDX}px;top:0;right:0;bottom:0;background-color:var(--card)"></div>
+    ${linesSvg(t, f)}
     <div class="abs" style="left:${CX}px;top:${CY}px;transform-origin:0 0;transform:scale(${CS})">${inner}</div>
-    ${toolbar({ x: EDX + 20, y: 16, logicalOnly: false, stage: 'logical', compare: comparing ? 'on' : 'off', layout: 'idle', add: 'idle', lineStyle: LINE_STYLE })}`;
-  if (comparing) h += comparePanel(t, 14);
-  // fct_order.dbml's text, bottom right
-  if (t >= CODE_IN && t < CODE_OUT + 0.3) {
-    const op = Math.min(1, easeOut(seg(t, CODE_IN, CODE_IN + 0.3))) * (1 - seg(t, CODE_OUT, CODE_OUT + 0.3));
-    const body = FCT_DBML.map((l, i) => `<div style="display:flex;height:28px;align-items:center"><span style="width:26px;text-align:right;margin-right:16px;color:var(--line-no)">${i + 1}</span><span style="white-space:pre">${dbmlLine(l)}</span></div>`).join('');
-    h += codeCard('.erd-studio/main/tables/main/fct_order.dbml', '#5ca2f8', body, op, 560);
-  }
-  // the SQL change: fct_order.sql's diff, bottom right, until the comparison's panel takes the corner
-  if (t >= SQL_AT && t < SQL_CARD_OUT + 0.3) {
-    const op = Math.min(1, easeOut(seg(t, SQL_AT + 0.1, SQL_AT + 0.4))) * (1 - seg(t, SQL_CARD_OUT, SQL_CARD_OUT + 0.3));
-    const body = SQL_CARD.lines.map((l, i) => {
-      const add = i === SQL_CARD.added;
-      return `<div style="display:flex;height:28px;align-items:center;${add ? 'background:rgba(34,197,94,.16)' : ''}"><span style="width:26px;text-align:right;margin-right:8px;color:var(--line-no)">${i + 1}</span><span style="width:16px;color:var(--green);font-weight:700">${add ? '+' : ''}</span><span style="white-space:pre;${add ? 'color:#b7f0c9' : ''}">${sqlLine(l)}</span></div>`;
-    }).join('');
-    h += codeCard(SQL_CARD.path, '#e0a458', body, op, 520, `<span style="flex:1"></span><span style="color:${GIT_COLOUR.M};font-weight:700">M</span>`);
-  }
-  return h + terminal(t);
-}
-
-/** A file's text in a card at the canvas's bottom right. */
-function codeCard(file, iconColour, body, op, width, extra = '') {
-  return `<div class="abs" style="right:24px;bottom:22px;width:${width}px;border-radius:12px;background:#1b1c20;border:1px solid #3a3c42;box-shadow:0 18px 48px #000c;overflow:hidden;opacity:${op.toFixed(3)};transform:translateY(${(12 * (1 - op)).toFixed(1)}px)">
-      <div style="height:40px;display:flex;align-items:center;gap:10px;padding:0 16px;border-bottom:1px solid #2c2c30;font-size:18px;color:var(--text-2);white-space:nowrap"><span style="color:${iconColour};display:flex">${ICON.file({ size: 18 })}</span>${file}${extra}</div>
-      <div class="mono" style="padding:8px 0 10px 4px;font-size:17px">${body}</div></div>`;
-}
-/** One line of SQL, lightly coloured: its keywords and the Jinja call. */
-function sqlLine(s) {
-  return esc(s).replace(/^(select|from)\b/, '<span style="color:var(--syn-kw)">$1</span>').replace(/(\{\{.*\}\})/, '<span style="color:var(--syn-val)">$1</span>');
+    ${toolbar({ x: EDX + 20, y: 16, logicalOnly: true, layout: 'idle', add: 'idle', lineStyle: LINE_STYLE })}
+    ${dragLine(t)}${dialog(t)}${textCard(t)}${terminal(t)}`;
 }
 
 function explorer(t) {
-  const phase = phaseAt(t);
-  const rows = heroTree({ sql: phase !== 'inStep', store: t >= STORE_FILE_AT && t < RESET_AT });
+  const live = t < CONF_IN;
+  const rows = heroTree({ store: live && t >= STORE_FILE_AT });
   const at = (id) => rows.findIndex((r) => r[4] === id);
   const pulse = (from, hold) => easeOut(seg(t, from, from + 0.25)) * (1 - seg(t, from + hold, from + hold + 0.4));
   const lights = new Map();
-  FILE_ORDER.forEach((name, k) => {
-    const from = LIGHT0 + k * LIGHT_STEP, last = k === FILE_ORDER.length - 1;
-    lights.set(at(`t:${name}`), Math.min(easeOut(seg(t, from, from + 0.25)), 1 - seg(t, from + LIGHT_STEP, from + LIGHT_STEP + 0.3) * (last ? 0 : 1)) * (1 - seg(t, CODE_OUT, CODE_OUT + 0.3)));
-  });
   const add = (id, v) => { const i = at(id); if (i >= 0 && v > 0) lights.set(i, Math.max(lights.get(i) ?? 0, v)); };
-  add('sales', easeOut(seg(t, DRAFT_IN - 0.3, DRAFT_IN)) * (1 - seg(t, DRAFT_OUT, DRAFT_OUT + 0.35)));
-  if (t < RESET_AT) for (const [id, , from] of GIT) add(id, pulse(from, id === 'm:dim_store' || id === 'm:fct_order' ? SQL_CARD_OUT - SQL_AT : id === 't:dim_store' ? 2.2 : 0.9));
-  const git = new Map(GIT.filter(([, , from]) => t >= from && t < RESET_AT).map(([id, letter]) => [at(id), letter]));
-  const scroll = t >= RESET_AT ? 0 : easeInOut(seg(t, SCROLL_AT, SCROLL_AT + 0.3)) * SCROLL_ROWS * ROW_H;
+  if (live) {
+    add('t:fct_order', pulse(TEXT_IN, TEXT_OUT - TEXT_IN));
+    for (const [id, , from] of GIT) add(id, pulse(from, id === 't:dim_store' ? 2 : 1.1));
+    for (const [i, id] of [[1, 't:fct_order'], [2, 'rels']]) add(id, pulse(AI.steps[i] + 0.25, 0.9));
+  }
+  const git = new Map(GIT.filter(([, , from]) => live && t >= from).map(([id, letter]) => [at(id), letter]));
   const tree = fileTree(rows, {
-    top: -scroll, rowH: ROW_H, width: SIDEW - 10, indent: 22, font: 19,
+    top: 0, rowH: ROW_H, width: SIDEW - 10, indent: 22, font: 19,
     lit: (i) => lights.get(i) ?? 0,
     colour: (i) => (git.has(i) ? GIT_COLOUR[git.get(i)] : null),
     badge: (i) => (git.has(i) ? `<span style="flex:1"></span><span style="margin-right:22px;font-size:17px;font-weight:700;color:${GIT_COLOUR[git.get(i)]}">${git.get(i)}</span>` : ''),
@@ -711,20 +786,14 @@ function confluencePage(t) {
 
 export function render(t) {
   t = ((t % HERO.loop) + HERO.loop) % HERO.loop;
-  const d = t >= DRAFT_IN && t < DRAFT_OUT ? 1 : 0;   // a tab switch: a cut
-  let body = ordersCanvas(t);
-  if (d > 0) body += draftPage(SALES_DRAFT, { left: EDX, width: BODYW - EDX, op: d, glow: easeOut(seg(t, DRAFT_IN + 1.2, DRAFT_IN + 1.6)), scale: DRAFT_SCALE, font: 16, edges: DRAFT_EDGES, stage: 'logical' }).html;
-  body += explorer(t) + activityBar('files');
+  let body = ordersCanvas(t) + explorer(t) + activityBar('files');
   // the pointer, on top of everything (the window clips it as it comes in and goes out)
-  const visit = POINTER.find((v) => t >= v[0].t && t <= v.at(-1).t);
-  if (visit) {
-    const p = path(t, visit);
+  if (t >= HOVER_PATH[0].t && t <= HOVER_PATH.at(-1).t) {
+    const p = path(t, HOVER_PATH);
     body += pointer(p.x, p.y, press(t));
   }
-  const tabs = [{ label: 'orders.dbml', on: d < 0.5 }];
-  if (d > 0) tabs.push({ label: SALES_DRAFT.tab, on: d >= 0.5 });
   return `<div class="abs" style="left:0;top:0;width:${HERO.w}px;height:${CAP_H}px">${captionBand(t)}</div>`
-    + card({ ...WIN, tabs, crumb: d < 0.5 ? '.erd-studio › main › diagrams › orders.dbml' : 'shop-analytics', body })
+    + card({ ...WIN, tabs: [{ label: 'orders.dbml', on: true }], crumb: '.erd-studio › main › diagrams › orders.dbml', body })
     + confluencePage(t);
 }
 

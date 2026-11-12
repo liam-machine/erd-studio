@@ -1,13 +1,11 @@
 #!/usr/bin/env node
-// Renders the README's hero GIF, media/demo.gif, from player/hero.html: one change followed from the
-// code to the business in a dbt project whose design sits beside its SQL as DBML files, under a
-// caption band, one caption per beat: the Explorer's .erd-studio tree beside the orders diagram,
-// Import DBML…'s draft, the SQL changing and Compare with dbt marking it, Claude Code bringing the
-// design in line (staged from a real run: record/heroRun.mjs), Compare with dbt again (All matched),
-// and the Confluence page that draws the same files. Deterministic: hero.js's render(t) is pure, so
-// every run gives the same frames. Laid out at HERO's size (1440 wide) and scaled to 800 px wide (the
-// README shows it at width="800"), HERO.fps, the loop's length (HERO.loop) seamless, one palette for
-// the whole loop.
+// Renders the README's hero GIF, media/demo.gif, from player/hero.html: ERD Studio in a plain folder
+// (no stage tabs) under a caption band, one caption per beat: the orders diagram with a hovered
+// table's arrows moving, a relationship drawn by hand, a column typed into its DBML file, a table
+// added by Claude Code (the three staged from a real run: record/heroRun.mjs), and the Confluence
+// page that draws the same files. Deterministic: hero.js's render(t) is pure, so every run gives the
+// same frames. Laid out at HERO's size (1440 wide) and scaled to 800 px wide (the README shows it at
+// width="800"), HERO.fps, the loop's length (HERO.loop) seamless, one palette for the whole loop.
 //
 //   node hero-gif.mjs                 (npm run gif)
 //   node hero-gif.mjs --frames 0,8    only PNG stills of those times, into build/hero/
@@ -22,7 +20,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const OUT = join(HERE, '..', 'media', 'demo.gif');
 const WORK = join(HERE, 'build', 'hero');
 const WIDTH = 800;
-/** The README hero's budget. The GIF was 0.5 MB as four stills; animated, keep it under 2 MB (it is about 1.3 MB). */
+/** The README hero's budget. The GIF was 0.5 MB as four stills; animated, keep it under 2 MB (it is about 1 MB). */
 const MAX_BYTES = 2 * 1024 * 1024;
 const argv = process.argv.slice(2);
 const i = argv.indexOf('--frames');
