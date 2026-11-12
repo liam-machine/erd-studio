@@ -144,6 +144,23 @@ describe('watchMissedCanvasDrops', () => {
     expect(deps.addTables).not.toHaveBeenCalled();
   });
 
+  it('catches a drop of a file whose tab was already open: VS Code brings that tab to the front instead of opening it', () => {
+    const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);
+    // The file's tab is open behind the diagram (an earlier missed drop, say).
+    const tab = { ...fileTab(DIM_LOCATION, () => group), isActive: false };
+    group.tabs = [...group.tabs, tab];
+    // The drop: VS Code makes it the group's active tab (a `changed` tab, not an `opened` one).
+    tab.isActive = true;
+    group.activeTab = tab;
+    vscode._fireDidChangeTabs({ changed: [tab] });
+    expect(info).toHaveBeenCalledWith(missedCanvasDropMessage(['dim_location'], 'showcase'), 'Add to showcase');
+    expect(deps.takeDrag).toHaveBeenCalledTimes(1);
+    // A later change to that tab (it is in front now, not the diagram) is not a drop.
+    drag = { tables: ['dim_location'], at: T0 };
+    vscode._fireDidChangeTabs({ changed: [tab] });
+    expect(info).toHaveBeenCalledTimes(1);
+  });
+
   it('says it once for a multi-table drag (VS Code opens each file)', () => {
     drag = { tables: ['dim_location', 'dim_date'], at: T0 };
     const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);

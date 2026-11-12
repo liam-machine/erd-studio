@@ -462,8 +462,8 @@ export interface RevealTableMessage {
  * A drag has started in the sidebar's Table Library (its drag controller's
  * `handleDrag`, `src/providers/tableLibraryDrag.ts`): posted to every open,
  * loaded canvas on the logical stage, which shows "Hold Shift and drop to add
- * … to this diagram" over an editable diagram. VS Code lets a drag that
- * started in the workbench reach a webview only while Shift is held. The
+ * … to this diagram" over an editable diagram, and takes its first pointer
+ * event after it as the drag's end (see `DropTablesMessage.afterDrag`). The
  * tables are the drag's, in order, at most {@link ADD_EXISTING_TABLES_LIMIT}.
  */
 export interface LibraryDragStartedMessage {
@@ -717,8 +717,9 @@ export const TABLE_LIBRARY_DRAG_MIME = 'application/vnd.code.tree.erdstudio.mode
 export const TABLE_LIBRARY_NAMES_MIME = 'application/vnd.erdstudio.tables+json';
 
 /**
- * Something was dropped on the canvas (a Shift-drag from the Table Library,
- * or a table file from the Explorer): `position` is the drop point in flow
+ * Something was dropped on the canvas (a drag from the Table Library, or a
+ * table file from the Explorer), or a Table Library drag ended over it
+ * (`afterDrag`): `position` is the drop point in flow
  * coordinates, `uris` whatever URIs the drop's DataTransfer held (possibly
  * none). The host resolves each `file:` URI to a table file, else uses the
  * Table Library drag that started in the last minute, and adds the tables
@@ -737,6 +738,18 @@ export interface DropTablesMessage {
     uris: string[];
     /** The drop's DataTransfer carried {@link TABLE_LIBRARY_DRAG_MIME}: a Table Library drag. Absent means false. */
     fromLibrary?: boolean;
+    /**
+     * No drop event reached the canvas: a Table Library drag ended with the
+     * pointer over it (the webview's first pointer event after the host's
+     * `libraryDragStarted`, well inside the canvas). On macOS Chromium does
+     * not deliver a drag that started in the workbench to the webview's
+     * out-of-process frame, so a Shift-drop usually ends this way. `uris` is
+     * empty; the host adds the drag it remembered, if it is still pending and
+     * this canvas was on screen when it started, and otherwise does nothing
+     * (the drag ended somewhere else, or a drop already used it). Absent
+     * means false.
+     */
+    afterDrag?: boolean;
   };
 }
 

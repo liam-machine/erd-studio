@@ -731,6 +731,24 @@ export const PENDING_REVEAL_MS = 60_000;
 /** How long a Table Library drag is remembered for a drop that brings no table file. */
 export const PENDING_LIBRARY_DRAG_MS = 60_000;
 
+/**
+ * Whether a canvas's `afterDrag` drop (the webview saw a Table Library drag
+ * end over it; no drop event arrived) adds the remembered drag: it is still
+ * waiting (no drop, row drop or missed-drop add used it), fresh
+ * ({@link PENDING_LIBRARY_DRAG_MS}), and the canvas was on screen when the
+ * drag started and still is.
+ */
+export function afterDragLands(
+  pending: { at: number; onScreen?: ReadonlySet<string> } | undefined,
+  panelKey: string,
+  visibleNow: boolean,
+  now: number,
+): boolean {
+  if (!pending || !visibleNow) return false;
+  if (now < pending.at || now - pending.at > PENDING_LIBRARY_DRAG_MS) return false;
+  return pending.onScreen?.has(panelKey) === true;
+}
+
 /** The answer to a drop on the canvas that names no table. */
 export const DROP_TABLES_NOTHING_MESSAGE =
   'ERD Studio: Hold Shift and drop a table from the Table Library, or a table file from the Explorer, onto the diagram.';
@@ -1222,7 +1240,13 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * a drop on a canvas whose DataTransfer names no table file adds these,
    * once, while younger than {@link PENDING_LIBRARY_DRAG_MS}.
    */
-  private pendingLibraryDrag: { tables: string[]; files?: string[]; at: number } | undefined;
+  private pendingLibraryDrag: {
+    tables: string[];
+    files?: string[];
+    at: number;
+    /** The canvases on screen when the drag started: only one of these may say the drag ended over it (`afterDrag`). */
+    onScreen?: ReadonlySet<string>;
+  } | undefined;
 
   /**
    * Webviews whose panel has been disposed. Refresh paths iterate a snapshot
@@ -6892,7 +6916,13 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     files?: readonly string[],
   ): void {
     if (tables.length === 0) return;
-    this.pendingLibraryDrag = { tables: [...tables], ...(files !== undefined && files.length === tables.length ? { files: [...files] } : {}), at: Date.now() };
+    const onScreen = new Set(Array.from(this.openPanels.entries()).filter(([, p]) => p.panel?.visible === true).map(([key]) => key));
+    this.pendingLibraryDrag = {
+      tables: [...tables],
+      ...(files !== undefined && files.length === tables.length ? { files: [...files] } : {}),
+      at: Date.now(),
+      onScreen,
+    };
     const message: LibraryDragStartedMessage = { type: 'libraryDragStarted', payload: { tables: [...tables] } };
     for (const [panelKey, panel] of Array.from(this.openPanels.entries())) {
       if (!panel.loaded || panel.activeStage !== 'logical' || this.disposedWebviews.has(panel.webview) || this.forgetIfGone(panelKey)) continue;
@@ -6949,8 +6979,17 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     document: vscode.TextDocument,
     webview: vscode.Webview,
     panelKey: string,
-    payload: DropTablesMessage['payload'],
+    given: DropTablesMessage['payload'],
   ): Promise<void> {
+    let payload = given;
+    if (given.afterDrag === true) {
+      // No drop reached the canvas; the webview saw the drag end over it. Only
+      // the drag still waiting, started while this canvas was on screen, and
+      // only while it still is: anything else ended elsewhere (or a drop or a
+      // missed-drop add already used it), and says nothing.
+      if (!afterDragLands(this.pendingLibraryDrag, panelKey, this.openPanels.get(panelKey)?.panel?.visible === true, Date.now())) return;
+      payload = { position: given.position, uris: [], fromLibrary: true };
+    }
     try {
       const dropped = tablesOfDroppedUris(payload.uris, this.tableLibraryService.listTableFiles());
       // The drop uses the library drag up, whichever way its tables came.

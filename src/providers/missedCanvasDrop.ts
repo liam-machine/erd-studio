@@ -8,8 +8,9 @@
  * a button that adds the tables to the diagram the drop was aimed at.
  *
  * The decision is the pure `missedCanvasDrop` (`src/services/tableDrop.ts`):
- * a fresh remembered drag, a pinned text tab of one of its files, in a group
- * whose front tab was a diagram just before. The drag is then used up (the
+ * a fresh remembered drag, a pinned text tab of one of its files that opened
+ * or (already open) came to the front, in a group whose front tab was a
+ * diagram just before. The drag is then used up (the
  * canvases take their "Hold Shift and drop" hint down). Nothing is written
  * unless the user presses the button, and then only through Add to Diagram's
  * own route (`addTables`: the canvas's Add Existing Tables edit).
@@ -52,7 +53,12 @@ export function watchMissedCanvasDrops(deps: MissedCanvasDropDeps): vscode.Dispo
   snapshot();
   const onTabs = vscode.window.tabGroups.onDidChangeTabs((event) => {
     try {
-      for (const tab of event.opened) {
+      // A dropped file whose tab was already open is not opened again: VS Code
+      // brings its tab to the front (a `changed` tab that is now its group's
+      // active one, where a diagram was in front before).
+      const broughtForward = event.changed.filter((tab) =>
+        tab.isActive && tab.group.activeTab === tab && frontBefore.get(tab.group) !== undefined && !event.opened.includes(tab));
+      for (const tab of [...event.opened, ...broughtForward]) {
         const input = tab.input;
         if (!(input instanceof vscode.TabInputText) || input.uri.scheme !== 'file') continue;
         const drag = deps.peekDrag();

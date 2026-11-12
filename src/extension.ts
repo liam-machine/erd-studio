@@ -3296,7 +3296,7 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     (() => {
       tableLibraryView = vscode.window.createTreeView('erdStudio.modelLibrary', {
         treeDataProvider: tableLibraryProvider,
-        // Rows drag onto a diagram: a Shift-drop adds them where they land.
+        // Rows drag onto a diagram: a drop there adds them (with Shift where they land; see docs/dev/architecture.md).
         // Each dragged table's file goes with its name: a drop adds that file where two schema folders share the name.
         dragAndDropController: new TableLibraryDragController((tables, files) => editorProvider.noteLibraryDrag(tables, files), { withFiles: true }),
         // Move Table moves every selected table to one folder.

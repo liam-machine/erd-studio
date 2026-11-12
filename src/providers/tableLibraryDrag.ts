@@ -18,13 +18,16 @@
  * there at dragstart, and a drop on a Diagrams row hands that over first, so
  * a drop that read the names from it found none and added nothing (2.0.4).
  *
- * Why Shift: while a drag that started in the workbench is in progress, VS
- * Code turns off pointer events on every webview unless Shift is held, so a
- * drop reaches the canvas only with Shift down (without it the editor group
- * takes the drop and opens the file). And what the canvas's DataTransfer
- * holds is not guaranteed (`handleDrag` runs in the extension host, after the
- * drag has begun), so the canvas posts whatever URIs it finds and the host
- * falls back on the drag remembered here.
+ * Why the remembered drag: a drop on the canvas seldom arrives (VS Code turns
+ * a webview's pointer events off during a workbench drag unless Shift is
+ * held, and with Shift Chromium does not deliver the drag to the webview's
+ * out-of-process frame), so a drag that ends over a diagram is finished from
+ * what the extension can see: the file VS Code opens instead
+ * (`missedCanvasDrop.ts`), or the canvas's first pointer event after the drag
+ * (`afterDrag`). And what the canvas's DataTransfer holds, when a drop does
+ * arrive, is not guaranteed (`handleDrag` runs in the extension host, after
+ * the drag has begun), so the canvas posts whatever URIs it finds and the
+ * host falls back on the drag remembered here.
  */
 
 import * as vscode from 'vscode';

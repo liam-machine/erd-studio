@@ -30,8 +30,10 @@ vi.mock('../../webview/hooks/useVsCodeApi', () => ({
 import { App } from '../../webview/App';
 import { useEditorStore } from '../../webview/store/editorStore';
 import {
+  AFTER_DRAG_EDGE_PX,
   DROP_REFUSED_READ_ONLY,
   LIBRARY_DRAG_HINT_MS,
+  dragEndedOverCanvas,
   dropEffectFor,
   acceptsDrop,
   droppedUris,
@@ -141,6 +143,36 @@ describe('acceptsDrop', () => {
   });
 });
 
+/** A pointer event at (x, y) on `target`, as the webview's first one after a drag; `movement` as a real mouse reports it. */
+function pointerAt(target: Element, type: 'pointermove' | 'pointerdown', x: number, y: number, movement = { x: 0, y: 0 }) {
+  const event = new MouseEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: y });
+  Object.defineProperty(event, 'movementX', { value: movement.x });
+  Object.defineProperty(event, 'movementY', { value: movement.y });
+  act(() => { target.dispatchEvent(event); });
+}
+
+describe('dragEndedOverCanvas', () => {
+  const viewport = { width: 1000, height: 700 };
+  it('is a pointer well inside the webview, on the diagram, whose last move started inside too: the drag ended there', () => {
+    expect(dragEndedOverCanvas({ x: 500, y: 400, movementX: 2, movementY: 1, onDiagram: true }, viewport)).toBe(true);
+    // No movement known (a click, or a mouse that does not report it): the point alone.
+    expect(dragEndedOverCanvas({ x: 500, y: 400, onDiagram: true }, viewport)).toBe(true);
+    expect(dragEndedOverCanvas({ x: AFTER_DRAG_EDGE_PX, y: AFTER_DRAG_EDGE_PX, onDiagram: true }, viewport)).toBe(true);
+  });
+  it('is not a pointer coming in from outside: near an edge, or its last move started outside', () => {
+    expect(dragEndedOverCanvas({ x: AFTER_DRAG_EDGE_PX - 1, y: 400, onDiagram: true }, viewport)).toBe(false);
+    expect(dragEndedOverCanvas({ x: 500, y: 10, onDiagram: true }, viewport)).toBe(false);
+    expect(dragEndedOverCanvas({ x: 990, y: 400, onDiagram: true }, viewport)).toBe(false);
+    expect(dragEndedOverCanvas({ x: 500, y: 690, onDiagram: true }, viewport)).toBe(false);
+    // A fast move in from the sidebar lands well inside, but it started outside.
+    expect(dragEndedOverCanvas({ x: 60, y: 400, movementX: 70, movementY: 0, onDiagram: true }, viewport)).toBe(false);
+  });
+  it('is not a pointer over a toolbar, a panel or a dialog, or one that cannot be read', () => {
+    expect(dragEndedOverCanvas({ x: 500, y: 400, onDiagram: false }, viewport)).toBe(false);
+    expect(dragEndedOverCanvas({ x: Number.NaN, y: 400, onDiagram: true }, viewport)).toBe(false);
+  });
+});
+
 describe('the canvas as a drop target', () => {
   it('shows the hint when a Table Library drag starts, as a polite live region, and hides it on a pointer move', () => {
     render(<App />);
@@ -164,6 +196,48 @@ describe('the canvas as a drop target', () => {
     const dataTransfer = transfer({});
     expect(fireEvent.dragOver(canvas(container), { dataTransfer })).toBe(true);
     expect(screen.queryByText(LET_GO)).toBeNull();
+  });
+
+  it('a drag that ended over the canvas with no drop event: the first pointer move there posts it as an afterDrag drop, once', () => {
+    const { container } = render(<App />);
+    postFromHost({ type: 'domainLoaded', payload: subjectArea('logical') });
+    postFromHost({ type: 'libraryDragStarted', payload: { tables: ['dim_customer'] } });
+    const pane = container.querySelector('.react-flow__pane') ?? container.querySelector('.react-flow');
+    expect(pane).toBeTruthy();
+    pointerAt(pane!, 'pointermove', 400, 300, { x: 2, y: 1 });
+    expect(drops()).toEqual([{
+      type: 'dropTables',
+      payload: { position: { x: 400, y: 300 }, uris: [], fromLibrary: true, afterDrag: true },
+    }]);
+    expect(screen.queryByText(HINT)).toBeNull();
+    // The drag is over: later moves post nothing.
+    pointerAt(pane!, 'pointermove', 420, 310, { x: 20, y: 10 });
+    expect(drops()).toHaveLength(1);
+  });
+
+  it('a pointer coming in from outside after the drag (at the edge, or moving in) ends the drag without a drop', () => {
+    const { container } = render(<App />);
+    postFromHost({ type: 'domainLoaded', payload: subjectArea('logical') });
+    const pane = container.querySelector('.react-flow__pane') ?? container.querySelector('.react-flow');
+    postFromHost({ type: 'libraryDragStarted', payload: { tables: ['dim_customer'] } });
+    pointerAt(pane!, 'pointermove', 5, 300, { x: 8, y: 0 });
+    postFromHost({ type: 'libraryDragStarted', payload: { tables: ['dim_customer'] } });
+    pointerAt(pane!, 'pointermove', 80, 300, { x: 90, y: 0 });
+    expect(drops()).toEqual([]);
+    expect(screen.queryByText(HINT)).toBeNull();
+  });
+
+  it('no afterDrag drop once a real drop, or the host, ended the drag', () => {
+    const { container } = render(<App />);
+    postFromHost({ type: 'domainLoaded', payload: subjectArea('logical') });
+    const pane = container.querySelector('.react-flow__pane') ?? container.querySelector('.react-flow');
+    postFromHost({ type: 'libraryDragStarted', payload: { tables: ['dim_customer'] } });
+    postFromHost({ type: 'libraryDragEnded' });
+    pointerAt(pane!, 'pointermove', 400, 300);
+    postFromHost({ type: 'libraryDragStarted', payload: { tables: ['dim_customer'] } });
+    fireEvent.drop(canvas(container), { dataTransfer: transfer({}), clientX: 10, clientY: 20 });
+    pointerAt(pane!, 'pointerdown', 400, 300);
+    expect(drops()).toEqual([{ type: 'dropTables', payload: { position: { x: 10, y: 20 }, uris: [] } }]);
   });
 
   it('hides the hint after a while', () => {

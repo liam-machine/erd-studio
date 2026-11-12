@@ -2,39 +2,35 @@
  * Dropping tables on the canvas: Table Library rows dragged from the sidebar,
  * or table files dragged from the Explorer.
  *
- * VS Code lets a drag that started in the workbench reach a webview only
- * while Shift is held (without it the editor group takes the drop and opens
- * the file). So when the host says a Table Library drag has started
- * (`libraryDragStarted`), the canvas shows "Hold Shift and drop to add … to
- * this diagram" — until the drop, the host's `libraryDragEnded` (the drag
- * was used up: dropped on a canvas or a diagram's row, or it missed the canvas
- * and opened the file), {@link LIBRARY_DRAG_HINT_MS}, the diagram changing or
- * the host selecting a table on it (the tables were added, or found already
- * there, some other way), or the next pointer move inside the webview
- * (pointer events come back once the drag is over). While an acceptable drag
- * is over the canvas, it says "Let go to add …": the drop will land.
+ * When the host says a Table Library drag has started (`libraryDragStarted`),
+ * the canvas shows "Hold Shift and drop to add … to this diagram" — until
+ * the drop, the host's `libraryDragEnded` (the drag was used up: dropped on
+ * a canvas or a diagram's row, or it missed the canvas and opened the file),
+ * {@link LIBRARY_DRAG_HINT_MS}, the diagram changing or the host selecting a
+ * table on it, or the webview's next pointer event (pointer events come back
+ * once the drag is over). While an acceptable drag is over the canvas, it says
+ * "Let go to add …".
  *
- * When Shift is pressed decides nothing by itself: VS Code reads it on each
- * drag event (its `WebviewWindowDragMonitor` turns the webview's pointer
- * events on for a `drag` / `dragover` with Shift and off for one without, and
- * the editor group's "Hold Shift to drop into editor" overlay goes on its
- * next `dragover` with Shift). What matters is that Shift is down when the
- * button is let go: released a moment early, the drop lands on the editor
- * group and the file opens. Hence the hint's second sentence. (Whether a
- * Shift pressed with the pointer held still is noticed before the release
- * depends on the OS sending drag events without movement; not observed with
- * a real mouse yet.) A drop that misses this way is caught by the host,
- * which offers the add (`missedCanvasDrop`, `src/services/tableDrop.ts`).
+ * A drop event seldom reaches the canvas on macOS: VS Code turns the
+ * webview's pointer events off during a workbench drag unless Shift is held
+ * (the editor group then takes the drop and opens the file: the host's
+ * missed-drop watcher offers the add), and with Shift Chromium
+ * refuses to deliver a drag that started in the workbench to the webview's
+ * out-of-process frame, so the drop reaches nothing. That last case is caught
+ * here: the webview's first pointer event after the drag, when
+ * {@link dragEndedOverCanvas} says the drag ended over the diagram, is posted
+ * as a `dropTables` marked `afterDrag` (the host adds the drag it remembered,
+ * if nothing used it up). See docs/dev/architecture.md, "Dragging tables from
+ * the Table Library".
  *
- * Over an editable logical diagram, a drag that carries URIs (or the Table
- * Library drag the host announced) is accepted as a copy and highlights the
- * canvas; the drop posts `dropTables` with the flow position and whatever
- * URIs the DataTransfer holds — possibly none, since what VS Code puts there
- * for a tree drag is not guaranteed: the host then uses the drag it
- * remembered — and `fromLibrary` when the DataTransfer carries the Table
- * Library's own mime type (the host then uses the remembered drag first: a
- * tree drag's URIs are its table rows only, never a schema or layer row's
- * tables).
+ * When a drop does arrive: over an editable logical diagram, a drag that
+ * carries URIs (or the Table Library drag the host announced) is accepted as
+ * a copy and highlights the canvas; the drop posts `dropTables` with the flow
+ * position and whatever URIs the DataTransfer holds — possibly none: the host
+ * then uses the drag it remembered — and `fromLibrary` when the DataTransfer
+ * carries the Table Library's own mime type (the host then uses the
+ * remembered drag first: a tree drag's URIs are its table rows only, never a
+ * schema or layer row's tables).
  *
  * Nothing is added on the physical stage or a read-only diagram: a drop
  * there is answered with {@link DROP_REFUSED_READ_ONLY} (the caller's toast)
@@ -58,6 +54,50 @@ export const LIBRARY_DRAG_FRESH_MS = 60_000;
 
 /** The drop highlight goes once no `dragover` has arrived for this long (a missed `dragleave`). */
 export const DRAG_OVER_IDLE_MS = 400;
+
+/**
+ * How far inside the webview's edges the first pointer event after a Table
+ * Library drag must be to count as the drag having ended there: a pointer
+ * coming in from the sidebar or the tab bar shows up within a move of the
+ * edge.
+ */
+export const AFTER_DRAG_EDGE_PX = 32;
+
+/** One pointer event, as {@link dragEndedOverCanvas} reads it. */
+export interface PointerSample {
+  readonly x: number;
+  readonly y: number;
+  /** How far the pointer moved since its last event (a real mouse reports it; 0 or absent when unknown). */
+  readonly movementX?: number;
+  readonly movementY?: number;
+  /** The event's target is on the diagram itself (pane, table or line), not a toolbar, panel or dialog. */
+  readonly onDiagram: boolean;
+}
+
+/**
+ * Whether the webview's first pointer event after the host's
+ * `libraryDragStarted` says the Table Library drag ended with the pointer
+ * over this canvas, so the drop that never arrived was meant for it.
+ *
+ * On macOS Chromium does not deliver a drag that started in the workbench to
+ * the webview's out-of-process frame (its drag target check refuses a frame
+ * of another site), so a Shift-drop on the canvas usually reaches nothing;
+ * the webview's pointer events then come back, and the first one comes the
+ * moment the hand moves on, from where it let go. A pointer that
+ * comes in from outside instead (the drag ended in the sidebar, the
+ * Explorer, another editor) shows up at the webview's edge, or its last move
+ * started outside: neither counts.
+ */
+export function dragEndedOverCanvas(sample: PointerSample, viewport: { readonly width: number; readonly height: number }): boolean {
+  const { x, y } = sample;
+  if (!sample.onDiagram || ![x, y, viewport.width, viewport.height].every(Number.isFinite)) return false;
+  const inside = (px: number, py: number, margin: number): boolean =>
+    px >= margin && py >= margin && px <= viewport.width - margin && py <= viewport.height - margin;
+  if (!inside(x, y, AFTER_DRAG_EDGE_PX)) return false;
+  const mx = Number.isFinite(sample.movementX) ? sample.movementX! : 0;
+  const my = Number.isFinite(sample.movementY) ? sample.movementY! : 0;
+  return inside(x - mx, y - my, 1);
+}
 
 /** DataTransfer types that carry URIs (types are lower case once in a DataTransfer). */
 const URI_TYPES = ['text/uri-list', 'application/vnd.code.uri-list', 'resourceurls'];
@@ -195,6 +235,8 @@ export function useLibraryDrop(onRefused?: (reason: string) => void): LibraryDro
 
   const [hintTables, setHintTables] = useState<string[] | null>(null);
   const [dropActive, setDropActive] = useState(false);
+  /** A Table Library drag is announced and not over yet: the next pointer event in the webview ends it. */
+  const [dragArmed, setDragArmed] = useState(false);
   /** When the announced Table Library drag started; undefined once it is over (a drop or a pointer move). */
   const libraryDragAt = useRef<number | undefined>(undefined);
   /** The announced drag's tables, kept after the hint times out: an acceptable drag over the canvas names them again. */
@@ -208,12 +250,14 @@ export function useLibraryDrop(onRefused?: (reason: string) => void): LibraryDro
     libraryDragAt.current = Date.now();
     libraryDragTables.current = names;
     setHintTables(names);
+    setDragArmed(true);
   }, []);
 
   const endLibraryDrag = useCallback(() => {
     libraryDragAt.current = undefined;
     libraryDragTables.current = null;
     setHintTables(null);
+    setDragArmed(false);
   }, []);
 
   // The diagram changed under the hint, or the host selected a table on it
@@ -229,17 +273,58 @@ export function useLibraryDrop(onRefused?: (reason: string) => void): LibraryDro
     revealAtHint.current = pendingReveal;
   }, [domain, pendingReveal, hintTables]);
 
-  // The hint goes after a while, or as soon as the pointer moves in the
-  // webview: pointer events only reach it again once the drag is over.
+  // The hint goes after a while.
   useEffect(() => {
     if (!hintTables) return undefined;
     const timer = setTimeout(() => setHintTables(null), LIBRARY_DRAG_HINT_MS);
-    window.addEventListener('pointermove', endLibraryDrag);
-    return () => {
-      clearTimeout(timer);
-      window.removeEventListener('pointermove', endLibraryDrag);
+    return () => clearTimeout(timer);
+  }, [hintTables]);
+
+  // The drag is over at the webview's first pointer event: pointer events only
+  // reach it again once the drag has ended. If it ended over this canvas and
+  // no drop event came (see `dragEndedOverCanvas`), that is the drop: post it,
+  // marked `afterDrag`, and the host adds the drag it remembered if no drop
+  // used it up.
+  const editableRef = useRef(editable);
+  editableRef.current = editable;
+  const loadedRef = useRef(loaded);
+  loadedRef.current = loaded;
+  useEffect(() => {
+    if (!dragArmed || viewer) return undefined;
+    const onFirstPointer = (event: PointerEvent): void => {
+      const at = libraryDragAt.current;
+      endLibraryDrag();
+      if (at === undefined || Date.now() - at > LIBRARY_DRAG_FRESH_MS || !loadedRef.current) return;
+      const target = event.target as Element | null;
+      const landed = dragEndedOverCanvas(
+        {
+          x: event.clientX,
+          y: event.clientY,
+          movementX: event.type === 'pointermove' ? event.movementX : 0,
+          movementY: event.type === 'pointermove' ? event.movementY : 0,
+          onDiagram: typeof target?.closest === 'function' && target.closest('.react-flow') !== null,
+        },
+        { width: window.innerWidth, height: window.innerHeight },
+      );
+      if (!landed) return;
+      if (!editableRef.current) {
+        onRefused?.(DROP_REFUSED_READ_ONLY);
+        return;
+      }
+      const point = screenToFlowPosition({ x: event.clientX, y: event.clientY });
+      if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) return;
+      send({
+        type: 'dropTables',
+        payload: { position: { x: Math.round(point.x), y: Math.round(point.y) }, uris: [], fromLibrary: true, afterDrag: true },
+      });
     };
-  }, [hintTables, endLibraryDrag]);
+    window.addEventListener('pointermove', onFirstPointer, true);
+    window.addEventListener('pointerdown', onFirstPointer, true);
+    return () => {
+      window.removeEventListener('pointermove', onFirstPointer, true);
+      window.removeEventListener('pointerdown', onFirstPointer, true);
+    };
+  }, [dragArmed, viewer, endLibraryDrag, screenToFlowPosition, send, onRefused]);
 
   const clearOver = useCallback(() => {
     enterDepth.current = 0;

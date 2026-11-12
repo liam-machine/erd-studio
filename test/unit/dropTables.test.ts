@@ -19,6 +19,7 @@ import { _appliedEdits, _resetMockWorkspace, createMockTextDocument, createMockW
 import {
   DROP_TABLES_NOTHING_MESSAGE,
   PENDING_LIBRARY_DRAG_MS,
+  afterDragLands,
   PHYSICAL_READ_ONLY_MESSAGE,
   SemanticEditorProvider,
 } from '../../src/providers/SemanticEditorProvider';
@@ -249,6 +250,7 @@ describe('validateDropTablesPayload', () => {
     expect(validateDropTablesPayload({ position: { x: 1, y: -2.5 }, uris: [] })).toBeNull();
     expect(validateDropTablesPayload({ position: { x: 1, y: 2 }, uris: [], fromLibrary: true })).toBeNull();
     expect(validateDropTablesPayload({ position: { x: 1, y: 2 }, uris: [], fromLibrary: false })).toBeNull();
+    expect(validateDropTablesPayload({ position: { x: 1, y: 2 }, uris: [], afterDrag: true })).toBeNull();
     expect(validateDropTablesPayload({ position: { x: 0, y: 0 }, uris: ['file:///a.dbml'] })).toBeNull();
   });
 
@@ -264,6 +266,7 @@ describe('validateDropTablesPayload', () => {
     [{ position: { x: 0, y: 0 }, uris: 'file:///a.dbml' }],
     [{ position: { x: 0, y: 0 }, uris: [42] }],
     [{ position: { x: 0, y: 0 }, uris: [], fromLibrary: 'yes' }],
+    [{ position: { x: 0, y: 0 }, uris: [], afterDrag: 1 }],
     [{ position: { x: 0, y: 0 }, uris: ['x'.repeat(DROP_TABLES_URI_MAX_LENGTH + 1)] }],
     [{ position: { x: 0, y: 0 }, uris: Array.from({ length: DROP_TABLES_URI_LIMIT + 1 }, () => 'file:///a.dbml') }],
   ])('refuses %j', (payload) => {
@@ -334,6 +337,25 @@ const errors = (panel: Panel): string[] => posted(panel, 'error').map((m) => (m 
 const notices = (panel: Panel): string[] => posted(panel, 'canvasNotice').map((m) => (m as { payload: { message: string } }).payload.message);
 const drop = (panel: Panel, uris: string[], position = { x: 500, y: 300 }, fromLibrary?: boolean) =>
   panel._simulateMessage({ type: 'dropTables', payload: { position, uris, ...(fromLibrary === undefined ? {} : { fromLibrary }) } });
+/** The webview saw a Table Library drag end over the canvas; no drop event arrived. */
+const dragEndedOver = (panel: Panel, position = { x: 500, y: 300 }) =>
+  panel._simulateMessage({ type: 'dropTables', payload: { position, uris: [], afterDrag: true } });
+
+describe('afterDragLands', () => {
+  const T = 1_000_000;
+  const pending = { at: T, onScreen: new Set(['a']) };
+  it('is the pending, fresh drag, for a canvas on screen when it started and still on screen', () => {
+    expect(afterDragLands(pending, 'a', true, T + 3_000)).toBe(true);
+  });
+  it('is nothing once the drag is used up or stale, for another canvas, or one not on screen (then or now)', () => {
+    expect(afterDragLands(undefined, 'a', true, T + 1)).toBe(false);
+    expect(afterDragLands(pending, 'a', true, T + PENDING_LIBRARY_DRAG_MS + 1)).toBe(false);
+    expect(afterDragLands(pending, 'a', true, T - 1)).toBe(false);
+    expect(afterDragLands(pending, 'b', true, T + 1)).toBe(false);
+    expect(afterDragLands(pending, 'a', false, T + 1)).toBe(false);
+    expect(afterDragLands({ at: T }, 'a', true, T + 1)).toBe(false);
+  });
+});
 
 beforeEach(() => {
   _resetMockWorkspace();
@@ -442,6 +464,55 @@ describe('dropTables', () => {
     await drop(panel, [], { x: 1, y: 1 }, true);
     expect(_appliedEdits).toHaveLength(0);
     expect(notices(panel)).toEqual(['"fct_order" is already on this diagram.']);
+  });
+
+  it('a drag that ended over the canvas with no drop event (afterDrag) adds the remembered drag at that point, once', async () => {
+    const provider = buildProvider(root);
+    const { panel, doc } = await loaded(provider);
+    provider.noteLibraryDrag(['dim_region'], [at(DIM_REGION)]);
+    await dragEndedOver(panel, { x: 500, y: 300 });
+    expect(errors(panel)).toEqual([]);
+    expect(_appliedEdits).toHaveLength(1);
+    expect(doc.getText()).toContain('use { table gold.dim_region }');
+    expect(doc.getText()).toMatch(new RegExp(`dim_region ${500 - NODE_WIDTH / 2} 280\\b`));
+    // Used up: a second one (or a real drop's echo) adds nothing and says nothing.
+    const info = vi.spyOn(vscode.window, 'showInformationMessage');
+    await dragEndedOver(panel);
+    expect(_appliedEdits).toHaveLength(1);
+    expect(info).not.toHaveBeenCalled();
+  });
+
+  it('afterDrag of a table already there says so on the canvas', async () => {
+    const provider = buildProvider(root);
+    const { panel } = await loaded(provider);
+    provider.noteLibraryDrag(['fct_order'], [at(FCT_ORDER)]);
+    await dragEndedOver(panel);
+    expect(_appliedEdits).toHaveLength(0);
+    expect(notices(panel)).toEqual(['"fct_order" is already on this diagram.']);
+  });
+
+  it('afterDrag with no drag waiting, a stale drag, or from a canvas that was not on screen when the drag started, does nothing and says nothing', async () => {
+    const provider = buildProvider(root);
+    const { panel, doc } = await loaded(provider);
+    const info = vi.spyOn(vscode.window, 'showInformationMessage');
+    await dragEndedOver(panel);
+    const now = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(now);
+    provider.noteLibraryDrag(['dim_region']);
+    clock.mockReturnValue(now + PENDING_LIBRARY_DRAG_MS + 1);
+    await dragEndedOver(panel);
+    clock.mockRestore();
+    (panel as unknown as { visible: boolean }).visible = false;
+    provider.noteLibraryDrag(['dim_region']);
+    (panel as unknown as { visible: boolean }).visible = true;
+    await dragEndedOver(panel);
+    expect(_appliedEdits).toHaveLength(0);
+    expect(doc.getText()).not.toContain('dim_region');
+    expect(info).not.toHaveBeenCalled();
+    expect(errors(panel)).toEqual([]);
+    // That drag is still waiting for a real drop.
+    await drop(panel, [], { x: 1, y: 1 }, true);
+    expect(doc.getText()).toContain('use { table gold.dim_region }');
   });
 
   it('several tables all already there are named together', async () => {

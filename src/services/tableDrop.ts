@@ -153,8 +153,9 @@ export interface MissedCanvasDrop {
  * dragged files there, pinned. It is when
  * - a Table Library drag is remembered and started at most
  *   {@link MISSED_DROP_MS} ago,
- * - the tab opened pinned (VS Code pins dropped editors; a single click on a
- *   Table Library row opens a preview),
+ * - the tab opened pinned, or was already open and came to the front pinned
+ *   (VS Code pins dropped editors, and brings an open one forward instead of
+ *   opening it again; a single click on a Table Library row opens a preview),
  * - its file is one of the drag's tables (by file where the drag knew them,
  *   else by name through the library),
  * - and the tab's editor group had a diagram in front just before
