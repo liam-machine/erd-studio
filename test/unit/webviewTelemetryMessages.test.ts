@@ -28,6 +28,49 @@ describe('layoutFinished payload (2.0 fields)', () => {
   });
 });
 
+describe('layoutFinished payload (fields added after 2.0.4: what failed, and how far the fallbacks got)', () => {
+  const log = { tables: 1100, relationships: 2400, message: 'RangeError: Maximum call stack size exceeded' };
+
+  it('still accepts every older shape', () => {
+    // 1.x: no optional field. 2.0.0 – 2.0.4: failure and fallback only.
+    expect(validateLayoutFinishedPayload({ ms: 12, ok: true })).toBe(true);
+    expect(validateLayoutFinishedPayload({ ms: 12, ok: false })).toBe(true);
+    expect(validateLayoutFinishedPayload({ ms: 12, ok: false, firstOpen: true, failure: 'other' })).toBe(true);
+    expect(validateLayoutFinishedPayload({ ms: 12, ok: true, firstOpen: true, fallback: true })).toBe(true);
+  });
+
+  it('accepts the new classes, the size buckets, the fallback outcome, the rung and the log', () => {
+    for (const failure of ['memory', 'unsupported', 'input', 'engine', 'result']) {
+      expect(validateLayoutFinishedPayload({ ms: 10, ok: false, failure })).toBe(true);
+    }
+    expect(validateLayoutFinishedPayload({
+      ms: 64000, ok: false, firstOpen: true, failure: 'stack', tableBucket: '500plus', relBucket: '2000plus', exhausted: true, lastFailure: 'timeout', log,
+    })).toBe(true);
+    expect(validateLayoutFinishedPayload({ ms: 900, ok: true, fallback: true, rung: 2 })).toBe(true);
+    expect(validateLayoutFinishedPayload({ ms: 900, ok: true, rung: 3 })).toBe(true);
+  });
+
+  it.each([
+    { ms: 10, ok: false, tableBucket: 1100 },
+    { ms: 10, ok: false, tableBucket: 'huge' },
+    { ms: 10, ok: false, relBucket: 2400 },
+    { ms: 10, ok: false, relBucket: 'under50' },
+    { ms: 10, ok: false, exhausted: false },
+    { ms: 10, ok: false, lastFailure: 'Maximum call stack size exceeded' },
+    { ms: 10, ok: true, rung: 1 },
+    { ms: 10, ok: true, rung: 4 },
+    { ms: 10, ok: true, rung: '2' },
+    { ms: 10, ok: false, log: { tables: -1, relationships: 0, message: '' } },
+    { ms: 10, ok: false, log: { tables: 1_000_001, relationships: 0, message: '' } },
+    { ms: 10, ok: false, log: { tables: 10.5, relationships: 0, message: '' } },
+    { ms: 10, ok: false, log: { tables: 10, relationships: 0, message: 'x'.repeat(501) } },
+    { ms: 10, ok: false, log: { tables: 10, relationships: 0 } },
+    { ms: 10, ok: false, log: 'boom' },
+  ])('refuses %j', (payload) => {
+    expect(validateLayoutFinishedPayload(payload)).toBe(false);
+  });
+});
+
 describe('webviewError payload', () => {
   it('accepts every kind and area', () => {
     for (const kind of ['render', 'window', 'rejection']) {
@@ -67,6 +110,33 @@ describe('the draft page passive messages', () => {
       .toEqual({ type: 'layoutFinished', ms: 1200, fitZoom: 'under30', fallback: true });
     expect(parseDraftToHost({ type: 'layoutFinished', ms: 0, fitZoom: 'ok' }, allowed))
       .toEqual({ type: 'layoutFinished', ms: 0, fitZoom: 'ok' });
+  });
+
+  it('parses layoutFinished with the fallback rung, and refuses another rung', () => {
+    expect(parseDraftToHost({ type: 'layoutFinished', ms: 1200, fitZoom: 'ok', fallback: true, rung: 3 }, allowed))
+      .toEqual({ type: 'layoutFinished', ms: 1200, fitZoom: 'ok', fallback: true, rung: 3 });
+    expect(parseDraftToHost({ type: 'layoutFinished', ms: 1200, fitZoom: 'ok', rung: 1 }, allowed)).toBeUndefined();
+  });
+
+  it('parses layoutFailed: alone from an older page, or rebuilt from its checked detail', () => {
+    expect(parseDraftToHost({ type: 'layoutFailed' }, allowed)).toEqual({ type: 'layoutFailed' });
+    const detail = {
+      ms: 31000, failure: 'stack', tableBucket: '500plus', relBucket: '2000plus', exhausted: true, lastFailure: 'timeout',
+      log: { tables: 1100, relationships: 2400, message: 'Maximum call stack size exceeded' },
+    };
+    expect(parseDraftToHost({ type: 'layoutFailed', ...detail, table: 'dim_customer' }, allowed)).toEqual({ type: 'layoutFailed', ...detail });
+  });
+
+  it.each([
+    { type: 'layoutFailed', ms: -1 },
+    { type: 'layoutFailed', ms: '12' },
+    { type: 'layoutFailed', failure: 'Maximum call stack size exceeded' },
+    { type: 'layoutFailed', tableBucket: 1100 },
+    { type: 'layoutFailed', relBucket: 'lots' },
+    { type: 'layoutFailed', exhausted: 1 },
+    { type: 'layoutFailed', log: { tables: 2_000_000, relationships: 0, message: '' } },
+  ])('refuses %j', (raw) => {
+    expect(parseDraftToHost(raw, allowed)).toBeUndefined();
   });
 
   it.each([
