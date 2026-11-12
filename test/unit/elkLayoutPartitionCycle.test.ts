@@ -41,7 +41,14 @@ vi.mock('elkjs/lib/elk-api', () => {
   return { default: InProcessELK };
 });
 
-import { runElkLayout, type LayoutOutcome, type PartitionStrategy } from '../../webview/lib/elkLayout';
+import {
+  runElkLayout,
+  tableTypeBandCount,
+  layoutLeftTablesInPlace,
+  layoutUnchangedNotice,
+  type LayoutOutcome,
+  type PartitionStrategy,
+} from '../../webview/lib/elkLayout';
 import { buildLayoutOptions } from '../../webview/lib/firstOpenLayout';
 
 beforeAll(() => {
@@ -169,6 +176,34 @@ describe('grouped layout of a diagram with two-way relationships (Gerhard, 2026-
       }
     }
   }, 60_000);
+});
+
+/**
+ * Gerhard: "None does not fail but I cannot tell whether it did anything".
+ * Real-app check (2026-11-12): Table type -> None -> Re-apply moved nothing,
+ * with no message. With no table types, Table type and None ARE the same
+ * layout; the canvas must say so instead of looking like it never ran.
+ */
+describe('Table type and None on tables with no table types (real engine)', () => {
+  it('produce identical positions, which is why a switch between them moves nothing', async () => {
+    const { nodes, edges } = diagram();
+    expect(tableTypeBandCount(nodes)).toBe(1);
+    const role = await layOut(nodes, edges, 'role');
+    const none = await layOut(nodes, edges, 'none');
+    expect(role.positions).toEqual(none.positions);
+    // Placed where the last layout put them, the next layout reports "nothing moved".
+    const placed = nodes.map((n) => ({ ...n, position: role.positions[n.id] }));
+    expect(layoutLeftTablesInPlace(placed, none.positions)).toBe(true);
+    expect(layoutUnchangedNotice(none.outcome, tableTypeBandCount(nodes))).toMatch(/no table types to group by, so Table type and None arrange them the same way/);
+  });
+
+  it('differ once the tables have two table types', async () => {
+    const { nodes, edges } = diagram(goldFacts);
+    expect(tableTypeBandCount(nodes)).toBe(2);
+    const role = await layOut(nodes, edges, 'role');
+    const none = await layOut(nodes, edges, 'none');
+    expect(role.positions).not.toEqual(none.positions);
+  });
 });
 
 describe('layout at scale (real engine)', () => {

@@ -309,7 +309,63 @@ describe('Toolbar layout-dirty button', () => {
     openOptionsPanel();
     expect(screen.queryByText(/Press Re-apply Layout/)).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'None' }));
-    expect(screen.getByText(/No grouping\. Tables are placed freely to reduce line crossings\. Press Re-apply Layout to use these choices\./)).toBeTruthy();
+    expect(screen.getByText(/No grouping\. Tables are placed freely to reduce line crossings\..*Press Re-apply Layout to use these choices\./)).toBeTruthy();
+  });
+
+  // Real-app check (2026-11-12): Table type -> None -> Re-apply moved nothing
+  // and said nothing, because with no table types the two are the same layout.
+  it('picking Table type or None on tables with no table types says they arrange the same way', () => {
+    render(<Toolbar {...defaultProps} />);
+    openOptionsPanel();
+    fireEvent.click(screen.getByRole('button', { name: 'Table type' }));
+    expect(screen.getByText(/These tables have no table types to group by, so Table type and None arrange them the same way\./)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'None' }));
+    expect(screen.getByText(/These tables have no table types to group by, so Table type and None arrange them the same way\./)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Join depth' }));
+    expect(screen.queryByText(/no table types to group by/)).toBeNull();
+  });
+
+  it('does not say so when the tables have two table types', () => {
+    const typed = [
+      { ...makeNode('dim_a'), data: { ...makeNode('dim_a').data, modelRole: 'conformed-dim' as const } },
+      { ...makeNode('fct_b'), data: { ...makeNode('fct_b').data, modelRole: 'transaction-fact' as const } },
+    ];
+    render(<Toolbar {...defaultProps} nodes={typed} />);
+    openOptionsPanel();
+    fireEvent.click(screen.getByRole('button', { name: 'None' }));
+    expect(screen.queryByText(/no table types to group by/)).toBeNull();
+  });
+
+  it('a re-applied layout that moved no table says so instead of looking like it never ran', async () => {
+    mockRunElkLayout.mockImplementationOnce(async (_nodes, _edges, _options, _strategy, hooks) => {
+      hooks?.onOutcome?.({ step: 'default', grouping: 'none', bands: 'off' });
+      return { model_a: { x: 0, y: 0 } };
+    });
+    mockStoreState.setToastMessage.mockClear();
+    render(<Toolbar {...defaultProps} />);
+
+    await act(async () => {
+      fireEvent.click(layoutButton());
+    });
+
+    expect(mockStoreState.setToastMessage).toHaveBeenCalledWith(
+      'Layout re-applied (grouping: None); nothing moved. These tables have no table types to group by, so Table type and None arrange them the same way.',
+    );
+  });
+
+  it('a re-applied layout that moved a table shows no notice', async () => {
+    mockRunElkLayout.mockImplementationOnce(async (_nodes, _edges, _options, _strategy, hooks) => {
+      hooks?.onOutcome?.({ step: 'default', grouping: 'none', bands: 'off' });
+      return { model_a: { x: 40, y: 0 } };
+    });
+    mockStoreState.setToastMessage.mockClear();
+    render(<Toolbar {...defaultProps} />);
+
+    await act(async () => {
+      fireEvent.click(layoutButton());
+    });
+
+    expect(mockStoreState.setToastMessage).not.toHaveBeenCalled();
   });
 });
 

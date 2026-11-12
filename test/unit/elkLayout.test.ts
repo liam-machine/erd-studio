@@ -10,6 +10,9 @@ import {
   gridLayout,
   partitionJoinCount,
   resolveNodeDimensions,
+  tableTypeBandCount,
+  layoutLeftTablesInPlace,
+  layoutUnchangedNotice,
 } from '../../webview/lib/elkLayout';
 import type { TableRole } from '../../src/types/semantic';
 import type { TableFlowNode, FkFlowEdge } from '@erd-studio/renderer/editor';
@@ -541,5 +544,33 @@ describe('gridLayout (the fallback that needs no ELK)', () => {
 
   it('is empty for an empty diagram', () => {
     expect(gridLayout([], [], {})).toEqual({});
+  });
+});
+
+// Gerhard (2026-11-12): None "does not fail but I cannot tell whether it did anything".
+describe('a re-applied layout that moved nothing', () => {
+  it('tableTypeBandCount counts Table type bands (no type and a fact share one)', () => {
+    expect(tableTypeBandCount([makeNode('a'), makeNode('b')])).toBe(1);
+    expect(tableTypeBandCount([makeNode('a', 'transaction-fact'), makeNode('b')])).toBe(1);
+    expect(tableTypeBandCount([makeNode('a', 'conformed-dim'), makeNode('b')])).toBe(2);
+    expect(tableTypeBandCount([])).toBe(0);
+  });
+
+  it('layoutLeftTablesInPlace is true only when every table lands within a pixel of where it is', () => {
+    const nodes = [makeNode('a'), { ...makeNode('b'), position: { x: 100, y: 50 } }];
+    expect(layoutLeftTablesInPlace(nodes, { a: { x: 0.4, y: -0.4 }, b: { x: 100, y: 50 } })).toBe(true);
+    expect(layoutLeftTablesInPlace(nodes, { a: { x: 0, y: 0 }, b: { x: 102, y: 50 } })).toBe(false);
+    expect(layoutLeftTablesInPlace(nodes, { a: { x: 0, y: 0 } })).toBe(false);
+    expect(layoutLeftTablesInPlace([], {})).toBe(false);
+  });
+
+  it('layoutUnchangedNotice explains Table type / None with no table types, and is plain otherwise', () => {
+    const same = /^Layout re-applied \(grouping: (None|Table type)\); nothing moved\. These tables have no table types to group by, so Table type and None arrange them the same way\.$/;
+    expect(layoutUnchangedNotice({ step: 'default', grouping: 'none', bands: 'off' }, 1)).toMatch(same);
+    expect(layoutUnchangedNotice({ step: 'default', grouping: 'role', bands: 'off' }, 0)).toMatch(same);
+    const plain = 'Layout re-applied; nothing moved. The tables were already laid out this way with these settings.';
+    expect(layoutUnchangedNotice({ step: 'default', grouping: 'none', bands: 'off' }, 2)).toBe(plain);
+    expect(layoutUnchangedNotice({ step: 'default', grouping: 'depth', bands: 'partitioned' }, 1)).toBe(plain);
+    expect(layoutUnchangedNotice(undefined, 1)).toBe(plain);
   });
 });

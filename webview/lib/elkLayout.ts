@@ -1068,6 +1068,47 @@ export function layoutOutcomeNotice(outcome: LayoutOutcome, tables: number): str
 }
 
 /**
+ * How many Table type bands these tables fall into. Under two, Table type has
+ * nothing to group by and lays the tables out exactly as None does (an
+ * imported diagram usually has no table types at all).
+ */
+export function tableTypeBandCount(nodes: TableFlowNode[]): number {
+  return new Set(nodes.map((n) => roleToPartition(n.data.modelRole))).size;
+}
+
+/**
+ * Whether a layout put every table back where it already was (within a
+ * pixel), so the canvas visibly did nothing.
+ */
+export function layoutLeftTablesInPlace(
+  nodes: TableFlowNode[],
+  positions: Record<string, { x: number; y: number }>,
+): boolean {
+  if (nodes.length === 0) return false;
+  return nodes.every((n) => {
+    const p = positions[n.id];
+    return p !== undefined
+      && Math.abs(p.x - n.position.x) < 1
+      && Math.abs(p.y - n.position.y) < 1;
+  });
+}
+
+/**
+ * What the canvas says when a re-applied layout moved nothing, so the user
+ * does not take it for a layout that never ran (Gerhard, 2026-11-12: "None
+ * does not fail but I cannot tell whether it did anything"). With no table
+ * types set, Table type and None produce the same arrangement.
+ */
+export function layoutUnchangedNotice(outcome: LayoutOutcome | undefined, tableTypeBands: number): string {
+  const grouping = outcome?.grouping;
+  if (tableTypeBands < 2 && (grouping === 'none' || grouping === 'role')) {
+    const asked = grouping === 'none' ? 'None' : 'Table type';
+    return `Layout re-applied (grouping: ${asked}); nothing moved. These tables have no table types to group by, so Table type and None arrange them the same way.`;
+  }
+  return 'Layout re-applied; nothing moved. The tables were already laid out this way with these settings.';
+}
+
+/**
  * One line for the extension's own log about a layout that worked but not as
  * asked (a fallback produced it, or the grouping was kept by direction only),
  * or `undefined` when it laid out as asked. Local only.

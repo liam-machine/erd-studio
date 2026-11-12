@@ -33,6 +33,9 @@ import {
   layoutFailureReport,
   layoutOutcomeLogMessage,
   layoutOutcomeNotice,
+  layoutLeftTablesInPlace,
+  layoutUnchangedNotice,
+  tableTypeBandCount,
   detectLayerBound,
   detectStrategy,
   type PartitionStrategy,
@@ -554,6 +557,10 @@ export function Toolbar({ nodes, edges }: ToolbarProps) {
       setLayoutDirty(false);
       const notice = outcome ? layoutOutcomeNotice(outcome, modelNodes.length) : undefined;
       if (notice) setToastMessage(notice);
+      // A re-applied layout that moved nothing would look like it never ran.
+      else if (!firstOpen && layoutLeftTablesInPlace(modelNodes, positions)) {
+        setToastMessage(layoutUnchangedNotice(outcome, tableTypeBandCount(modelNodes)));
+      }
     } catch (err) {
       reportLayout(false, err);
       console.error('[Toolbar] Auto layout failed:', err);
@@ -826,6 +833,10 @@ export function Toolbar({ nodes, edges }: ToolbarProps) {
                     : partitionStrategy === 'depth'
                     ? 'Arranges tables so that relationship lines flow in one direction, reducing crossings.'
                     : 'No grouping. Tables are placed freely to reduce line crossings.'}
+                    {(partitionStrategy === 'role' || partitionStrategy === 'none')
+                      && tableTypeBandCount(nodes.filter((n): n is TableFlowNode => n.type === 'model')) < 2
+                      ? ' These tables have no table types to group by, so Table type and None arrange them the same way.'
+                      : ''}
                     {layoutDirty ? ' Press Re-apply Layout to use these choices.' : ''}
                   </span>
                 </div>
