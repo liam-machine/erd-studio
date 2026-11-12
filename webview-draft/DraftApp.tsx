@@ -25,8 +25,8 @@ import type { NodePosition } from '../src/types/semantic';
 import type { DraftHost } from './lib/draftHost';
 import { layoutDraft as defaultLayout, withPositions } from './lib/draftLayout';
 import { fittedZoomOf } from './lib/fitZoom';
-import type { LayoutHooks } from '../webview/lib/elkLayout';
-import { fitZoomBucket } from '../src/types/webviewError';
+import { layoutFailureReport, type LayoutHooks } from '../webview/lib/elkLayout';
+import { fitZoomBucket, type LayoutFallbackRung } from '../src/types/webviewError';
 import { filterDisplayToSchema } from './lib/filterDisplayToSchema';
 import { BUSY_LABELS, layingOutLabel } from './lib/wording';
 import { DraftBanner } from './components/DraftBanner';
@@ -63,7 +63,7 @@ export function DraftApp({ host, layout = defaultLayout }: DraftAppProps) {
   /** The draft whose finished layout was reported (`laidOut`, once per draft: a schema filter's own layout says nothing). */
   const laidOutFor = useRef<string | undefined>();
   /** A finished layout waiting for the canvas to fit it, to report (`layoutFinished`). */
-  const layoutDone = useRef<{ key: string; ms: number; fallback: boolean } | undefined>();
+  const layoutDone = useRef<{ key: string; ms: number; fallback: boolean; rung?: LayoutFallbackRung } | undefined>();
   const canvasRef = useRef<HTMLElement>(null);
   const hostRef = useRef(host);
   hostRef.current = host;
@@ -116,10 +116,11 @@ export function DraftApp({ host, layout = defaultLayout }: DraftAppProps) {
     const viewId = view.id;
     const startedAt = performance.now();
     let fallback = false;
-    layout(filtered, { onStackFallback: () => { fallback = true; } }).then(
+    let rung: LayoutFallbackRung | undefined;
+    layout(filtered, { onStackFallback: () => { fallback = true; }, onFallbackRung: (r) => { rung = r; } }).then(
       (positions) => {
         if (cancelled) return;
-        layoutDone.current = { key: layoutKey, ms: Math.round(performance.now() - startedAt), fallback };
+        layoutDone.current = { key: layoutKey, ms: Math.round(performance.now() - startedAt), fallback, ...(rung !== undefined ? { rung } : {}) };
         setLayouts((prev) => new Map(prev).set(layoutKey, positions));
         if (laidOutFor.current !== viewId) {
           laidOutFor.current = viewId;
@@ -132,7 +133,13 @@ export function DraftApp({ host, layout = defaultLayout }: DraftAppProps) {
         setLayouts((prev) => new Map(prev).set(layoutKey, null));
         if (layoutFailedFor.current !== viewId) {
           layoutFailedFor.current = viewId;
-          hostRef.current.post({ type: 'layoutFailed' });
+          // The failure's class and the draft's size as buckets (telemetry);
+          // the counts and the message are for the extension's own log only.
+          hostRef.current.post({
+            type: 'layoutFailed',
+            ms: Math.round(performance.now() - startedAt),
+            ...layoutFailureReport(err, { tables: filtered.models.length, relationships: (filtered.relationships ?? []).length }),
+          });
         }
       },
     );
@@ -168,6 +175,7 @@ export function DraftApp({ host, layout = defaultLayout }: DraftAppProps) {
       ms: done.ms,
       fitZoom: zoom === undefined ? 'ok' : fitZoomBucket(zoom),
       ...(done.fallback ? { fallback: true as const } : {}),
+      ...(done.rung !== undefined ? { rung: done.rung } : {}),
     });
   }, [layoutKey]);
   const onTogglePanel = useCallback(() => {
