@@ -8,6 +8,10 @@ The `Unreleased` heading below is renamed to the released version by the deploy 
 Releases are patch bumps by default. To ship a minor or major version, write it into the
 heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that.
 
+## 2.0.4 — 2026-11-12
+
+- Release 2.0.4: same-named tables across schemas, Table Library New Table / New Schema, layout and drop fixes — develop → main (#298)
+
 ## 2.0.3 — 2026-11-11
 
 ### Added
