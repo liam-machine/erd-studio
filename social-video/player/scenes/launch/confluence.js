@@ -82,7 +82,23 @@ export default {
     let sv = `<path d="M${ax} ${y0} V${lerp(y0, y1, grow)}" stroke="#4c9aff" stroke-width="4" fill="none"/>`;
     if (grow >= 1) for (let k = 0; k < 2; k++) { const q = ((t * 0.9 + k * 0.5) % 1); sv += `<circle cx="${ax}" cy="${lerp(y0, y1, q)}" r="5" fill="#85b8ff"/>`; }
     html += `<svg class="abs" style="left:0;top:0;overflow:visible" width="1" height="1">${sv}</svg>`;
-    if (t >= readsAt + 0.2) html += `<div class="abs" style="left:${ax + 20}px;top:${y0 + 2}px;font-size:20px;color:var(--text-2);white-space:nowrap;${appear(t, readsAt + 0.2, { dy: 0, dx: -8 })}">reads the committed DBML</div>`;
+    if (t >= readsAt + 0.2 && t < wordAt(scene, 'truth', 'open format') - 0.1) html += `<div class="abs" style="left:${ax + 20}px;top:${y0 + 2}px;font-size:20px;color:var(--text-2);white-space:nowrap;${appear(t, readsAt + 0.2, { dy: 0, dx: -8 })}">reads the committed DBML</div>`;
+    // `truth`: the one connection is the whole pipeline. On "single source of truth" the repo card gets
+    // the badge; on "No vendor in the middle" a struck-through cloud lands beside the line (nothing
+    // sits between GitHub and Confluence); on "open format" the line's label says what is rendered.
+    const truthAt = wordAt(scene, 'truth', 'single source');
+    const vendorAt = wordAt(scene, 'truth', 'No vendor') - 0.1;
+    const openAt = wordAt(scene, 'truth', 'open format') - 0.1;
+    if (t >= truthAt) {
+      const p = easeOut(seg(t, truthAt, truthAt + 0.4));
+      html += `<div class="abs" style="left:${PX + PW - 372}px;top:${RY + 8}px;${appear(t, truthAt, { dy: -8 })}"><span class="pill" style="font-size:22px;padding:7px 16px;gap:8px;background:rgba(34,197,94,${(0.1 + 0.12 * p).toFixed(3)});border:2px solid #22c55e;color:#4ade80;transform:scale(${(1 + 0.06 * Math.sin(Math.PI * p)).toFixed(3)})">${ICON.check({ size: 20 })}Single source of truth</span></div>`;
+    }
+    if (t >= vendorAt) {
+      html += `<div class="abs" style="right:${1080 - (ax - 22)}px;top:${y0 - 2}px;white-space:nowrap;${appear(t, vendorAt, { dy: 0, dx: 10 })}"><span class="pill" style="font-size:20px;padding:5px 14px;gap:8px;background:#2a1a1a;border:2px solid #f87171;color:#fca5a5"><span style="text-decoration:line-through">vendor cloud</span> · nothing in the middle</span></div>`;
+    }
+    if (t >= openAt) {
+      html += `<div class="abs" style="left:${ax + 20}px;top:${y0 + 2}px;font-size:20px;color:var(--text-2);white-space:nowrap;background:var(--bg, #0b0f17);padding-right:8px;${appear(t, openAt, { dy: 0, dx: -8 })}">renders the DBML, an open format</div>`;
+    }
     return html;
   },
 };
