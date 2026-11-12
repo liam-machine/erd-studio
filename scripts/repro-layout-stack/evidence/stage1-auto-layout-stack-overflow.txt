@@ -1,0 +1,94 @@
+# Stage 1 evidence: Auto layout 'Maximum call stack size exceeded' (Gerhard, 2026-11-12)
+# worktree 26f635d2 on fix/gerhard-feedback-3 (origin/develop 9e246d57 + repro commits), node v26.3.1, 2026-11-12 19:05 AEDT
+
+$ node scripts/repro-layout-stack/build.mjs
+built /Users/liamwynne/GIT/LIAM/erd-studio-gerhard-3/scripts/repro-layout-stack/.out/layout.cjs
+
+## 1. The 8-table / 14-relationship diagram (two-way relationships). Real runElkLayout, real ELK, full fallback ladder, Node default stack
+$ node scripts/repro-layout-stack/run.cjs twoway 8 14 all 192
+twoway       8t     14r  auto ->depth bound=3 bands=5/0/0/0/3  FAIL RangeError: Maximum call stack size exceeded [stack, every fallback failed, last=stack] 177ms
+        at a3b (elk-worker.min.js:4433:13)
+        at CGc (elk-worker.min.js:5403:71)
+        at CGc (elk-worker.min.js:5403:213)
+        at a3b (elk-worker.min.js:4433:13)
+        at CGc (elk-worker.min.js:5403:71)
+
+## 2. Same, with an 8x bigger stack (4 MB): still fails, so it is not memory or machine dependent
+$ node --stack-size=8000 scripts/repro-layout-stack/run.cjs twoway 8 14 depth 192
+twoway       8t     14r  depth->depth bound=5 bands=5/0/0/0/3  FAIL RangeError: Maximum call stack size exceeded [stack, every fallback failed, last=stack] 1275ms
+
+## 3. Unminified engine: the recursing function is CoffmanGrahamLayerer.dfs (transitive reduction)
+$ REPRO_ELK=full node scripts/repro-layout-stack/frames.cjs twoway 8 14 depth 192
+RangeError: Maximum call stack size exceeded (149ms)
+frames captured: 40
+top 20:
+  $getOutgoingEdges
+  $dfs_4
+  $dfs_4
+  $dfs_4
+  $dfs_4
+  $dfs_4
+  $dfs_4
+
+## 4. A real Chromium dedicated Web Worker (blob URL, as the canvas builds it), with the fallback ladder
+$ node scripts/repro-layout-stack/browser.cjs twoway:8:14:192 twoway:40:80:13 twoway:130:160:26
+chromium 153.0.8010.12: trivial recursion depth main=8773 worker=4543
+twoway       8t     14r auto ->depth  FAIL (every rung) first="RangeError: Maximum call stack size exceeded"  r1:x157ms r2:x32ms r3:x24ms
+twoway       8t     14r role ->role   OK  r1:ok137ms
+twoway       8t     14r depth->depth  FAIL (every rung) first="RangeError: Maximum call stack size exceeded"  r1:x169ms r2:x30ms r3:x23ms
+twoway       8t     14r none ->none   OK  r1:ok136ms
+twoway      40t     80r auto ->depth  FAIL (every rung) first="RangeError: Maximum call stack size exceeded"  r1:x234ms r2:x108ms r3:x99ms
+twoway      40t     80r role ->role   OK  r1:ok433ms
+twoway      40t     80r depth->depth  FAIL (every rung) first="RangeError: Maximum call stack size exceeded"  r1:x241ms r2:x107ms r3:x106ms
+twoway      40t     80r none ->none   OK  r1:ok397ms
+twoway     130t    160r auto ->depth  FAIL (every rung) first="RangeError: Maximum call stack size exceeded"  r1:x283ms r2:x139ms r3:x139ms
+twoway     130t    160r role ->role   OK  r1:ok3036ms
+twoway     130t    160r depth->depth  FAIL (every rung) first="RangeError: Maximum call stack size exceeded"  r1:x263ms r2:x154ms r3:x145ms
+twoway     130t    160r none ->none   OK  r1:ok3412ms
+
+## 5. How often (seed sweeps through the real runElkLayout, Auto grouping)
+$ node scripts/repro-layout-stack/sweep.cjs twoway 15 28 200 auto
+twoway 15t/28r auto: 5/200 failed (11840ms)
+$ node scripts/repro-layout-stack/sweep.cjs twoway 40 80 30 auto
+twoway 40t/80r auto: 3/30 failed (21696ms)
+$ node scripts/repro-layout-stack/sweep.cjs twoway 130 80 40 auto
+twoway 130t/80r auto: 0/40 failed (8616ms)
+$ node scripts/repro-layout-stack/sweep.cjs gerhard 130 80 40 auto
+gerhard 130t/80r auto: 0/40 failed (18058ms)
+
+## 6. Fix prototype: orient every edge along one order consistent with the partitions (raw vs orient, rung 1 only)
+$ node scripts/repro-layout-stack/proto-orient.cjs twoway 15 28 200 raw|orient
+twoway 15/28 mode=raw: 5/200 failed
+twoway 15/28 mode=orient: 0/200 failed
+
+## 7. Regression test (it.fails until the fix)
+$ npx vitest run test/unit/elkLayoutPartitionCycle.test.ts
+ ✓ test/unit/elkLayoutPartitionCycle.test.ts (6 tests) 595ms
+ Test Files  1 passed (1)
+      Tests  6 passed (6)
+
+## 1b. All four Grouping choices on the 8-table diagram (frames omitted): Auto and Join depth fail, Table type and None work, as Gerhard saw
+$ node scripts/repro-layout-stack/run.cjs twoway 8 14 all 192 | grep -v "^        at"
+twoway       8t     14r  auto ->depth bound=3 bands=5/0/0/0/3  FAIL RangeError: Maximum call stack size exceeded [stack, every fallback failed, last=stack] 136ms
+twoway       8t     14r  role ->role  bound=5 bands=-  OK   rung=1 25ms
+twoway       8t     14r  depth->depth bound=5 bands=5/0/0/0/3  FAIL RangeError: Maximum call stack size exceeded [stack, every fallback failed, last=stack] 97ms
+twoway       8t     14r  none ->none  bound=5 bands=-  OK   rung=1 11ms
+
+## 8. Scale matrix at a Web-Worker-sized stack (node --stack-size=500 ~ Chromium worker, see section 4 depth probe), seed 1, cap 240 s per run
+## (in-process, so the 30 s guard only fires after ELK returns; times are wall clock). 5000t/10000r ran Node out of heap for both None and Auto.
+random     500t    500r  none ->none  bound=5 bands=-  OK   rung=2 3044ms
+random     500t    500r  auto ->depth bound=10 bands=355/91/30/14/10  OK   rung=2 38554ms
+random     500t   1000r  none ->none  bound=5 bands=-  OK   rung=2 9561ms
+random     500t   1000r  auto ->depth bound=10 bands=318/125/39/16/2  FAIL Error: ELK layout timed out after 30s [timeout] 133060ms
+chain      500t    500r  none ->none  bound=5 bands=-  OK   rung=1 497ms
+chain 500 500 auto: KILLED after 240s (no result)
+twoway     500t    600r  none ->none  bound=5 bands=-  OK   rung=2 3417ms
+twoway     500t    600r  auto ->depth bound=10 bands=307/129/43/15/6  OK   rung=3 85286ms
+islands   1000t    700r  none ->none  bound=5 bands=-  OK   rung=1 268ms
+islands   1000t    700r  auto ->depth bound=10 bands=525/252/154/56/13  OK   rung=1 296ms
+random    1000t   1000r  none ->none  bound=5 bands=-  OK   rung=2 6915ms
+random    1000t   1000r  auto ->depth bound=10 bands=771/155/43/22/9  FAIL Error: ELK layout timed out after 30s [timeout] 222159ms
+random    2000t   2000r  none ->none  bound=5 bands=-  OK   rung=2 25527ms
+random 2000 2000 auto: KILLED after 240s (no result)
+random 5000 10000 none: out of memory (V8 heap) - no result
+random 5000 10000 auto: out of memory (V8 heap) - no result
