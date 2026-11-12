@@ -6952,7 +6952,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   private takeLibraryDrag(): { tables: string[]; files?: string[] } | undefined {
     const pending = this.pendingLibraryDrag;
     this.pendingLibraryDrag = undefined;
-    // Used up (a drop somewhere, or a missed canvas drop): no canvas goes on saying "Hold Shift and drop".
+    // Used up (a drop somewhere, or a missed canvas drop): no canvas goes on saying "Drop to add".
     if (pending) {
       const ended: LibraryDragEndedMessage = { type: 'libraryDragEnded' };
       for (const [panelKey, panel] of Array.from(this.openPanels.entries())) {

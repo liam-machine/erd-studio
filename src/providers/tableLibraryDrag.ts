@@ -10,7 +10,7 @@
  * (`onDragStarted`, with each table's file where the extension asks for
  * them: two schema folders may each hold a table of one name, and only the
  * file says which): the editor provider remembers it for a minute and tells
- * the open canvases, which show "Hold Shift and drop to add … to this
+ * the open canvases, which show "Drop to add … to this
  * diagram".
  *
  * The names never go under the view's own tree mime type

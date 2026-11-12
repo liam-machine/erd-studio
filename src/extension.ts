@@ -3427,7 +3427,7 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
         },
       };
       return vscode.Disposable.from(
-        // A Table Library drag let go over a diagram without Shift opens the file instead: say so, and offer the add.
+        // A Table Library drag let go over a diagram without Shift opens the file instead: add the tables there and close that tab.
         watchMissedCanvasDrops({
           peekDrag: () => editorProvider.peekRememberedLibraryDrag(),
           takeDrag: () => editorProvider.takeRememberedLibraryDrag(),

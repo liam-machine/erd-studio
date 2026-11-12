@@ -8,13 +8,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as vscode from 'vscode';
 
-import {
-  MISSED_DROP_MS,
-  missedCanvasDrop,
-  missedCanvasDropButton,
-  missedCanvasDropMessage,
-} from '../../src/services/tableDrop';
-import { watchMissedCanvasDrops } from '../../src/providers/missedCanvasDrop';
+import { MISSED_DROP_MS, missedCanvasDrop } from '../../src/services/tableDrop';
+import { MISSED_DROP_CLOSE_MS, watchMissedCanvasDrops } from '../../src/providers/missedCanvasDrop';
 import { SUBJECT_AREA_EDITOR_VIEW_TYPE } from '../../src/services/recoveryService';
 
 const SEM = '/p/.erd-studio';
@@ -73,13 +68,6 @@ describe('missedCanvasDrop', () => {
     expect(missedCanvasDrop({ ...base, now: T0 - 1 })).toBeUndefined();
     expect(missedCanvasDrop({ ...base, frontDiagram: undefined })).toBeUndefined();
   });
-
-  it('says what opened, where it was meant to go and why', () => {
-    expect(missedCanvasDropMessage(['dim_location'], 'showcase')).toBe(
-      'ERD Studio: "dim_location" opened as a file instead of being added to showcase. VS Code adds a dragged table to a diagram only while Shift is held as you let go.');
-    expect(missedCanvasDropMessage(['a', 'b'], 'showcase')).toMatch(/^ERD Studio: 2 tables opened as files instead of being added to showcase\. /);
-    expect(missedCanvasDropButton('showcase')).toBe('Add to showcase');
-  });
 });
 
 describe('watchMissedCanvasDrops', () => {
@@ -125,60 +113,74 @@ describe('watchMissedCanvasDrops', () => {
     group.tabs = [...group.tabs, tab];
     group.activeTab = tab;
     vscode._fireDidChangeTabs({ opened: [tab] });
+    return tab;
   };
+  const tabGroupsApi = vscode.window.tabGroups as unknown as { close?: (tab: unknown, preserveFocus?: boolean) => Promise<boolean> };
+  let closed: unknown[];
+  beforeEach(() => {
+    closed = [];
+    tabGroupsApi.close = vi.fn(async (tab: unknown) => { closed.push(tab); return true; });
+  });
+  afterEach(() => { delete tabGroupsApi.close; });
 
-  it('says the drop missed, uses the drag up, and adds the tables to the diagram when the user asks', async () => {
-    const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue('Add to showcase' as never);
-    dropOpensFile();
-    expect(info).toHaveBeenCalledWith(missedCanvasDropMessage(['dim_location'], 'showcase'), 'Add to showcase');
+  it('adds the drag to the diagram the drop was aimed at, uses the drag up, closes the tab the drop opened, and names the add in the status bar', async () => {
+    const info = vi.spyOn(vscode.window, 'showInformationMessage');
+    const status = vi.spyOn(vscode.window, 'setStatusBarMessage');
+    const tab = dropOpensFile();
     expect(deps.takeDrag).toHaveBeenCalledTimes(1);
+    expect(closed).toEqual([tab]);
     await vi.waitFor(() => expect(deps.addTables).toHaveBeenCalledWith(SHOWCASE, ['dim_location'], undefined));
+    await vi.waitFor(() => expect(status).toHaveBeenCalledWith('$(check) ERD Studio: Added "dim_location" to showcase', expect.any(Number)));
+    expect(info).not.toHaveBeenCalled();
   });
 
-  it('passes the drag\'s files on, and writes nothing when the notice is dismissed', async () => {
+  it('passes the drag\'s files on; says nothing in the status bar when nothing was added (already there: the canvas says so)', async () => {
     drag = { tables: ['dim_location'], files: [DIM_LOCATION], at: T0 };
-    const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);
+    deps.addTables = vi.fn(async () => []);
+    watcher.dispose();
+    watcher = watchMissedCanvasDrops(deps);
+    const status = vi.spyOn(vscode.window, 'setStatusBarMessage');
     dropOpensFile();
-    expect(info).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(deps.addTables).toHaveBeenCalledWith(SHOWCASE, ['dim_location'], [DIM_LOCATION]));
     await new Promise((r) => setTimeout(r, 0));
-    expect(deps.addTables).not.toHaveBeenCalled();
+    expect(status).not.toHaveBeenCalled();
   });
 
-  it('catches a drop of a file whose tab was already open: VS Code brings that tab to the front instead of opening it', () => {
-    const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);
-    // The file's tab is open behind the diagram (an earlier missed drop, say).
+  it('a drop of a file whose tab was already open (VS Code brings that tab to the front): adds, and leaves that tab open', async () => {
     const tab = { ...fileTab(DIM_LOCATION, () => group), isActive: false };
     group.tabs = [...group.tabs, tab];
-    // The drop: VS Code makes it the group's active tab (a `changed` tab, not an `opened` one).
     tab.isActive = true;
     group.activeTab = tab;
     vscode._fireDidChangeTabs({ changed: [tab] });
-    expect(info).toHaveBeenCalledWith(missedCanvasDropMessage(['dim_location'], 'showcase'), 'Add to showcase');
     expect(deps.takeDrag).toHaveBeenCalledTimes(1);
+    expect(closed).toEqual([]);
+    await vi.waitFor(() => expect(deps.addTables).toHaveBeenCalledWith(SHOWCASE, ['dim_location'], undefined));
     // A later change to that tab (it is in front now, not the diagram) is not a drop.
     drag = { tables: ['dim_location'], at: T0 };
     vscode._fireDidChangeTabs({ changed: [tab] });
-    expect(info).toHaveBeenCalledTimes(1);
+    expect(deps.addTables).toHaveBeenCalledTimes(1);
   });
 
-  it('says it once for a multi-table drag (VS Code opens each file)', () => {
+  it('adds a multi-table drag once and closes each file VS Code opens for it, but not a file opened later', async () => {
     drag = { tables: ['dim_location', 'dim_date'], at: T0 };
-    const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);
-    dropOpensFile(DIM_LOCATION);
+    const first = dropOpensFile(DIM_LOCATION);
+    const second = dropOpensFile(DIM_DATE);
+    expect(closed).toEqual([first, second]);
+    await vi.waitFor(() => expect(deps.addTables).toHaveBeenCalledTimes(1));
+    expect(deps.addTables).toHaveBeenCalledWith(SHOWCASE, ['dim_location', 'dim_date'], undefined);
+    deps.now = () => T0 + 1_500 + MISSED_DROP_CLOSE_MS + 1;
     dropOpensFile(DIM_DATE);
-    expect(info).toHaveBeenCalledTimes(1);
+    expect(closed).toHaveLength(2);
   });
 
-  it('stays quiet for a click on a row (a preview tab), with no drag, or when a text file was in front, not a diagram', () => {
-    const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);
+  it('does nothing for a click on a row (a preview tab), with no drag, or when a text file was in front, not a diagram', () => {
     dropOpensFile(DIM_LOCATION, true);
-    expect(info).not.toHaveBeenCalled();
     // The preview tab is now in front: a pinned open after it was not aimed at the diagram.
     dropOpensFile(DIM_LOCATION);
-    expect(info).not.toHaveBeenCalled();
     expect(deps.takeDrag).not.toHaveBeenCalled();
     drag = undefined;
     dropOpensFile(DIM_LOCATION);
-    expect(info).not.toHaveBeenCalled();
+    expect(deps.addTables).not.toHaveBeenCalled();
+    expect(closed).toEqual([]);
   });
 });

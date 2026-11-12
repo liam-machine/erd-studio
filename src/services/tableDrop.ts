@@ -185,18 +185,6 @@ export function missedCanvasDrop<T extends DroppableTableFile>(input: {
   return { diagramPath: frontDiagram, names: [...drag.tables], ...(withFiles ? { files: [...drag.files!] } : {}) };
 }
 
-/** What the missed-drop notice says: the file opened, and why the table was not added. */
-export function missedCanvasDropMessage(names: readonly string[], diagram: string): string {
-  const what = names.length === 1 ? `"${names[0]}"` : `${names.length} tables`;
-  return `ERD Studio: ${what} opened as ${names.length === 1 ? 'a file' : 'files'} instead of being added to ${diagram}. `
-    + 'VS Code adds a dragged table to a diagram only while Shift is held as you let go.';
-}
-
-/** The missed-drop notice's button. */
-export function missedCanvasDropButton(diagram: string): string {
-  return `Add to ${diagram}`;
-}
-
 /**
  * Where dropped tables go: the first centred under the drop point with its
  * header under the pointer, the others in a grid to its right and below,

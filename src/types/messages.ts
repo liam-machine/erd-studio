@@ -461,7 +461,7 @@ export interface RevealTableMessage {
 /**
  * A drag has started in the sidebar's Table Library (its drag controller's
  * `handleDrag`, `src/providers/tableLibraryDrag.ts`): posted to every open,
- * loaded canvas on the logical stage, which shows "Hold Shift and drop to add
+ * loaded canvas on the logical stage, which shows "Drop to add
  * … to this diagram" over an editable diagram, and takes its first pointer
  * event after it as the drag's end (see `DropTablesMessage.afterDrag`). The
  * tables are the drag's, in order, at most {@link ADD_EXISTING_TABLES_LIMIT}.
@@ -476,9 +476,9 @@ export interface LibraryDragStartedMessage {
 /**
  * The Table Library drag announced by `libraryDragStarted` is used up: its
  * tables were dropped on a canvas or on a diagram's row in the Diagrams view,
- * or the drop missed the canvas and opened the file instead (the host offers
- * the add). Posted by `SemanticEditorProvider.takeLibraryDrag` to every
- * loaded canvas, which takes its "Hold Shift and drop" hint down and stops
+ * or the drop missed the canvas and opened the file instead (the host adds
+ * the tables there). Posted by `SemanticEditorProvider.takeLibraryDrag` to every
+ * loaded canvas, which takes its "Drop to add" hint down and stops
  * treating the drag as in progress. An older webview ignores it (the hint
  * then times out as before).
  */

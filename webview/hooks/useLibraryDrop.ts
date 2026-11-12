@@ -3,9 +3,9 @@
  * or table files dragged from the Explorer.
  *
  * When the host says a Table Library drag has started (`libraryDragStarted`),
- * the canvas shows "Hold Shift and drop to add … to this diagram" — until
- * the drop, the host's `libraryDragEnded` (the drag was used up: dropped on
- * a canvas or a diagram's row, or it missed the canvas and opened the file),
+ * the canvas shows "Drop to add … to this diagram" — until the drop, the
+ * host's `libraryDragEnded` (the drag was used up: dropped on a canvas or a
+ * diagram's row, or it missed the canvas and the host added it there),
  * {@link LIBRARY_DRAG_HINT_MS}, the diagram changing or the host selecting a
  * table on it, or the webview's next pointer event (pointer events come back
  * once the drag is over). While an acceptable drag is over the canvas, it says
@@ -14,7 +14,7 @@
  * A drop event seldom reaches the canvas on macOS: VS Code turns the
  * webview's pointer events off during a workbench drag unless Shift is held
  * (the editor group then takes the drop and opens the file: the host's
- * missed-drop watcher offers the add), and with Shift Chromium
+ * missed-drop watcher adds the tables instead), and with Shift Chromium
  * refuses to deliver a drag that started in the workbench to the webview's
  * out-of-process frame, so the drop reaches nothing. That last case is caught
  * here: the webview's first pointer event after the drag, when
@@ -46,7 +46,7 @@ import { useSend } from './useMessageBus';
 import { useEditorStore } from '../store/editorStore';
 import { DROP_TABLES_URI_LIMIT, DROP_TABLES_URI_MAX_LENGTH, TABLE_LIBRARY_DRAG_MIME } from '../../src/types/messages';
 
-/** How long the "Hold Shift and drop" hint stays without a drop or a pointer move (a long sidebar takes a while to cross). */
+/** How long the "Drop to add" hint stays without a drop or a pointer move (a long sidebar takes a while to cross). */
 export const LIBRARY_DRAG_HINT_MS = 20_000;
 
 /** How long a Table Library drag counts as in progress for accepting a drop (the host remembers it as long). */
@@ -117,7 +117,7 @@ export function libraryDragHintText(tables: readonly string[], over = false): st
   const what = tables.length === 1 ? tables[0] : `${tables.length} tables`;
   return over
     ? `Let go to add ${what} to this diagram`
-    : `Hold Shift and drop to add ${what} to this diagram. Keep Shift down until you let go.`;
+    : `Drop to add ${what} to this diagram`;
 }
 
 type DataTransferLike = Pick<DataTransfer, 'getData'> & { readonly types?: ArrayLike<string> | readonly string[] };

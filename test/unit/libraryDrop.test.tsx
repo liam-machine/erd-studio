@@ -2,7 +2,7 @@
 /**
  * Dropping tables on the canvas, webview side (`useLibraryDrop`,
  * `LibraryDropOverlay`, wired in App.tsx): the host's `libraryDragStarted`
- * shows "Hold Shift and drop to add … to this diagram" until the drop, a
+ * shows "Drop to add … to this diagram" until the drop, a
  * pointer move, the diagram changing or {@link LIBRARY_DRAG_HINT_MS}, and
  * "Let go to add …" while an acceptable drag is over the canvas (Shift
  * pressed early or late); an acceptable drag over an
@@ -69,7 +69,7 @@ function transfer(data: Record<string, string>) {
 const sent = () => mockVsCode.postMessage.mock.calls.map((c) => c[0] as { type: string; payload?: unknown });
 const drops = () => sent().filter((m) => m.type === 'dropTables');
 const canvas = (container: HTMLElement) => container.querySelector('.editor-canvas') as HTMLElement;
-const HINT = 'Hold Shift and drop to add dim_customer to this diagram. Keep Shift down until you let go.';
+const HINT = 'Drop to add dim_customer to this diagram';
 const LET_GO = 'Let go to add dim_customer to this diagram';
 
 beforeAll(() => {
@@ -137,7 +137,7 @@ describe('acceptsDrop', () => {
 
   it('words the hint for one table or several, and says "Let go" once the drag is over the canvas', () => {
     expect(libraryDragHintText(['dim_customer'])).toBe(HINT);
-    expect(libraryDragHintText(['a', 'b', 'c'])).toMatch(/^Hold Shift and drop to add 3 tables to this diagram\. /);
+    expect(libraryDragHintText(['a', 'b', 'c'])).toBe('Drop to add 3 tables to this diagram');
     expect(libraryDragHintText(['dim_customer'], true)).toBe(LET_GO);
     expect(libraryDragHintText(['a', 'b'], true)).toBe('Let go to add 2 tables to this diagram');
   });
@@ -247,7 +247,7 @@ describe('the canvas as a drop target', () => {
     postFromHost({ type: 'libraryDragStarted', payload: { tables: ['a', 'b'] } });
     expect(screen.getByText(libraryDragHintText(['a', 'b']))).toBeTruthy();
     act(() => { vi.advanceTimersByTime(LIBRARY_DRAG_HINT_MS + 1); });
-    expect(screen.queryByText(/Hold Shift and drop/)).toBeNull();
+    expect(screen.queryByText(/^Drop to add/)).toBeNull();
   });
 
   it('highlights an acceptable drag, and its drop posts the flow position and the URIs, and ends the hint', () => {
