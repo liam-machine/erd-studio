@@ -3,7 +3,7 @@
  * Toolbar component tests — the layout-dirty button, and the top-right corner.
  *
  * Verifies that:
- *  - The button starts clean (⊞ icon, no dirty class)
+ *  - The button starts clean (layout icon, no dirty class)
  *  - Changing any layout option marks it dirty (↺ icon, dirty class)
  *  - Running the layout clears the dirty flag
  *  - The corner actions stay labelled while they fit, and collapse to one
@@ -152,10 +152,10 @@ describe('Toolbar layout-dirty button', () => {
     mockRunElkLayout.mockResolvedValue({ model_a: { x: 10, y: 20 } });
   });
 
-  it('starts clean — shows ⊞ and no dirty class', () => {
+  it('starts clean — shows the layout icon and no dirty class', () => {
     render(<Toolbar {...defaultProps} />);
     const btn = layoutButton();
-    expect(btn.textContent).toContain('⊞');
+    expect(btn.querySelector('[data-icon="layout"]')).not.toBeNull();
     expect(btn.className).not.toContain('dirty');
   });
 
@@ -165,7 +165,7 @@ describe('Toolbar layout-dirty button', () => {
     // "Join depth" is the text of the depth strategy button
     fireEvent.click(screen.getByRole('button', { name: 'Join depth' }));
     const btn = layoutButton();
-    expect(btn.textContent).toContain('↺');
+    expect(btn.querySelector('[data-icon="relayout"]')).not.toBeNull();
     expect(btn.className).toContain('dirty');
   });
 
@@ -201,8 +201,37 @@ describe('Toolbar layout-dirty button', () => {
       fireEvent.click(layoutButton());
     });
 
-    expect(layoutButton().textContent).toContain('⊞');
+    expect(layoutButton().querySelector('[data-icon="layout"]')).not.toBeNull();
     expect(layoutButton().className).not.toContain('dirty');
+  });
+
+  it('Escape closes the layout settings popover and returns focus to the caret', () => {
+    render(<Toolbar {...defaultProps} />);
+    openOptionsPanel();
+    const popover = document.querySelector('.toolbar__lp') as HTMLElement;
+    expect(popover).not.toBeNull();
+    // Focus inside the popover, as a keyboard user would be.
+    const inner = popover.querySelector('button') as HTMLButtonElement;
+    inner.focus();
+    const canvasKeydown = vi.fn();
+    document.addEventListener('keydown', canvasKeydown);
+
+    fireEvent.keyDown(inner, { key: 'Escape' });
+
+    expect(document.querySelector('.toolbar__lp')).toBeNull();
+    expect(caretButton().getAttribute('aria-expanded')).toBe('false');
+    expect(document.activeElement).toBe(caretButton());
+    // The canvas shortcut handler (which would clear the selection) never sees it.
+    expect(canvasKeydown).not.toHaveBeenCalled();
+    document.removeEventListener('keydown', canvasKeydown);
+  });
+
+  it('Escape with focus on the caret also closes the popover', () => {
+    render(<Toolbar {...defaultProps} />);
+    openOptionsPanel();
+    caretButton().focus();
+    fireEvent.keyDown(caretButton(), { key: 'Escape' });
+    expect(document.querySelector('.toolbar__lp')).toBeNull();
   });
 
   it('dirty button title changes to warn about pending options', () => {
@@ -466,7 +495,7 @@ describe('the top-right corner actions', () => {
     layout({ toolbarRight: 900, cornerRight: 1000 });
     render(<Toolbar {...defaultProps} />);
 
-    expect(trigger().textContent).toBe('⋯');
+    expect(trigger().querySelector('[data-icon="more"]')).not.toBeNull();
     expect(screen.queryByRole('button', { name: /send feedback/i })).toBeNull();
   });
 
@@ -544,7 +573,8 @@ describe('the top-right corner actions', () => {
     layout({ toolbarRight: 900, cornerRight: 1400 });
     render(<Toolbar {...defaultProps} />);
     const buttons = Array.from(document.querySelectorAll('.toolbar__corner-actions > button'));
-    expect(buttons.map((b) => b.textContent)).toEqual(['⤓', '💬 Feedback', '{ } View File']);
+    expect(buttons.map((b) => b.textContent?.trim())).toEqual(['', 'Feedback', 'View File']);
+    expect(buttons[0].querySelector('[data-icon="export"]')).not.toBeNull();
     expect(buttons[0].getAttribute('aria-label')).toBe('Export diagram as Mermaid or DBML');
   });
 

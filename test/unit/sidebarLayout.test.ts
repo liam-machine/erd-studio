@@ -26,14 +26,18 @@ const { contributes } = pkg;
 
 describe('sidebar views', () => {
   it('are Diagrams, Table Library, Relationships and Help & Feedback, in that order', () => {
-    expect(contributes.views['erd-studio'].map((v) => [v.id, v.name])).toEqual([
+    // First, the glass sidebar (prototype): one webview drawing the same four, shown while erdStudio.glassSidebar is on.
+    expect(contributes.views['erd-studio'][0]).toEqual({ type: 'webview', id: 'erdStudio.glassSidebar', name: 'ERD Studio', when: 'erdStudio.glassSidebar' });
+    expect(contributes.views['erd-studio'].slice(1).map((v) => [v.id, v.name])).toEqual([
       ['erdStudio.domainTree', 'Diagrams'],
       ['erdStudio.modelLibrary', 'Table Library'],
       ['erdStudio.relationships', 'Relationships'],
       ['erdStudio.help', 'Help & Feedback'],
     ]);
+    // The native trees hide while the glass sidebar shows them.
+    for (const view of contributes.views['erd-studio'].slice(1)) expect(view.when ?? '', view.id).toMatch(/(^|&& )!erdStudio\.glassSidebar$/);
     // Relationships live in the table library, so the view shows with it.
-    const views = contributes.views['erd-studio'];
+    const views = contributes.views['erd-studio'].slice(1);
     expect(views[2].when).toBe(views[1].when);
     // Relationships starts collapsed too: a long list under the Table Library until asked for.
     expect(views[2].visibility).toBe('collapsed');

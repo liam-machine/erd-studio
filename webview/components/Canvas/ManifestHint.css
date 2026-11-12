@@ -1,72 +1,159 @@
 /**
- * ManifestHint styles — the logical stage's "Run dbt parse" strip (#113),
+ * ManifestHint styles: the logical stage's "Run dbt parse" notice (#113),
  * laid out exactly like PhysicalSourceNotice so the two read as one family.
+ * EmbeddedTablesBanner shares these classes (with an informational tone).
  *
- * A strip above the flow area, not an overlay — it must never cover a node.
- * Theme tokens only (webview/styles/theme.css); no literal colours.
+ * An inset glass card in the editor's notice tray (`.editor-notices`, above
+ * the flow area, in flow): it must never cover a node. A tinted wash over
+ * the glass, a coloured hairline, a round icon badge and a raised pill for
+ * the action. Glass tokens only (packages/renderer/src/styles/theme.css).
  */
 
 .manifest-hint {
+  /* The notice's tone: warning by default; a variant swaps these three. */
+  --notice-tone: var(--warning-fg);
+  --notice-tint: var(--glass-tint-warning);
+  --notice-edge: var(--glass-tint-warning-edge);
+
   flex-shrink: 0;
   display: flex;
-  align-items: baseline;
-  gap: 8px;
-  padding: 6px 12px;
-  background: var(--warning-bg);
-  color: var(--warning-fg);
-  border-bottom: 1px solid var(--panel-border);
-  font-size: 12px;
-  line-height: 1.4;
+  align-items: flex-start;
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-3) var(--space-4) var(--space-4);
+
+  background: linear-gradient(var(--notice-tint), var(--notice-tint)), var(--glass-surface-2);
+  -webkit-backdrop-filter: var(--glass-backdrop);
+  backdrop-filter: var(--glass-backdrop);
+  border: 1px solid var(--notice-edge);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--glass-elevation-1);
+
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
+
+  animation: notice-card-in var(--duration-base) var(--ease-out);
+}
+
+@keyframes notice-card-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .manifest-hint {
+    animation: none;
+  }
+}
+
+/* Informational: the file holds its own tables (nothing is wrong). */
+.embedded-tables-banner {
+  --notice-tone: var(--focus-border);
+  --notice-tint: var(--glass-tint-accent);
+  --notice-edge: var(--control-border-selected);
 }
 
 .manifest-hint__icon {
   flex-shrink: 0;
-  font-size: 13px;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--radius-pill);
+  background: var(--notice-tint);
+  color: var(--notice-tone);
+  font-size: var(--text-sm);
+  line-height: 1;
 }
 
 .manifest-hint__text {
   flex: 1;
+  min-width: 0;
+  padding-top: var(--space-1);
+}
+
+.manifest-hint__lead {
+  color: var(--text-primary);
 }
 
 .manifest-hint__hint {
-  opacity: 0.85;
+  color: var(--text-secondary);
 }
 
 .manifest-hint__action {
   flex-shrink: 0;
   align-self: center;
-  padding: 2px 10px;
-  border: none;
-  border-radius: 2px;
-  background: var(--button-bg);
-  color: var(--button-fg);
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--control-height-sm);
+  padding: 0 var(--space-5);
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-pill);
+  background: var(--control-thumb);
+  box-shadow: var(--control-thumb-shadow);
+  color: var(--text-primary);
   font-family: inherit;
-  font-size: 12px;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  white-space: nowrap;
   cursor: pointer;
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
+    transform var(--duration-instant) var(--ease-standard);
 }
 
 .manifest-hint__action:hover {
-  background: var(--button-hover-bg);
+  border-color: var(--control-border-hover);
+  background:
+    linear-gradient(var(--control-fill), var(--control-fill)),
+    var(--control-thumb);
+}
+
+.manifest-hint__action:active {
+  transform: scale(0.97);
 }
 
 .manifest-hint__action:focus-visible {
-  outline: 1px solid var(--focus-border);
-  outline-offset: 1px;
+  outline: var(--focus-outline);
+  outline-offset: var(--focus-offset);
 }
-
 
 .manifest-hint__dismiss {
   flex-shrink: 0;
-  padding: 0 4px;
-  border: none;
-  background: none;
-  color: inherit;
-  font-size: 15px;
+  align-self: center;
+  display: grid;
+  place-items: center;
+  width: var(--control-height-sm);
+  height: var(--control-height-sm);
+  padding: 0;
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--text-tertiary);
+  font-size: var(--text-lg);
   line-height: 1;
   cursor: pointer;
-  opacity: 0.7;
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard);
 }
 
 .manifest-hint__dismiss:hover {
-  opacity: 1;
+  background: var(--control-fill-hover);
+  border-color: var(--control-border-hover);
+  color: var(--text-primary);
+}
+
+.manifest-hint__dismiss:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: var(--focus-offset);
 }

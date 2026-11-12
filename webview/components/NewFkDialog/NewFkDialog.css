@@ -1,21 +1,60 @@
 /**
  * NewFkDialog styles.
  *
- * Centered dialog for creating FK relationships between models.
- * BEM naming, VS Code theme tokens from packages/renderer/src/styles/theme.css.
+ * An in-canvas glass sheet (a React Flow <Panel>, top-center) for creating or
+ * editing a relationship. It shares the dialog sheet language: surface-3
+ * material, an 18px radius, elevation-3, a title row, refined inputs, inset
+ * wells and a footer with a quiet secondary and a filled primary button.
+ *
+ * The two ends sit in one inset card (`__link`), source on the left and
+ * target on the right with an arrow between them, so a composite key's extra
+ * column pairs line up under the columns they extend.
+ *
+ * Colours come only from the tokens in packages/renderer/src/styles/theme.css.
+ * The Panel root keeps React Flow's own `transform`; the entrance animates the
+ * independent `translate` / `scale` properties, which compose with it.
  */
 
 .new-fk-dialog {
-  width: 420px;
-  max-height: calc(100vh - 100px);
-  margin-top: 80px;
-  background: var(--panel-bg);
-  border: 1px solid var(--panel-border);
-  border-radius: 6px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+  --new-fk-dialog-caret: var(--text-tertiary);
+  --new-fk-dialog-arrow-col: 28px;
+
+  width: 480px;
+  max-width: calc(100vw - 2 * var(--shell-inset));
+  /* Below the toolbar row and stage tabs (about 80px under the 15px inset),
+     so the two glass layers never overlap; runs to 15px above the bottom. */
+  margin-top: calc(var(--shell-inset) + 80px + var(--shell-gap));
+  max-height: calc(100% - 80px - var(--shell-gap) - 2 * var(--shell-inset));
   display: flex;
   flex-direction: column;
-  z-index: 10; /* Above toolbar and other panels */
+  z-index: var(--z-chrome-raised); /* Above toolbar and other panels */
+
+  background: var(--glass-surface-3);
+  -webkit-backdrop-filter: var(--glass-backdrop);
+  backdrop-filter: var(--glass-backdrop);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--glass-elevation-3);
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+  font-size: var(--text-md);
+  line-height: var(--leading-normal);
+
+  transform-origin: top center;
+  animation: new-fk-dialog-in var(--duration-base) var(--ease-spring);
+}
+
+@keyframes new-fk-dialog-in {
+  from {
+    opacity: 0;
+    translate: 0 -8px;
+    scale: 0.98;
+  }
+  to {
+    opacity: 1;
+    translate: 0 0;
+    scale: 1;
+  }
 }
 
 /* ---------------------------------------------------------------------------
@@ -26,18 +65,20 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--panel-border);
-  background: var(--panel-bg);
+  gap: var(--space-4);
+  padding: var(--space-6) var(--space-6) var(--space-5) var(--space-7);
+  border-bottom: 1px solid var(--glass-divider);
+  background: transparent;
   flex-shrink: 0;
 }
 
 .new-fk-dialog__title {
   margin: 0;
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--editor-fg);
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-tight);
+  line-height: var(--leading-tight);
+  color: var(--text-primary);
 }
 
 .new-fk-dialog__close {
@@ -45,21 +86,38 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
-  border: none;
-  border-radius: 4px;
-  background: transparent;
-  color: var(--editor-fg);
-  font-size: 18px;
+  width: var(--control-height);
+  height: var(--control-height);
+  padding: 0;
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-pill);
+  background: var(--control-fill);
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: var(--text-lg);
   line-height: 1;
   cursor: pointer;
-  transition: background 0.1s ease, color 0.1s ease;
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard),
+    transform var(--duration-instant) var(--ease-standard);
 }
 
 .new-fk-dialog__close:hover {
-  background: var(--button-bg);
-  color: var(--button-fg);
+  background: var(--control-fill-hover);
+  border-color: var(--control-border-hover);
+  color: var(--text-primary);
+}
+
+.new-fk-dialog__close:active {
+  background: var(--control-fill-active);
+  transform: scale(0.94);
+}
+
+.new-fk-dialog__close:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: var(--focus-offset);
 }
 
 /* ---------------------------------------------------------------------------
@@ -68,12 +126,61 @@
 
 .new-fk-dialog__content {
   flex: 1;
-  padding: 16px;
+  min-height: 0;
+  padding: var(--space-6) var(--space-7) var(--space-7);
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: var(--space-6);
+  scrollbar-width: thin;
+  scrollbar-color: var(--glass-scrollbar) transparent;
 }
+
+/* ---------------------------------------------------------------------------
+   The link card: source (left) → target (right), then any extra column pairs
+   --------------------------------------------------------------------------- */
+
+.new-fk-dialog__link {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--new-fk-dialog-arrow-col) minmax(0, 1fr);
+  grid-auto-flow: row;
+  row-gap: var(--space-5);
+  padding: var(--space-5);
+  border: 1px solid var(--glass-divider);
+  border-radius: var(--radius-lg);
+  background: var(--glass-well);
+}
+
+/* Everything after the four end fields runs the full width of the card. */
+.new-fk-dialog__link > * {
+  grid-column: 1 / -1;
+}
+
+/* Source table / source column on the left, target table / column on the right. */
+.new-fk-dialog__link > .new-fk-dialog__field:nth-child(1) { grid-row: 1; grid-column: 1; }
+.new-fk-dialog__link > .new-fk-dialog__field:nth-child(2) { grid-row: 2; grid-column: 1; }
+.new-fk-dialog__link > .new-fk-dialog__field:nth-child(3) { grid-row: 1; grid-column: 3; }
+.new-fk-dialog__link > .new-fk-dialog__field:nth-child(4) { grid-row: 2; grid-column: 3; }
+
+/* The arrows between the two ends, level with the controls (under the labels). */
+.new-fk-dialog__link::before,
+.new-fk-dialog__link::after {
+  content: '→' / '';
+  grid-column: 2;
+  align-self: start;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: var(--control-height-lg);
+  /* The label line above the control: text-sm at the normal leading, plus the field gap. */
+  margin-top: calc(var(--text-sm) * var(--leading-normal) + var(--space-3));
+  color: var(--text-quaternary);
+  font-size: var(--text-md);
+  pointer-events: none;
+}
+
+.new-fk-dialog__link::before { grid-row: 1; }
+.new-fk-dialog__link::after { grid-row: 2; }
 
 /* ---------------------------------------------------------------------------
    Form Fields
@@ -82,85 +189,147 @@
 .new-fk-dialog__field {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--space-3);
+  min-width: 0;
 }
 
 .new-fk-dialog__label {
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--editor-fg);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .new-fk-dialog__input,
 .new-fk-dialog__select {
-  padding: 6px 8px;
-  border: 1px solid var(--input-border, var(--panel-border));
-  border-radius: 3px;
-  background: var(--input-bg);
-  color: var(--input-fg, var(--editor-fg));
+  width: 100%;
+  min-width: 0;
+  min-height: var(--control-height-lg);
+  padding: 0 var(--space-5);
+  border: 1px solid var(--glass-input-border);
+  border-radius: var(--radius-md);
+  background: var(--glass-input-bg);
+  color: var(--input-fg);
   font-family: inherit;
-  font-size: 12px;
+  font-size: var(--text-md);
+  transition:
+    border-color var(--duration-fast) var(--ease-standard),
+    box-shadow var(--duration-fast) var(--ease-standard),
+    background-color var(--duration-fast) var(--ease-standard);
+}
+
+.new-fk-dialog__input:hover:not(:disabled),
+.new-fk-dialog__select:hover {
+  border-color: var(--glass-border-strong);
 }
 
 .new-fk-dialog__input:focus,
 .new-fk-dialog__select:focus {
-  outline: 1px solid var(--focus-border);
-  outline-offset: -1px;
-  border-color: var(--focus-border);
+  outline: none;
+  border-color: var(--glass-input-border-focus);
+  box-shadow: var(--focus-halo);
 }
 
 .new-fk-dialog__input::placeholder {
-  color: var(--vscode-descriptionForeground, #888);
-  opacity: 0.7;
+  color: var(--text-quaternary);
+  opacity: 1;
 }
 
 .new-fk-dialog__input--error,
-.new-fk-dialog__select--error {
-  border-color: var(--error-fg, #f48771);
+.new-fk-dialog__select--error,
+.new-fk-dialog__input--error:hover,
+.new-fk-dialog__select--error:hover {
+  border-color: var(--error-fg);
+}
+
+.new-fk-dialog__input--error:focus,
+.new-fk-dialog__select--error:focus {
+  border-color: var(--error-fg);
+  box-shadow: 0 0 0 3px var(--glass-tint-error);
 }
 
 .new-fk-dialog__input:disabled {
-  opacity: 0.5;
+  border-style: dashed;
+  background: transparent;
+  color: var(--text-quaternary);
   cursor: not-allowed;
 }
 
+/* A native select with a drawn chevron (no images: webview CSP). */
 .new-fk-dialog__select {
+  -webkit-appearance: none;
+  appearance: none;
+  padding-right: var(--space-9);
   cursor: pointer;
+  text-overflow: ellipsis;
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--new-fk-dialog-caret) 50%),
+    linear-gradient(135deg, var(--new-fk-dialog-caret) 50%, transparent 50%);
+  background-position: calc(100% - 17px) 52%, calc(100% - 12px) 52%;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+}
+
+.new-fk-dialog__select option {
+  background-color: var(--input-bg);
+  color: var(--input-fg);
 }
 
 .new-fk-dialog__hint {
-  font-size: 11px;
-  color: var(--dim-fg);
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+  color: var(--text-tertiary);
 }
 
 .new-fk-dialog__error {
-  font-size: 11px;
-  color: var(--error-fg, #f48771);
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+  color: var(--error-fg);
 }
 
-.new-fk-dialog__error--global {
-  padding: 8px;
-  border-radius: 3px;
-  background: rgba(244, 135, 113, 0.1);
-}
-
-.new-fk-dialog__warning {
-  font-size: 11px;
-  color: var(--vscode-editorWarning-foreground, #cca700);
-}
-
+/* A notice card: an error or warning about the whole relationship. */
+.new-fk-dialog__error--global,
 .new-fk-dialog__warning--global {
   display: flex;
   align-items: flex-start;
-  gap: 6px;
-  padding: 8px;
-  border-radius: 3px;
-  background: rgba(204, 167, 0, 0.1);
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+  border: 1px solid var(--glass-tint-error-edge);
+  border-radius: var(--radius-md);
+  background: var(--glass-tint-error);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+}
+
+.new-fk-dialog__error--global::before {
+  content: '';
+  flex: none;
+  width: 6px;
+  height: 6px;
+  margin-top: 0.5em;
+  border-radius: var(--radius-pill);
+  background: var(--error-fg);
+}
+
+.new-fk-dialog__warning {
+  font-size: var(--text-xs);
+  color: var(--warning-fg);
+}
+
+.new-fk-dialog__warning--global {
+  border-color: var(--glass-tint-warning-edge);
+  background: var(--glass-tint-warning);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
 }
 
 .new-fk-dialog__warning-icon {
   flex-shrink: 0;
-  font-size: 12px;
+  color: var(--warning-fg);
+  font-size: var(--text-sm);
+  line-height: inherit;
 }
 
 /* ---------------------------------------------------------------------------
@@ -168,68 +337,214 @@
    --------------------------------------------------------------------------- */
 
 .new-fk-dialog__direction {
-  font-size: 11px;
-  line-height: 1.5;
-  color: var(--dim-fg);
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
+  color: var(--text-secondary);
 }
 
 .new-fk-dialog__direction--reversed {
-  padding: 8px;
-  border-radius: 3px;
-  color: var(--warning-fg);
-  background: var(--warning-bg);
+  padding: var(--space-4) var(--space-5);
+  border: 1px solid var(--glass-tint-warning-edge);
+  border-radius: var(--radius-md);
+  background: var(--glass-tint-warning);
+  color: var(--text-primary);
 }
 
 .new-fk-dialog__direction-lead {
-  font-weight: 600;
+  color: var(--warning-fg);
+  font-weight: var(--weight-semibold);
 }
 
 .new-fk-dialog__link-button {
-  margin-left: 6px;
+  margin-left: var(--space-3);
   padding: 0;
   border: none;
+  border-radius: var(--radius-xs);
   background: none;
-  color: var(--vscode-textLink-foreground, var(--focus-border));
+  color: var(--focus-border);
   font: inherit;
-  text-decoration: underline;
+  font-weight: var(--weight-medium);
+  text-decoration: none;
   cursor: pointer;
+  transition: color var(--duration-fast) var(--ease-standard);
 }
 
+.new-fk-dialog__link-button:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.new-fk-dialog__link-button:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: var(--focus-offset);
+}
+
+/* "Which way does this relationship point?": two radio cards. */
 .new-fk-dialog__direction-choice {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--space-3);
+  min-width: 0;
   margin: 0;
-  padding: 8px;
-  border: 1px solid var(--panel-border);
-  border-radius: 3px;
+  padding: 0;
+  border: 0;
 }
 
-.new-fk-dialog__radio,
+/* A floated legend is laid out as an ordinary flex item, so the gap applies. */
+.new-fk-dialog__direction-choice > legend {
+  float: left;
+  width: 100%;
+  padding: 0;
+}
+
+.new-fk-dialog__radio {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  column-gap: var(--space-4);
+  row-gap: var(--space-1);
+  align-items: start;
+  padding: var(--space-4) var(--space-5);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  background: var(--glass-input-bg);
+  font-size: var(--text-sm);
+  color: var(--text-primary);
+  cursor: pointer;
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
+    box-shadow var(--duration-fast) var(--ease-standard);
+}
+
+.new-fk-dialog__radio:hover {
+  border-color: var(--glass-border-strong);
+  background: var(--control-fill-hover);
+}
+
+.new-fk-dialog__radio:has(input:checked) {
+  border-color: var(--control-border-selected);
+  background: var(--control-fill-selected);
+}
+
+.new-fk-dialog__radio:has(input:focus-visible) {
+  outline: var(--focus-outline);
+  outline-offset: var(--focus-offset);
+}
+
+.new-fk-dialog__radio > input { grid-column: 1; grid-row: 1; margin-top: 1px; }
+.new-fk-dialog__radio-text { grid-column: 2; grid-row: 1; font-weight: var(--weight-medium); }
+
+.new-fk-dialog__radio .new-fk-dialog__hint {
+  grid-column: 2;
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+}
+
+/* The "pick one" hint under the radio cards. */
+.new-fk-dialog__direction-choice > .new-fk-dialog__hint {
+  padding: 0 var(--space-1);
+}
+
 .new-fk-dialog__checkbox {
   display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 4px 6px;
-  font-size: 12px;
-  color: var(--editor-fg);
+  align-items: flex-start;
+  gap: var(--space-4);
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
+  color: var(--text-primary);
   cursor: pointer;
 }
 
-.new-fk-dialog__radio .new-fk-dialog__hint {
-  flex-basis: 100%;
-  padding-left: 20px;
-  font-family: var(--vscode-editor-font-family, monospace);
+.new-fk-dialog__checkbox > input {
+  margin-top: 2px;
+}
+
+/* Radio and checkbox, drawn on glass. */
+.new-fk-dialog__radio > input[type='radio'],
+.new-fk-dialog__checkbox > input[type='checkbox'] {
+  -webkit-appearance: none;
+  appearance: none;
+  flex: none;
+  display: inline-grid;
+  place-content: center;
+  width: 16px;
+  height: 16px;
+  margin-left: 0;
+  margin-right: 0;
+  margin-bottom: 0;
+  border: 1px solid var(--glass-border-strong);
+  background: var(--glass-input-bg);
+  cursor: pointer;
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard);
+}
+
+.new-fk-dialog__radio > input[type='radio'] {
+  border-radius: var(--radius-pill);
+}
+
+.new-fk-dialog__checkbox > input[type='checkbox'] {
+  border-radius: var(--radius-xs);
+}
+
+.new-fk-dialog__radio > input[type='radio']::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-pill);
+  background: var(--text-on-accent);
+  scale: 0;
+  transition: scale var(--duration-fast) var(--ease-spring);
+}
+
+.new-fk-dialog__checkbox > input[type='checkbox']::before {
+  content: '';
+  width: 8px;
+  height: 4px;
+  margin-top: -2px;
+  border-left: 1.5px solid var(--text-on-accent);
+  border-bottom: 1.5px solid var(--text-on-accent);
+  rotate: -45deg;
+  scale: 0;
+  transition: scale var(--duration-fast) var(--ease-spring);
+}
+
+.new-fk-dialog__radio > input[type='radio']:checked,
+.new-fk-dialog__checkbox > input[type='checkbox']:checked {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+.new-fk-dialog__radio > input[type='radio']:checked::before,
+.new-fk-dialog__checkbox > input[type='checkbox']:checked::before {
+  scale: 1;
+}
+
+.new-fk-dialog__radio > input[type='radio']:focus-visible {
+  outline: none; /* the card carries the ring */
+}
+
+.new-fk-dialog__checkbox > input[type='checkbox']:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: var(--focus-offset);
 }
 
 /* ---------------------------------------------------------------------------
    Composite foreign keys: the other column pairs (#133 L2)
    --------------------------------------------------------------------------- */
 
+/* Same columns as the card, so each pair lines up under source / target. */
 .new-fk-dialog__pair-row {
-  display: flex;
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--new-fk-dialog-arrow-col) minmax(0, 1fr);
   align-items: center;
-  gap: 6px;
+}
+
+/* The target picker makes room for the remove button at the row's end. */
+.new-fk-dialog__pair-row > .new-fk-dialog__pair-column:nth-child(3) {
+  width: calc(100% - 30px);
 }
 
 .new-fk-dialog__pair-column {
@@ -238,26 +553,51 @@
 }
 
 .new-fk-dialog__pair-arrow {
-  color: var(--dim-fg);
+  justify-self: center;
+  color: var(--text-quaternary);
 }
 
 .new-fk-dialog__pair-remove {
-  padding: 0 4px;
-  border: none;
-  background: none;
-  color: var(--dim-fg);
-  font-size: 14px;
+  position: absolute;
+  top: 50%;
+  right: 0;
+  translate: 0 -50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--text-tertiary);
+  font-family: inherit;
+  font-size: var(--text-lg);
+  line-height: 1;
   cursor: pointer;
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard);
 }
 
 .new-fk-dialog__pair-remove:hover {
+  background: var(--glass-tint-error);
+  border-color: var(--control-border-hover);
   color: var(--error-fg);
 }
 
+.new-fk-dialog__pair-remove:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: 1px;
+}
+
 .new-fk-dialog__add-pair {
+  justify-self: start;
   align-self: flex-start;
   margin-left: 0;
-  font-size: 11px;
+  font-size: var(--text-xs);
 }
 
 /* ---------------------------------------------------------------------------
@@ -266,31 +606,37 @@
 
 .new-fk-dialog__preview {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 12px;
-  border-radius: 4px;
-  background: rgba(249, 115, 22, 0.1); /* Design orange tint */
-  border: 1px solid rgba(249, 115, 22, 0.3);
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2) var(--space-4);
+  padding: var(--space-4) var(--space-5);
+  border: 1px solid var(--glass-divider);
+  border-radius: var(--radius-md);
+  background: var(--glass-well);
 }
 
 .new-fk-dialog__preview-label {
-  font-size: 11px;
-  font-weight: 600;
+  flex-basis: 100%;
+  color: var(--text-tertiary);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-caps);
   text-transform: uppercase;
-  letter-spacing: 0.5px;
-  color: var(--vscode-descriptionForeground, #888);
 }
 
 .new-fk-dialog__preview-text {
-  font-size: 12px;
-  font-family: var(--vscode-editor-font-family, monospace);
-  color: var(--editor-fg);
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: var(--text-sm);
+  font-family: var(--font-mono);
+  color: var(--text-primary);
 }
 
 .new-fk-dialog__preview-cardinality {
-  margin-left: 6px;
-  color: var(--vscode-descriptionForeground, #888);
+  margin-left: var(--space-3);
+  color: var(--text-tertiary);
+  font-family: var(--font-ui);
+  font-size: var(--text-xs);
 }
 
 /* ---------------------------------------------------------------------------
@@ -301,44 +647,72 @@
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 8px;
-  padding: 12px 16px;
-  border-top: 1px solid var(--panel-border);
+  gap: var(--space-4);
+  padding: var(--space-5) var(--space-7) var(--space-6);
+  border-top: 1px solid var(--glass-divider);
   flex-shrink: 0;
 }
 
 .new-fk-dialog__button {
-  padding: 6px 14px;
-  border: 1px solid transparent;
-  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--control-height-lg);
+  padding: 0 var(--space-6);
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-md);
   font-family: inherit;
-  font-size: 12px;
+  font-size: var(--text-md);
+  font-weight: var(--weight-medium);
   cursor: pointer;
-  transition: background 0.1s ease, opacity 0.1s ease;
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard),
+    box-shadow var(--duration-fast) var(--ease-standard),
+    opacity var(--duration-fast) var(--ease-standard),
+    transform var(--duration-instant) var(--ease-standard);
+}
+
+.new-fk-dialog__button:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.new-fk-dialog__button:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: var(--focus-offset);
 }
 
 .new-fk-dialog__button--primary {
-  background: var(--button-bg);
-  color: var(--button-fg);
+  background: var(--accent);
+  border-color: var(--glass-border);
+  color: var(--text-on-accent);
+  box-shadow: var(--glass-elevation-1);
 }
 
 .new-fk-dialog__button--primary:hover:not(:disabled) {
-  background: var(--button-hover-bg);
+  background: var(--accent-hover);
+  border-color: var(--control-border-hover);
 }
 
 .new-fk-dialog__button--secondary {
-  background: transparent;
-  border-color: var(--panel-border);
-  color: var(--editor-fg);
+  background: var(--control-fill);
+  color: var(--text-primary);
 }
 
 .new-fk-dialog__button--secondary:hover {
-  background: rgba(128, 128, 128, 0.1);
+  background: var(--control-fill-hover);
+  border-color: var(--control-border-hover);
+}
+
+.new-fk-dialog__button--secondary:active {
+  background: var(--control-fill-active);
 }
 
 .new-fk-dialog__button:disabled {
-  opacity: 0.5;
+  opacity: 0.45;
   cursor: not-allowed;
+  box-shadow: none;
 }
 
 /*
@@ -350,33 +724,48 @@
  */
 .new-fk-dialog__stored-in {
   flex-shrink: 0;
-  padding: 10px 16px;
+  padding: 10px var(--space-7);
   border-top: 1px solid var(--panel-border);
-  font-size: 11px;
-  color: var(--dim-fg);
+  border-top-color: var(--glass-divider);
+  background: var(--glass-well);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  line-height: var(--leading-normal);
+  color: var(--text-tertiary);
   overflow-wrap: anywhere;
 }
 
 /* How to give the schema a relationships file of its own (only under its layer's shared file). */
 .new-fk-dialog__stored-in-hint {
-  margin-top: 2px;
+  margin-top: var(--space-1);
+  font-family: var(--font-ui);
+  font-size: var(--text-xs);
 }
 
 /* "Stored in": a choice of the layer's relationships files (DBML, two or more). */
 .new-fk-dialog__stored-in--choice {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--space-2);
+  font-family: var(--font-ui);
 }
 
 .new-fk-dialog__stored-in-label {
-  font-size: 11px;
-  font-weight: 500;
-  color: var(--editor-fg);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  color: var(--text-secondary);
 }
 
 .new-fk-dialog__stored-in-select {
   min-width: 0;
   max-width: 100%;
-  font-size: 11px;
+  min-height: var(--control-height);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .new-fk-dialog {
+    animation: none;
+  }
 }

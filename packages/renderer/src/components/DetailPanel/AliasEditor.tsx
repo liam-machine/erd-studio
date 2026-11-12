@@ -17,6 +17,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { TABLE_ALIAS_MAX_LENGTH, TABLE_ALIAS_RULE, isValidTableAlias } from '@erd-studio/core';
 import { useCanvasHost } from '../../host/canvasEnvironment';
+import { IconPencil } from './panelIcons';
 
 interface AliasEditorProps {
   /** What the diagram calls the table: the name the edit is posted for. */
@@ -110,7 +111,7 @@ export function AliasEditor({ modelName, tableName, alias, readOnly, dbtWording 
 
   if (editing) {
     return (
-      <div className="detail-panel__metadata-row detail-panel__metadata-row--alias">
+      <div className="detail-panel__metadata-row detail-panel__metadata-row--alias detail-panel__metadata-row--editing">
         <span className="detail-panel__label detail-panel__label--wide">Warehouse name</span>
         <span className="detail-panel__alias-edit">
           <input
@@ -150,7 +151,7 @@ export function AliasEditor({ modelName, tableName, alias, readOnly, dbtWording 
           title="Set the warehouse name (alias)"
           aria-label="Edit warehouse name"
         >
-          ✎
+          <IconPencil size={12} />
         </button>
       )}
     </div>

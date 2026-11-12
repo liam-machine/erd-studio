@@ -22,7 +22,8 @@ const packageJson = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'package.jso
 type Context = import('vscode').ExtensionContext;
 
 function makeContext(root: string): Context {
-  const globalState = new Map<string, unknown>([['erdStudio.gettingStartedShown', true]]);
+  // The glass sidebar (prototype, on by default) off: these tests drive the native trees' reveal.
+  const globalState = new Map<string, unknown>([['erdStudio.gettingStartedShown', true], ['erdStudio.glassSidebar.enabled', false]]);
   const workspaceState = new Map<string, unknown>([['erdStudio.harnessInstallPrompted', true], ['erdStudio.diagramsNudgeShown', true]]);
   return {
     subscriptions: [],

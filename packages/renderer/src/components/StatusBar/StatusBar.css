@@ -1,22 +1,32 @@
 /**
  * StatusBar styles.
  *
- * Positioned at bottom-left of the canvas, beside the legend's ? button (the
- * extension's editor and the viewer). Theme tokens only (styles/theme.css).
+ * A quiet floating glass pill at the bottom-left of the canvas, beside the
+ * legend's ? button (the extension's editor and the viewer), the same 28px
+ * tall as that button so the two line up. Theme tokens only (styles/theme.css);
+ * no opacity on the bar (it would stop the blur) — the text is faded with the
+ * text tiers instead.
  */
 
 .status-bar {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 4px 10px;
-  margin-left: 40px; /* Leave room for the legend ? button */
-  background: var(--panel-bg);
-  border: 1px solid var(--panel-border);
-  border-radius: 4px;
-  font-size: 11px;
-  color: var(--editor-fg);
-  opacity: 0.85;
+  gap: var(--space-4);
+  min-height: var(--control-height);
+  padding: 0 var(--space-5);
+  /* Clear of the legend's ? button: its inset, its width and a gap. */
+  margin-left: calc(var(--shell-inset) + var(--shell-control-size) + var(--shell-gap));
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-pill);
+  background: var(--glass-surface-1);
+  -webkit-backdrop-filter: var(--glass-backdrop);
+  backdrop-filter: var(--glass-backdrop);
+  box-shadow: var(--glass-elevation-1);
+  color: var(--text-secondary);
+  font-family: var(--font-ui);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  line-height: var(--leading-tight);
 }
 
 .status-bar__item {
@@ -29,39 +39,50 @@
 .status-bar__counts {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-4);
   white-space: nowrap;
 }
 
+/* The "|" between items, drawn as a hairline (the character stays in the
+   text for anything that reads it). */
 .status-bar__divider {
-  color: var(--panel-border);
+  display: inline-block;
+  flex-shrink: 0;
+  width: 1px;
+  height: 12px;
+  overflow: hidden;
+  background: var(--glass-divider);
+  color: transparent;
+  font-size: 0;
+  line-height: 0;
 }
 
 /* The key to the tables' layers: a swatch in each layer's colour, its name and how many tables. */
 .status-bar__layers {
   display: inline-flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--space-5);
 }
 
 .status-bar__layer {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-2);
+  color: var(--text-secondary);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 
 /* The layer's abbreviation, as the table headers badge it. */
 .status-bar__badge {
-  padding: 0 4px;
-  border-radius: 3px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-xs);
+  background: var(--glass-tint-accent-strong);
+  color: var(--text-primary);
   font-size: 9px;
-  font-weight: 700;
-  letter-spacing: 0.5px;
-  line-height: 1.5;
-  background: var(--button-bg);
-  color: var(--button-fg);
+  font-weight: var(--weight-bold);
+  letter-spacing: var(--tracking-caps);
+  line-height: 1.6;
 }
 
 /*
@@ -76,8 +97,11 @@
   max-width: calc(100% - 51px - 231px);
   flex-direction: column;
   align-items: flex-start;
+  justify-content: center;
   flex-wrap: nowrap;
-  row-gap: 2px;
+  row-gap: var(--space-1);
+  padding: var(--space-2) var(--space-5);
+  border-radius: var(--radius-lg);
 }
 
 .status-bar--viewer .status-bar__divider--layers {
@@ -91,7 +115,7 @@
 
 .status-bar--viewer .status-bar__layers {
   flex-wrap: wrap;
-  row-gap: 2px;
+  row-gap: var(--space-1);
 }
 
 /* Beside the open legend there is no room for the counts on a canvas under

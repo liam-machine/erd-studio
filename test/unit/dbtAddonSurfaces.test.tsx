@@ -325,7 +325,8 @@ function domText(doc: Document, win: Window & typeof globalThis, root: Element =
 type Ctx = import('vscode').ExtensionContext;
 
 function makeContext(storageRoot: string): Ctx {
-  const globalState = new Map<string, unknown>([['erdStudio.gettingStartedShown', true]]);
+  // The glass sidebar (prototype, on by default) off: this sweep reads the native trees and their welcome text.
+  const globalState = new Map<string, unknown>([['erdStudio.gettingStartedShown', true], ['erdStudio.glassSidebar.enabled', false]]);
   const workspaceState = new Map<string, unknown>([
     ['erdStudio.harnessInstallPrompted', true],
     ['erdStudio.diagramsNudgeShown', true],

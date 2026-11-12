@@ -1,23 +1,37 @@
 /**
- * SyncMergeModal styles — VS Code-style merge editor overlay.
+ * SyncMergeModal styles — the merge editor, as a glass sheet over a dimmed,
+ * lightly blurred scrim.
  *
- * Visual hierarchy: Header → Toolbar → Progress → Completion → Table → Footer
- * Stage colours:  Logical = blue (#60a5fa)  ·  Physical = green (#22c55e)
+ * Visual hierarchy: Header → Toolbar → Progress → Table → Footer
+ * Stage colours:  Logical = --stage-logical (blue)  ·  Physical = --stage-physical (green)
+ *
+ * Shares the dialog sheet language (surface-3 material, an 18px radius,
+ * elevation-3, hairline dividers, glass controls). Colours come only from the
+ * tokens in packages/renderer/src/styles/theme.css; the TSX still paints the
+ * stage names and type pills with STAGE_HEX inline, which these rules frame.
  */
 
 /* ---------------------------------------------------------------------------
-   Backdrop
+   Backdrop — a dim of the editor background with a light blur
    --------------------------------------------------------------------------- */
 
 .sync-modal__backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.6);
-  z-index: 200;
+  z-index: var(--z-modal);
+  background: color-mix(in srgb, var(--editor-bg) 55%, transparent);
+  -webkit-backdrop-filter: var(--glass-backdrop-thin);
+  backdrop-filter: var(--glass-backdrop-thin);
+  animation: sync-modal__scrim-in var(--duration-base) var(--ease-standard);
+}
+
+@keyframes sync-modal__scrim-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
 }
 
 /* ---------------------------------------------------------------------------
-   Modal container
+   Modal container — the sheet
    --------------------------------------------------------------------------- */
 
 .sync-modal {
@@ -28,82 +42,138 @@
   width: min(960px, 90vw);
   min-width: 560px;
   height: min(720px, 82vh);
-  z-index: 201;
-  background: var(--panel-bg);
-  border: 1px solid var(--panel-border);
-  border-radius: 8px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+  z-index: calc(var(--z-modal) + 1);
   display: flex;
   flex-direction: column;
   overflow: hidden;
+
+  background: var(--glass-surface-3);
+  -webkit-backdrop-filter: var(--glass-backdrop);
+  backdrop-filter: var(--glass-backdrop);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--glass-elevation-3);
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+  font-size: var(--text-md);
+
+  /* `translate` / `scale` compose with the centring transform. */
+  animation: sync-modal__sheet-in var(--duration-slow) var(--ease-out);
+}
+
+@keyframes sync-modal__sheet-in {
+  from {
+    opacity: 0;
+    translate: 0 12px;
+    scale: 0.97;
+  }
+  to {
+    opacity: 1;
+    translate: 0 0;
+    scale: 1;
+  }
 }
 
 /* ---------------------------------------------------------------------------
-   Header — two-line: title + explanatory subtitle
+   Header — glyph, diagram name, "Logical vs Physical", close
    --------------------------------------------------------------------------- */
 
 .sync-modal__header {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 10px 16px;
-  border-bottom: 1px solid var(--panel-border);
+  gap: var(--space-4);
+  padding: var(--space-5) var(--space-5) var(--space-5) var(--space-6);
+  border-bottom: 1px solid var(--glass-divider);
   flex-shrink: 0;
 }
 
 .sync-modal__header-icon {
-  font-size: 14px;
-  opacity: 0.5;
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: var(--control-height);
+  height: var(--control-height);
+  border-radius: var(--radius-md);
+  background: var(--control-fill);
+  color: var(--text-secondary);
+  font-size: var(--text-md);
 }
 
 .sync-modal__header-domain {
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--editor-fg);
-  margin-right: 4px;
+  margin-right: var(--space-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-primary);
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-tight);
 }
 
+/* The stage names: tinted capsules in their own colour (set inline). */
 .sync-modal__header-stage {
-  font-size: 11px;
-  font-weight: 600;
+  flex: none;
+  padding: var(--space-1) var(--space-4);
+  border: 1px solid color-mix(in srgb, currentColor 40%, transparent);
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, currentColor 12%, transparent);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  line-height: 1.4;
 }
 
 .sync-modal__header-vs {
-  font-size: 10px;
-  opacity: 0.4;
-  font-weight: 500;
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
 }
 
 .sync-modal__close {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
-  border: none;
-  border-radius: 4px;
-  background: transparent;
-  color: var(--editor-fg);
-  font-size: 16px;
-  cursor: pointer;
-  opacity: 0.4;
-  transition: opacity 0.15s, background 0.15s;
   flex-shrink: 0;
+  width: var(--control-height);
+  height: var(--control-height);
   margin-left: auto;
+  padding: 0;
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-pill);
+  background: var(--control-fill);
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: var(--text-lg);
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard),
+    transform var(--duration-instant) var(--ease-standard);
 }
 
 .sync-modal__close:hover {
-  opacity: 1;
-  background: var(--button-bg);
-  color: var(--button-fg);
+  background: var(--control-fill-hover);
+  border-color: var(--control-border-hover);
+  color: var(--text-primary);
+}
+
+.sync-modal__close:active {
+  background: var(--control-fill-active);
+  transform: scale(0.94);
+}
+
+.sync-modal__close:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: var(--focus-offset);
 }
 
 /* ---------------------------------------------------------------------------
-   Toolbar — bulk actions with stage-colored accents
+   Toolbar — bulk actions with stage-coloured dots, count and progress
    --------------------------------------------------------------------------- */
 
 .sync-modal__toolbar {
-  padding: 6px 0 0;
+  padding: var(--space-4) 0 0;
   border-bottom: none;
   flex-shrink: 0;
 }
@@ -112,129 +182,168 @@
   display: grid;
   grid-template-columns: 3.5% 28% 1fr 28%;
   align-items: center;
-  padding: 0 14px 6px;
+  padding: 0 var(--space-5) var(--space-4);
 }
 
 .sync-modal__toolbar-center {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  padding: 0 8px;
+  gap: var(--space-4);
+  padding: 0 var(--space-4);
+}
+
+/* Shared control recipe for the toolbar's buttons. */
+.sync-modal__toolbar-btn,
+.sync-modal__bulk-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-md);
+  font-family: inherit;
+  font-weight: var(--weight-medium);
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard),
+    transform var(--duration-instant) var(--ease-standard);
 }
 
 .sync-modal__toolbar-btn {
-  padding: 3px 10px;
-  border: 1px solid var(--panel-border);
-  border-radius: 4px;
+  min-height: var(--control-height-sm);
+  padding: 0 var(--space-4);
   background: transparent;
-  color: var(--editor-fg);
-  font-size: 10px;
-  font-weight: 600;
-  cursor: pointer;
-  opacity: 0.65;
-  transition: all 0.15s;
-  white-space: nowrap;
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
 }
 
 .sync-modal__toolbar-btn:hover:not(:disabled) {
-  opacity: 1;
-  background: var(--selection-bg);
+  background: var(--control-fill-hover);
+  border-color: var(--control-border-hover);
+  color: var(--text-primary);
+}
+
+.sync-modal__toolbar-btn:active:not(:disabled) {
+  background: var(--control-fill-active);
+  transform: scale(0.97);
 }
 
 /* Reset with nothing decided yet */
 .sync-modal__toolbar-btn:disabled {
-  opacity: 0.3;
+  color: var(--text-quaternary);
   cursor: default;
 }
 
 .sync-modal__bulk-btn {
-  padding: 4px 12px;
-  border: 1px solid var(--panel-border);
-  border-radius: 4px;
-  background: transparent;
-  color: var(--editor-fg);
-  font-size: 11px;
-  font-weight: 600;
-  cursor: pointer;
-  opacity: 0.8;
-  transition: all 0.15s;
-  white-space: nowrap;
-  border-left: 3px solid transparent;
+  justify-self: start;
+  min-height: var(--control-height);
+  padding: 0 var(--space-5);
+  background: var(--control-fill);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
 }
 
-.sync-modal__bulk-btn--logical {
-  border-left-color: var(--stage-logical, #60a5fa);
+.sync-modal__bulk-btn::before {
+  content: '';
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-pill);
 }
 
-.sync-modal__bulk-btn--physical {
-  border-left-color: var(--stage-physical, #22c55e);
+.sync-modal__bulk-btn--logical::before {
+  background: var(--stage-logical);
+  box-shadow: 0 0 0 3px var(--glass-tint-logical);
+}
+
+.sync-modal__bulk-btn--physical::before {
+  background: var(--stage-physical);
+  box-shadow: 0 0 0 3px var(--glass-tint-physical);
 }
 
 .sync-modal__bulk-btn:hover {
-  opacity: 1;
-  background: var(--selection-bg);
+  background: var(--control-fill-hover);
+  border-color: var(--control-border-hover);
+}
+
+.sync-modal__bulk-btn:active {
+  background: var(--control-fill-active);
+  transform: scale(0.97);
+}
+
+.sync-modal__toolbar-btn:focus-visible,
+.sync-modal__bulk-btn:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: var(--focus-offset);
 }
 
 .sync-modal__toolbar-count {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--editor-fg);
-  opacity: 0.65;
+  gap: var(--space-3);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
   font-variant-numeric: tabular-nums;
 }
 
 .sync-modal__toolbar-breakdown {
   display: inline-flex;
-  gap: 3px;
+  gap: var(--space-2);
 }
 
 .sync-modal__toolbar-breakdown-dot {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 16px;
-  height: 16px;
-  padding: 0 4px;
-  border-radius: 8px;
-  font-size: 9px;
-  font-weight: 700;
-  color: var(--button-fg, #fff);
+  min-width: 18px;
+  height: 18px;
+  padding: 0 var(--space-3);
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-bold);
+  color: var(--text-primary);
 }
 
 .sync-modal__toolbar-breakdown-dot--logical {
-  background: var(--stage-logical, #60a5fa);
+  border-color: var(--glass-tint-logical-edge);
+  background: var(--glass-tint-logical-strong);
 }
 
 .sync-modal__toolbar-breakdown-dot--physical {
-  background: var(--stage-physical, #22c55e);
+  border-color: var(--glass-tint-physical-edge);
+  background: var(--glass-tint-physical-strong);
 }
 
 /* ---------------------------------------------------------------------------
-   Progress bar — inline two-tone bar in toolbar
+   Progress bar — a slim two-tone capsule under the toolbar
    --------------------------------------------------------------------------- */
 
 .sync-modal__progress {
   display: flex;
-  height: 3px;
-  background: var(--panel-border);
+  height: 4px;
+  margin: 0 var(--space-6) var(--space-4);
+  border-radius: var(--radius-pill);
+  background: var(--control-fill-hover);
   overflow: hidden;
 }
 
 .sync-modal__progress-fill {
   height: 100%;
-  transition: width 0.3s ease;
+  transition: width var(--duration-slow) var(--ease-out);
 }
 
 .sync-modal__progress-fill--logical {
-  background: var(--stage-logical, #60a5fa);
+  background: var(--stage-logical);
 }
 
 .sync-modal__progress-fill--physical {
-  background: var(--stage-physical, #22c55e);
+  background: var(--stage-physical);
 }
 
 /* ---------------------------------------------------------------------------
@@ -245,15 +354,20 @@
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
+  border-top: 1px solid var(--glass-divider);
+  scrollbar-width: thin;
+  scrollbar-color: var(--glass-scrollbar) transparent;
 }
 
 /* ---------------------------------------------------------------------------
    Table + colgroup
+   Separate borders, so the sticky header's hairlines stay with it on scroll.
    --------------------------------------------------------------------------- */
 
 .sync-modal__table {
   width: 100%;
-  border-collapse: collapse;
+  border-collapse: separate;
+  border-spacing: 0;
   table-layout: fixed;
 }
 
@@ -262,44 +376,43 @@
 .sync-modal__col--item    { width: 40.5%; }
 
 /* ---------------------------------------------------------------------------
-   Thead — sticky with stage-colored bottom borders
+   Thead — sticky, frosted, with stage-coloured underlines
    --------------------------------------------------------------------------- */
 
 .sync-modal__thead {
   position: sticky;
   top: 0;
   z-index: 2;
-  background: var(--panel-bg);
-  box-shadow: 0 1px 0 var(--panel-border);
 }
 
 .sync-modal__th {
-  padding: 7px 12px;
-  font-size: 10px;
-  font-weight: 700;
+  padding: var(--space-4) var(--space-5);
+  border-bottom: 1px solid var(--glass-divider);
+  background: color-mix(in srgb, var(--glass-surface-solid) 88%, transparent);
+  -webkit-backdrop-filter: var(--glass-backdrop-thin);
+  backdrop-filter: var(--glass-backdrop-thin);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-caps);
   text-transform: uppercase;
-  letter-spacing: 0.6px;
   text-align: left;
-  border-bottom: 2px solid var(--panel-border);
   white-space: nowrap;
 }
 
 .sync-modal__th--chevron {
   padding: 0;
-  border-bottom: 2px solid var(--panel-border);
 }
 
 .sync-modal__th--item {
-  color: var(--editor-fg);
-  opacity: 0.45;
+  color: var(--text-tertiary);
 }
 
 .sync-modal__th--logical {
-  border-bottom: 2px solid var(--stage-logical, #60a5fa);
+  box-shadow: inset 0 -2px 0 var(--stage-logical);
 }
 
 .sync-modal__th--physical {
-  border-bottom: 2px solid var(--stage-physical, #22c55e);
+  box-shadow: inset 0 -2px 0 var(--stage-physical);
 }
 
 /* ---------------------------------------------------------------------------
@@ -307,11 +420,14 @@
    --------------------------------------------------------------------------- */
 
 .sync-modal__row {
-  border-bottom: 1px solid rgba(128, 128, 128, 0.12);
-  transition: background 0.15s ease;
+  transition: background-color var(--duration-fast) var(--ease-standard);
 }
 
-.sync-modal__row:last-child {
+.sync-modal__row > td {
+  border-bottom: 1px solid var(--glass-divider);
+}
+
+.sync-modal__row:last-child > td {
   border-bottom: none;
 }
 
@@ -320,17 +436,12 @@
    --------------------------------------------------------------------------- */
 
 .sync-modal__row--model-header {
-  background: var(--stage-ghost-bg, rgba(128, 128, 128, 0.1));
-}
-
-/* Separator above each model header row (except the very first body row) */
-tbody .sync-modal__row--model-header:not(:first-child) {
-  border-top: 1px solid var(--panel-border);
+  background: var(--glass-well);
 }
 
 .sync-modal__row--model-header .sync-modal__cell {
-  padding-top: 8px;
-  padding-bottom: 8px;
+  padding-top: var(--space-4);
+  padding-bottom: var(--space-4);
 }
 
 /* When all items in this model are resolved, give the header a green tint */
@@ -344,7 +455,7 @@ tbody .sync-modal__row--model-header:not(:first-child) {
 }
 
 .sync-modal__row--model-header.sync-modal__row--matched:not(.sync-modal__row--all-resolved):hover {
-  opacity: 0.75;
+  opacity: 0.8;
 }
 
 /* ---------------------------------------------------------------------------
@@ -363,16 +474,17 @@ tbody .sync-modal__row--model-header:not(:first-child) {
 .sync-modal__row--mismatch,
 .sync-modal__row--type-mismatch,
 .sync-modal__row--cardinality-mismatch {
-  background: rgba(239, 68, 68, 0.04);
+  background: color-mix(in srgb, var(--discrepancy-mismatch) 5%, transparent);
 }
 
-.sync-modal__row--conflict:hover {
-  background: var(--selection-bg);
+/* Hover lays a veil over whatever tint the row has. */
+.sync-modal__row--conflict:hover > td {
+  background-image: linear-gradient(var(--control-fill), var(--control-fill));
 }
 
 /* Indent the item cell for column rows */
 .sync-modal__row--column .sync-modal__cell--item {
-  padding-left: 22px;
+  padding-left: var(--space-8);
 }
 
 /* ---------------------------------------------------------------------------
@@ -380,10 +492,13 @@ tbody .sync-modal__row--model-header:not(:first-child) {
    --------------------------------------------------------------------------- */
 
 .sync-modal__cell {
-  padding: 6px 12px;
+  padding: var(--space-3) var(--space-5);
   vertical-align: middle;
-  font-size: 12px;
-  color: var(--editor-fg);
+  font-size: var(--text-sm);
+  color: var(--text-primary);
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    opacity var(--duration-fast) var(--ease-standard);
 }
 
 /* Chevron column cell — narrow, no horizontal padding, holds the toggle */
@@ -395,32 +510,42 @@ tbody .sync-modal__row--model-header:not(:first-child) {
   /* border-left applied inline per-row for the accent colour */
 }
 
-/* When this side is the selected ground truth */
+/* When this side is the selected ground truth: a wash of that side's colour. */
 .sync-modal__cell--selected {
-  background: var(--selection-bg);
+  background: var(--control-fill-selected);
+}
+
+.sync-modal__cell--selected:has(.sync-modal__accept-btn--logical) {
+  background: var(--glass-tint-logical);
+}
+
+.sync-modal__cell--selected:has(.sync-modal__accept-btn--physical) {
+  background: var(--glass-tint-physical);
 }
 
 /* When the other side is selected — dim and strike through */
 .sync-modal__cell--rejected {
-  opacity: 0.35;
+  opacity: 0.4;
 }
 
 .sync-modal__cell--rejected .sync-modal__cell-value {
   text-decoration: line-through;
-  text-decoration-color: var(--editor-fg);
+  text-decoration-color: var(--text-secondary);
   text-decoration-thickness: 1px;
 }
 
 .sync-modal__stage-content {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  align-items: flex-start;
+  gap: var(--space-2);
 }
 
 .sync-modal__cell-value {
   display: block;
-  font-size: 11px;
-  font-family: var(--vscode-editor-font-family, monospace);
+  max-width: 100%;
+  font-size: var(--text-xs);
+  font-family: var(--font-mono);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -432,59 +557,76 @@ tbody .sync-modal__row--model-header:not(:first-child) {
 }
 
 /* ---------------------------------------------------------------------------
-   Accept buttons — "Keep Logical" / "Keep Physical"
+   Accept buttons — "Logical" / "Physical" capsules
    --------------------------------------------------------------------------- */
 
-.sync-modal__accept-btn {
-  display: inline-block;
-  padding: 4px 10px;
-  border: 1px solid var(--panel-border);
-  border-radius: 4px;
-  background: transparent;
-  color: var(--editor-fg);
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.2px;
-  cursor: pointer;
-  opacity: 0.6;
-  transition: all 0.15s;
+.sync-modal__accept-btn,
+.sync-modal__model-bulk-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 22px;
+  padding: 0 var(--space-4);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-pill);
+  background: var(--control-fill);
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-semibold);
   white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard),
+    box-shadow var(--duration-fast) var(--ease-standard),
+    transform var(--duration-instant) var(--ease-standard);
 }
 
-.sync-modal__accept-btn:hover {
-  opacity: 1;
+.sync-modal__accept-btn:active,
+.sync-modal__model-bulk-btn:active {
+  transform: scale(0.96);
+}
+
+.sync-modal__accept-btn:focus-visible,
+.sync-modal__model-bulk-btn:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: var(--focus-offset);
 }
 
 /* Logical hover preview */
-.sync-modal__accept-btn--logical:hover {
-  background: var(--stage-logical-hover, rgba(96, 165, 250, 0.12));
-  border-color: var(--stage-logical, #60a5fa);
-  color: var(--stage-logical, #60a5fa);
+.sync-modal__accept-btn--logical:hover,
+.sync-modal__model-bulk-btn--logical:hover {
+  background: var(--glass-tint-logical);
+  border-color: var(--glass-tint-logical-edge);
+  color: var(--text-primary);
 }
 
 /* Physical hover preview */
-.sync-modal__accept-btn--physical:hover {
-  background: var(--stage-physical-hover, rgba(34, 197, 94, 0.12));
-  border-color: var(--stage-physical, #22c55e);
-  color: var(--stage-physical, #22c55e);
+.sync-modal__accept-btn--physical:hover,
+.sync-modal__model-bulk-btn--physical:hover {
+  background: var(--glass-tint-physical);
+  border-color: var(--glass-tint-physical-edge);
+  color: var(--text-primary);
 }
 
 /* Logical accept — blue when selected */
-.sync-modal__accept-btn--logical.sync-modal__accept-btn--selected {
-  opacity: 1;
-  background: var(--stage-logical, #60a5fa);
-  border-color: var(--stage-logical, #60a5fa);
-  color: var(--button-fg, #fff);
-  box-shadow: 0 0 0 1px var(--stage-logical-ring, rgba(96, 165, 250, 0.3));
+.sync-modal__accept-btn--logical.sync-modal__accept-btn--selected,
+.sync-modal__model-bulk-btn--logical.sync-modal__model-bulk-btn--selected {
+  background: var(--glass-tint-logical-strong);
+  border-color: var(--stage-logical);
+  color: var(--text-primary);
+  box-shadow: 0 0 0 3px var(--glass-tint-logical);
 }
 
 /* Physical accept — green when selected */
-.sync-modal__accept-btn--physical.sync-modal__accept-btn--selected {
-  opacity: 1;
-  background: var(--stage-physical, #22c55e);
-  border-color: var(--stage-physical, #22c55e);
-  color: var(--button-fg, #fff);
-  box-shadow: 0 0 0 1px var(--stage-physical-ring, rgba(34, 197, 94, 0.3));
+.sync-modal__accept-btn--physical.sync-modal__accept-btn--selected,
+.sync-modal__model-bulk-btn--physical.sync-modal__model-bulk-btn--selected {
+  background: var(--glass-tint-physical-strong);
+  border-color: var(--stage-physical);
+  color: var(--text-primary);
+  box-shadow: 0 0 0 3px var(--glass-tint-physical);
 }
 
 /* ---------------------------------------------------------------------------
@@ -498,20 +640,25 @@ tbody .sync-modal__row--model-header:not(:first-child) {
   justify-content: center;
   width: 100%;
   height: 100%;
-  min-height: 30px;
-  border: none;
-  background: transparent;
-  color: var(--editor-fg);
-  font-size: 11px;
-  cursor: pointer;
-  opacity: 0.75;
-  transition: opacity 0.15s;
+  min-height: 32px;
   padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-tertiary);
+  font-size: 9px;
   line-height: 1;
+  cursor: pointer;
+  transition: color var(--duration-fast) var(--ease-standard);
 }
 
 .sync-modal__chevron:hover {
-  opacity: 1;
+  color: var(--text-primary);
+}
+
+.sync-modal__chevron:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: -3px;
 }
 
 /* ---------------------------------------------------------------------------
@@ -522,52 +669,25 @@ tbody .sync-modal__row--model-header:not(:first-child) {
   display: flex;
   align-items: center;
   width: 100%;
-  gap: 8px;
+  min-width: 0;
+  gap: var(--space-4);
 }
 
-/* Per-model bulk accept buttons — inside stage cells */
-.sync-modal__model-bulk-btn {
-  display: block;
-  padding: 2px 8px;
-  border: 1px solid var(--panel-border);
-  border-radius: 3px;
-  background: transparent;
-  color: var(--editor-fg);
-  font-size: 10px;
-  font-weight: 600;
-  cursor: pointer;
-  opacity: 0.55;
-  transition: all 0.15s;
-  white-space: nowrap;
-  letter-spacing: 0.2px;
+/* Per-model bulk accept buttons — inside stage cells: a dot of the side's colour */
+.sync-modal__model-bulk-btn::before {
+  content: '';
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-pill);
 }
 
-.sync-modal__model-bulk-btn--logical {
-  border-left: 2px solid var(--stage-logical, #60a5fa);
+.sync-modal__model-bulk-btn--logical::before {
+  background: var(--stage-logical);
 }
 
-.sync-modal__model-bulk-btn--physical {
-  border-left: 2px solid var(--stage-physical, #22c55e);
-}
-
-.sync-modal__model-bulk-btn:hover {
-  opacity: 1;
-  background: var(--selection-bg);
-}
-
-/* Pressed: every item of the table keeps this side (click again to clear). */
-.sync-modal__model-bulk-btn--logical.sync-modal__model-bulk-btn--selected {
-  opacity: 1;
-  background: var(--stage-logical, #60a5fa);
-  border-color: var(--stage-logical, #60a5fa);
-  color: var(--button-fg, #fff);
-}
-
-.sync-modal__model-bulk-btn--physical.sync-modal__model-bulk-btn--selected {
-  opacity: 1;
-  background: var(--stage-physical, #22c55e);
-  border-color: var(--stage-physical, #22c55e);
-  color: var(--button-fg, #fff);
+.sync-modal__model-bulk-btn--physical::before {
+  background: var(--stage-physical);
 }
 
 /* ---------------------------------------------------------------------------
@@ -575,67 +695,73 @@ tbody .sync-modal__row--model-header:not(:first-child) {
    --------------------------------------------------------------------------- */
 
 .sync-modal__model-name {
-  font-weight: 600;
-  font-size: 12px;
-  color: var(--editor-fg);
-  white-space: nowrap;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-primary);
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
 }
 
 .sync-modal__resolved-badge {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
-  font-size: 10px;
-  font-weight: 600;
-  color: var(--stage-physical, #22c55e);
-  letter-spacing: 0.2px;
-  white-space: nowrap;
+  gap: var(--space-1);
   flex-shrink: 0;
-  background: rgba(34, 197, 94, 0.1);
-  padding: 1px 7px;
-  border-radius: 3px;
+  padding: 0 var(--space-4);
+  border: 1px solid var(--glass-tint-physical-edge);
+  border-radius: var(--radius-pill);
+  background: var(--glass-tint-physical);
+  color: var(--text-primary);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-semibold);
+  line-height: 18px;
+  white-space: nowrap;
 }
 
 /* Selection summary chips — shown when a model row is collapsed */
 .sync-modal__selection-summary {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  margin-left: 4px;
-  font-size: 10px;
-  font-weight: 500;
+  gap: var(--space-2);
+  margin-left: var(--space-1);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-medium);
 }
 
 .sync-modal__selection-chip {
   display: inline-flex;
   align-items: center;
-  padding: 1px 6px;
-  border-radius: 3px;
+  padding: 0 var(--space-3);
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+  line-height: 16px;
   white-space: nowrap;
 }
 
 .sync-modal__selection-chip--logical {
-  background: rgba(96, 165, 250, 0.12);
-  color: var(--stage-logical, #60a5fa);
+  border-color: var(--glass-tint-logical-edge);
+  background: var(--glass-tint-logical);
+  color: var(--text-primary);
 }
 
 .sync-modal__selection-chip--physical {
-  background: rgba(34, 197, 94, 0.12);
-  color: var(--stage-physical, #22c55e);
+  border-color: var(--glass-tint-physical-edge);
+  background: var(--glass-tint-physical);
+  color: var(--text-primary);
 }
 
 .sync-modal__selection-chip--pending {
-  background: rgba(128, 128, 128, 0.1);
-  color: var(--editor-fg);
-  opacity: 0.55;
+  border-color: var(--glass-border);
+  background: var(--control-fill);
+  color: var(--text-tertiary);
 }
 
 .sync-modal__col-name {
-  font-family: var(--vscode-editor-font-family, monospace);
-  font-size: 11px;
-  color: var(--editor-fg);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-primary);
 }
 
 /* Column and relationship item cells: badge + label on one line that never
@@ -648,7 +774,7 @@ tbody .sync-modal__row--model-header:not(:first-child) {
 .sync-modal__item-content {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-3);
   min-width: 0;
 }
 
@@ -662,103 +788,107 @@ tbody .sync-modal__row--model-header:not(:first-child) {
 
 /* Relationship labels — structured with hierarchy */
 .sync-modal__rel-label {
-  font-family: var(--vscode-editor-font-family, monospace);
-  font-size: 11px;
-  color: var(--editor-fg);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-primary);
 }
 
 .sync-modal__rel-model {
-  font-weight: 600;
-  color: var(--editor-fg);
+  font-weight: var(--weight-semibold);
+  color: var(--text-primary);
 }
 
 .sync-modal__rel-sep {
-  opacity: 0.35;
+  color: var(--text-quaternary);
 }
 
 .sync-modal__rel-col {
-  font-weight: 400;
-  opacity: 0.75;
+  font-weight: var(--weight-regular);
+  color: var(--text-secondary);
 }
 
 .sync-modal__rel-arrow {
-  opacity: 0.35;
-  margin: 0 3px;
+  margin: 0 var(--space-2);
+  color: var(--text-quaternary);
 }
 
 .sync-modal__exists-dot {
-  font-size: 11px;
-  font-weight: 500;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
 }
 
 .sync-modal__missing-dash {
-  font-size: 11px;
-  opacity: 0.25;
+  font-size: var(--text-xs);
+  color: var(--text-quaternary);
 }
 
 /* ---------------------------------------------------------------------------
-   Status badges — replace tiny dots with readable pills
+   Status badges — calm capsules, tinted by meaning
    --------------------------------------------------------------------------- */
 
 .sync-modal__status-badge {
   display: inline-flex;
   align-items: center;
-  padding: 1px 7px;
-  border-radius: 3px;
-  font-size: 9px;
-  font-weight: 600;
-  letter-spacing: 0.3px;
-  text-transform: uppercase;
-  white-space: nowrap;
   flex-shrink: 0;
-  line-height: 1.5;
+  padding: 0 var(--space-3);
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-semibold);
+  line-height: 18px;
+  white-space: nowrap;
 }
 
 .sync-modal__status-badge--sm {
-  font-size: 8px;
-  padding: 0 5px;
-  line-height: 1.6;
+  font-size: var(--text-2xs);
+  padding: 0 var(--space-3);
+  line-height: 16px;
 }
 
 .sync-modal__status-badge--extra {
-  background: rgba(245, 158, 11, 0.15);
-  color: var(--discrepancy-extra, #f59e0b);
+  border-color: color-mix(in srgb, var(--discrepancy-extra) 40%, transparent);
+  background: color-mix(in srgb, var(--discrepancy-extra) 14%, transparent);
+  color: var(--discrepancy-extra);
 }
 
-.sync-modal__status-badge--missing {
-  background: var(--stage-ghost-bg, rgba(156, 163, 175, 0.08));
-  color: var(--stage-ghost, #9ca3af);
+.sync-modal__status-badge--missing,
+.sync-modal__status-badge--undeclared {
+  border-color: var(--glass-border);
+  background: var(--glass-tint-ghost);
+  color: var(--stage-ghost);
 }
 
-.sync-modal__status-badge--type-mismatch {
-  background: rgba(239, 68, 68, 0.12);
-  color: var(--discrepancy-mismatch, #ef4444);
-}
-
+.sync-modal__status-badge--type-mismatch,
 .sync-modal__status-badge--cardinality-mismatch {
-  background: rgba(239, 68, 68, 0.12);
-  color: var(--discrepancy-mismatch, #ef4444);
+  border-color: color-mix(in srgb, var(--discrepancy-mismatch) 40%, transparent);
+  background: color-mix(in srgb, var(--discrepancy-mismatch) 12%, transparent);
+  color: var(--discrepancy-mismatch);
 }
 
 /* ---------------------------------------------------------------------------
-   Type-mismatch pill badges
+   Type pills (colour and border set inline from the stage)
    --------------------------------------------------------------------------- */
 
 .sync-modal__type-pill {
   display: inline-block;
-  padding: 1px 6px;
+  max-width: 100%;
+  padding: 0 var(--space-3);
   border: 1px solid currentColor;
-  border-radius: 3px;
-  font-family: var(--vscode-editor-font-family, monospace);
-  font-size: 10px;
-  font-weight: 600;
-  line-height: 1.4;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, currentColor 10%, transparent);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-semibold);
+  line-height: 18px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: middle;
 }
 
 .sync-modal__no-type {
-  font-size: 10px;
-  opacity: 0.5;
+  font-size: var(--text-2xs);
   font-style: italic;
+  color: var(--text-tertiary);
 }
 
 /* ---------------------------------------------------------------------------
@@ -766,13 +896,13 @@ tbody .sync-modal__row--model-header:not(:first-child) {
    --------------------------------------------------------------------------- */
 
 .sync-modal__section-header-row {
-  background: rgba(128, 128, 128, 0.07);
+  background: var(--glass-well);
   cursor: pointer;
-  transition: background 0.15s ease;
+  transition: background-color var(--duration-fast) var(--ease-standard);
 }
 
 .sync-modal__section-header-row:not(.sync-modal__section-header-row--static):hover {
-  background: var(--selection-bg);
+  background: var(--control-fill-hover);
 }
 
 .sync-modal__section-header-row--static {
@@ -782,43 +912,49 @@ tbody .sync-modal__row--model-header:not(:first-child) {
 .sync-modal__section-label {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 8px 12px;
-  font-size: 10px;
-  font-weight: 700;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+  border-bottom: 1px solid var(--glass-divider);
+  color: var(--text-tertiary);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-caps);
   text-transform: uppercase;
-  letter-spacing: 0.5px;
-  color: var(--editor-fg);
-  opacity: 0.6;
-  border-top: 1px solid var(--panel-border);
 }
 
 .sync-modal__section-toggle {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  height: 18px;
+  padding: 0;
   border: none;
+  border-radius: var(--radius-xs);
   background: transparent;
-  color: var(--editor-fg);
+  color: var(--text-tertiary);
   font-size: 9px;
   cursor: pointer;
-  opacity: 0.6;
-  padding: 0;
+}
+
+.sync-modal__section-toggle:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: 1px;
 }
 
 .sync-modal__section-count {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 16px;
-  height: 16px;
-  padding: 0 4px;
-  border-radius: 8px;
-  background: rgba(128, 128, 128, 0.15);
-  font-size: 9px;
-  font-weight: 700;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-pill);
+  background: var(--control-fill-hover);
+  color: var(--text-secondary);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0;
 }
 
 /* ---------------------------------------------------------------------------
@@ -826,9 +962,9 @@ tbody .sync-modal__row--model-header:not(:first-child) {
    --------------------------------------------------------------------------- */
 
 .sync-modal__footer {
-  border-top: 1px solid var(--panel-border);
   flex-shrink: 0;
-  transition: background 0.3s ease;
+  border-top: 1px solid var(--glass-divider);
+  transition: background-color var(--duration-slow) var(--ease-standard);
 }
 
 .sync-modal__footer--ready {
@@ -836,7 +972,7 @@ tbody .sync-modal__row--model-header:not(:first-child) {
 }
 
 .sync-modal__footer .disc-panel__sync-footer {
-  padding: 10px 16px;
+  padding: var(--space-5) var(--space-6);
 }
 
 /* ---------------------------------------------------------------------------
@@ -847,27 +983,30 @@ tbody .sync-modal__row--model-header:not(:first-child) {
   position: absolute;
   bottom: 0;
   right: 0;
-  width: 16px;
-  height: 16px;
+  width: 22px;
+  height: 22px;
   cursor: nwse-resize;
   z-index: 10;
 }
 
+/* Two short diagonal strokes, inset from the sheet's rounded corner. */
 .sync-modal__resize-handle::before {
   content: '';
   position: absolute;
-  bottom: 3px;
-  right: 3px;
-  width: 8px;
-  height: 8px;
-  border-right: 2px solid var(--editor-fg);
-  border-bottom: 2px solid var(--editor-fg);
-  opacity: 0.25;
-  transition: opacity 0.15s;
+  bottom: 6px;
+  right: 6px;
+  width: 9px;
+  height: 9px;
+  background:
+    linear-gradient(135deg, transparent 45%, var(--text-quaternary) 45%, var(--text-quaternary) 55%, transparent 55%),
+    linear-gradient(135deg, transparent 75%, var(--text-quaternary) 75%, var(--text-quaternary) 85%, transparent 85%);
+  transition: opacity var(--duration-fast) var(--ease-standard);
 }
 
 .sync-modal__resize-handle:hover::before {
-  opacity: 0.6;
+  background:
+    linear-gradient(135deg, transparent 45%, var(--text-secondary) 45%, var(--text-secondary) 55%, transparent 55%),
+    linear-gradient(135deg, transparent 75%, var(--text-secondary) 75%, var(--text-secondary) 85%, transparent 85%);
 }
 
 /* ---------------------------------------------------------------------------
@@ -880,11 +1019,19 @@ tbody .sync-modal__row--model-header:not(:first-child) {
 }
 
 @keyframes sync-modal__pulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.3); }
-  50%      { box-shadow: 0 0 0 4px rgba(34, 197, 94, 0.1); }
+  0%, 100% { box-shadow: 0 0 0 0 var(--glass-tint-physical-edge); }
+  50%      { box-shadow: 0 0 0 5px var(--glass-tint-physical); }
 }
 
 /* Pulse the CTA button when all resolved and plan not yet generated */
 .sync-modal__footer--ready .disc-panel__sync-footer-btn {
   animation: sync-modal__pulse 2s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sync-modal__backdrop,
+  .sync-modal,
+  .sync-modal__footer--ready .disc-panel__sync-footer-btn {
+    animation: none;
+  }
 }

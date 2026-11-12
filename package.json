@@ -349,6 +349,12 @@
       {
         "command": "erdStudio.addToDiagram",
         "title": "Add to Diagram…",
+        "icon": "$(diff-added)",
+        "category": "ERD Studio"
+      },
+      {
+        "command": "erdStudio.toggleGlassSidebar",
+        "title": "Toggle Glass Sidebar (Preview)",
         "category": "ERD Studio"
       },
       {
@@ -492,24 +498,31 @@
     "views": {
       "erd-studio": [
         {
+          "type": "webview",
+          "id": "erdStudio.glassSidebar",
+          "name": "ERD Studio",
+          "when": "erdStudio.glassSidebar"
+        },
+        {
           "id": "erdStudio.domainTree",
-          "name": "Diagrams"
+          "name": "Diagrams",
+          "when": "!erdStudio.glassSidebar"
         },
         {
           "id": "erdStudio.modelLibrary",
           "name": "Table Library",
-          "when": "erdStudio.hasLogicalModelsDir"
+          "when": "erdStudio.hasLogicalModelsDir && !erdStudio.glassSidebar"
         },
         {
           "id": "erdStudio.relationships",
           "name": "Relationships",
-          "when": "erdStudio.hasLogicalModelsDir",
+          "when": "erdStudio.hasLogicalModelsDir && !erdStudio.glassSidebar",
           "visibility": "collapsed"
         },
         {
           "id": "erdStudio.help",
           "name": "Help & Feedback",
-          "when": "erdStudio.hasProject",
+          "when": "erdStudio.hasProject && !erdStudio.glassSidebar",
           "visibility": "collapsed"
         }
       ]

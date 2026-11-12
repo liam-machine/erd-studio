@@ -57,6 +57,16 @@ export const EmptyCanvas: React.FC = () => {
   return (
     <div className="empty-canvas">
       <section className="empty-canvas__card" aria-labelledby="empty-canvas-title">
+        {/* Decorative: two tables and the line between them. Colours come from CSS (currentColor). */}
+        <div className="empty-canvas__art" aria-hidden="true">
+          <svg className="empty-canvas__glyph" viewBox="0 0 48 48" width="48" height="48" focusable="false">
+            <rect className="empty-canvas__glyph-table" x="4" y="9" width="17" height="21" rx="4" />
+            <path className="empty-canvas__glyph-rule" d="M4 15.5h17M8 20.5h9M8 24.5h6" />
+            <rect className="empty-canvas__glyph-table empty-canvas__glyph-table--new" x="27" y="18" width="17" height="21" rx="4" />
+            <path className="empty-canvas__glyph-plus" d="M35.5 24.5v8M31.5 28.5h8" />
+            <path className="empty-canvas__glyph-link" d="M21 19.5h3a3 3 0 0 1 3 3v2" />
+          </svg>
+        </div>
         <h2 id="empty-canvas-title" className="empty-canvas__title">This diagram is empty</h2>
         <p className="empty-canvas__body">
           {libraryHasTables

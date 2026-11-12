@@ -802,23 +802,29 @@ function EditorCanvas() {
   const selectModeActive = canvasMode === 'select' && !domain.readOnly;
   return (
     <div
-      className={`editor-canvas${selectModeActive ? ' editor-canvas--select-mode' : ''}${logicalOnly ? ' editor-canvas--neutral' : ''}`}
-      // Column flex so the physical-source notice is a strip ABOVE the flow
-      // area rather than an overlay on top of the nodes. With the notice
-      // hidden this is a one-child flex container — i.e. unchanged.
+      className={`editor-canvas${selectModeActive ? ' editor-canvas--select-mode' : ''}${logicalOnly ? ' editor-canvas--neutral' : ''}${!logicalOnly && !discrepancyVisible ? ' editor-canvas--quiet-lines' : ''}`}
+      // Column flex so the notice tray is ABOVE the flow area rather than an
+      // overlay on top of the nodes. With no notice the tray collapses and
+      // the flow area runs full-bleed; the chrome floats over it as glass
+      // layers (theme.css, "Floating shell").
       style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}
       // On the physical stage or a read-only diagram a drop adds nothing and says why.
       {...dropHandlers}
     >
-      {/* "dbt has not been compiled" strip. Renders nothing on the logical
-          stage or when any dbt artifact was found. */}
-      <PhysicalSourceNotice />
-      {/* Logical-stage "Run dbt parse" hint (#113) — no manifest.json yet. */}
-      <ManifestHint />
-      {/* A single-file DBML dropped into a layer folder (§2.5): offer Import DBML. */}
-      <EmbeddedTablesBanner />
-      {/* What the files hold that the canvas is not drawing, each with its file and line. */}
-      <FilesNotShownBanner />
+      {/* The notice tray: the strips above the flow area, stacked as inset
+          glass cards on the canvas wash. In flow (it never covers a node);
+          collapses to nothing when every notice renders nothing (App.css). */}
+      <div className="editor-notices">
+        {/* "dbt has not been compiled" strip. Renders nothing on the logical
+            stage or when any dbt artifact was found. */}
+        <PhysicalSourceNotice />
+        {/* Logical-stage "Run dbt parse" hint (#113) — no manifest.json yet. */}
+        <ManifestHint />
+        {/* A single-file DBML dropped into a layer folder (§2.5): offer Import DBML. */}
+        <EmbeddedTablesBanner />
+        {/* What the files hold that the canvas is not drawing, each with its file and line. */}
+        <FilesNotShownBanner />
+      </div>
 
       <ReactFlow
         className={flowClassName}

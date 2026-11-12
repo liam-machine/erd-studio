@@ -51,6 +51,7 @@ import type {
 } from '@erd-studio/core';
 import { useIsViewer, useSend } from '../../host/canvasEnvironment';
 import { roleLabel } from '../../lib/roleOptions';
+import { IconChevron, IconClose, IconPencil } from './panelIcons';
 import './FieldsSection.css';
 
 // ---------------------------------------------------------------------------
@@ -273,7 +274,7 @@ function CollapsibleFields({
           aria-controls={listId}
           onClick={toggle}
         >
-          <span className="fields-section__chevron" aria-hidden="true">{open ? '\u25be' : '\u25b8'}</span>
+          <span className="fields-section__chevron" aria-hidden="true"><IconChevron size={11} /></span>
           <span className="fields-section__toggle-label">Fields</span>{' '}
           <span className="fields-section__count">({count})</span>
         </button>
@@ -480,7 +481,7 @@ function FieldRowView({ row, logicalOnly, onCommit, onRemove }: FieldRowViewProp
     <span className="fields-section__actions">
       {textEditable && hasValue && (
         <button type="button" className="fields-section__icon-btn" onClick={startEdit} title={`Edit ${label}`} aria-label={`Edit ${label}`}>
-          ✎
+          <IconPencil size={12} />
         </button>
       )}
       {clearable && (
@@ -491,7 +492,7 @@ function FieldRowView({ row, logicalOnly, onCommit, onRemove }: FieldRowViewProp
           title={kind === 'meta' ? `Remove ${label}` : `Clear ${label}`}
           aria-label={kind === 'meta' ? `Remove ${label}` : `Clear ${label}`}
         >
-          ×
+          <IconClose size={12} />
         </button>
       )}
     </span>
@@ -539,8 +540,8 @@ function FieldRowView({ row, logicalOnly, onCommit, onRemove }: FieldRowViewProp
           autoFocus
         />
         <div className="detail-panel__rationale-actions">
-          <button type="button" className="detail-panel__button" onClick={save}>Save</button>
           <button type="button" className="detail-panel__button" onClick={cancel}>Cancel</button>
+          <button type="button" className="detail-panel__button detail-panel__button--primary" onClick={save}>Save</button>
         </div>
       </div>
     ) : (
@@ -673,8 +674,8 @@ function AddField({
         aria-label="Field value"
       />
       <div className="fields-section__new-actions">
-        <button type="button" className="detail-panel__button" onClick={saveNew}>Add</button>
         <button type="button" className="detail-panel__button" onClick={reset}>Cancel</button>
+        <button type="button" className="detail-panel__button detail-panel__button--primary" onClick={saveNew}>Add</button>
       </div>
       {storedAsJson && !error && (
         <span className="fields-section__warning">

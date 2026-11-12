@@ -3,42 +3,56 @@
  *
  * Portalled into document.body, so positioned fixed against the viewport.
  * pointer-events: none keeps it out of the way of node drags and the
- * long-press relationship drag.
+ * long-press relationship drag. Outside the viewport, so a small glass
+ * popover with a thin backdrop blur.
  */
 
 .hover-tip {
   position: fixed;
-  z-index: 10000;
+  z-index: var(--z-tooltip);
   max-width: 320px;
-  padding: 6px 10px;
-  background: var(--vscode-editorHoverWidget-background, var(--panel-bg, #252526));
-  border: 1px solid var(--vscode-editorHoverWidget-border, var(--panel-border, #454545));
-  border-radius: 5px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
-  font-size: 12px;
-  line-height: 1.45;
-  color: var(--vscode-editorHoverWidget-foreground, var(--editor-fg, #d4d4d4));
+  padding: var(--space-3) var(--space-5);
+  background: var(--glass-surface-3);
+  -webkit-backdrop-filter: var(--glass-backdrop-thin);
+  backdrop-filter: var(--glass-backdrop-thin);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--glass-elevation-2);
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
+  color: var(--text-primary);
   pointer-events: none;
   opacity: 0;
-  white-space: normal;
+  transform: translateY(2px);
+  white-space: pre-line;
   word-wrap: break-word;
-  transition: opacity 0.12s ease;
+  transition:
+    opacity var(--duration-fast) var(--ease-out),
+    transform var(--duration-base) var(--ease-out);
+}
+
+.hover-tip--flipped {
+  transform: translateY(-2px);
 }
 
 .hover-tip--visible {
   opacity: 1;
+  transform: none;
 }
 
 /* Label/value rows under the text (a model's `meta:` entries): a two-column
    grid, so every value starts at the same x whatever the key length. */
 .hover-tip__rows {
-  margin-top: 6px;
-  padding-top: 6px;
-  border-top: 1px solid var(--vscode-editorHoverWidget-border, var(--panel-border, #454545));
   display: grid;
   grid-template-columns: minmax(52px, max-content) minmax(0, 1fr);
-  column-gap: 10px;
+  column-gap: var(--space-5);
   row-gap: 3px;
+  margin-top: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-sm);
+  background: var(--glass-well);
+  white-space: normal;
 }
 
 .hover-tip__row {
@@ -50,6 +64,29 @@
   /* break-word, not anywhere: `anywhere` shrinks the min-content width, so the
      shrink-to-fit card came out narrow and split `source_system` mid-word. */
   overflow-wrap: break-word;
-  font-family: var(--vscode-editor-font-family, monospace);
-  color: var(--vscode-descriptionForeground, #888);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+}
+
+.hover-tip__value {
+  color: var(--text-primary);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hover-tip,
+  .hover-tip--flipped {
+    transform: none;
+    transition: none;
+  }
+}
+
+/* A context menu or an in-canvas sheet takes over: the hover tip for the
+   table under the pointer steps aside instead of stacking a second glass
+   surface (with the same title) over it. The tip is portalled to body, so
+   body:has() reaches it. */
+body:has(.context-menu) .hover-tip,
+body:has(.new-model-dialog, .new-fk-dialog, .add-existing-model-dialog) .hover-tip {
+  opacity: 0 !important;
+  transition: none;
 }

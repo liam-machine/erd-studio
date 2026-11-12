@@ -1,39 +1,59 @@
 /*
- * The onboarding guide's coach mark (Show Me Around). Positioned through
- * custom properties the component sets with style.setProperty (no inline
- * style attribute); colours only from the theme's variables.
+ * The onboarding guide's coach mark (Show Me Around): a frosted glass
+ * callout with an accent hairline and a soft accent halo, so it reads as
+ * "the guide speaking" without shouting. Positioned through custom
+ * properties the component sets with style.setProperty (no inline style
+ * attribute); colours only from the theme's variables (the glass tokens in
+ * packages/renderer/src/styles/theme.css).
+ *
+ * It is fixed-positioned outside the React Flow viewport, so it may blur
+ * what is behind it.
  */
 
 .guide-mark {
+  --guide-edge: var(--control-border-selected);
+
   position: fixed;
   left: var(--guide-x, 50%);
   top: var(--guide-y, 50%);
-  z-index: 1000;
+  z-index: var(--z-menu);
   box-sizing: border-box;
   width: min(340px, calc(100vw - 16px));
-  padding: 12px 14px 10px;
-  border: 1px solid var(--focus-border);
-  border-radius: 6px;
-  background: var(--panel-bg);
-  color: var(--editor-fg);
-  box-shadow: 0 6px 24px var(--canvas-selection-glow);
-  font-size: 13px;
-  line-height: 1.45;
+  padding: var(--space-5) var(--space-6) var(--space-5);
+
+  background: var(--glass-surface-3);
+  -webkit-backdrop-filter: var(--glass-backdrop);
+  backdrop-filter: var(--glass-backdrop);
+  border: 1px solid var(--guide-edge);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--glass-elevation-3), 0 0 0 4px var(--glass-tint-accent);
+
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+  font-size: var(--text-md);
+  line-height: var(--leading-normal);
 }
 
 .guide-mark:focus {
-  outline: 1px solid var(--focus-border);
-  outline-offset: 2px;
+  outline: none;
 }
 
-/* The arrow: a small square turned 45°, on the edge facing the anchor. */
+.guide-mark:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: var(--focus-offset);
+}
+
+/* The arrow: a small square turned 45°, on the edge facing the anchor.
+   Only its outer half is painted (clip-path), so the translucent glass does
+   not double up where it overlaps the callout; the 2px of overlap left
+   covers the callout's own border line under the arrow's base. */
 .guide-mark::before {
   content: '';
   position: absolute;
   width: 10px;
   height: 10px;
-  background: var(--panel-bg);
-  border: 1px solid var(--focus-border);
+  background: var(--glass-surface-3);
+  border: 1px solid var(--guide-edge);
   transform: rotate(45deg);
 }
 
@@ -46,6 +66,7 @@
   left: calc(var(--guide-arrow, 24px) - 5px);
   border-right: none;
   border-bottom: none;
+  clip-path: polygon(0 0, calc(100% + 2px) 0, 0 calc(100% + 2px));
 }
 
 .guide-mark[data-side='above']::before {
@@ -53,6 +74,7 @@
   left: calc(var(--guide-arrow, 24px) - 5px);
   border-left: none;
   border-top: none;
+  clip-path: polygon(100% 100%, -2px 100%, 100% -2px);
 }
 
 .guide-mark[data-side='right']::before {
@@ -60,6 +82,7 @@
   top: calc(var(--guide-arrow, 24px) - 5px);
   border-right: none;
   border-top: none;
+  clip-path: polygon(0 100%, 0 -2px, calc(100% + 2px) 100%);
 }
 
 .guide-mark[data-side='left']::before {
@@ -67,42 +90,58 @@
   top: calc(var(--guide-arrow, 24px) - 5px);
   border-left: none;
   border-bottom: none;
+  clip-path: polygon(100% 0, -2px 0, 100% calc(100% + 2px));
 }
 
 .guide-mark__header {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: var(--space-5);
 }
 
 .guide-mark__title {
   margin: 0;
-  font-size: 13px;
-  font-weight: 600;
+  color: var(--text-primary);
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-tight);
+  line-height: var(--leading-tight);
 }
 
+/* "2 of 5": a quiet capsule. */
 .guide-mark__progress {
   flex: none;
-  font-size: 11px;
-  color: var(--dim-fg);
+  padding: var(--space-1) var(--space-4);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-pill);
+  background: var(--control-fill);
+  color: var(--text-tertiary);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-medium);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .guide-mark__text {
-  margin: 6px 0 10px;
+  margin: var(--space-3) 0 var(--space-5);
+  color: var(--text-secondary);
 }
 
 .guide-mark__note {
-  margin: -4px 0 10px;
-  font-size: 11px;
-  color: var(--dim-fg);
+  margin: calc(-1 * var(--space-2)) 0 var(--space-5);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--glass-well);
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
 }
 
 .guide-mark__actions {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-3);
 }
 
 .guide-mark__spacer {
@@ -110,28 +149,49 @@
 }
 
 .guide-mark__button {
-  padding: 3px 10px;
-  border: 1px solid var(--panel-border);
-  border-radius: 3px;
-  background: var(--vscode-button-secondaryBackground, var(--input-bg));
-  color: var(--vscode-button-secondaryForeground, var(--editor-fg));
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--control-height);
+  padding: 0 var(--space-5);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-pill);
+  background: var(--control-fill);
+  color: var(--text-primary);
   font: inherit;
-  font-size: 12px;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
   cursor: pointer;
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
+    transform var(--duration-instant) var(--ease-standard);
 }
 
 .guide-mark__button:hover {
-  background: var(--vscode-button-secondaryHoverBackground, var(--selection-bg));
+  background: var(--control-fill-hover);
+  border-color: var(--glass-border-strong);
+}
+
+.guide-mark__button:active {
+  background: var(--control-fill-active);
+  transform: scale(0.97);
 }
 
 .guide-mark__button--primary {
-  border-color: transparent;
-  background: var(--button-bg);
-  color: var(--button-fg);
+  border-color: var(--glass-border);
+  background: var(--accent);
+  color: var(--text-on-accent);
+  box-shadow: var(--glass-highlight);
 }
 
 .guide-mark__button--primary:hover {
-  background: var(--button-hover-bg);
+  border-color: transparent;
+  background: var(--accent-hover);
+}
+
+.guide-mark__button--primary:active {
+  background: var(--accent-hover);
 }
 
 /* Star on GitHub: GitHub's gold, with its star, so it reads as the thing to press. */
@@ -139,21 +199,23 @@
   position: relative;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-3);
   overflow: hidden;
-  padding: 5px 14px;
+  min-height: var(--control-height-lg);
+  padding: 0 var(--space-6);
   border: 1px solid var(--star-gold-dark);
-  border-radius: 6px;
+  border-radius: var(--radius-pill);
   background: linear-gradient(180deg, var(--star-gold-light), var(--star-gold));
   color: var(--star-gold-fg);
-  font-size: 13px;
-  font-weight: 600;
-  box-shadow: 0 1px 6px var(--star-gold-glow);
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+  box-shadow: var(--glass-highlight), 0 1px 6px var(--star-gold-glow);
 }
 
 .guide-mark__button--star:hover {
+  border-color: var(--star-gold-dark);
   background: linear-gradient(180deg, var(--star-gold-light), var(--star-gold-dark));
-  box-shadow: 0 2px 12px var(--star-gold-glow);
+  box-shadow: var(--glass-highlight), 0 2px 12px var(--star-gold-glow);
 }
 
 .guide-mark__button.guide-mark__button--star:focus-visible {
@@ -203,23 +265,27 @@
 
 .guide-mark__button:focus-visible,
 .guide-mark__skip:focus-visible {
-  outline: 1px solid var(--focus-border);
-  outline-offset: 1px;
+  outline: var(--focus-outline);
+  outline-offset: var(--focus-offset);
 }
 
 .guide-mark__skip {
-  margin-top: 8px;
+  margin-top: var(--space-4);
   padding: 0;
   border: none;
+  border-radius: var(--radius-xs);
   background: none;
-  color: var(--vscode-textLink-foreground, var(--dim-fg));
+  color: var(--text-tertiary);
   font: inherit;
-  font-size: 11px;
+  font-size: var(--text-xs);
   cursor: pointer;
+  transition: color var(--duration-fast) var(--ease-standard);
 }
 
 .guide-mark__skip:hover {
+  color: var(--text-primary);
   text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 /* The ring around what the step points at: it never takes a click. */
@@ -229,10 +295,11 @@
   top: var(--guide-ring-y, 0);
   width: var(--guide-ring-w, 0);
   height: var(--guide-ring-h, 0);
-  z-index: 999;
+  z-index: calc(var(--z-menu) - 1);
   box-sizing: border-box;
   border: 2px solid var(--focus-border);
-  border-radius: 6px;
+  border-radius: var(--radius-lg);
+  box-shadow: 0 0 0 4px var(--glass-tint-accent), 0 0 24px var(--glass-tint-accent-strong);
   pointer-events: none;
 }
 
@@ -242,6 +309,43 @@
 
 @media (prefers-reduced-motion: no-preference) {
   .guide-ring {
-    transition: left 120ms ease-out, top 120ms ease-out, width 120ms ease-out, height 120ms ease-out;
+    /* Short: the ring follows its anchor through pans and zooms. */
+    transition:
+      left var(--duration-fast) var(--ease-standard),
+      top var(--duration-fast) var(--ease-standard),
+      width var(--duration-fast) var(--ease-standard),
+      height var(--duration-fast) var(--ease-standard);
+  }
+
+  /* The callout arrives once (it is the same element for every step), and
+     the ring settles in from a little wider each time it reappears. */
+  .guide-mark {
+    animation: guide-mark-in var(--duration-slow) var(--ease-out);
+  }
+
+  .guide-ring:not([hidden]) {
+    animation: guide-ring-in var(--duration-slow) var(--ease-out);
+  }
+}
+
+@keyframes guide-mark-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes guide-ring-in {
+  from {
+    opacity: 0;
+    box-shadow: 0 0 0 12px transparent, 0 0 24px transparent;
+  }
+  to {
+    opacity: 1;
+    box-shadow: 0 0 0 4px var(--glass-tint-accent), 0 0 24px var(--glass-tint-accent-strong);
   }
 }

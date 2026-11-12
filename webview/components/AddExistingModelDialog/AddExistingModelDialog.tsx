@@ -301,7 +301,13 @@ export function AddExistingTableDialog() {
   }
 
   return (
-    <Panel position="top-center" className="add-existing-model-dialog">
+    <Panel
+      position="top-center"
+      className="add-existing-model-dialog"
+      // Escape closes it from the search field too (the canvas shortcut
+      // handler ignores keys typed into an input).
+      onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); handleClose(); } }}
+    >
       {/* Header */}
       <div className="add-existing-model-dialog__header">
         <h3 className="add-existing-model-dialog__title">Add Existing Tables</h3>
@@ -319,6 +325,19 @@ export function AddExistingTableDialog() {
       <div className="add-existing-model-dialog__content">
         {/* Search */}
         <div className="add-existing-model-dialog__search">
+          <svg
+            className="add-existing-model-dialog__search-icon"
+            width="14"
+            height="14"
+            viewBox="0 0 16 16"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            aria-hidden="true"
+          >
+            <circle cx="7" cy="7" r="4.5" />
+            <path d="M10.4 10.4 14 14" strokeLinecap="round" />
+          </svg>
           <input
             type="text"
             className="add-existing-model-dialog__search-input"

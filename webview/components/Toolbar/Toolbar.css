@@ -1,34 +1,111 @@
 /**
- * Toolbar styles.
+ * Toolbar styles (glass).
  *
- * Unified toolbar at top-center of the graph editor. Uses VS Code theme
- * tokens from webview/styles/theme.css for consistent dark/light support.
+ * A floating frosted bar at the top centre of the canvas, the stage tabs as a
+ * capsule under it, and a glass pill of corner actions at the top right.
+ * Colours come only from the tokens in packages/renderer/src/styles/theme.css
+ * (the "GLASS LAYER"), so dark, light, high contrast and reduced transparency
+ * all follow from the tokens with no theme special cases here.
+ *
+ * Why the bar's material sits on a ::before and not on the bar itself: an
+ * element with backdrop-filter is a "backdrop root", so a descendant's own
+ * backdrop-filter would only see the bar, not the canvas. The menus and the
+ * layout popover hang below the bar and must frost the canvas, so the bar
+ * paints its glass on a pseudo-element behind its content instead.
  */
 
-/* Outer container: stacks controls above stage tabs with a small gap */
+/* Outer container (the top-centre Panel): stacks the bar above the stage tabs.
+   fitView measures this class's bottom edge; do not restyle its position. */
 .toolbar-container {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-3);
 }
 
-/* Inner controls row */
+/* The Panel and the row are transparent and sized to the widest row, so they
+   would otherwise swallow the pointer in the empty band between and beside
+   the islands and the stage tabs: a table panned under it could not be
+   hovered, clicked or dragged there, and a drag started in a gap would not
+   pan. Only the visible capsules take the pointer (menus and popovers are
+   descendants of an island, so they inherit it). */
+.react-flow__panel.toolbar-container,
+.toolbar-container .toolbar {
+  pointer-events: none;
+}
+
+.toolbar-container .toolbar__island,
+.toolbar-container .stage-tabs {
+  pointer-events: auto;
+}
+
+/* While one of its menus or popovers is open, the toolbar's Panel rises to
+   the popover layer, so the menu hangs over the detail panel (a later Panel
+   at the same z-index) instead of under it. */
+.react-flow__panel.toolbar-container:has(.toolbar__dropdown-menu, .toolbar__lp, .toolbar__island--view-open) {
+  z-index: var(--z-popover);
+}
+
+/* ---------------------------------------------------------------------------
+   The bar: a row of glass islands
+   The row itself is transparent; each island (identity, canvas, arrange,
+   view, actions) is its own capsule of material, 34px tall like the corner
+   pill, so the top edge of the chrome reads as one calm line. The row never
+   wraps: on a narrower editor it compacts instead (see "Narrow editors").
+   --------------------------------------------------------------------------- */
+
 .toolbar {
+  position: relative;
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 12px;
-  background: var(--panel-bg);
-  border: 1px solid var(--panel-border);
-  border-radius: 6px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  justify-content: center;
+  flex-wrap: nowrap;
+  gap: var(--shell-gap);
+  width: max-content;
+  padding: 0;
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
 }
 
-/* When toolbar is attached to stage tabs below, keep a small gap between them */
+.toolbar__island {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  height: var(--shell-corner-height);
+  padding: calc((var(--shell-corner-height) - var(--control-height)) / 2);
+  border-radius: var(--radius-pill);
+  box-sizing: border-box;
+}
+
+/* An island with an open popover sits above its neighbours and the tabs. */
+.toolbar__island:has(.toolbar__dropdown-menu, .toolbar__lp),
+.toolbar__island--view-open {
+  z-index: 1;
+}
+
+/* The material, behind the content: an element with backdrop-filter is a
+   "backdrop root", so if the island itself carried the blur, the menus and
+   popovers hanging below it could only frost the island, not the canvas. */
+.toolbar__island::before,
+.toolbar__corner-actions::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border: 1px solid var(--glass-border);
+  border-radius: inherit;
+  background: var(--glass-surface-2);
+  -webkit-backdrop-filter: var(--glass-backdrop);
+  backdrop-filter: var(--glass-backdrop);
+  box-shadow: var(--glass-elevation-2);
+  pointer-events: none;
+}
+
+/* Kept for the measurement in Toolbar.tsx and its tests. */
 .toolbar--attached-bottom {
-  border-radius: 6px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  border-radius: 0;
 }
 
 /* ---------------------------------------------------------------------------
@@ -38,14 +115,49 @@
 .toolbar__section {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-1);
 }
 
 .toolbar__divider {
+  flex-shrink: 0;
   width: 1px;
-  height: 20px;
-  background: var(--panel-border);
-  margin: 0 4px;
+  height: 16px;
+  margin: 0 var(--space-2);
+  background: var(--glass-divider);
+}
+
+/* Inside an island the controls are capsules too (concentric with it). */
+.toolbar__island .toolbar__button,
+.toolbar__island .toolbar__dropdown-trigger,
+.toolbar__island .toolbar__split-group,
+.toolbar__island .table-detail-switch,
+.toolbar__island .line-style-switch {
+  border-radius: var(--radius-pill);
+}
+
+.toolbar__island .table-detail-switch::before,
+.toolbar__island .table-detail-switch__option,
+.toolbar__island .line-style-switch::before,
+.toolbar__island .line-style-switch__option {
+  border-radius: var(--radius-pill);
+}
+
+.toolbar__island .toolbar__split-main {
+  border-radius: var(--radius-pill) 0 0 var(--radius-pill);
+}
+
+.toolbar__island .toolbar__split-caret {
+  border-radius: 0 var(--radius-pill) var(--radius-pill) 0;
+}
+
+/* Every icon in the bar: one 16px stroke set (toolbarIcons.tsx). */
+.toolbar-icon {
+  flex-shrink: 0;
+  display: block;
+}
+
+.toolbar__label {
+  white-space: nowrap;
 }
 
 /* ---------------------------------------------------------------------------
@@ -53,13 +165,20 @@
    --------------------------------------------------------------------------- */
 
 .toolbar__domain {
-  gap: 8px;
+  gap: var(--space-4);
+  padding: 0 0 0 var(--space-4);
+}
+
+/* The layer chip ends the identity island, so it sits concentric in it. */
+.toolbar__domain:not(:has(.toolbar__layer-badge)) {
+  padding-right: var(--space-4);
 }
 
 .toolbar__domain-name {
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--editor-fg);
+  color: var(--text-primary);
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-tight);
   white-space: nowrap;
 }
 
@@ -67,25 +186,34 @@
 .toolbar__layer-badge {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  font-size: 11px;
-  white-space: nowrap;
+  gap: var(--space-2);
   max-width: 200px;
+  height: var(--control-height);
+  box-sizing: border-box;
+  padding: 0 var(--space-5) 0 var(--space-2);
   overflow: hidden;
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-pill);
+  background: var(--control-fill);
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  line-height: 1.4;
+  white-space: nowrap;
   text-overflow: ellipsis;
-  color: var(--dim-fg);
 }
 
 .toolbar__layer-abbrev {
   flex-shrink: 0;
-  padding: 1px 5px;
-  border-radius: 3px;
-  font-size: 10px;
-  font-weight: 700;
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-pill);
+  background: var(--glass-tint-accent-strong);
+  color: var(--text-primary);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-bold);
+  letter-spacing: var(--tracking-caps);
+  line-height: 16px;
   text-transform: uppercase;
-  letter-spacing: 0.5px;
-  background: var(--button-bg);
-  color: var(--button-fg);
 }
 
 .toolbar__layer-abbrev--bronze {
@@ -108,65 +236,132 @@
    --------------------------------------------------------------------------- */
 
 .toolbar__zoom {
-  gap: 2px;
+  gap: 0;
 }
 
 .toolbar__zoom-level {
-  min-width: 42px;
-  text-align: center;
-  font-size: 12px;
+  min-width: 38px;
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
   font-variant-numeric: tabular-nums;
-  color: var(--editor-fg);
-  opacity: 0.8;
+  text-align: center;
   white-space: nowrap;
 }
 
 /* ---------------------------------------------------------------------------
-   Buttons
+   Buttons: quiet glass controls, a soft fill on hover
    --------------------------------------------------------------------------- */
 
 .toolbar__button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 5px;
-  min-width: 28px;
-  height: 26px;
-  padding: 0 8px;
-  border: 1px solid transparent;
-  border-radius: 4px;
+  gap: var(--space-2);
+  min-width: var(--control-height);
+  height: var(--control-height);
+  padding: 0 var(--space-3);
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-md);
   background: transparent;
-  color: var(--editor-fg);
+  color: var(--text-primary);
   font-family: inherit;
-  font-size: 14px;
+  font-size: var(--text-lg);
+  font-weight: var(--weight-regular);
+  line-height: 1;
   white-space: nowrap;
+  color: var(--text-secondary);
   cursor: pointer;
-  transition: background 0.1s ease, border-color 0.1s ease;
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard),
+    transform var(--duration-instant) var(--ease-standard);
 }
 
 .toolbar__button:hover:not(:disabled) {
-  background: var(--button-bg);
-  color: var(--button-fg);
+  background: var(--control-fill-hover);
+  border-color: var(--control-border-hover);
+  color: var(--text-primary);
+}
+
+.toolbar__button:active:not(:disabled) {
+  background: var(--control-fill-active);
+  transform: scale(0.94);
+}
+
+.toolbar__button:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: var(--focus-offset);
 }
 
 .toolbar__button:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
+  color: var(--text-quaternary);
+  cursor: default;
 }
 
 .toolbar__button--text {
-  font-size: 12px;
-  padding: 0 10px;
+  padding: 0 var(--space-4);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
 }
 
-.toolbar__button--confirm {
-  background: var(--button-bg);
-  color: var(--button-fg);
+.toolbar__button--text:hover:not(:disabled) {
+  color: var(--text-primary);
 }
 
+.toolbar__button--confirm,
 .toolbar__button--primary {
-  background: var(--button-bg);
-  color: var(--button-fg);
+  background: var(--accent);
+  border-color: var(--glass-border);
+  color: var(--text-on-accent);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+}
+
+.toolbar__button--confirm:hover:not(:disabled),
+.toolbar__button--primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+  border-color: var(--control-border-hover);
+}
+
+/* A toggled button (select mode). */
+.toolbar__button--active,
+.toolbar__button--active:hover:not(:disabled) {
+  background: var(--control-fill-selected);
+  border-color: var(--control-border-selected);
+  color: var(--control-fg-selected);
+}
+
+/* A glyph inside a button: decorative, the button carries the name. */
+.toolbar__glyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+/* Emoji glyphs read as monochrome symbols on glass, as SF Symbols would.
+   A filter on a leaf (never an ancestor of a glass surface). */
+.toolbar__glyph--emoji {
+  font-size: 12px;
+  filter: grayscale(1);
+}
+
+/* Glyphs in a menu share one column, so the labels line up. */
+.toolbar__dropdown-item .toolbar__glyph {
+  flex-shrink: 0;
+  width: 16px;
+  color: var(--text-secondary);
+}
+
+.toolbar__glyph--code {
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  letter-spacing: -0.04em;
 }
 
 /* ---------------------------------------------------------------------------
@@ -174,9 +369,9 @@
    --------------------------------------------------------------------------- */
 
 .toolbar__confirm-label {
-  font-size: 12px;
-  color: var(--editor-fg);
-  margin-right: 4px;
+  margin-right: var(--space-2);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
   white-space: nowrap;
 }
 
@@ -188,10 +383,10 @@
   display: inline-block;
   width: 12px;
   height: 12px;
-  border: 2px solid currentColor;
+  border: 1.5px solid currentColor;
   border-top-color: transparent;
   border-radius: 50%;
-  animation: toolbar-spin 0.6s linear infinite;
+  animation: toolbar-spin 0.7s linear infinite;
 }
 
 @keyframes toolbar-spin {
@@ -201,93 +396,198 @@
 }
 
 /* ---------------------------------------------------------------------------
-   Dropdown
+   Dropdown triggers (Compare, + Add)
    --------------------------------------------------------------------------- */
 
 .toolbar__dropdown {
   position: relative;
 }
 
+/* Neutral filled control: Compare. */
 .toolbar__dropdown-trigger {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  min-width: 28px;
-  height: 26px;
-  padding: 0 8px;
-  border: 1px solid transparent;
-  border-radius: 4px;
-  background: var(--button-bg);
-  color: var(--button-fg);
+  gap: var(--space-2);
+  min-width: var(--control-height);
+  height: var(--control-height);
+  padding: 0 var(--space-5);
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-md);
+  background: var(--control-fill);
+  color: var(--text-primary);
   font-family: inherit;
-  font-size: 12px;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  line-height: 1;
   white-space: nowrap;
   cursor: pointer;
-  transition: background 0.1s ease;
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard),
+    box-shadow var(--duration-fast) var(--ease-standard),
+    transform var(--duration-instant) var(--ease-standard);
 }
 
 .toolbar__dropdown-trigger:hover {
-  background: var(--button-hover-bg);
+  background: var(--control-fill-hover);
+  border-color: var(--control-border-hover);
+}
+
+.toolbar__dropdown-trigger:active {
+  background: var(--control-fill-active);
+  transform: scale(0.97);
+}
+
+.toolbar__dropdown-trigger[aria-expanded='true'] {
+  background: var(--control-fill-active);
+  border-color: var(--control-border-hover);
+}
+
+.toolbar__dropdown-trigger:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: var(--focus-offset);
+}
+
+/* The primary action of the bar: + Add. */
+/* Its border is the glass hairline (contrastBorder in high contrast, where
+   the accent fill is gone): the one primary action never turns into bare text. */
+.toolbar__dropdown-trigger--primary {
+  gap: var(--space-2);
+  padding: 0 var(--space-4) 0 var(--space-3);
+  background: var(--accent);
+  border-color: var(--glass-border);
+  color: var(--text-on-accent);
+  box-shadow: var(--glass-highlight), 0 1px 2px var(--glass-tint-accent-strong);
+}
+
+.toolbar__dropdown-trigger--primary:hover,
+.toolbar__dropdown-trigger--primary[aria-expanded='true'] {
+  background: var(--accent-hover);
+  border-color: var(--control-border-hover);
+}
+
+.toolbar__dropdown-trigger--primary:active {
+  background: var(--accent-hover);
 }
 
 .toolbar__dropdown-arrow {
-  font-size: 10px;
-  margin-left: 2px;
-  opacity: 0.8;
+  display: inline-flex;
+  margin-left: calc(-1 * var(--space-1));
+  color: var(--text-secondary);
+  transition: transform var(--duration-base) var(--ease-spring);
+}
+
+.toolbar__dropdown-trigger--primary .toolbar__dropdown-arrow {
+  color: color-mix(in srgb, var(--text-on-accent) 80%, transparent);
+}
+
+.toolbar__dropdown-trigger[aria-expanded='true'] .toolbar__dropdown-arrow {
+  transform: rotate(180deg);
+}
+
+/* Active dropdown trigger: the comparison is on (Stop comparing). */
+.toolbar__dropdown-trigger--active,
+.toolbar__dropdown-trigger--active:hover {
+  background:
+    linear-gradient(var(--glass-tint-warning), var(--glass-tint-warning)),
+    var(--glass-tint-warning);
+  border-color: var(--glass-tint-warning-edge);
+  color: var(--text-primary);
+}
+
+.toolbar__dropdown-trigger--active::before {
+  content: '';
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--warning-fg);
+  box-shadow: 0 0 0 3px var(--glass-tint-warning);
+}
+
+/* ---------------------------------------------------------------------------
+   Menus: raised glass popovers
+   --------------------------------------------------------------------------- */
+
+@keyframes toolbar-pop {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 
 .toolbar__dropdown-menu {
   position: absolute;
   top: 100%;
   left: 0;
-  margin-top: 4px;
-  min-width: 160px;
-  background: var(--panel-bg);
-  border: 1px solid var(--panel-border);
-  border-radius: 4px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
-  z-index: 100;
-  overflow: hidden;
+  z-index: var(--z-popover);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 180px;
+  margin-top: var(--space-5);
+  padding: var(--space-2);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+  background: var(--glass-surface-3);
+  -webkit-backdrop-filter: var(--glass-backdrop);
+  backdrop-filter: var(--glass-backdrop);
+  box-shadow: var(--glass-elevation-3);
+  color: var(--text-primary);
+  transform-origin: top left;
+  animation: toolbar-pop var(--duration-base) var(--ease-spring);
 }
 
 .toolbar__dropdown-item {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
   width: 100%;
-  padding: 8px 12px;
-  border: none;
+  min-height: var(--control-height);
+  padding: 0 var(--space-4);
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-md);
   background: transparent;
-  color: var(--editor-fg);
+  color: var(--text-primary);
   font-family: inherit;
-  font-size: 12px;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-regular);
   text-align: left;
   white-space: nowrap;
   cursor: pointer;
-  transition: background 0.1s ease;
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard);
 }
 
-.toolbar__dropdown-item:hover {
-  background: var(--button-bg);
-  color: var(--button-fg);
+.toolbar__dropdown-item:hover:not(:disabled) {
+  background: var(--control-fill-hover);
+  border-color: var(--control-border-hover);
+}
+
+.toolbar__dropdown-item:active:not(:disabled) {
+  background: var(--control-fill-active);
+}
+
+.toolbar__dropdown-item:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: -2px;
 }
 
 .toolbar__dropdown-item:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.toolbar__dropdown-item:disabled:hover {
-  background: transparent;
-  color: var(--editor-fg);
-}
-
-.toolbar__dropdown-item:not(:last-child) {
-  border-bottom: 1px solid var(--panel-border);
+  color: var(--text-quaternary);
+  cursor: default;
 }
 
 .toolbar__dropdown-divider {
   height: 1px;
-  background: var(--panel-border);
-  margin: 0;
+  margin: var(--space-1) var(--space-3);
+  background: var(--glass-divider);
 }
 
 /* ---------------------------------------------------------------------------
@@ -295,113 +595,149 @@
    --------------------------------------------------------------------------- */
 
 .toolbar__search {
-  gap: 6px;
+  position: relative;
+  gap: var(--space-3);
+}
+
+.toolbar__search-icon {
+  position: absolute;
+  top: 50%;
+  left: 10px;
+  display: inline-flex;
+  color: var(--text-tertiary);
+  transform: translateY(-50%);
+  pointer-events: none;
+  transition: color var(--duration-fast) var(--ease-standard);
+}
+
+.toolbar__search-icon svg {
+  width: 13px;
+  height: 13px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+}
+
+.toolbar__search:focus-within .toolbar__search-icon {
+  color: var(--text-secondary);
 }
 
 .toolbar__search-input {
-  width: 110px;
-  height: 24px;
-  padding: 0 8px;
-  border: 1px solid var(--input-border, var(--panel-border));
-  border-radius: 4px;
-  background: var(--input-bg);
-  color: var(--input-fg, var(--editor-fg));
+  width: 132px;
+  height: var(--control-height);
+  padding: 0 var(--space-5) 0 28px;
+  border: 1px solid var(--glass-input-border);
+  border-radius: var(--radius-pill);
+  background: var(--glass-input-bg);
+  color: var(--input-fg, var(--text-primary));
   font-family: inherit;
-  font-size: 12px;
+  font-size: var(--text-sm);
+  transition:
+    width var(--duration-base) var(--ease-out),
+    border-color var(--duration-fast) var(--ease-standard),
+    box-shadow var(--duration-fast) var(--ease-standard),
+    background-color var(--duration-fast) var(--ease-standard);
+}
+
+.toolbar__search-input:hover {
+  border-color: var(--glass-border-strong);
 }
 
 .toolbar__search-input:focus {
-  width: 140px;
-  outline: 1px solid var(--focus-border);
-  outline-offset: -1px;
-  border-color: var(--focus-border);
+  width: 172px;
+  outline: none;
+  border-color: var(--glass-input-border-focus);
+  box-shadow: var(--focus-halo);
 }
 
 .toolbar__search-input::placeholder {
-  color: var(--vscode-descriptionForeground, #888);
-  opacity: 0.7;
+  color: var(--text-tertiary);
+  opacity: 1;
 }
 
 .toolbar__search-count {
-  min-width: 20px;
-  padding: 2px 6px;
-  border-radius: 10px;
-  background: var(--button-bg);
-  color: var(--button-fg);
-  font-size: 11px;
-  font-weight: 500;
+  min-width: 22px;
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--control-border-selected);
+  border-radius: var(--radius-pill);
+  background: var(--glass-tint-accent-strong);
+  color: var(--text-primary);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.3;
   text-align: center;
 }
 
 /* No table here matches, some elsewhere in the project do: opens Go to Table. */
 .toolbar__search-elsewhere {
-  padding: 2px 4px;
-  border: none;
-  background: none;
-  color: var(--dim-fg);
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-pill);
+  background: var(--control-fill);
+  color: var(--text-secondary);
   font-family: inherit;
-  font-size: 11px;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
   white-space: nowrap;
-  text-decoration: underline;
   cursor: pointer;
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard);
 }
 
 .toolbar__search-elsewhere:hover {
-  color: var(--editor-fg);
+  background: var(--control-fill-hover);
+  border-color: var(--control-border-hover);
+  color: var(--text-primary);
 }
 
 .toolbar__search-elsewhere:focus-visible {
-  color: var(--editor-fg);
-  outline: 1px solid var(--focus-border);
-  outline-offset: -1px;
+  color: var(--text-primary);
+  outline: var(--focus-outline);
+  outline-offset: var(--focus-offset);
 }
 
 /* ---------------------------------------------------------------------------
-   Active button state (for legend toggle)
-   --------------------------------------------------------------------------- */
-
-.toolbar__button--active {
-  background: var(--button-bg);
-  color: var(--button-fg);
-}
-
-/* ---------------------------------------------------------------------------
-   Palette dropdown
+   Palette dropdown (kept for its classes; drawn as a glass menu)
    --------------------------------------------------------------------------- */
 
 .toolbar__dropdown-trigger--palette {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 0 8px;
+  gap: var(--space-2);
   min-width: auto;
+  padding: 0 var(--space-4);
 }
 
 .toolbar__dropdown-menu--palette {
-  min-width: 180px;
+  min-width: 200px;
 }
 
 .toolbar__palette-swatch {
   display: inline-block;
   width: 12px;
   height: 12px;
-  border-radius: 2px;
+  border-radius: var(--radius-xs);
+  box-shadow: inset 0 0 0 1px var(--glass-border);
 }
 
 .toolbar__palette-preview {
   display: flex;
-  gap: 3px;
   flex-shrink: 0;
+  gap: 3px;
 }
 
 .toolbar__dropdown-item--palette {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-4);
 }
 
 .toolbar__dropdown-item--selected {
-  background: rgba(128, 128, 128, 0.1);
+  background: var(--glass-tint-accent);
+  border-color: var(--control-border-selected);
 }
 
 .toolbar__palette-name {
@@ -409,12 +745,12 @@
 }
 
 .toolbar__check {
-  color: var(--button-bg);
-  font-size: 12px;
+  color: var(--accent);
+  font-size: var(--text-sm);
 }
 
 /* ---------------------------------------------------------------------------
-   Quick tooltips (instant on hover)
+   Quick tooltips (instant on hover), a thin glass label
    --------------------------------------------------------------------------- */
 
 .toolbar__button--tooltip {
@@ -426,59 +762,56 @@
   position: absolute;
   top: 100%;
   left: 50%;
-  transform: translateX(-50%);
-  margin-top: 6px;
-  padding: 4px 8px;
-  background: var(--panel-bg);
-  border: 1px solid var(--panel-border);
-  border-radius: 4px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
-  color: var(--editor-fg);
-  font-size: 11px;
-  font-weight: 500;
+  z-index: var(--z-menu);
+  margin-top: var(--space-5);
+  padding: var(--space-2) var(--space-4);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  background: var(--glass-surface-3);
+  -webkit-backdrop-filter: var(--glass-backdrop-thin);
+  backdrop-filter: var(--glass-backdrop-thin);
+  box-shadow: var(--glass-elevation-1);
+  color: var(--text-primary);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  line-height: 1.3;
   white-space: nowrap;
   pointer-events: none;
   opacity: 0;
-  transition: opacity 0.1s ease;
-  z-index: 1000;
+  transform: translate(-50%, -2px);
+  transition:
+    opacity var(--duration-fast) var(--ease-standard),
+    transform var(--duration-fast) var(--ease-out);
 }
 
 .toolbar__button--tooltip:hover::after {
   opacity: 1;
+  transform: translate(-50%, 0);
   transition-delay: 0.15s; /* Very short delay - appears quickly */
 }
 
 /* ---------------------------------------------------------------------------
-   Active dropdown trigger (e.g., discrepancy toggle when ON)
-   --------------------------------------------------------------------------- */
-
-.toolbar__dropdown-trigger--active {
-  background: var(--vscode-editorWarning-foreground, #cca700);
-  color: #000;
-}
-
-.toolbar__dropdown-trigger--active:hover {
-  background: var(--vscode-editorWarning-foreground, #cca700);
-  opacity: 0.85;
-}
-
-/* ---------------------------------------------------------------------------
-   Layout panel  (.toolbar__lp)
+   Layout panel (.toolbar__lp): a raised glass popover
    --------------------------------------------------------------------------- */
 
 .toolbar__lp {
   position: absolute;
   top: 100%;
   left: 0;
-  margin-top: 4px;
-  width: 300px;
-  background: var(--panel-bg);
-  border: 1px solid var(--panel-border);
-  border-radius: 8px;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.28);
-  z-index: 100;
+  z-index: var(--z-popover);
   display: flex;
   flex-direction: column;
+  width: 304px;
+  margin-top: var(--space-5);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+  background: var(--glass-surface-3);
+  -webkit-backdrop-filter: var(--glass-backdrop);
+  backdrop-filter: var(--glass-backdrop);
+  box-shadow: var(--glass-elevation-3);
+  color: var(--text-primary);
+  transform-origin: top left;
+  animation: toolbar-pop var(--duration-base) var(--ease-spring);
 }
 
 /* ---- Header ---- */
@@ -486,111 +819,122 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 14px 8px;
-  border-bottom: 1px solid var(--panel-border);
+  padding: var(--space-5) var(--space-6) var(--space-4);
+  border-bottom: 1px solid var(--glass-divider);
 }
 
 .toolbar__lp-title {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--editor-fg);
+  color: var(--text-primary);
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-tight);
 }
 
 .toolbar__lp-kbd {
-  font-size: 10px;
-  font-family: var(--vscode-editor-font-family, monospace);
-  color: var(--vscode-descriptionForeground, #888);
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid var(--panel-border);
-  border-radius: 3px;
-  padding: 1px 6px;
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-xs);
+  background: var(--control-fill);
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
 }
 
 /* ---- Sections ---- */
 .toolbar__lp-section {
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: var(--space-3);
 }
 
 .toolbar__lp-label {
-  font-size: 10px;
-  font-weight: 600;
+  color: var(--text-tertiary);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-caps);
   text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--vscode-descriptionForeground, #888);
 }
 
 .toolbar__lp-desc {
-  font-size: 11px;
-  line-height: 1.35;
-  color: var(--vscode-descriptionForeground, #888);
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
 }
 
 /* ---- Body (padded area below header) ---- */
 .toolbar__lp > .toolbar__lp-section,
 .toolbar__lp > .toolbar__lp-columns {
-  padding: 0 14px;
+  padding: 0 var(--space-6);
 }
 
 .toolbar__lp > .toolbar__lp-section:first-of-type {
-  padding-top: 12px;
+  padding-top: var(--space-5);
 }
 
 .toolbar__lp > .toolbar__lp-section + .toolbar__lp-section,
 .toolbar__lp > .toolbar__lp-columns + .toolbar__lp-section,
 .toolbar__lp > .toolbar__lp-section + .toolbar__lp-columns {
-  padding-top: 10px;
+  padding-top: var(--space-5);
 }
 
 /* ---- Pill track (segmented control) ---- */
 .toolbar__lp-track {
   display: flex;
-  gap: 1px;
-  background: rgba(255, 255, 255, 0.06);
-  border-radius: 6px;
-  padding: 2px;
+  gap: var(--space-1);
+  padding: var(--space-1);
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-md);
+  background: var(--control-fill);
 }
 
 .toolbar__lp-pill {
   flex: 1;
-  height: 24px;
-  border: none;
-  border-radius: 4px;
+  height: var(--control-height-sm);
+  padding: 0 var(--space-3);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
   background: transparent;
-  color: var(--editor-fg);
+  color: var(--text-secondary);
   font-family: inherit;
-  font-size: 11px;
-  cursor: pointer;
-  transition: background 0.12s ease, color 0.12s ease, box-shadow 0.12s ease;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
   white-space: nowrap;
-  opacity: 0.7;
+  cursor: pointer;
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard),
+    box-shadow var(--duration-fast) var(--ease-standard);
 }
 
 .toolbar__lp-pill:hover:not(.toolbar__lp-pill--on) {
-  opacity: 1;
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--control-fill-hover);
+  border-color: var(--control-border-hover);
+  color: var(--text-primary);
+}
+
+.toolbar__lp-pill:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: 1px;
 }
 
 .toolbar__lp-pill--on {
-  background: var(--button-bg);
-  color: var(--button-fg);
-  opacity: 1;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+  background: var(--control-thumb);
+  color: var(--text-primary);
+  box-shadow: var(--control-thumb-shadow);
 }
 
-/* Highlight the resolved strategy pill when Auto is selected */
+/* The strategy Auto resolved to, while Auto is the choice. */
 .toolbar__lp-pill--auto-resolved:not(.toolbar__lp-pill--on) {
-  opacity: 1;
-  outline: 1.5px dashed var(--button-bg);
-  outline-offset: -1.5px;
+  color: var(--text-primary);
+  outline: 1px dashed var(--control-border-selected);
+  outline-offset: -2px;
 }
 
 /* ---- Columns (Direction + Spacing side-by-side) ---- */
 .toolbar__lp-columns {
   display: flex;
-  gap: 12px;
-  padding: 0 14px;
+  gap: var(--space-5);
+  padding: 0 var(--space-6);
 }
 
 .toolbar__lp-columns > .toolbar__lp-section {
@@ -602,127 +946,175 @@
 .toolbar__lp-layer-row {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-4);
 }
 
 .toolbar__lp-input {
-  width: 50px;
-  height: 24px;
-  padding: 0 6px;
-  border: 1px solid var(--panel-border);
-  border-radius: 4px;
-  background: var(--input-bg);
-  color: var(--input-fg, var(--editor-fg));
+  flex-shrink: 0;
+  width: 52px;
+  height: var(--control-height-sm);
+  padding: 0 var(--space-3);
+  border: 1px solid var(--glass-input-border);
+  border-radius: var(--radius-sm);
+  background: var(--glass-input-bg);
+  color: var(--input-fg, var(--text-primary));
   font-family: inherit;
-  font-size: 12px;
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
   text-align: center;
+  transition:
+    border-color var(--duration-fast) var(--ease-standard),
+    box-shadow var(--duration-fast) var(--ease-standard);
 }
 
 .toolbar__lp-input:focus {
-  outline: 1px solid var(--focus-border);
-  outline-offset: -1px;
-  border-color: var(--focus-border);
+  outline: none;
+  border-color: var(--glass-input-border-focus);
+  box-shadow: var(--focus-halo);
 }
 
 .toolbar__lp-input--auto {
-  opacity: 0.45;
+  background: transparent;
+  color: var(--text-tertiary);
   cursor: default;
 }
 
-/* ---- Apply button ---- */
+/* ---- Apply button: the popover's primary action ---- */
 .toolbar__lp-apply {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  height: 30px;
-  margin: 12px 14px 14px;
-  border: none;
-  border-radius: 6px;
-  background: var(--button-bg);
-  color: var(--button-fg);
+  gap: var(--space-4);
+  height: var(--control-height-lg);
+  margin: var(--space-6);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  background: var(--accent);
+  color: var(--text-on-accent);
   font-family: inherit;
-  font-size: 12px;
-  font-weight: 500;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
   cursor: pointer;
-  transition: filter 0.1s ease;
+  box-shadow: var(--glass-highlight);
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
+    transform var(--duration-instant) var(--ease-standard);
 }
 
 .toolbar__lp-apply:hover:not(:disabled) {
-  filter: brightness(1.12);
+  background: var(--accent-hover);
+  border-color: var(--control-border-hover);
 }
 
-.toolbar__lp-apply--dirty {
-  background: var(--vscode-editorWarning-foreground, #cca700);
-  color: #000;
+.toolbar__lp-apply:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.toolbar__lp-apply:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: var(--focus-offset);
+}
+
+/* Options changed since the last run: an amber wash says "re-apply". */
+.toolbar__lp-apply--dirty,
+.toolbar__lp-apply--dirty:hover:not(:disabled) {
+  background:
+    linear-gradient(var(--glass-tint-warning), var(--glass-tint-warning)),
+    var(--glass-tint-warning);
+  border-color: var(--glass-tint-warning-edge);
+  color: var(--text-primary);
 }
 
 .toolbar__lp-apply:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
+  background: var(--control-fill);
+  color: var(--text-quaternary);
+  cursor: default;
 }
 
 .toolbar__lp-apply-key {
-  font-size: 10px;
-  font-family: var(--vscode-editor-font-family, monospace);
-  opacity: 0.55;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-xs);
+  background: var(--control-fill);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  opacity: 0.75;
 }
 
-/* Split button group for auto-layout + options caret */
+/* ---------------------------------------------------------------------------
+   Layout split button (main + options caret), one filled capsule
+   --------------------------------------------------------------------------- */
+
 .toolbar__split-group {
-  display: flex;
-  gap: 0;
   position: relative;
-  border-radius: 4px;
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  height: var(--control-height);
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-md);
+  background: var(--control-fill);
   overflow: visible;
 }
 
-/* Main layout button — filled so it stands out from icon-only toolbar buttons */
 .toolbar__split-main {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 5px;
-  height: 26px;
-  padding: 0 10px;
-  border: none;
-  border-radius: 4px 0 0 4px;
-  background: var(--button-bg);
-  color: var(--button-fg);
+  gap: var(--space-3);
+  padding: 0 var(--space-4) 0 var(--space-4);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md) 0 0 var(--radius-md);
+  background: transparent;
+  color: var(--text-primary);
   font-family: inherit;
-  font-size: 12px;
-  font-weight: 500;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
   white-space: nowrap;
   cursor: pointer;
-  transition: background 0.1s ease;
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard);
 }
 
 .toolbar__split-main:hover:not(:disabled) {
-  background: var(--button-hover-bg, var(--button-bg));
-  filter: brightness(1.12);
+  background: var(--control-fill-hover);
+  border-color: var(--control-border-hover);
 }
 
-.toolbar__split-main--dirty {
-  background: var(--vscode-editorWarning-foreground, #cca700);
-  color: #000;
+.toolbar__split-main:active:not(:disabled) {
+  background: var(--control-fill-active);
 }
 
+.toolbar__split-main:focus-visible,
+.toolbar__split-caret:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: var(--focus-offset);
+}
+
+/* Options changed: an amber wash on the main half until it is re-run. */
+.toolbar__split-main--dirty,
 .toolbar__split-main--dirty:hover:not(:disabled) {
-  background: var(--vscode-editorWarning-foreground, #cca700);
-  filter: brightness(1.08);
+  background:
+    linear-gradient(var(--glass-tint-warning), var(--glass-tint-warning)),
+    var(--glass-tint-warning);
+  border-color: var(--glass-tint-warning-edge);
+  color: var(--text-primary);
 }
 
 .toolbar__split-main:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
+  color: var(--text-quaternary);
+  cursor: default;
 }
 
-/* Thin separator between main button and caret */
+/* Hairline between the main button and the caret. */
 .toolbar__split-sep {
-  width: 1px;
-  background: rgba(255, 255, 255, 0.2);
-  align-self: stretch;
   flex-shrink: 0;
+  align-self: center;
+  width: 1px;
+  height: 14px;
+  background: var(--glass-divider);
   pointer-events: none;
 }
 
@@ -730,35 +1122,35 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 20px;
-  height: 26px;
+  width: 24px;
   padding: 0;
-  border: none;
-  border-radius: 0 4px 4px 0;
-  background: var(--button-bg);
-  color: var(--button-fg);
+  border: 1px solid transparent;
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+  background: transparent;
+  color: var(--text-secondary);
   font-size: 9px;
   cursor: pointer;
-  transition: filter 0.1s ease;
-  opacity: 0.85;
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard);
 }
 
 .toolbar__split-caret:hover {
-  filter: brightness(1.15);
-  opacity: 1;
+  background: var(--control-fill-hover);
+  border-color: var(--control-border-hover);
+  color: var(--text-primary);
 }
 
-.toolbar__split-caret--active {
-  filter: brightness(0.88);
-  opacity: 1;
+.toolbar__split-caret--active,
+.toolbar__split-caret--active:hover {
+  background: var(--control-fill-active);
+  border-color: var(--control-border-selected);
+  color: var(--text-primary);
 }
 
 /* ---------------------------------------------------------------------------
-   View File button (top-right corner)
-   --------------------------------------------------------------------------- */
-
-/* ---------------------------------------------------------------------------
-   Top-right corner actions
+   Top-right corner actions: one glass pill, exactly --shell-corner-height tall
 
    Labelled buttons while they fit, and one overflow glyph once they would run
    into the top-centre toolbar — which grows with the domain name, the search
@@ -768,48 +1160,70 @@
 
 .toolbar__corner {
   display: flex;
-  gap: 6px;
 }
 
+/* The pill. Its material is the shared ::before above (so the overflow menu
+   inside it can frost the canvas); 3px padding around 28px controls makes the
+   outer height exactly --shell-corner-height, which the detail panel's offset
+   assumes. Measured by `measureCorner`. */
 .toolbar__corner-actions {
+  position: relative;
   display: flex;
-  gap: 6px;
+  align-items: center;
+  gap: var(--space-1);
+  height: var(--shell-corner-height);
+  padding: calc((var(--shell-corner-height) - var(--control-height)) / 2);
+  border-radius: var(--radius-pill);
 }
 
-/* The labelled form. */
+/* The labelled form: quiet controls inside the pill. */
 .toolbar__corner-button {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  padding: 4px 10px;
-  border: 1px solid var(--panel-border);
-  border-radius: 4px;
-  background: var(--panel-bg);
-  color: var(--editor-fg);
+  gap: var(--space-3);
+  height: var(--control-height);
+  padding: 0 var(--space-5);
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--text-secondary);
   font-family: inherit;
-  font-size: 12px;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  line-height: 1;
   white-space: nowrap;
   cursor: pointer;
-  opacity: 0.8;
-  transition: background 0.1s ease, opacity 0.1s ease;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard),
+    transform var(--duration-instant) var(--ease-standard);
 }
 
 .toolbar__corner-button:hover {
-  background: var(--button-bg);
-  color: var(--button-fg);
-  opacity: 1;
+  background: var(--control-fill-hover);
+  border-color: var(--control-border-hover);
+  color: var(--text-primary);
+}
+
+.toolbar__corner-button:active {
+  background: var(--control-fill-active);
+  transform: scale(0.96);
+}
+
+.toolbar__corner-button:focus-visible,
+.toolbar__corner-trigger:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: 1px;
 }
 
 /* A glyph-only corner button (Export), the size of the overflow trigger, so it
    costs the labelled corner as little width as possible. */
 .toolbar__corner-button--icon {
   justify-content: center;
-  width: 28px;
-  height: 26px;
+  width: var(--control-height);
   padding: 0;
-  font-size: 14px;
-  line-height: 1;
+  font-size: var(--text-lg);
 }
 
 /* The collapsed form. */
@@ -821,29 +1235,36 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 26px;
+  width: var(--control-height);
+  height: var(--control-height);
   padding: 0;
-  border: 1px solid var(--panel-border);
-  border-radius: 4px;
-  background: var(--panel-bg);
-  color: var(--editor-fg);
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--text-secondary);
   font-family: inherit;
   /* The glyph is a horizontal ellipsis; it needs the size to read as a
      control rather than as three stray dots. */
   font-size: 16px;
   line-height: 1;
   cursor: pointer;
-  opacity: 0.8;
-  transition: background 0.1s ease, opacity 0.1s ease;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard);
 }
 
-.toolbar__corner-trigger:hover,
-.toolbar__corner-trigger--active {
-  background: var(--button-bg);
-  color: var(--button-fg);
-  opacity: 1;
+.toolbar__corner-trigger:hover {
+  background: var(--control-fill-hover);
+  border-color: var(--control-border-hover);
+  color: var(--text-primary);
+}
+
+.toolbar__corner-trigger--active,
+.toolbar__corner-trigger--active:hover {
+  background: var(--control-fill-active);
+  border-color: var(--control-border-selected);
+  color: var(--text-primary);
 }
 
 /* Right-aligned: the menu is wider than its trigger and the trigger sits at
@@ -851,4 +1272,161 @@
 .toolbar__corner-list {
   left: auto;
   right: 0;
+  margin-top: calc((var(--shell-corner-height) - var(--control-height)) / 2 + var(--space-3));
+  transform-origin: top right;
+}
+
+/* ---------------------------------------------------------------------------
+   View island: the view preferences sit inline on a wide editor, and fold
+   behind one "View" button (a raised glass popover) on a narrow one.
+   --------------------------------------------------------------------------- */
+
+.toolbar__view-group {
+  display: contents;
+}
+
+.toolbar__view-toggle {
+  display: none;
+}
+
+.toolbar__island--view .toolbar__search {
+  margin-right: var(--space-1);
+}
+
+/* ---------------------------------------------------------------------------
+   Narrow editors: compact instead of wrapping (the detail panel and the
+   minimap are placed for a one-row toolbar). The webview is its own
+   document, so these widths are the editor's, not the window's.
+   --------------------------------------------------------------------------- */
+
+/* 1. Search folds to a round icon until it has focus or a query; the
+   layer chip keeps only its badge. */
+@media (max-width: 1440px) {
+  .toolbar__search-input {
+    width: var(--control-height);
+    padding-right: 0;
+    cursor: pointer;
+  }
+
+  .toolbar__search-input::placeholder {
+    color: transparent;
+  }
+
+  .toolbar__search-input:focus,
+  .toolbar__search-input:not(:placeholder-shown) {
+    width: 172px;
+    padding-right: var(--space-5);
+    cursor: text;
+  }
+
+  .toolbar__search-input:focus::placeholder {
+    color: var(--text-tertiary);
+  }
+
+  .toolbar__search-icon {
+    left: 50%;
+    transform: translate(-50%, -50%);
+    transition: left var(--duration-base) var(--ease-out), color var(--duration-fast) var(--ease-standard);
+  }
+
+  .toolbar__search:focus-within .toolbar__search-icon,
+  .toolbar__search:has(.toolbar__search-input:not(:placeholder-shown)) .toolbar__search-icon {
+    left: 16px;
+  }
+
+  .toolbar__layer-badge {
+    padding-right: var(--space-2);
+    font-size: 0;
+  }
+}
+
+/* 2. Labels give way to their icons (each button keeps its aria-label and
+   title); the Add label stays, it is the primary action. */
+@media (max-width: 1280px) {
+  .toolbar__split-main .toolbar__label,
+  .toolbar__dropdown-trigger:not(.toolbar__dropdown-trigger--primary):not(.toolbar__dropdown-trigger--active) .toolbar__label {
+    display: none;
+  }
+
+  .toolbar__split-main {
+    padding: 0 var(--space-3) 0 var(--space-4);
+  }
+
+  .toolbar__dropdown-trigger:not(.toolbar__dropdown-trigger--primary):not(.toolbar__dropdown-trigger--active) {
+    justify-content: center;
+    padding: 0 var(--space-3);
+  }
+
+  .stage-tabs__hint {
+    display: none;
+  }
+}
+
+/* 3. The view preferences fold into the View popover. */
+@media (max-width: 1140px) {
+  .toolbar__view-toggle {
+    display: inline-flex;
+  }
+
+  .toolbar__view-group {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    z-index: var(--z-popover);
+    display: none;
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--space-3);
+    min-width: 200px;
+    margin-top: var(--space-5);
+    padding: var(--space-4);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-lg);
+    background: var(--glass-surface-3);
+    -webkit-backdrop-filter: var(--glass-backdrop);
+    backdrop-filter: var(--glass-backdrop);
+    box-shadow: var(--glass-elevation-3);
+    transform-origin: top right;
+    animation: toolbar-pop var(--duration-base) var(--ease-spring);
+  }
+
+  .toolbar__island--view-open .toolbar__view-group {
+    display: flex;
+  }
+
+  .toolbar__view-group > .toolbar__section {
+    justify-content: center;
+  }
+
+  .toolbar__view-group .table-detail-switch,
+  .toolbar__view-group .line-style-switch {
+    width: 100%;
+  }
+}
+
+/* 4. The open search box grows only as far as the centred row has room for,
+   so it never pushes the row under the corner pill or off the left edge.
+   `--toolbar-search-room` is measured in Toolbar.tsx (searchRoom.ts). */
+@media (max-width: 900px) {
+  .toolbar__search-input:focus,
+  .toolbar__search-input:not(:placeholder-shown) {
+    width: clamp(96px, var(--toolbar-search-room, 172px), 172px);
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Motion preferences: the tokens already collapse durations; keyframes need
+   their own opt-out.
+   --------------------------------------------------------------------------- */
+
+@media (prefers-reduced-motion: reduce) {
+  .toolbar__dropdown-menu,
+  .toolbar__lp,
+  .toolbar__view-group {
+    animation: none;
+  }
+
+  .toolbar__spinner {
+    animation-duration: 1.6s;
+  }
 }

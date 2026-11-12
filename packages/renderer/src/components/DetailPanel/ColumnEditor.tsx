@@ -1,8 +1,9 @@
 /**
  * ColumnEditor — editable column list for the DetailPanel.
  *
- * Renders columns in file order (user-controlled via drag-to-reorder).
- * Supports adding new columns and inline editing.
+ * Renders columns in file order (user-controlled via drag-to-reorder) as one
+ * grouped, inset list. Supports adding new columns and inline editing; with
+ * several columns selected, the bulk actions float at the foot of the panel.
  * Uses ColumnRowEditor for consistent column row rendering.
  */
 
@@ -10,6 +11,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { ColumnRowEditor } from '../common/ColumnRowEditor';
 import { BulkColumnActions } from './BulkColumnActions';
+import { IconCollapseAll, IconExpandAll, IconPlus, IconTable } from './panelIcons';
 import { FieldsSection, type FieldsTable } from './FieldsSection';
 import { useIsViewer, useSend } from '../../host/canvasEnvironment';
 import { useColumnReorder } from '../../hooks/useColumnReorder';
@@ -224,7 +226,6 @@ export function ColumnEditor({ modelName, columns, readOnly, modelRole, fields, 
   );
 
   // Check expansion state for UI
-  const allExpanded = columns.length > 0 && expandedColumns.size === columns.length;
   const anyExpanded = expandedColumns.size > 0;
 
   // New column template for when user clicks "Add Column"
@@ -245,58 +246,54 @@ export function ColumnEditor({ modelName, columns, readOnly, modelRole, fields, 
           Columns ({columns.length})
         </h4>
         <div className="column-editor__header-actions">
-          {/* Expand/Collapse All buttons */}
+          {/* Expand / collapse all: one toggling icon */}
           {columns.length > 0 && (
             <div className="column-editor__expand-controls">
-              {!allExpanded && (
-                <button
-                  className="column-editor__expand-btn"
-                  onClick={handleExpandAll}
-                  data-tooltip="Expand all"
-                  aria-label="Expand all descriptions"
-                >
-                  ⊞
-                </button>
-              )}
-              {anyExpanded && (
+              {anyExpanded ? (
                 <button
                   className="column-editor__expand-btn"
                   onClick={handleCollapseAll}
                   data-tooltip="Collapse all"
                   aria-label="Collapse all descriptions"
                 >
-                  ⊟
+                  <IconCollapseAll size={13} />
+                </button>
+              ) : (
+                <button
+                  className="column-editor__expand-btn"
+                  onClick={handleExpandAll}
+                  data-tooltip="Expand all"
+                  aria-label="Expand all descriptions"
+                >
+                  <IconExpandAll size={13} />
                 </button>
               )}
             </div>
           )}
           {isEditable && (
             <button
-              className="column-editor__add-btn"
+              className="column-editor__add-btn column-editor__add-btn--icon"
               onClick={handleAddColumn}
               disabled={isAddingColumn}
-              title="Add column"
+              data-tooltip="Add column"
+              aria-label="Add column"
             >
-              + Add Column
+              <IconPlus size={13} />
             </button>
           )}
         </div>
       </div>
 
-      {/* Bulk actions toolbar — shown when multiple columns are selected */}
-      {isEditable && selectedColumns.length > 1 && (
-        <BulkColumnActions
-          modelName={modelName}
-          selectedColumns={selectedColumns}
-          columns={columns}
-          onClearSelection={clearColumnSelection}
-        />
-      )}
-
       {/* Column list */}
       <div className="column-editor__list">
         {columns.length === 0 && !isAddingColumn && (
-          <div className="column-editor__empty">No columns</div>
+          <div className="column-editor__empty">
+            <span className="column-editor__empty-icon"><IconTable size={18} /></span>
+            <span className="column-editor__empty-title">No columns{isEditable ? ' yet' : ''}</span>
+            {isEditable && (
+              <span className="column-editor__empty-hint">Add the first column to start shaping this table.</span>
+            )}
+          </div>
         )}
 
         {orderedColumns.map((col, idx) => (
@@ -354,18 +351,29 @@ export function ColumnEditor({ modelName, columns, readOnly, modelRole, fields, 
             onToggleExpand={() => {}}
           />
         )}
+
+        {/* The list's last row: add a column (any list the user can edit). */}
+        {isEditable && (
+          <button
+            className="column-editor__add-btn column-editor__add-btn--bottom"
+            onClick={handleAddColumn}
+            disabled={isAddingColumn}
+            title="Add column"
+          >
+            <IconPlus size={12} />
+            {columns.length === 0 ? 'Add the first column' : 'Add column'}
+          </button>
+        )}
       </div>
 
-      {/* Bottom "Add Column" button for longer lists */}
-      {isEditable && columns.length > 0 && (
-        <button
-          className="column-editor__add-btn column-editor__add-btn--bottom"
-          onClick={handleAddColumn}
-          disabled={isAddingColumn}
-          title="Add column"
-        >
-          + Add Column
-        </button>
+      {/* Bulk actions — shown when several columns are selected; floats at the foot of the panel while the list scrolls. */}
+      {isEditable && selectedColumns.length > 1 && (
+        <BulkColumnActions
+          modelName={modelName}
+          selectedColumns={selectedColumns}
+          columns={columns}
+          onClearSelection={clearColumnSelection}
+        />
       )}
     </div>
   );

@@ -26,6 +26,7 @@ import { useFirstOpenAutoLayout } from '../../hooks/useFirstOpenAutoLayout';
 import { useRevealRelationship } from '../../hooks/useRevealRelationship';
 import { useRevealTable } from '../../hooks/useRevealTable';
 import { otherProjectMatches, searchElsewhereLabel } from './searchElsewhere';
+import { searchRoom } from './searchRoom';
 import { GO_TO_TABLE_QUERY_MAX } from '../../../src/types/messages';
 import { layoutFailureSummary, type LayoutFallbackRung } from '../../../src/types/webviewError';
 import {
@@ -44,6 +45,10 @@ import {
   type LayoutOutcome,
 } from '../../lib/elkLayout';
 import { FIRST_OPEN_LAYOUT, buildLayoutOptions } from '../../lib/firstOpenLayout';
+import {
+  IconChevronDown, IconCompare, IconExport, IconFeedback, IconFile, IconFit, IconLayout, IconMarquee,
+  IconMinus, IconMore, IconPlus, IconRedo, IconRefresh, IconRelayout, IconUndo, IconView,
+} from './toolbarIcons';
 import { StageTabs } from './StageTabs';
 import { LineStyleSwitch } from './LineStyleSwitch';
 import { TableDetailSwitch } from './TableDetailSwitch';
@@ -60,6 +65,8 @@ import './Toolbar.css';
  * panels, so "touching" already reads as broken.
  */
 const CORNER_MIN_GAP = 16;
+/** Clearance the open search box keeps from the corner pill and the left edge. */
+const SEARCH_ROOM_GAP = 8;
 
 /** Why "+ Add → New Relationship" is greyed out on a diagram with no tables. */
 export const NO_TABLES_FOR_RELATIONSHIP = 'This diagram has no tables yet — add one first';
@@ -174,6 +181,11 @@ export function Toolbar({ nodes, edges }: ToolbarProps) {
   // breakpoint could only ever approximate that.
   const [cornerMenuOpen, setCornerMenuOpen] = useState(false);
   const [cornerCollapsed, setCornerCollapsed] = useState(false);
+  // On a narrow editor the view preferences (detail level, line style, select
+  // mode) fold behind one "View" button instead of wrapping the toolbar onto
+  // a second row: the same controls, shown in a popover (CSS decides when).
+  const [viewMenuOpen, setViewMenuOpen] = useState(false);
+  const viewIslandRef = useRef<HTMLDivElement>(null);
   const cornerMenuRef = useRef<HTMLDivElement>(null);
   /** The corner's own box, whose right edge is pinned to the canvas edge. */
   const cornerRef = useRef<HTMLDivElement>(null);
@@ -240,9 +252,25 @@ export function Toolbar({ nodes, edges }: ToolbarProps) {
         setLayoutOptionsOpen(false);
       }
     };
+    // Escape closes the popover without reaching the canvas shortcut handler
+    // (which would clear the selection behind it), and gives focus back to
+    // the caret when it was inside the popover.
+    const keyHandler = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      e.stopPropagation();
+      const group = layoutGroupRef.current;
+      if (group && group.contains(document.activeElement)) {
+        group.querySelector<HTMLButtonElement>('.toolbar__split-caret')?.focus();
+      }
+      setLayoutOptionsOpen(false);
+    };
     // Use capture phase so this fires before React Flow canvas handlers
     window.addEventListener('mousedown', handler, true);
-    return () => window.removeEventListener('mousedown', handler, true);
+    document.addEventListener('keydown', keyHandler, true);
+    return () => {
+      window.removeEventListener('mousedown', handler, true);
+      document.removeEventListener('keydown', keyHandler, true);
+    };
   }, [layoutOptionsOpen]);
 
   // --- Model dropdown click-outside handler --------------------------------
@@ -262,6 +290,17 @@ export function Toolbar({ nodes, edges }: ToolbarProps) {
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [modelDropdownOpen]);
+
+  useEffect(() => {
+    if (!viewMenuOpen) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (viewIslandRef.current && !viewIslandRef.current.contains(e.target as Node)) {
+        setViewMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [viewMenuOpen]);
 
   // --- Corner collapse: measured, not guessed -------------------------------
 
@@ -319,6 +358,56 @@ export function Toolbar({ nodes, edges }: ToolbarProps) {
       window.removeEventListener('resize', measureCorner);
     };
   }, [measureCorner, toolbarRendered]);
+
+  // --- Search room: how far the open search box may grow -------------------
+
+  /**
+   * On a narrow editor the centred row has little room either side, and the
+   * open search box (Toolbar.css, "Narrow editors") would push it under the
+   * corner pill and off the left edge. The room is published as
+   * `--toolbar-search-room` on the row; the CSS uses it only below 900px.
+   * `searchRoom` is the same whatever width the input has now, so a re-measure
+   * after it is applied does not change it (the 2px hysteresis absorbs
+   * sub-pixel noise), and nothing here runs on pointer movement.
+   */
+  const lastSearchRoomRef = useRef<number | null>(null);
+  const measureSearchRoom = useCallback(() => {
+    const row = toolbarRowRef.current;
+    const input = searchInputRef.current;
+    if (!row || !input) return;
+    const rowRect = row.getBoundingClientRect();
+    const inputWidth = input.getBoundingClientRect().width;
+    if (rowRect.width <= 0 || inputWidth <= 0) return;
+    const cornerRect = cornerRef.current?.getBoundingClientRect();
+    const room = searchRoom({
+      inputWidth,
+      rowLeft: rowRect.left,
+      rowRight: rowRect.right,
+      rightLimit: cornerRect && cornerRect.width > 0 ? cornerRect.left : window.innerWidth,
+      gap: SEARCH_ROOM_GAP,
+    });
+    const last = lastSearchRoomRef.current;
+    if (last !== null && Math.abs(room - last) < 2) return;
+    lastSearchRoomRef.current = room;
+    row.style.setProperty('--toolbar-search-room', `${room}px`);
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!toolbarRendered) return;
+    measureSearchRoom();
+    // The corner pill changes width when it collapses, without the row moving.
+    const observer =
+      typeof ResizeObserver !== 'undefined' ? new ResizeObserver(() => measureSearchRoom()) : null;
+    if (observer) {
+      if (toolbarRowRef.current) observer.observe(toolbarRowRef.current);
+      if (cornerRef.current) observer.observe(cornerRef.current);
+    }
+    window.addEventListener('resize', measureSearchRoom);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener('resize', measureSearchRoom);
+    };
+  }, [measureSearchRoom, toolbarRendered]);
 
   // An overflow menu left open behind an expansion would be a popup hanging off
   // a trigger that no longer exists.
@@ -667,8 +756,10 @@ export function Toolbar({ nodes, edges }: ToolbarProps) {
   return (
     <>
       <Panel position="top-center" className="toolbar-container">
-        {/* Row 1: Controls */}
+        {/* Row 1: Controls, as glass islands (identity, canvas, arrange, view,
+            actions), the way a macOS unified toolbar groups its items. */}
         <div className="toolbar toolbar--attached-bottom" ref={toolbarRowRef}>
+        <div className="toolbar__island toolbar__island--identity">
         {/* Domain info */}
         <div className="toolbar__section toolbar__domain">
           <span className="toolbar__domain-name">{domain.domain}</span>
@@ -693,10 +784,9 @@ export function Toolbar({ nodes, edges }: ToolbarProps) {
             </span>
           )}
         </div>
+        </div>
 
-        {/* Divider */}
-        <div className="toolbar__divider" />
-
+        <div className="toolbar__island toolbar__island--canvas">
         {/* Zoom controls */}
         <div className="toolbar__section toolbar__zoom">
           <button
@@ -705,7 +795,7 @@ export function Toolbar({ nodes, edges }: ToolbarProps) {
             title="Zoom out"
             aria-label="Zoom out"
           >
-            −
+            <IconMinus />
           </button>
           <span className="toolbar__zoom-level">{zoomPercent}%</span>
           <button
@@ -714,15 +804,15 @@ export function Toolbar({ nodes, edges }: ToolbarProps) {
             title="Zoom in"
             aria-label="Zoom in"
           >
-            +
+            <IconPlus />
           </button>
           <button
-            className="toolbar__button toolbar__button--text"
+            className="toolbar__button"
             onClick={handleFitView}
             title="Fit view to show all nodes"
             aria-label="Fit view to show all nodes"
           >
-            Fit
+            <IconFit />
           </button>
         </div>
 
@@ -737,7 +827,7 @@ export function Toolbar({ nodes, edges }: ToolbarProps) {
                 title="Undo (Ctrl+Z)"
                 aria-label="Undo"
               >
-                ↶
+                <IconUndo />
               </button>
               <button
                 className="toolbar__button"
@@ -745,15 +835,14 @@ export function Toolbar({ nodes, edges }: ToolbarProps) {
                 title="Redo (Ctrl+Shift+Z)"
                 aria-label="Redo"
               >
-                ↷
+                <IconRedo />
               </button>
             </div>
           </>
         )}
+        </div>
 
-        {/* Divider */}
-        <div className="toolbar__divider" />
-
+        <div className="toolbar__island toolbar__island--arrange">
         {/* Auto Layout + options + Refresh Manifest */}
         <div className="toolbar__section">
           <div className="toolbar__split-group" ref={layoutGroupRef} data-guide={GUIDE_TARGETS.canvasLayout}>
@@ -764,7 +853,8 @@ export function Toolbar({ nodes, edges }: ToolbarProps) {
               title={layoutDirty ? 'Options changed — click to re-run layout (Shift+L)' : 'Auto-layout all tables (Shift+L)'}
               aria-label="Auto-layout nodes"
             >
-              {isLayouting ? <span className="toolbar__spinner" /> : (layoutDirty ? '↺' : '⊞')} Layout
+              {isLayouting ? <span className="toolbar__spinner" /> : (layoutDirty ? <IconRelayout /> : <IconLayout />)}
+              <span className="toolbar__label">Layout</span>
             </button>
             <span className="toolbar__split-sep" aria-hidden="true" />
             <button
@@ -774,7 +864,7 @@ export function Toolbar({ nodes, edges }: ToolbarProps) {
               aria-label="Layout settings"
               aria-expanded={layoutOptionsOpen}
             >
-              ▾
+              <IconChevronDown size={12} />
             </button>
             {layoutOptionsOpen && (
               <div
@@ -918,13 +1008,21 @@ export function Toolbar({ nodes, edges }: ToolbarProps) {
               data-tooltip="Refresh"
               aria-label="Refresh manifest data"
             >
-              {isRefreshing ? <span className="toolbar__spinner" /> : '↻'}
+              {isRefreshing ? <span className="toolbar__spinner" /> : <IconRefresh />}
             </button>
           )}
         </div>
+        </div>
 
+        <div className={`toolbar__island toolbar__island--view${viewMenuOpen ? ' toolbar__island--view-open' : ''}`} ref={viewIslandRef}>
         {/* Search (F402) */}
         <div className="toolbar__section toolbar__search">
+          <span className="toolbar__search-icon" aria-hidden="true">
+            <svg viewBox="0 0 14 14" focusable="false">
+              <circle cx="6" cy="6" r="4.25" />
+              <path d="M9.25 9.25 L12.5 12.5" />
+            </svg>
+          </span>
           <input
             ref={searchInputRef}
             type="text"
@@ -952,9 +1050,22 @@ export function Toolbar({ nodes, edges }: ToolbarProps) {
           )}
         </div>
 
-        {/* Divider */}
-        <div className="toolbar__divider" />
-
+        {/* Narrow editor only: the view preferences fold behind this button. */}
+        <button
+          type="button"
+          className={`toolbar__button toolbar__view-toggle${viewMenuOpen ? ' toolbar__button--active' : ''}`}
+          onClick={() => setViewMenuOpen((open) => !open)}
+          title="View options: table detail, line style, select mode"
+          aria-label="View options"
+          aria-haspopup="true"
+          aria-expanded={viewMenuOpen}
+        >
+          <IconView />
+        </button>
+        <div
+          className="toolbar__view-group"
+          onKeyDown={(e) => { if (e.key === 'Escape' && viewMenuOpen) { e.stopPropagation(); setViewMenuOpen(false); } }}
+        >
         {/* Table detail level — a view preference, on every stage and read-only diagram too */}
         <div className="toolbar__section">
           <TableDetailSwitch />
@@ -975,15 +1086,18 @@ export function Toolbar({ nodes, edges }: ToolbarProps) {
               aria-label="Toggle select mode"
               aria-pressed={canvasMode === 'select'}
             >
-              ⬚
+              <IconMarquee />
             </button>
           </div>
         )}
+        </div>
+        </div>
 
+        {(discrepancyOptions.length > 0 || !isReadOnly) && (
+        <div className="toolbar__island toolbar__island--actions">
         {/* Discrepancy toggle */}
         {discrepancyOptions.length > 0 && (
           <>
-            <div className="toolbar__divider" />
             <div className="toolbar__section">
               <div className="toolbar__dropdown" ref={discrepancyDropdownRef}>
                 <button
@@ -1002,9 +1116,10 @@ export function Toolbar({ nodes, edges }: ToolbarProps) {
                   aria-haspopup={discrepancyOptions.length > 1 ? 'menu' : undefined}
                   aria-expanded={discrepancyDropdownOpen}
                 >
-                  {compareButtonWording(domain.stage, discrepancyVisible, discrepancyCompareStage).label}
+                  {!discrepancyVisible && <IconCompare />}
+                  <span className="toolbar__label">{compareButtonWording(domain.stage, discrepancyVisible, discrepancyCompareStage).label}</span>
                   {!discrepancyVisible && discrepancyOptions.length > 1 && (
-                    <span className="toolbar__dropdown-arrow">▾</span>
+                    <span className="toolbar__dropdown-arrow"><IconChevronDown size={11} /></span>
                   )}
                 </button>
                 {discrepancyDropdownOpen && !discrepancyVisible && (
@@ -1029,11 +1144,10 @@ export function Toolbar({ nodes, edges }: ToolbarProps) {
         {/* Add Dropdown — hidden in read-only mode */}
         {!isReadOnly && (
           <>
-            <div className="toolbar__divider" />
             <div className="toolbar__section">
               <div className="toolbar__dropdown" ref={modelDropdownRef}>
                 <button
-                  className="toolbar__dropdown-trigger"
+                  className="toolbar__dropdown-trigger toolbar__dropdown-trigger--primary"
                   data-guide={GUIDE_TARGETS.canvasAdd}
                   onClick={() => setModelDropdownOpen(!modelDropdownOpen)}
                   title="Add table or relationship"
@@ -1041,8 +1155,9 @@ export function Toolbar({ nodes, edges }: ToolbarProps) {
                   aria-haspopup="menu"
                   aria-expanded={modelDropdownOpen}
                 >
-                  + Add
-                  <span className="toolbar__dropdown-arrow">▾</span>
+                  <IconPlus size={14} />
+                  <span className="toolbar__label">Add</span>
+                  <span className="toolbar__dropdown-arrow"><IconChevronDown size={11} /></span>
                 </button>
                 {modelDropdownOpen && (
                   <div className="toolbar__dropdown-menu" role="menu">
@@ -1085,6 +1200,8 @@ export function Toolbar({ nodes, edges }: ToolbarProps) {
           </>
         )}
         </div>
+        )}
+        </div>
 
         {/* Row 2: Stage tabs (attached below toolbar) — a lone Logical tab says nothing */}
         {!logicalOnly && <StageTabs activeStage={domain.stage} readOnly={isReadOnly} />}
@@ -1108,7 +1225,7 @@ export function Toolbar({ nodes, edges }: ToolbarProps) {
                 aria-haspopup="menu"
                 aria-expanded={cornerMenuOpen}
               >
-                ⋯
+                <IconMore />
               </button>
               {cornerMenuOpen && (
                 <div className="toolbar__dropdown-menu toolbar__corner-list" role="menu">
@@ -1118,14 +1235,14 @@ export function Toolbar({ nodes, edges }: ToolbarProps) {
                     role="menuitem"
                     title={exportTitle}
                   >
-                    ⤓ Export as Mermaid or DBML…
+                    <span className="toolbar__glyph" aria-hidden="true"><IconExport /></span> Export as Mermaid or DBML…
                   </button>
                   <button
                     className="toolbar__dropdown-item"
                     onClick={handleSendFeedback}
                     role="menuitem"
                   >
-                    💬 Send feedback
+                    <span className="toolbar__glyph" aria-hidden="true"><IconFeedback /></span> Send feedback
                   </button>
                   <button
                     className="toolbar__dropdown-item"
@@ -1133,7 +1250,7 @@ export function Toolbar({ nodes, edges }: ToolbarProps) {
                     role="menuitem"
                     title="Open the diagram's file in a text editor"
                   >
-                    {'{ }'} Open file
+                    <span className="toolbar__glyph" aria-hidden="true"><IconFile /></span> Open file
                   </button>
                 </div>
               )}
@@ -1146,7 +1263,7 @@ export function Toolbar({ nodes, edges }: ToolbarProps) {
                 title={exportTitle}
                 aria-label="Export diagram as Mermaid or DBML"
               >
-                ⤓
+                <IconExport />
               </button>
               <button
                 className="toolbar__corner-button"
@@ -1154,7 +1271,7 @@ export function Toolbar({ nodes, edges }: ToolbarProps) {
                 title="Send feedback"
                 aria-label="Send feedback"
               >
-                💬 Feedback
+                <span className="toolbar__glyph" aria-hidden="true"><IconFeedback /></span> Feedback
               </button>
               <button
                 className="toolbar__corner-button"
@@ -1163,7 +1280,7 @@ export function Toolbar({ nodes, edges }: ToolbarProps) {
                 title="Open file"
                 aria-label="Open the diagram's file in a text editor"
               >
-                {'{ }'} View File
+                <span className="toolbar__glyph" aria-hidden="true"><IconFile /></span> View File
               </button>
             </>
           )}

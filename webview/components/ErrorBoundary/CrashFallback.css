@@ -1,87 +1,165 @@
-/* The crash screen (CrashFallback.tsx): fills the panel the crash left blank. Theme colours only. */
+/*
+ * The crash screen (CrashFallback.tsx): fills the panel the crash left blank
+ * with the canvas's own ambient wash, and puts the message in a raised glass
+ * card with a red warning badge. Shared by the canvas and the draft page,
+ * both of which load theme.css. Glass tokens only.
+ */
 
 .crash-fallback {
   position: fixed;
   inset: 0;
-  z-index: 2000;
+  z-index: var(--z-takeover);
 
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 16px;
+  padding: var(--space-6);
 
-  background: var(--editor-bg);
-  color: var(--editor-fg);
-  font-size: 13px;
+  background-color: var(--editor-bg);
+  background-image: var(--canvas-wash);
+  background-repeat: no-repeat;
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+  font-size: var(--text-md);
 }
 
 .crash-fallback__panel {
+  box-sizing: border-box;
   max-width: 440px;
-  padding: 20px 24px;
+  padding: var(--space-8);
 
-  background: var(--panel-bg);
-  border: 1px solid var(--panel-border);
-  border-left: 3px solid var(--error-fg);
-  border-radius: 6px;
+  background:
+    radial-gradient(110% 60% at 0% 0%, var(--glass-tint-error), transparent 70%),
+    var(--glass-surface-3);
+  -webkit-backdrop-filter: var(--glass-backdrop);
+  backdrop-filter: var(--glass-backdrop);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--glass-elevation-3);
+
+  animation: crash-fallback-rise var(--duration-slow) var(--ease-out);
+}
+
+@keyframes crash-fallback-rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .crash-fallback__panel {
+    animation: none;
+  }
+}
+
+.crash-fallback__icon {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  margin-bottom: var(--space-6);
+  border: 1px solid var(--glass-tint-error-edge);
+  border-radius: var(--radius-lg);
+  background: var(--glass-tint-error);
+  box-shadow: var(--glass-highlight);
+  color: var(--error-fg);
+}
+
+.crash-fallback__icon svg {
+  display: block;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .crash-fallback__title {
-  margin: 0 0 8px;
-  font-size: 15px;
-  font-weight: 600;
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-tight);
+  line-height: var(--leading-tight);
 }
 
 .crash-fallback__body {
-  margin: 0 0 12px;
-  line-height: 1.5;
+  margin: 0 0 var(--space-4);
+  color: var(--text-secondary);
+  line-height: var(--leading-normal);
 }
 
 .crash-fallback__actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 16px;
+  gap: var(--space-4);
+  margin-top: var(--space-7);
 }
 
 .crash-fallback__button {
-  padding: 6px 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--control-height-lg);
+  padding: 0 var(--space-6);
 
-  background: var(--button-bg);
-  color: var(--button-fg);
-  border: 1px solid transparent;
-  border-radius: 3px;
+  background: var(--accent);
+  color: var(--text-on-accent);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-pill);
+  box-shadow: var(--glass-highlight);
 
-  font-size: 13px;
-  font-weight: 500;
+  font-family: inherit;
+  font-size: var(--text-md);
+  font-weight: var(--weight-medium);
   cursor: pointer;
+
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
+    transform var(--duration-instant) var(--ease-standard);
 }
 
 .crash-fallback__button:hover:not(:disabled) {
-  background: var(--button-hover-bg);
+  background: var(--accent-hover);
+}
+
+.crash-fallback__button:active:not(:disabled) {
+  transform: scale(0.97);
 }
 
 .crash-fallback__button:focus-visible {
-  outline: 1px solid var(--focus-border);
-  outline-offset: 1px;
+  outline: var(--focus-outline);
+  outline-offset: var(--focus-offset);
 }
 
 .crash-fallback__button:disabled {
   cursor: default;
-  opacity: 0.6;
+  opacity: 0.55;
 }
 
 .crash-fallback__button--secondary {
-  background: transparent;
-  color: var(--editor-fg);
-  border-color: var(--panel-border);
+  background: var(--control-fill);
+  color: var(--text-primary);
+  border-color: var(--glass-border);
+  box-shadow: none;
 }
 
 .crash-fallback__button--secondary:hover:not(:disabled) {
-  background: var(--selection-bg);
+  background: var(--control-fill-hover);
+  border-color: var(--glass-border-strong);
 }
 
 .crash-fallback__hint {
-  margin: 12px 0 0;
-  line-height: 1.5;
-  color: var(--dim-fg);
+  margin: var(--space-6) 0 0;
+  padding: var(--space-4) var(--space-5);
+  border-radius: var(--radius-md);
+  background: var(--glass-well);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
 }

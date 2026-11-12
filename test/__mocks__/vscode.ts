@@ -305,6 +305,7 @@ export const window = {
   registerTreeDataProvider: () => ({ dispose: () => {} }),
   registerCustomEditorProvider: () => ({ dispose: () => {} }),
   registerFileDecorationProvider: () => ({ dispose: () => {} }),
+  registerWebviewViewProvider: (_viewId?: string, _provider?: unknown, _options?: unknown) => ({ dispose: () => {} }),
   createTreeView: (_viewId?: string, _options?: unknown) => ({ dispose: () => {} }),
   createStatusBarItem: (_alignment?: unknown, _priority?: number): MockStatusBarItem => ({
     text: '',

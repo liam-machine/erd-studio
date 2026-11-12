@@ -1,20 +1,62 @@
 /**
- * DetailPanel styles.
+ * DetailPanel styles — the floating glass inspector.
  *
- * Floating detail view at top-right. Uses VS Code theme tokens from
- * webview/styles/theme.css for consistent light/dark theme support.
- * Follows BEM naming and matches Toolbar/ModelNode patterns.
+ * A raised glass sheet at the top right (the editor's shell in theme.css
+ * places it under the corner cluster and makes it a tall sheet). Inside: a
+ * sticky header that turns to material once content scrolls under it, then
+ * quiet, titled sections with grouped inset cards (label left, value right),
+ * and as few lines as possible: space and alignment do the separating.
+ *
+ * Colours come only from the theme tokens (packages/renderer/src/styles/
+ * theme.css); light, high-contrast and reduced-transparency variants come
+ * from the tokens, never from rules here. BEM naming.
  */
 
 .detail-panel {
   width: 340px;
   max-height: calc(100vh - 100px);
   overflow-y: auto;
-  background: var(--panel-bg);
-  border: 1px solid var(--panel-border);
-  border-radius: 6px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
-  font-size: 12px;
+  /* Local scale */
+  --dp-gutter: var(--space-6);
+  --dp-row-height: 34px;
+  --dp-card-bg: var(--glass-well);
+  --dp-card-border: var(--glass-divider);
+  /* Raised glass */
+  background: var(--glass-surface-3);
+  -webkit-backdrop-filter: var(--glass-backdrop);
+  backdrop-filter: var(--glass-backdrop);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--glass-elevation-3);
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--glass-scrollbar) transparent;
+}
+
+/* Breathing room under the last section. */
+.detail-panel::after {
+  content: '';
+  display: block;
+  height: var(--space-6);
+}
+
+.detail-panel::-webkit-scrollbar {
+  width: 10px;
+}
+
+.detail-panel::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.detail-panel::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: var(--radius-pill);
+  background: var(--glass-scrollbar);
+  background-clip: padding-box;
 }
 
 /*
@@ -34,178 +76,344 @@
 .detail-panel--viewer .detail-panel__value {
   min-width: 0;
   overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 /* ---------------------------------------------------------------------------
-   Header
+   Header: name, chips, jump bar. Sticky; clear at the top, material (with
+   a hairline) once something has scrolled under it.
    --------------------------------------------------------------------------- */
 
 .detail-panel__header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--panel-border);
-  background: var(--panel-bg);
   position: sticky;
   top: 0;
-  z-index: 1;
+  z-index: 2;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: var(--space-1);
+  row-gap: var(--space-3);
+  padding: var(--space-6) var(--space-5) var(--space-5) var(--dp-gutter);
+  border-bottom: 1px solid transparent;
+  background: transparent;
+  transition:
+    background-color var(--duration-base) var(--ease-standard),
+    border-color var(--duration-base) var(--ease-standard);
+}
+
+/* Nearly opaque, with the full blur, so rows scrolling under the title and
+   the jump bar never read through as crisp text. */
+.detail-panel__header--scrolled {
+  background: color-mix(in srgb, var(--glass-surface-solid) 94%, transparent);
+  -webkit-backdrop-filter: var(--glass-backdrop);
+  backdrop-filter: var(--glass-backdrop);
+  border-bottom-color: var(--glass-divider);
+  box-shadow: var(--glass-shadow-sm);
 }
 
 .detail-panel__title {
+  flex: 1 1 0;
+  min-width: 0;
   margin: 0;
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--editor-fg);
+  padding: var(--space-1) 0;
   overflow: hidden;
+  color: var(--text-primary);
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-tight);
+  line-height: var(--leading-tight);
   text-overflow: ellipsis;
   white-space: nowrap;
-  flex: 1;
-  min-width: 0;
 }
 
 .detail-panel__title--editable {
-  cursor: pointer;
-}
-
-.detail-panel__title--editable:hover {
-  text-decoration: underline;
-  text-decoration-style: dotted;
-  text-underline-offset: 3px;
-}
-
-.detail-panel__title-input {
-  flex: 1;
-  min-width: 0;
-  margin: 0;
-  padding: 2px 6px;
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--editor-fg);
-  background: var(--input-bg, var(--vscode-input-background, #3c3c3c));
-  border: 1px solid var(--focus-border, var(--vscode-focusBorder, #007fd4));
-  border-radius: 3px;
-  outline: none;
-  font-family: inherit;
+  cursor: text;
 }
 
 .detail-panel__title-edit {
-  flex: 1;
+  flex: 1 1 0;
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: var(--space-2);
+}
+
+.detail-panel__title-input {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  height: var(--control-height);
+  margin: 0;
+  padding: 0 var(--space-4);
+  border: 1px solid var(--glass-input-border-focus);
+  border-radius: var(--radius-md);
+  background: var(--glass-input-bg);
+  box-shadow: var(--focus-halo);
+  color: var(--input-fg);
+  font-family: inherit;
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-tight);
+  outline: none;
 }
 
 .detail-panel__title-input--error {
-  border-color: var(--vscode-errorForeground, #f48771);
+  border-color: var(--error-fg);
+  box-shadow: 0 0 0 3px var(--glass-tint-error);
 }
 
 .detail-panel__title-error {
-  font-size: 10px;
-  color: var(--vscode-errorForeground, #f48771);
-  line-height: 1.2;
+  padding-left: var(--space-1);
+  color: var(--error-fg);
+  font-size: var(--text-xs);
+  line-height: var(--leading-tight);
+}
+
+/* Header icon buttons: the rename pencil (on hover or focus) and the close circle. */
+.detail-panel__title-edit-btn,
+.detail-panel__close {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--control-border);
+  background: transparent;
+  color: var(--text-tertiary);
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard),
+    opacity var(--duration-fast) var(--ease-standard),
+    transform var(--duration-instant) var(--ease-standard);
 }
 
 .detail-panel__title-edit-btn {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  padding: 0;
-  border: none;
-  border-radius: 3px;
-  background: transparent;
-  color: var(--vscode-descriptionForeground, #888);
-  font-size: 13px;
-  line-height: 1;
-  cursor: pointer;
+  border-radius: var(--radius-md);
   opacity: 0;
-  transition: opacity 0.15s ease, background 0.1s ease, color 0.1s ease;
 }
 
-.detail-panel__header:hover .detail-panel__title-edit-btn {
+.detail-panel__header:hover .detail-panel__title-edit-btn,
+.detail-panel__title-edit-btn:focus-visible {
   opacity: 1;
 }
 
-.detail-panel__title-edit-btn:hover {
-  background: var(--button-bg);
-  color: var(--button-fg);
-}
-
 .detail-panel__close {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  border: none;
-  border-radius: 4px;
-  background: transparent;
-  color: var(--editor-fg);
-  font-size: 18px;
-  line-height: 1;
-  cursor: pointer;
-  transition: background 0.1s ease, color 0.1s ease;
+  border-radius: var(--radius-pill);
+  background: var(--control-fill);
+  color: var(--text-secondary);
 }
 
+.detail-panel__title-edit-btn:hover,
 .detail-panel__close:hover {
-  background: var(--button-bg);
-  color: var(--button-fg);
+  background: var(--control-fill-hover);
+  border-color: var(--control-border-hover);
+  color: var(--text-primary);
+}
+
+.detail-panel__title-edit-btn:active,
+.detail-panel__close:active {
+  background: var(--control-fill-active);
+  transform: scale(0.94);
+}
+
+.detail-panel__title-edit-btn:focus-visible,
+.detail-panel__close:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: var(--focus-offset);
+}
+
+/* Chips under the name: stage, layer, role, read-only. */
+.detail-panel__chips {
+  flex-basis: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.detail-panel__chip {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  height: 20px;
+  padding: 0 var(--space-4);
+  overflow: hidden;
+  border: 1px solid var(--glass-divider);
+  border-radius: var(--radius-pill);
+  background: var(--control-fill);
+  color: var(--text-secondary);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-medium);
+  line-height: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Stage text mixed toward the text colour: darker on light themes, lighter
+   on dark ones, so it clears 4.5:1 on its own tint either way. */
+.detail-panel__chip--logical {
+  border-color: var(--glass-tint-logical-edge);
+  background: var(--glass-tint-logical);
+  color: color-mix(in srgb, var(--stage-logical) 55%, var(--text-primary));
+}
+
+.detail-panel__chip--physical {
+  border-color: var(--glass-tint-physical-edge);
+  background: var(--glass-tint-physical);
+  color: color-mix(in srgb, var(--stage-physical) 55%, var(--text-primary));
+}
+
+.detail-panel__chip--muted {
+  background: transparent;
+  color: var(--text-secondary);
+}
+
+/* The jump bar: a segmented control whose thumb follows the scroll. */
+.detail-panel__nav {
+  flex-basis: 100%;
+  display: flex;
+  gap: var(--space-1);
+  min-width: 0;
+  margin-top: var(--space-1);
+  margin-right: var(--space-1);
+  padding: var(--space-1);
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-md);
+  background: var(--control-fill);
+}
+
+.detail-panel__nav-item {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: var(--control-height-sm);
+  padding: 0 var(--space-3);
+  overflow: hidden;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  line-height: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color var(--duration-base) var(--ease-standard),
+    box-shadow var(--duration-base) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard);
+}
+
+.detail-panel__nav-item:hover {
+  color: var(--text-primary);
+  border-color: var(--control-border-hover);
+}
+
+.detail-panel__nav-item--active {
+  background: var(--control-thumb);
+  box-shadow: var(--control-thumb-shadow);
+  color: var(--text-primary);
+}
+
+.detail-panel__nav-item:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: 0;
 }
 
 /* ---------------------------------------------------------------------------
-   Sections
+   Sections: space, not lines, between them.
    --------------------------------------------------------------------------- */
 
 .detail-panel__section {
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--panel-border);
+  margin-top: var(--space-7);
+  padding: 0 var(--dp-gutter);
 }
 
-.detail-panel__section:last-child {
-  border-bottom: none;
+/* The editor's sections rise in once as the sheet opens. The viewer
+   (read-only embed) keeps its panel static: no entrance there.
+   backwards, not both: once it has run nothing is left on the section (an
+   animated opacity or transform would cut the bulk bar's blur off). */
+.detail-panel:not(.detail-panel--viewer) .detail-panel__section {
+  animation: detail-panel-rise var(--duration-slow) var(--ease-out) backwards;
+}
+
+.detail-panel__header + .detail-panel__section {
+  margin-top: var(--space-2);
+}
+
+.detail-panel:not(.detail-panel--viewer) .detail-panel__section:nth-of-type(3) { animation-delay: 30ms; }
+.detail-panel:not(.detail-panel--viewer) .detail-panel__section:nth-of-type(4) { animation-delay: 60ms; }
+.detail-panel:not(.detail-panel--viewer) .detail-panel__section:nth-of-type(n + 5) { animation-delay: 90ms; }
+
+@keyframes detail-panel-rise {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .detail-panel:not(.detail-panel--viewer) .detail-panel__section {
+    animation: none;
+  }
 }
 
 .detail-panel__section-title {
-  margin: 0 0 8px 0;
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  color: var(--vscode-descriptionForeground, #888);
+  margin: 0 0 var(--space-3);
+  padding: 0 var(--space-1);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-normal);
+  line-height: var(--leading-tight);
+  text-transform: none;
+}
+
+.detail-panel__section-title--details {
+  margin-top: var(--space-6);
+}
+
+.detail-panel__section-title--details:first-child {
+  margin-top: 0;
 }
 
 /* ---------------------------------------------------------------------------
-   Metadata
+   Details: a grouped card of label / value rows
    --------------------------------------------------------------------------- */
 
 .detail-panel__metadata {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  padding: 0 var(--space-5);
+  border: 1px solid var(--dp-card-border);
+  border-radius: var(--radius-lg);
+  background: var(--dp-card-bg);
 }
 
 .detail-panel__metadata-row {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-4);
+  min-height: var(--dp-row-height);
+  padding: var(--space-3) 0;
+  box-sizing: border-box;
+}
+
+.detail-panel__metadata-row + .detail-panel__metadata-row {
+  border-top: 1px solid var(--glass-divider);
 }
 
 .detail-panel__label {
-  font-weight: 500;
-  color: var(--vscode-descriptionForeground, #888);
+  flex-shrink: 0;
   min-width: 50px;
-}
-
-.detail-panel__value {
-  color: var(--editor-fg);
-  font-family: var(--vscode-editor-font-family, monospace);
-  font-size: 11px;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-regular);
 }
 
 /* "Columns from" does not fit the 50px reserved for "Schema". */
@@ -213,295 +421,560 @@
   min-width: 84px;
 }
 
+.detail-panel__value {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* Table name (alias). A model with no alias is built under its own name,
    which is shown dimmed so it does not read as a value someone set. */
 .detail-panel__value--muted {
-  color: var(--dim-fg);
+  color: var(--text-secondary);
+}
+
+/* Provenance (and the reviewers) are prose, not identifiers: the UI face, wrapping. */
+.detail-panel__value--provenance {
+  font-family: inherit;
+  color: var(--text-secondary);
+  line-height: var(--leading-tight);
+  white-space: normal;
+}
+
+.detail-panel__file-path {
+  direction: ltr;
+}
+
+/* Warehouse name: the pencil floats over the row's trailing edge, so the
+   value lines up flush right with every other row; on hover the value slides
+   left to make room. Editing turns the value into an input. */
+.detail-panel__metadata-row--alias {
+  position: relative;
+}
+
+.detail-panel__metadata-row--alias .detail-panel__value {
+  transition: padding-right var(--duration-fast) var(--ease-standard);
 }
 
 .detail-panel__metadata-row--alias .detail-panel__alias-edit-btn {
-  width: 18px;
-  height: 18px;
-  font-size: 11px;
+  position: absolute;
+  top: 50%;
+  right: calc(-1 * var(--space-2));
+  translate: 0 -50%;
+  width: 22px;
+  height: 22px;
 }
 
-.detail-panel__metadata-row--alias:hover .detail-panel__alias-edit-btn {
-  opacity: 1;
+.detail-panel__metadata-row--alias:hover .detail-panel__value,
+.detail-panel__metadata-row--alias:focus-within .detail-panel__value {
+  padding-right: 22px;
+}
+
+.detail-panel__metadata-row--editing {
+  align-items: flex-start;
+}
+
+.detail-panel__metadata-row--editing .detail-panel__label {
+  line-height: var(--control-height);
 }
 
 .detail-panel__alias-edit {
   display: flex;
   flex: 1;
   flex-direction: column;
-  gap: 3px;
+  gap: var(--space-2);
   min-width: 0;
 }
 
 .detail-panel__alias-input {
-  padding: 2px 6px;
-  font-family: var(--vscode-editor-font-family, monospace);
-  font-size: 11px;
-  color: var(--input-fg, var(--editor-fg));
-  background: var(--input-bg);
-  border: 1px solid var(--focus-border);
-  border-radius: 3px;
+  box-sizing: border-box;
+  width: 100%;
+  height: var(--control-height);
+  padding: 0 var(--space-4);
+  border: 1px solid var(--glass-input-border-focus);
+  border-radius: var(--radius-md);
+  background: var(--glass-input-bg);
+  box-shadow: var(--focus-halo);
+  color: var(--input-fg);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
   outline: none;
 }
 
 .detail-panel__alias-input--error {
   border-color: var(--error-fg);
+  box-shadow: 0 0 0 3px var(--glass-tint-error);
 }
 
 .detail-panel__alias-hint {
-  font-size: 10px;
-  line-height: 1.3;
-  color: var(--dim-fg);
+  color: var(--text-secondary);
+  font-size: var(--text-2xs);
+  line-height: var(--leading-tight);
 }
 
 .detail-panel__alias-hint--error {
   color: var(--error-fg);
 }
 
-/* Provenance is prose, not an identifier — the monospace face of a value makes
-   it read as a schema name. */
-.detail-panel__value--provenance {
-  font-family: inherit;
-  color: var(--dim-fg);
-}
-
-.detail-panel__status-badge {
-  padding: 2px 6px;
-  border-radius: 3px;
-  font-size: 10px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
-.detail-panel__status-badge--built {
-  background: var(--model-built-bg);
-  color: var(--model-built);
-}
-
-.detail-panel__status-badge--design {
-  background: var(--model-design-bg);
-  color: var(--model-design);
-}
-
-.detail-panel__status-badge--missing {
-  background: var(--model-missing-bg);
-  color: var(--model-missing);
-}
-
-.detail-panel__status-badge--approved {
-  background: var(--model-approved-bg);
-  color: var(--model-approved);
-}
-
-/* Approve/Unapprove button in metadata row */
-.detail-panel__approve-btn {
-  margin-left: auto;
-  padding: 2px 8px;
-  border: 1px solid var(--model-approved);
-  border-radius: 3px;
-  background: transparent;
-  color: var(--model-approved);
-  font-size: 10px;
-  font-weight: 500;
+/* File: "Open" in the editor. */
+.detail-panel__file-open,
+.detail-panel__off-add,
+.detail-panel__off-add-all {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 22px;
+  padding: 0 var(--space-4);
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-pill);
+  background: var(--control-fill);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  line-height: 1;
+  white-space: nowrap;
   cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease;
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
+    transform var(--duration-instant) var(--ease-standard);
 }
 
-.detail-panel__approve-btn:hover {
-  background: var(--model-approved);
-  color: var(--model-approved-text, #fff);
+.detail-panel__file-open:hover,
+.detail-panel__off-add:hover,
+.detail-panel__off-add-all:hover {
+  background: var(--control-fill-hover);
+  border-color: var(--control-border-hover);
 }
 
-.detail-panel__approve-btn--unapprove {
-  border-color: var(--model-design);
-  color: var(--model-design);
+.detail-panel__file-open:active,
+.detail-panel__off-add:active,
+.detail-panel__off-add-all:active {
+  background: var(--control-fill-active);
+  transform: scale(0.96);
 }
 
-.detail-panel__approve-btn--unapprove:hover {
-  background: var(--model-design);
-  color: var(--model-design-text, #fff);
+.detail-panel__file-open:focus-visible,
+.detail-panel__off-add:focus-visible,
+.detail-panel__off-add-all:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: var(--focus-offset);
+}
+
+.detail-panel__file-open .panel-icon {
+  color: var(--text-secondary);
+}
+
+/* ---------------------------------------------------------------------------
+   Description (and the text editors the Fields section shares)
+   --------------------------------------------------------------------------- */
+
+.detail-panel__description-section {
+  display: flex;
+  flex-direction: column;
+}
+
+.detail-panel__rationale-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-height: 22px;
+  margin-bottom: var(--space-3);
+}
+
+.detail-panel__rationale-header .detail-panel__section-title {
+  margin: 0;
+}
+
+/* Pencils: quiet until their row is hovered or they have keyboard focus. */
+.detail-panel__rationale-edit-btn {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-tertiary);
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  transition:
+    opacity var(--duration-fast) var(--ease-standard),
+    background-color var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard);
+}
+
+.detail-panel__metadata-row:hover .detail-panel__rationale-edit-btn,
+.detail-panel__description-section:hover .detail-panel__rationale-edit-btn,
+.detail-panel__rationale-edit-btn:focus-visible {
+  opacity: 1;
+}
+
+.detail-panel__rationale-edit-btn:hover {
+  background: var(--control-fill-hover);
+  border-color: var(--control-border-hover);
+  color: var(--text-primary);
+}
+
+.detail-panel__rationale-edit-btn:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: 1px;
+}
+
+@media (hover: none) {
+  .detail-panel__rationale-edit-btn,
+  .detail-panel__title-edit-btn {
+    opacity: 1;
+  }
+}
+
+.detail-panel__rationale-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+/* The description itself: body text in an inset card. */
+.detail-panel__description-card,
+.detail-panel__description {
+  padding: var(--space-4) var(--space-5);
+  border: 1px solid var(--dp-card-border);
+  border-radius: var(--radius-lg);
+  background: var(--dp-card-bg);
 }
 
 .detail-panel__description {
-  margin: 8px 0 0 0;
-  color: var(--editor-fg);
-  line-height: 1.5;
-  font-size: 11px;
+  margin: 0 0 var(--space-1);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.detail-panel__rationale-text {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.detail-panel__rationale-textarea {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 64px;
+  padding: var(--space-4) var(--space-5);
+  border: 1px solid var(--glass-input-border);
+  border-radius: var(--radius-lg);
+  background: var(--glass-input-bg);
+  color: var(--input-fg);
+  font-family: inherit;
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
+  resize: vertical;
+  outline: none;
+  transition:
+    border-color var(--duration-fast) var(--ease-standard),
+    box-shadow var(--duration-fast) var(--ease-standard);
+}
+
+.detail-panel__rationale-textarea:focus {
+  border-color: var(--glass-input-border-focus);
+  box-shadow: var(--focus-halo);
+}
+
+.detail-panel__rationale-textarea::placeholder {
+  color: var(--text-tertiary);
+}
+
+.detail-panel__rationale-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+}
+
+/* "Add a description" and "+ Add field": a quiet row that invites, never shouts. */
+.detail-panel__rationale-add-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: var(--control-height);
+  padding: 0 var(--space-5);
+  border: 1px solid var(--dp-card-border, var(--glass-divider));
+  border-radius: var(--radius-lg);
+  background: var(--dp-card-bg, var(--glass-well));
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: var(--text-sm);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard);
+}
+
+.detail-panel__rationale-add-btn:hover {
+  background: var(--glass-tint-ai);
+  border-color: color-mix(in srgb, var(--ai-fg) 40%, transparent);
+  color: var(--ai-fg);
+}
+
+.detail-panel__rationale-add-btn:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: var(--focus-offset);
+}
+
+.detail-panel__description-add {
+  width: 100%;
+  min-height: 40px;
 }
 
 /* ---------------------------------------------------------------------------
-   Columns
+   Buttons: neutral glass controls; a primary accent fill for Save / Add.
    --------------------------------------------------------------------------- */
 
-.detail-panel__columns {
+.detail-panel__button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  min-height: var(--control-height);
+  padding: 0 var(--space-5);
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-md);
+  background: var(--control-fill);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  cursor: pointer;
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard),
+    transform var(--duration-instant) var(--ease-standard);
+}
+
+.detail-panel__button:hover {
+  background: var(--control-fill-hover);
+  border-color: var(--control-border-hover);
+}
+
+.detail-panel__button:active {
+  background: var(--control-fill-active);
+  transform: scale(0.97);
+}
+
+.detail-panel__button:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: var(--focus-offset);
+}
+
+.detail-panel__button--primary {
+  border-color: var(--glass-border);
+  background: var(--accent);
+  color: var(--text-on-accent);
+}
+
+.detail-panel__button--primary:hover {
+  background: var(--accent-hover);
+  border-color: var(--control-border-hover);
+}
+
+.detail-panel__button--primary:active {
+  background: var(--accent);
+}
+
+/* Remove from Diagram: the destructive action, last, full width and calm until hovered. */
+.detail-panel__section--actions {
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  gap: var(--space-4);
 }
 
-.detail-panel__column {
+.detail-panel__button--danger {
+  align-self: stretch;
+  min-height: var(--dp-row-height);
+  border-color: var(--dp-card-border);
+  border-radius: var(--radius-lg);
+  background: var(--dp-card-bg);
+  color: var(--error-fg);
+}
+
+.detail-panel__button--danger:hover {
+  background: var(--glass-tint-error);
+  border-color: var(--glass-tint-error-edge);
+  color: var(--error-fg);
+}
+
+/* Asking "Remove … from this diagram?": the section becomes a tinted card. */
+.detail-panel__section--actions:has(> .detail-panel__confirm-label) {
+  margin-left: var(--dp-gutter);
+  margin-right: var(--dp-gutter);
+  padding: var(--space-5);
+  border: 1px solid var(--glass-tint-error-edge);
+  border-radius: var(--radius-lg);
+  background: linear-gradient(var(--glass-tint-error), var(--glass-tint-error)), var(--dp-card-bg);
+}
+
+.detail-panel__confirm-label {
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
+}
+
+.detail-panel__confirm-actions {
   display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 6px;
-  border-radius: 3px;
-  line-height: 1.4;
+  gap: var(--space-3);
 }
 
-.detail-panel__column--built {
-  background: rgba(34, 197, 94, 0.08);
-}
-
-.detail-panel__column--built:hover {
-  background: rgba(34, 197, 94, 0.15);
-}
-
-.detail-panel__column--planned,
-.detail-panel__column--missing {
-  background: rgba(249, 115, 22, 0.1);
-}
-
-.detail-panel__column--planned:hover,
-.detail-panel__column--missing:hover {
-  background: rgba(249, 115, 22, 0.18);
-}
-
-.detail-panel__col-indicators {
-  display: flex;
-  gap: 2px;
-  flex-shrink: 0;
-  min-width: 36px;
-}
-
-.detail-panel__pk,
-.detail-panel__fk {
-  display: inline-block;
-  padding: 0 3px;
-  border-radius: 2px;
-  font-size: 9px;
-  font-weight: 700;
-  line-height: 1.5;
-  letter-spacing: 0.3px;
-}
-
-.detail-panel__pk {
-  background: rgba(234, 179, 8, 0.2);
-  color: #ca8a04;
-}
-
-.detail-panel__fk {
-  background: rgba(59, 130, 246, 0.2);
-  color: #3b82f6;
-}
-
-.detail-panel__col-name {
+.detail-panel__confirm-actions .detail-panel__button {
   flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--editor-fg);
+  min-height: var(--control-height);
+  border-radius: var(--radius-md);
 }
 
-.detail-panel__col-type {
-  flex-shrink: 0;
-  color: var(--vscode-descriptionForeground, #888);
-  font-size: 11px;
-  font-family: var(--vscode-editor-font-family, monospace);
+.detail-panel__confirm-actions .detail-panel__button--danger {
+  border-color: var(--glass-tint-error-edge);
+  background: color-mix(in srgb, var(--error-fg) 22%, transparent);
+  color: var(--error-fg);
+  font-weight: var(--weight-semibold);
 }
 
-.detail-panel__empty {
-  padding: 8px 6px;
-  color: var(--vscode-descriptionForeground, #888);
-  font-style: italic;
-  text-align: center;
+.detail-panel__confirm-actions .detail-panel__button--danger:hover {
+  background: color-mix(in srgb, var(--error-fg) 32%, transparent);
+  border-color: var(--error-fg);
 }
 
 /* ---------------------------------------------------------------------------
-   Relationships
+   Relationships: a grouped list of rows
    --------------------------------------------------------------------------- */
 
 .detail-panel__relationships {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--space-1);
+  padding: var(--space-2);
+  border: 1px solid var(--dp-card-border);
+  border-radius: var(--radius-lg);
+  background: var(--dp-card-bg);
 }
 
 .detail-panel__relationship {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 5px 6px;
-  border-radius: 3px;
-  line-height: 1.4;
-  font-size: 11px;
-}
-
-.detail-panel__relationship--built {
-  background: rgba(59, 130, 246, 0.08);
-}
-
-.detail-panel__relationship--approved {
-  background: rgba(20, 184, 166, 0.1);
-}
-
-.detail-panel__relationship--design {
-  background: rgba(249, 115, 22, 0.1);
+  gap: var(--space-4);
+  min-height: 32px;
+  padding: var(--space-2) var(--space-3) var(--space-2) var(--space-2);
+  box-sizing: border-box;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  font-size: var(--text-xs);
+  line-height: var(--leading-tight);
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard);
 }
 
 .detail-panel__relationship--clickable {
   cursor: pointer;
-  transition: background 0.1s ease;
 }
 
 .detail-panel__relationship--clickable:hover {
-  background: rgba(128, 128, 128, 0.2);
+  background: var(--control-fill-hover);
+  border-color: var(--control-border-hover);
 }
 
-.detail-panel__relationship--clickable:focus {
-  outline: 1px solid var(--focus-border);
-  outline-offset: -1px;
+.detail-panel__relationship--clickable:active {
+  background: var(--control-fill-active);
 }
 
+.detail-panel__relationship--clickable:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: -2px;
+}
+
+/* The direction: a small round badge (→ outgoing, ← incoming, ↻ self). */
 .detail-panel__rel-direction {
   flex-shrink: 0;
-  font-weight: 700;
-  font-size: 12px;
-  width: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius-pill);
+  background: var(--glass-tint-logical);
+  color: var(--stage-logical);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  line-height: 1;
   text-align: center;
-  color: var(--vscode-descriptionForeground, #888);
+}
+
+.detail-panel__rel-direction--in {
+  background: var(--control-fill);
+  color: var(--text-secondary);
 }
 
 .detail-panel__rel-columns {
   flex: 1;
   display: flex;
   align-items: center;
-  gap: 4px;
-  overflow: hidden;
+  gap: var(--space-2);
   min-width: 0;
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+/* The editor's row: when "from → to" does not fit on one line, the "to"
+   end drops to a second line (the arrow stays at the end of the first), so
+   neither name is cut short; a single name too long for the row is cut. */
+.detail-panel__relationship--clickable .detail-panel__rel-columns {
+  flex-wrap: wrap;
+  row-gap: var(--space-1);
+  padding: var(--space-1) 0;
+}
+
+.detail-panel__relationship--clickable .detail-panel__rel-local,
+.detail-panel__relationship--clickable .detail-panel__rel-target {
+  max-width: 100%;
 }
 
 .detail-panel__rel-local {
-  font-weight: 600;
-  color: var(--editor-fg);
-  white-space: nowrap;
   overflow: hidden;
+  color: var(--text-primary);
+  font-weight: var(--weight-medium);
   text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .detail-panel__rel-arrow {
-  color: var(--vscode-descriptionForeground, #888);
   flex-shrink: 0;
+  color: var(--text-secondary);
 }
 
 .detail-panel__rel-target {
-  color: var(--editor-fg);
-  font-family: var(--vscode-editor-font-family, monospace);
   overflow: hidden;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -516,10 +989,12 @@
  */
 .detail-panel__relationship--wrap {
   display: grid;
-  grid-template-columns: 16px minmax(0, 1fr);
-  column-gap: 6px;
-  row-gap: 2px;
+  grid-template-columns: 22px minmax(0, 1fr);
+  column-gap: var(--space-4);
+  row-gap: var(--space-1);
   align-items: start;
+  padding-top: var(--space-3);
+  padding-bottom: var(--space-3);
 }
 
 .detail-panel__relationship--wrap .detail-panel__rel-cardinality {
@@ -529,7 +1004,8 @@
 
 .detail-panel__relationship--wrap .detail-panel__rel-columns {
   flex-wrap: wrap;
-  row-gap: 1px;
+  row-gap: var(--space-1);
+  margin-top: 3px;
   overflow: visible;
 }
 
@@ -542,351 +1018,102 @@
   overflow-wrap: anywhere;
 }
 
-.detail-panel__relationship--wrap .detail-panel__rel-direction,
-.detail-panel__relationship--wrap .detail-panel__rel-cardinality {
-  margin-top: 1px;
-}
-
 /* The relationship's role (`ship date`), as the line's label reads. */
 .detail-panel__rel-role {
   flex-basis: 100%;
-  font-size: 10px;
+  color: var(--text-secondary);
+  font-family: var(--font-ui);
+  font-size: var(--text-2xs);
   font-style: italic;
-  color: var(--dim-fg);
   overflow-wrap: anywhere;
 }
 
 .detail-panel__rel-cardinality {
   flex-shrink: 0;
-  padding: 1px 4px;
-  border-radius: 2px;
-  font-size: 9px;
-  font-weight: 500;
-  background: rgba(128, 128, 128, 0.15);
-  color: var(--vscode-descriptionForeground, #888);
+  padding: 2px var(--space-3);
+  border: 1px solid var(--glass-divider);
+  border-radius: var(--radius-pill);
+  background: var(--control-fill);
+  color: var(--text-secondary);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-medium);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
   white-space: nowrap;
 }
 
+/* Delete: quiet until the row is hovered or focused. */
 .detail-panel__rel-delete {
   flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
-  padding: 0;
-  border: none;
-  border-radius: 3px;
-  background: transparent;
-  color: var(--vscode-descriptionForeground, #888);
-  font-size: 16px;
-  line-height: 1;
-  cursor: pointer;
-  transition: background 0.1s ease, color 0.1s ease;
-}
-
-.detail-panel__rel-delete:hover {
-  background: rgba(239, 68, 68, 0.15);
-  color: #ef4444;
-}
-
-/* Relationship approval toggle */
-.detail-panel__rel-approve {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
-  padding: 0;
-  border: 1px solid var(--model-approved, #14b8a6);
-  border-radius: 3px;
-  background: transparent;
-  color: var(--model-approved, #14b8a6);
-  font-size: 12px;
-  line-height: 1;
-  cursor: pointer;
-  opacity: 0.6;
-  transition: opacity 0.1s ease, background 0.1s ease;
-}
-
-.detail-panel__relationship:hover .detail-panel__rel-approve {
-  opacity: 1;
-}
-
-.detail-panel__rel-approve:hover {
-  background: var(--model-approved-bg, rgba(20, 184, 166, 0.15));
-}
-
-.detail-panel__rel-approve--approved {
-  background: var(--model-approved, #14b8a6);
-  color: var(--model-approved-text, #fff);
-  opacity: 1;
-}
-
-.detail-panel__rel-approve--approved:hover {
-  background: var(--model-design, #f97316);
-  border-color: var(--model-design, #f97316);
-  color: var(--model-design-text, #fff);
-}
-
-/* ---------------------------------------------------------------------------
-   Stub columns toggle
-   --------------------------------------------------------------------------- */
-
-.detail-panel__stub-label {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  color: var(--editor-fg);
-  cursor: pointer;
-  user-select: none;
-}
-
-.detail-panel__stub-label input[type="checkbox"] {
-  accent-color: var(--button-bg);
-  width: 13px;
-  height: 13px;
-  cursor: pointer;
-  flex-shrink: 0;
-}
-
-/* ---------------------------------------------------------------------------
-   Actions Section (Delete Model)
-   --------------------------------------------------------------------------- */
-
-.detail-panel__section--actions {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.detail-panel__button {
-  padding: 6px 12px;
-  border: 1px solid var(--panel-border);
-  border-radius: 4px;
-  background: var(--button-bg);
-  color: var(--button-fg);
-  font-size: 12px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: background 0.1s ease, border-color 0.1s ease;
-}
-
-.detail-panel__button:hover {
-  background: var(--button-hover-bg);
-  border-color: var(--focus-border);
-}
-
-.detail-panel__button--danger {
-  align-self: flex-start;
-  background: transparent;
-  color: #dc6b6b;
-  border-color: rgba(220, 107, 107, 0.25);
-  font-size: 11px;
-  padding: 4px 10px;
-}
-
-.detail-panel__button--danger:hover {
-  background: rgba(220, 107, 107, 0.1);
-  color: #ef4444;
-  border-color: rgba(239, 68, 68, 0.4);
-}
-
-.detail-panel__button--warning {
-  align-self: flex-start;
-  background: rgba(204, 167, 0, 0.1);
-  color: var(--vscode-editorWarning-foreground, #cca700);
-  border-color: var(--vscode-editorWarning-foreground, #cca700);
-  font-size: 11px;
-  padding: 4px 10px;
-}
-
-.detail-panel__button--warning:hover {
-  background: rgba(204, 167, 0, 0.2);
-}
-
-.detail-panel__confirm-label {
-  font-size: 11px;
-  color: var(--editor-fg);
-  line-height: 1.4;
-}
-
-.detail-panel__confirm-actions {
-  display: flex;
-  gap: 6px;
-}
-
-.detail-panel__confirm-actions .detail-panel__button {
-  flex: 1;
-  font-size: 12px;
-  padding: 6px 12px;
-}
-
-.detail-panel__confirm-actions .detail-panel__button--danger {
-  align-self: auto;
-  background: rgba(239, 68, 68, 0.1);
-  color: #ef4444;
-  border-color: rgba(239, 68, 68, 0.3);
-}
-
-.detail-panel__confirm-actions .detail-panel__button--danger:hover {
-  background: rgba(239, 68, 68, 0.2);
-  border-color: #ef4444;
-}
-
-/* ---------------------------------------------------------------------------
-   Text editors shared by the description, the warehouse name and the
-   Fields section (FieldsSection.css has the rest)
-   --------------------------------------------------------------------------- */
-
-.detail-panel__rationale-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 6px;
-}
-
-.detail-panel__rationale-edit-btn {
-  flex-shrink: 0;
-  display: flex;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
   width: 22px;
   height: 22px;
   padding: 0;
-  border: none;
-  border-radius: 3px;
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-pill);
   background: transparent;
-  color: var(--vscode-descriptionForeground, #888);
-  font-size: 13px;
+  color: var(--text-tertiary);
   line-height: 1;
   cursor: pointer;
   opacity: 0;
-  transition: opacity 0.15s ease, background 0.1s ease, color 0.1s ease;
+  transition:
+    opacity var(--duration-fast) var(--ease-standard),
+    background-color var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard);
 }
 
-.detail-panel__rationale-edit-btn:hover {
-  background: var(--button-bg);
-  color: var(--button-fg);
+.detail-panel__relationship:hover .detail-panel__rel-delete,
+.detail-panel__relationship:focus-within .detail-panel__rel-delete {
+  opacity: 1;
 }
 
-.detail-panel__rationale-field {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+.detail-panel__rel-delete:hover {
+  background: var(--glass-tint-error);
+  border-color: var(--glass-tint-error-edge);
+  color: var(--error-fg);
 }
 
-.detail-panel__rationale-text {
-  margin: 0;
-  font-size: 11px;
-  line-height: 1.5;
-  color: var(--editor-fg);
-  white-space: pre-wrap;
+.detail-panel__rel-delete:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: 1px;
 }
 
-.detail-panel__rationale-textarea {
-  width: 100%;
-  min-height: 40px;
-  padding: 4px 6px;
-  border: 1px solid var(--focus-border, var(--vscode-focusBorder, #007fd4));
-  border-radius: 3px;
-  background: var(--input-bg, var(--vscode-input-background, #3c3c3c));
-  color: var(--editor-fg);
-  font-family: inherit;
-  font-size: 11px;
-  line-height: 1.5;
-  resize: vertical;
-  outline: none;
-  box-sizing: border-box;
-}
-
-.detail-panel__rationale-textarea::placeholder {
-  color: var(--vscode-descriptionForeground, #888);
-  opacity: 0.6;
-}
-
-.detail-panel__rationale-actions {
-  display: flex;
-  gap: 6px;
-}
-
-.detail-panel__rationale-actions .detail-panel__button {
-  flex: 1;
-  padding: 4px 10px;
-  font-size: 11px;
-}
-
-.detail-panel__rationale-add-btn {
-  padding: 6px 12px;
-  border: 1px dashed var(--vscode-descriptionForeground, #888);
-  border-radius: 4px;
-  background: transparent;
-  color: var(--vscode-descriptionForeground, #888);
-  font-size: 11px;
-  cursor: pointer;
-  transition: background 0.1s ease, color 0.1s ease, border-color 0.1s ease;
-}
-
-.detail-panel__rationale-add-btn:hover {
-  background: var(--ai-bg);
-  color: var(--ai-fg);
-  border-color: var(--ai-fg);
+@media (hover: none) {
+  .detail-panel__rel-delete {
+    opacity: 1;
+  }
 }
 
 /* A relationship drawn backwards (#163): ⚠ Turn round, before the delete button. */
 .detail-panel__rel-backwards {
   flex-shrink: 0;
-  padding: 1px 6px;
-  border: 1px solid var(--warning-fg);
-  border-radius: 3px;
-  background: var(--warning-bg);
+  height: 22px;
+  padding: 0 var(--space-4);
+  border: 1px solid var(--glass-tint-warning-edge);
+  border-radius: var(--radius-pill);
+  background: var(--glass-tint-warning);
   color: var(--warning-fg);
-  font-size: 11px;
-  line-height: 1.4;
+  font: inherit;
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-semibold);
+  line-height: 1;
   white-space: nowrap;
   cursor: pointer;
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard);
 }
 
 .detail-panel__rel-backwards:hover {
-  border-color: var(--focus-border);
-  background: var(--button-bg);
-  color: var(--button-fg);
+  border-color: var(--warning-fg);
+  background: color-mix(in srgb, var(--warning-fg) 24%, transparent);
 }
 
-/* ---------------------------------------------------------------------------
-   File line (editing host only): the table's file, with Open
-   --------------------------------------------------------------------------- */
-
-.detail-panel__file-path {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.detail-panel__file-open,
-.detail-panel__off-add,
-.detail-panel__off-add-all {
-  flex-shrink: 0;
-  padding: 1px 6px;
-  border: 1px solid var(--panel-border);
-  border-radius: 3px;
-  background: transparent;
-  color: var(--editor-fg);
-  font-size: 10px;
-  cursor: pointer;
-  white-space: nowrap;
-}
-
-.detail-panel__file-open:hover,
-.detail-panel__off-add:hover,
-.detail-panel__off-add-all:hover {
-  background: var(--button-hover-bg);
-  border-color: var(--focus-border);
-  color: var(--button-fg);
+.detail-panel__rel-backwards:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: 1px;
 }
 
 /* ---------------------------------------------------------------------------
@@ -897,8 +1124,8 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  margin-bottom: 8px;
+  gap: var(--space-4);
+  margin-bottom: var(--space-3);
 }
 
 .detail-panel__off-diagram-title {
@@ -913,52 +1140,81 @@
   white-space: nowrap;
 }
 
+.detail-panel__off-text .detail-panel__rel-target {
+  color: var(--text-primary);
+  font-weight: var(--weight-medium);
+}
+
 .detail-panel__off-detail {
-  color: var(--dim-fg);
+  color: var(--text-secondary);
+}
+
+.detail-panel__off-add {
+  border-color: var(--control-border);
+  background: var(--glass-tint-accent);
+}
+
+.detail-panel__off-add:hover {
+  background: var(--glass-tint-accent-strong);
 }
 
 /* ---------------------------------------------------------------------------
-   Modelling detail (optional): folded until one of its fields is set
+   Modelling detail (optional): a disclosure row, folded until a field is set
    --------------------------------------------------------------------------- */
-
-.detail-panel__modelling {
-  padding-top: 6px;
-  padding-bottom: 6px;
-}
 
 .detail-panel__modelling-toggle {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-3);
   width: 100%;
-  padding: 2px 0;
-  border: none;
-  background: transparent;
-  color: var(--dim-fg);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.5px;
-  text-transform: uppercase;
+  min-height: var(--dp-row-height);
+  padding: 0 var(--space-5) 0 var(--space-4);
+  box-sizing: border-box;
+  border: 1px solid var(--dp-card-border);
+  border-radius: var(--radius-lg);
+  background: var(--dp-card-bg);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: var(--text-sm);
   text-align: left;
   cursor: pointer;
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard);
 }
 
 .detail-panel__modelling-toggle:hover {
-  color: var(--editor-fg);
+  background: var(--control-fill-hover);
+  border-color: var(--control-border-hover);
 }
 
 .detail-panel__modelling-toggle:focus-visible {
-  outline: 1px solid var(--focus-border);
-  outline-offset: 2px;
+  outline: var(--focus-outline);
+  outline-offset: var(--focus-offset);
 }
 
 .detail-panel__modelling-chevron {
-  width: 10px;
-  font-size: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  color: var(--text-tertiary);
+  transition: transform var(--duration-base) var(--ease-spring);
+}
+
+.detail-panel__modelling-toggle[aria-expanded='true'] .detail-panel__modelling-chevron {
+  transform: rotate(90deg);
+}
+
+.detail-panel__modelling-title {
+  font-weight: var(--weight-semibold);
 }
 
 .detail-panel__modelling-optional {
-  font-weight: 400;
-  text-transform: none;
-  letter-spacing: 0;
+  color: var(--text-secondary);
+  font-weight: var(--weight-regular);
+}
+
+.detail-panel__modelling-body > .detail-panel__section {
+  margin-top: var(--space-5);
 }

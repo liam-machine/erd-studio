@@ -2158,7 +2158,7 @@ describe('Welcome panel: commands', () => {
       new Set([
         'erdStudio.reportBug', 'erdStudio.showGettingStarted', 'erdStudio.trySampleProject', 'erdStudio.showLogs', 'erdStudio.start',
         'erdStudio.openExampleProject', 'erdStudio.openExampleDiagram', 'erdStudio.showImportGuide',
-        'erdStudio.showMeAround',
+        'erdStudio.showMeAround', 'erdStudio.toggleGlassSidebar',
       ]),
     );
     // setupAiHelper needs a project: it gets the standard no-project stub instead.

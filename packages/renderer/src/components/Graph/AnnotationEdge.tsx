@@ -8,6 +8,8 @@
 import { memo } from 'react';
 import { getBezierPath, type EdgeProps } from '@xyflow/react';
 import type { AnnotationFlowEdge } from '../../types/graph';
+// The line's stroke lives with the note styles (`.annotation-edge`).
+import './AnnotationNode.css';
 
 function AnnotationEdgeInner({
   sourceX,
@@ -30,10 +32,10 @@ function AnnotationEdgeInner({
     <path
       d={edgePath}
       fill="none"
-      stroke="var(--vscode-descriptionForeground, #999)"
-      strokeWidth={1.5}
-      strokeDasharray="6 4"
-      strokeOpacity={0.5}
+      stroke="var(--text-tertiary)"
+      strokeWidth={1.25}
+      strokeDasharray="3 5"
+      strokeLinecap="round"
       className="annotation-edge"
     />
   );

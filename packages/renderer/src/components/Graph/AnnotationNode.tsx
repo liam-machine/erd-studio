@@ -220,7 +220,10 @@ function AnnotationNodeInner({ data }: NodeProps<AnnotationFlowNode>) {
   );
 
   const colorClass = `annotation-node--${data.color}`;
-  const style: React.CSSProperties = {};
+  // The note's colour, from the same palette as the swatches: the stylesheet
+  // derives the glass tint, edge and text colour from it.
+  const hue = ANNOTATION_COLORS.find((opt) => opt.value === data.color)?.swatch;
+  const style: React.CSSProperties = hue ? ({ '--annotation-hue': hue } as CSSProperties) : {};
   if (resizeSize) {
     style.width = resizeSize.width;
     style.height = resizeSize.height;

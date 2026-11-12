@@ -1,50 +1,79 @@
-/* LineStyleSwitch — Curved / Hops, a compact segmented control in the toolbar.
-   Theme variables only. */
+/* LineStyleSwitch — Curved / Hops, a compact glass segmented control in the
+   toolbar: a recessed track and a raised thumb (the ::before) that slides
+   under the option that is on. Tokens only (theme.css). */
 
 .line-style-switch {
-  display: inline-flex;
-  align-items: center;
-  gap: 1px;
-  height: 26px;
-  padding: 2px;
-  border: 1px solid var(--panel-border);
-  border-radius: 5px;
+  --segmented-pad: 2px;
+
+  position: relative;
+  display: inline-grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  align-items: stretch;
+  height: var(--control-height);
+  padding: var(--segmented-pad);
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-md);
+  background: var(--control-fill);
   box-sizing: border-box;
 }
 
+.line-style-switch::before {
+  content: '';
+  position: absolute;
+  top: var(--segmented-pad);
+  bottom: var(--segmented-pad);
+  left: var(--segmented-pad);
+  width: calc((100% - 2 * var(--segmented-pad)) / 2);
+  border-radius: var(--radius-sm);
+  background: var(--control-thumb);
+  box-shadow: var(--control-thumb-shadow);
+  transition: transform var(--duration-base) var(--ease-spring);
+  pointer-events: none;
+}
+
+.line-style-switch:has(> .line-style-switch__option--on:nth-child(2))::before {
+  transform: translateX(100%);
+}
+
+/* Nothing on yet (before the setting arrives): no thumb. */
+.line-style-switch:not(:has(> .line-style-switch__option--on))::before {
+  visibility: hidden;
+}
+
 .line-style-switch__option {
+  position: relative;
+  z-index: 1;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 20px;
+  width: 28px;
   padding: 0;
-  border: none;
-  border-radius: 3px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
   background: transparent;
-  color: var(--editor-fg);
+  color: var(--text-tertiary);
   font-family: inherit;
-  font-size: 11px;
+  font-size: var(--text-xs);
   white-space: nowrap;
   cursor: pointer;
-  opacity: 0.7;
-  transition: background 0.1s ease, color 0.1s ease, opacity 0.1s ease;
+  transition:
+    color var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard);
 }
 
 .line-style-switch__option:hover:not(.line-style-switch__option--on) {
-  opacity: 1;
-  background: var(--selection-bg);
+  color: var(--text-primary);
+  border-color: var(--control-border-hover);
 }
 
 .line-style-switch__option:focus-visible {
-  outline: 1px solid var(--focus-border);
+  outline: var(--focus-outline);
   outline-offset: 1px;
 }
 
 .line-style-switch__option--on {
-  background: var(--button-bg);
-  color: var(--button-fg);
-  opacity: 1;
+  color: var(--text-primary);
   cursor: default;
 }
 
@@ -57,10 +86,4 @@
   stroke-width: 1.5;
   stroke-linecap: round;
   stroke-linejoin: round;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .line-style-switch__option {
-    transition: none;
-  }
 }

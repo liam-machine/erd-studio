@@ -14,3 +14,11 @@ body,
   height: 100%;
   overflow: hidden;
 }
+
+/* Crisp, calm text on the glass surfaces (macOS renders the light-on-dark
+   glyphs heavier without it). The webview's own page only. */
+body {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}

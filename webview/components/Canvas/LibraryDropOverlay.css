@@ -1,41 +1,100 @@
 /**
- * LibraryDropOverlay styles — the drop highlight over the whole canvas and the
- * "Hold Shift and drop" hint near its top. Theme tokens only; no literal
- * colours. Neither takes pointer events, so the drop reaches the canvas.
+ * LibraryDropOverlay styles: the drop highlight over the canvas and the
+ * "Hold Shift and drop" hint near its top. Neither takes pointer events, so
+ * the drop reaches the canvas.
+ *
+ * The highlight is a soft accent wash inside a rounded dashed frame, inset
+ * like the rest of the floating shell. It covers the whole flow area, so it
+ * has NO backdrop-filter (the canvas behind it must not be re-blurred on
+ * every frame of a drag). The hint is a small glass capsule. Glass tokens
+ * only (packages/renderer/src/styles/theme.css).
  */
 
 .library-drop__highlight {
   position: absolute;
-  inset: 0;
-  z-index: 6;
+  inset: var(--shell-inset);
+  z-index: var(--z-canvas-overlay);
   pointer-events: none;
-  border: 2px dashed var(--focus-border);
-  border-radius: 4px;
-  background: color-mix(in srgb, var(--focus-border) 8%, transparent);
+  border: 2px dashed var(--control-border-selected);
+  border-radius: var(--radius-xl);
+  background:
+    radial-gradient(80% 60% at 50% 0%, var(--glass-tint-accent), transparent 75%),
+    var(--glass-tint-accent);
+  box-shadow: inset 0 0 0 4px var(--glass-tint-accent);
+  animation: library-drop-fade var(--duration-fast) var(--ease-standard);
+}
+
+@keyframes library-drop-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
 .library-drop__hint-region {
   position: absolute;
   top: 56px;
   left: 50%;
-  z-index: 7;
+  z-index: var(--z-chrome-raised);
   transform: translateX(-50%);
   max-width: min(520px, calc(100% - 32px));
   pointer-events: none;
 }
 
 .library-drop__hint {
-  padding: 6px 12px;
-  background: var(--panel-bg);
-  border: 1px solid var(--panel-border);
-  border-left: 3px solid var(--focus-border);
-  border-radius: 6px;
-  color: var(--editor-fg);
-  font-size: 12px;
-  line-height: 1.4;
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-6) var(--space-3) var(--space-5);
+
+  background: var(--glass-surface-2);
+  -webkit-backdrop-filter: var(--glass-backdrop);
+  backdrop-filter: var(--glass-backdrop);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-pill);
+  box-shadow: var(--glass-elevation-2);
+
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  line-height: var(--leading-normal);
   text-align: center;
+
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard);
+  animation: library-drop-hint-in var(--duration-base) var(--ease-spring);
+}
+
+/* A small accent dot, so it reads as live status. */
+.library-drop__hint::before {
+  content: '';
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-pill);
+  background: var(--focus-border);
+  box-shadow: 0 0 0 3px var(--glass-tint-accent);
 }
 
 .library-drop__hint--over {
-  border-color: var(--focus-border);
+  border-color: var(--control-border-selected);
+  background: linear-gradient(var(--glass-tint-accent), var(--glass-tint-accent)), var(--glass-surface-2);
+}
+
+@keyframes library-drop-hint-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .library-drop__highlight,
+  .library-drop__hint {
+    animation: none;
+  }
 }

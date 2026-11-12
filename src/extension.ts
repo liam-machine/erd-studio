@@ -150,6 +150,8 @@ import { HelpTreeProvider } from './providers/HelpTreeProvider';
 import { RelationshipsTreeProvider, type RelationshipsGrouping, type RelationshipsNode } from './providers/RelationshipsTreeProvider';
 import { registerSidebarFilters } from './providers/sidebarFilter';
 import { registerRowDetails } from './providers/rowDetails';
+import { installContextKeyRecorder } from './providers/glassSidebar/contextKeys';
+import { TOGGLE_GLASS_SIDEBAR_COMMAND, glassSidebarEnabled, registerGlassSidebar } from './providers/glassSidebar/GlassSidebarProvider';
 import { openInDiagram, openRelationshipSource, type RelationshipsViewDeps } from './commands/relationshipsView';
 import {
   ADD_TO_DIAGRAM_COMMAND,
@@ -877,6 +879,7 @@ export const NO_LEGACY_ALIAS = new Set([
   'erdStudio.customiseFields',
   'erdStudio.showImportReport',
   'erdStudio.suggestRelationships',
+  TOGGLE_GLASS_SIDEBAR_COMMAND,
 ]);
 
 /**
@@ -896,6 +899,8 @@ export const PRE_REGISTERED_COMMANDS = new Set([
   'erdStudio.showImportGuide',
   // Show Me Around: the onboarding guide (an empty window gets the example's draft).
   'erdStudio.showMeAround',
+  // The glass sidebar (prototype) shows in an empty window too.
+  TOGGLE_GLASS_SIDEBAR_COMMAND,
 ]);
 
 /**
@@ -1307,6 +1312,11 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
   // The ERD Studio output channel (a LogOutputChannel: the user picks its
   // level). Plugged in first so every later line reaches it.
   const activationStart = Date.now();
+  // The glass sidebar (prototype) evaluates the views' `when` clauses itself:
+  // mirror every erdStudio.* setContext from here on (each still reaches VS
+  // Code unchanged). Its view and toggle are registered below, before the
+  // no-project return.
+  installContextKeyRecorder();
   // The walkthrough is listed from now on (its `when`, WALKTHROUGH_READY_CONTEXT_KEY).
   void vscode.commands.executeCommand('setContext', WALKTHROUGH_READY_CONTEXT_KEY, true);
   const outputChannel = vscode.window.createOutputChannel(LOG_CHANNEL_NAME, { log: true });
@@ -1573,6 +1583,9 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
       if (importGuideContext().intent !== before) panel.render();
     }),
   );
+
+  // The glass sidebar (prototype): its WebviewView and Toggle Glass Sidebar work in an empty window too.
+  const glassSidebar = registerGlassSidebar(context);
 
   // The host's own search for dbt_project.yml (every depth), bounded so it
   // never holds activation up; the walk alone decides when it is late.
@@ -2510,6 +2523,7 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
         // By its file: another schema folder may have a table of its name.
         const node = tableLibraryProvider.findTableNode(name, filePath);
         if (node && tableLibraryView?.visible) await tableLibraryView.reveal(node, { select: true, focus: false });
+        else if (node && glassSidebar.visible) await glassSidebar.reveal('tables', node);
         await vscode.commands.executeCommand('vscode.open', vscode.Uri.file(filePath));
       } catch (err) {
         log.warn('[ERD Studio] New Table: the new table could not be shown:', err);
@@ -3269,6 +3283,8 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     projectChangedSubscription,
     (() => {
       domainTreeData!.attach(treeProvider);
+      // The glass sidebar draws the same provider (it lists only while its view shows).
+      glassSidebar.setSource('diagrams', treeProvider);
       // Whenever there is a choice to make, the first row of the tree names
       // the open project and switches it on click — always visible, unlike
       // the view-title icon, which VS Code only shows on hover (#82).
@@ -3317,6 +3333,13 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
       treeDataProvider: helpProvider,
       canSelectMany: false,
     }),
+    // The glass sidebar bridges the same three providers (the native views keep theirs, with drag and drop).
+    (() => {
+      glassSidebar.setSource('tables', tableLibraryProvider);
+      glassSidebar.setSource('relationships', relationshipsProvider);
+      glassSidebar.setSource('help', helpProvider);
+      return { dispose: () => {} };
+    })(),
     activationCheckpoint('Commands'),
     (() => {
       const deps: RelationshipsViewDeps = {
@@ -3423,7 +3446,9 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
             void vscode.window.showInformationMessage(`ERD Studio: "${name}" has no relationships yet.`);
             return;
           }
-          await relationshipsView?.reveal(node, { select: true, focus: true, expand: true });
+          // With the glass sidebar on, the native view is hidden (its `when`): reveal the row there instead.
+          if (glassSidebarEnabled(context.globalState)) await glassSidebar.reveal('relationships', node, { focus: true });
+          else await relationshipsView?.reveal(node, { select: true, focus: true, expand: true });
         },
       };
       return vscode.Disposable.from(
@@ -3457,7 +3482,8 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
             void vscode.window.showErrorMessage(`Reveal in Table Library: ${typeof name === 'string' ? `"${name}" is not in the Table Library.` : 'No table named.'}`);
             return;
           }
-          await tableLibraryView?.reveal(node, { select: true, focus: true });
+          if (glassSidebarEnabled(context.globalState)) await glassSidebar.reveal('tables', node, { focus: true });
+          else await tableLibraryView?.reveal(node, { select: true, focus: true });
         }),
         vscode.commands.registerCommand('erdStudio.openRelationshipSource', (node?: RelationshipsNode) => openRelationshipSource(node, deps)),
         vscode.commands.registerCommand('erdStudio.groupRelationshipsByFile', () => setRelationshipsGrouping('file')),

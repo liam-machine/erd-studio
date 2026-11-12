@@ -12,11 +12,15 @@ heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that
 
 ### Added
 
+- **A glass side panel (preview).** The ERD Studio side panel is now one panel in the same glass style as the canvas: a search field over everything, then Diagrams, Table Library, Relationships and Help & Feedback as cards. Rows, hover buttons, right-click menus and empty states are the same as before, and each section's header has the same two buttons: **+** for what it can create and **…** for the rest. The search field finds diagrams, tables and relationships by name or description; **Go to Table…** and the three **Filter …** commands (with keys such as `layer:gold` or `col:customer_id`) are still in the Command Palette, and a filter set there shows on its section with a button to clear it. Not in the preview yet: dragging a table onto the canvas or a layer to a new place (use a table row's **Add to Diagram…** button), selecting several rows, and **Collapse All**. **ERD Studio: Toggle Glass Sidebar (Preview)** switches back to the standard side panel, where all of those work.
 - **Add a table to the diagram you have open in one click.** Each table in the Table Library has a **+** button, and its right-click menu has **Add to Open Diagram**: both add the table straight to the diagram in front of you, without asking. The status bar names the tables that were added.
 - **Opening a DBML diagram that imports two tables under one name now warns you.** When two table files both declare `Table adresse` with no schema (one in `tables/bqs/`, one in `tables/ccc/`) and a diagram imports both, the warning names the line, says how many relationships cannot be drawn yet, and offers **Qualify Tables**. `erd-studio doctor` reports it as `sharedUseSpelling`, with the line to write, instead of the parser's bare [3003] error and the [4000] errors that followed from it.
 
 ### Changed
 
+- **A new look for the editor: glass.** The canvas now fills the whole editor, and the toolbar, the table properties panel, the status line and the minimap float over it as frosted panels, in dark, light and high-contrast themes (high contrast and "reduce transparency" get solid panels). The toolbar is a row of grouped capsules that folds into a **View** menu on a narrow editor. Tables are calmer cards with thin borders and small key pills. Dialogs, menus, notices and the empty diagram follow the same style. Nothing about your files changes.
+- **Table properties has a new layout.** The table's name and its layer and type are at the top, with a bar that jumps to Overview, Columns, Relationships and Modelling. Details are grouped label-left, value-right. Each column is one row with its name, then its type and description beneath, and its keys on the right; the arrow opens its description, SCD and additive settings. Reorder, delete and **+ Key** appear when you point at a row.
+- **Relationship lines are grey until you look at them.** In a dbt project, lines now rest in a neutral grey on both the Logical and Physical tabs, and the lines of the table you point at or select light up in the diagram's layer colour, as they already did without dbt. **Compare with dbt** brings back blue for Logical and green for Physical.
 - The anonymous daily usage report now records more about an Auto Layout that failed: the diagram's size as a range (never a number), the kind of failure, and which fallback, if any, produced a layout. Never names, paths or messages.
 - **Add to Diagram… still asks which diagram**, so you can add tables to a different one. **Add to Open Diagram** is the one that adds without asking.
 - **The diagram's drop hint goes away on every open diagram as soon as the drag has been used.**
@@ -27,6 +31,7 @@ heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that
 
 ### Fixed
 
+- Escape closes the **Layout** settings.
 - **Auto Layout no longer saves a result that leaves a table without a position.** If the layout engine returns one, ERD Studio tries its lighter layouts and, if none works, says the layout failed and leaves the diagram as it was. The ERD Studio log now records why any layout failed, with the diagram's table and relationship counts.
 - **Auto Layout no longer fails with "Maximum call stack size exceeded" when grouping is Auto, Join depth or Table type.** A diagram with two-way or circular relationships could still fail this way, on any computer and at any size (eight tables were enough), because every lighter fallback layout failed the same way. Grouping by Table type or None was not affected.
 - **Join depth places tables in or after a loop of relationships by their real depth**, instead of putting them all in the first group.
