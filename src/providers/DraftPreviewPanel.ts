@@ -37,6 +37,7 @@ import {
   type DraftView,
 } from '../types/draft';
 import { createLogger } from '../services/logger';
+import { layoutFailureLogLine } from '../services/telemetryCanvas';
 import { ReadyWatch } from '../services/readyWatch';
 import { askNoReadyRecovery } from './noReadyRecovery';
 
@@ -354,10 +355,16 @@ export class DraftPreviewPanel {
           log.warn('The draft preview\'s Show Import Report failed:', err instanceof Error ? err.message : String(err));
         }
         return;
-      case 'layoutFailed':
+      case 'layoutFailed': {
         this.layingOut = undefined;
-        this.events.layoutFailed?.(this.view.source);
+        const { type: _type, ...failure } = message;
+        // The real counts and message, for the ERD Studio log only (never sent).
+        log.warn(layoutFailureLogLine('draft', failure));
+        // A page from before the detail sent the type alone.
+        if (Object.keys(failure).length > 0) this.events.layoutFailed?.(this.view.source, failure);
+        else this.events.layoutFailed?.(this.view.source);
         return;
+      }
       case 'laidOut':
         // Only the draft being laid out: a late one for a draft since replaced says nothing.
         if (this.layingOut === message.id) this.layingOut = undefined;

@@ -245,7 +245,9 @@ describe('the words and the fixed targets', () => {
     expect(new Set([MAJOR_NOTICE_OWED_KEY, MAJOR_NOTICE_SHOWN_KEY, MAJOR_NOTICE_CATCH_UP_KEY]).size).toBe(3);
   });
 
-  it('its three telemetry keys are the last three features, in this order', () => {
-    expect(FEATURES.slice(-3)).toEqual(['majorUpdateNoticeShown', 'majorUpdateNoticeShowMeAround', 'majorUpdateNoticeWhatsNew']);
+  it('its three telemetry keys follow the Fabric card\'s, in this order (later keys are appended after them)', () => {
+    const at = FEATURES.indexOf('majorUpdateNoticeShown');
+    expect(FEATURES[at - 1]).toBe('importFabricOutcomeTimedOut');
+    expect(FEATURES.slice(at, at + 3)).toEqual(['majorUpdateNoticeShown', 'majorUpdateNoticeShowMeAround', 'majorUpdateNoticeWhatsNew']);
   });
 });

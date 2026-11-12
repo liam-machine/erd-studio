@@ -334,6 +334,25 @@ describe('DraftPreviewPanel: the answers', () => {
     expect(panel._disposed).toBe(false);
   });
 
+  it('passes a failed layout\'s checked detail to the events, and refuses one with a field out of range', async () => {
+    const events = { detailsOpened: vi.fn(), layoutFailed: vi.fn() };
+    const preview = createDraftPreview(extensionUri, events);
+    track(preview.ask(draftOf('dbt')));
+    const panel = lastPanel();
+    await panel._simulateMessage({ type: 'ready' });
+    const detail = {
+      ms: 31000, failure: 'stack', tableBucket: '500plus', relBucket: '2000plus', exhausted: true, lastFailure: 'timeout',
+      log: { tables: 1134, relationships: 2417, message: 'Maximum call stack size exceeded' },
+    };
+    await panel._simulateMessage({ type: 'layoutFailed', ...detail, table: 'dim_customer' });
+    await flush();
+    expect(events.layoutFailed).toHaveBeenCalledWith('dbt', detail);
+    events.layoutFailed.mockClear();
+    await panel._simulateMessage({ type: 'layoutFailed', tableBucket: 1134 });
+    await flush();
+    expect(events.layoutFailed).not.toHaveBeenCalled();
+  });
+
   it.each([
     ['not an object', 'keep'],
     ['no type', {}],

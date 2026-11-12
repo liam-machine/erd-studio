@@ -17,7 +17,18 @@ import {
 } from '@erd-studio/core';
 
 import type { TelemetryErrorCode, TelemetryFeature } from './telemetryPayload';
-import type { FitZoomBucket, LayoutFailure, WebviewCrashArea, WebviewErrorKind } from '../types/webviewError';
+import {
+  layoutFailureDuration,
+  layoutFailureSummary,
+  type FitZoomBucket,
+  type LayoutFailure,
+  type LayoutFailureDetail,
+  type LayoutFallbackRung,
+  type LayoutRelBucket,
+  type LayoutTableBucket,
+  type WebviewCrashArea,
+  type WebviewErrorKind,
+} from '../types/webviewError';
 
 // ---------------------------------------------------------------------------
 // B13 — webview crashes
@@ -63,39 +74,122 @@ export function slowCanvasLoad(ms: number): boolean {
   return Number.isFinite(ms) && ms > CANVAS_LOAD_SLOW_MS;
 }
 
-const LAYOUT_FAILURE_CODES: Partial<Record<LayoutFailure, TelemetryErrorCode>> = {
+const LAYOUT_FAILURE_CODES: Record<LayoutFailure, TelemetryErrorCode> = {
   timeout: 'layoutFailedTimeout',
   worker: 'layoutFailedWorker',
   stack: 'layoutFailedStack',
+  other: 'layoutFailedOther',
+  memory: 'layoutFailedMemory',
+  unsupported: 'layoutFailedUnsupported',
+  input: 'layoutFailedInput',
+  engine: 'layoutFailedEngine',
+  result: 'layoutFailedResult',
+};
+
+const LAYOUT_TABLE_BUCKET_CODES: Record<LayoutTableBucket, TelemetryErrorCode> = {
+  under50: 'layoutFailedTablesUnder50',
+  '50to199': 'layoutFailedTables50to199',
+  '200to499': 'layoutFailedTables200to499',
+  '500plus': 'layoutFailedTables500Plus',
+};
+
+const LAYOUT_REL_BUCKET_CODES: Record<LayoutRelBucket, TelemetryErrorCode> = {
+  under100: 'layoutFailedRelsUnder100',
+  '100to499': 'layoutFailedRels100to499',
+  '500to1999': 'layoutFailedRels500to1999',
+  '2000plus': 'layoutFailedRels2000Plus',
+};
+
+const LAYOUT_DURATION_CODES: Record<ReturnType<typeof layoutFailureDuration>, TelemetryErrorCode> = {
+  under1s: 'layoutFailedUnder1s',
+  '1to5s': 'layoutFailed1to5s',
+  over5s: 'layoutFailedOver5s',
+};
+
+/** The last fallback's failure has a code only when it says something the first error's class does not. */
+const LAYOUT_LAST_RUNG_CODES: Partial<Record<LayoutFailure, TelemetryErrorCode>> = {
+  timeout: 'layoutFailedLastRungTimeout',
+  worker: 'layoutFailedLastRungWorker',
+  memory: 'layoutFailedLastRungMemory',
+};
+
+const LAYOUT_RUNG_FEATURES: Record<LayoutFallbackRung, TelemetryFeature> = {
+  2: 'layoutFallbackRung2',
+  3: 'layoutFallbackRung3',
 };
 
 /**
- * The 2.0 keys for a canvas `layoutFinished` (beside the bucket and the
- * `layoutFailed` / `firstLayoutFailed` errors it already records): the
- * failure's class (`other` has no code of its own), the stack-safe fallback,
- * and a slow first-open layout.
+ * The codes that describe one failed layout, the canvas's (beside
+ * `layoutFailed`) or a draft page's (beside `draftLayoutFailed`): its class,
+ * the diagram's size buckets, how long it ran, and whether every fallback
+ * failed (with the last one's class when that is a timeout, a dead worker or
+ * memory). Only the fixed fields are read; `log` (the counts and the message,
+ * for the extension's own log) is not a parameter here, so it cannot be
+ * counted. A page from before these fields yields only what it sent.
  */
-export function canvasLayoutTelemetry(payload: {
-  ms: number; ok: boolean; firstOpen?: boolean; failure?: LayoutFailure; fallback?: true;
+export function layoutFailureCodes(failure: Omit<LayoutFailureDetail, 'log'> & { ms?: number }): TelemetryErrorCode[] {
+  const codes: TelemetryErrorCode[] = [];
+  if (failure.failure) codes.push(LAYOUT_FAILURE_CODES[failure.failure]);
+  if (failure.tableBucket) codes.push(LAYOUT_TABLE_BUCKET_CODES[failure.tableBucket]);
+  if (failure.relBucket) codes.push(LAYOUT_REL_BUCKET_CODES[failure.relBucket]);
+  if (failure.ms !== undefined && Number.isFinite(failure.ms)) codes.push(LAYOUT_DURATION_CODES[layoutFailureDuration(failure.ms)]);
+  if (failure.exhausted === true) {
+    codes.push('layoutFailedAllRungs');
+    const last = failure.lastFailure ? LAYOUT_LAST_RUNG_CODES[failure.lastFailure] : undefined;
+    if (last) codes.push(last);
+  }
+  return codes.filter((code): code is TelemetryErrorCode => code !== undefined);
+}
+
+/** The feature for the fallback that produced a layout, if one did. */
+export function layoutRungFeature(rung: LayoutFallbackRung | undefined): TelemetryFeature | undefined {
+  return rung === undefined ? undefined : LAYOUT_RUNG_FEATURES[rung];
+}
+
+/**
+ * The 2.0 keys for a canvas `layoutFinished` (beside the bucket and the
+ * `layoutFailed` / `firstLayoutFailed` errors it already records): a failed
+ * layout's {@link layoutFailureCodes}, the stack-safe fallback, the fallback
+ * that produced the layout, and a slow first-open layout.
+ */
+export function canvasLayoutTelemetry(payload: Omit<LayoutFailureDetail, 'log'> & {
+  ms: number; ok: boolean; firstOpen?: boolean; fallback?: true; rung?: LayoutFallbackRung;
 }): { features: TelemetryFeature[]; errors: TelemetryErrorCode[] } {
   const features: TelemetryFeature[] = [];
-  const errors: TelemetryErrorCode[] = [];
-  if (!payload.ok && payload.failure) {
-    const code = LAYOUT_FAILURE_CODES[payload.failure];
-    if (code) errors.push(code);
-  }
+  const errors: TelemetryErrorCode[] = payload.ok ? [] : layoutFailureCodes(payload);
   if (payload.fallback === true) features.push('layoutStackFallback');
+  const rung = payload.ok ? layoutRungFeature(payload.rung) : undefined;
+  if (rung) features.push(rung);
   if (payload.firstOpen === true && payload.ok && payload.ms > LAYOUT_SLOW_MS) features.push('firstLayoutOver5s');
   return { features, errors };
 }
 
-/** The keys for a draft page's finished layout: slow, too small to read when fitted, laid out with the stack-safe fallback. */
-export function draftLayoutFeatures(payload: { ms: number; fitZoom: FitZoomBucket; fallback?: true }): TelemetryFeature[] {
+/**
+ * The keys for a draft page's finished layout: slow, too small to read when
+ * fitted, laid out with the stack-safe fallback, and the fallback that
+ * produced it.
+ */
+export function draftLayoutFeatures(payload: { ms: number; fitZoom: FitZoomBucket; fallback?: true; rung?: LayoutFallbackRung }): TelemetryFeature[] {
   const features: TelemetryFeature[] = [];
   if (payload.ms > LAYOUT_SLOW_MS) features.push('draftLayoutOver5s');
   if (payload.fitZoom === 'under30') features.push('draftFitZoomUnder30');
   if (payload.fallback === true) features.push('draftLayoutFallback');
+  const rung = layoutRungFeature(payload.rung);
+  if (rung) features.push(rung);
   return features;
+}
+
+/**
+ * One line for the extension's own log about a failed layout: its fixed
+ * summary, and from `log` the real counts and the error's message. Local
+ * only: nothing here is sent anywhere.
+ */
+export function layoutFailureLogLine(where: 'canvas' | 'draft', failure: LayoutFailureDetail & { ms?: number; firstOpen?: boolean }): string {
+  const origin = where === 'draft' ? 'Draft layout' : failure.firstOpen ? 'First-open auto layout' : 'Auto layout';
+  const size = failure.log ? `; ${failure.log.tables} tables, ${failure.log.relationships} relationships` : '';
+  const ran = failure.ms !== undefined && Number.isFinite(failure.ms) ? `; after ${Math.round(failure.ms)} ms` : '';
+  const message = failure.log?.message ? `: ${failure.log.message}` : '';
+  return `${origin} failed (${layoutFailureSummary(failure)}${size}${ran})${message}`;
 }
 
 // ---------------------------------------------------------------------------

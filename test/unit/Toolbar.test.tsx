@@ -94,6 +94,7 @@ const mockStoreState: Record<string, unknown> = {
   setDiscrepancyVisible: noop,
   setDiscrepancyCompareStage: noop,
   setToastMessage: vi.fn(),
+  recordError: vi.fn(),
   setFeedbackDialogOpen: vi.fn(),
   logicalOnly: false,
 };
@@ -230,6 +231,34 @@ describe('Toolbar layout-dirty button', () => {
     expect(mockStoreState.setToastMessage).toHaveBeenCalledWith(
       'Auto layout failed: ELK layout worker crashed: boom',
     );
+    consoleSpy.mockRestore();
+  });
+
+  it('a failed layout reports its class and size buckets, and leaves a fixed line for Send Feedback', async () => {
+    mockRunElkLayout.mockRejectedValueOnce(new Error('org.eclipse.elk.graph.json.JsonImportException: Referenced shape does not exist: dim_customer'));
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    mockPostMessage.mockClear();
+    mockStoreState.recordError.mockClear();
+    render(<Toolbar {...defaultProps} />);
+
+    await act(async () => {
+      fireEvent.click(layoutButton());
+    });
+
+    const finished = mockPostMessage.mock.calls.map(([m]) => m).find((m) => m?.type === 'layoutFinished');
+    expect(finished.payload).toMatchObject({ ok: false, failure: 'input', tableBucket: 'under50', relBucket: 'under100' });
+    expect(finished.payload.exhausted).toBeUndefined();
+    expect(finished.payload.rung).toBeUndefined();
+    // The message and the real counts travel in `log` only (the extension's own log).
+    expect(finished.payload.log.message).toContain('JsonImportException');
+    expect(Number.isInteger(finished.payload.log.tables)).toBe(true);
+    const { log: _log, ...telemetryBound } = finished.payload;
+    expect(JSON.stringify(telemetryBound)).not.toMatch(/dim_customer|JsonImportException/);
+    // Send Feedback's recent canvas errors: class, buckets and how far the fallbacks got, in fixed words.
+    expect(mockStoreState.recordError).toHaveBeenCalledTimes(1);
+    const [source, line] = mockStoreState.recordError.mock.calls[0];
+    expect(source).toBe('layout');
+    expect(line).toMatch(/^Auto layout failed \(class input, tables under50, relationships under100, no fallback tried, ran (under1s|1to5s)\)$/);
     consoleSpy.mockRestore();
   });
 });

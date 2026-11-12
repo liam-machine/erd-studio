@@ -14,7 +14,17 @@ import ELK from 'elkjs/lib/elk-api';
 import type { ELK as IELK, ElkNode, ElkExtendedEdge } from 'elkjs/lib/elk-api';
 import type { TableFlowNode, FkFlowEdge } from '@erd-studio/renderer/editor';
 import type { NodePosition, LayoutOptions, TableRole } from '../../src/types/semantic';
-import type { LayoutFailure } from '../../src/types/webviewError';
+import {
+  classifyLayoutErrorText,
+  isStackOverflowText,
+  layoutRelBucket,
+  layoutTableBucket,
+  LAYOUT_LOG_COUNT_MAX,
+  LAYOUT_LOG_MESSAGE_MAX,
+  type LayoutFailure,
+  type LayoutFailureDetail,
+  type LayoutFallbackRung,
+} from '../../src/types/webviewError';
 import { resolveNodeDimensions } from '@erd-studio/renderer/sizing';
 
 // ---------------------------------------------------------------------------
@@ -258,15 +268,53 @@ function guardError(message: string, failure: LayoutFailure): Error {
 }
 
 /**
- * Why a layout failed, from the known shapes of this module's errors (never
- * sent as text): the timeout guard, the worker dying, the worker's stack
- * overflowing (with the stack-safe placement too), or anything else.
+ * Why a layout failed, from the known shapes of this module's errors and the
+ * engine's own fixed text (never sent as text): the timeout guard, the worker
+ * dying, an unusable result, and, by `classifyLayoutErrorText`, a stack
+ * overflow, memory running out, an ELK exception by its class, or anything
+ * else.
  */
 export function classifyLayoutFailure(err: unknown): LayoutFailure {
   const tagged = typeof err === 'object' && err !== null ? (err as { [LAYOUT_FAILURE]?: LayoutFailure })[LAYOUT_FAILURE] : undefined;
   if (tagged) return tagged;
-  if (isStackOverflow(err)) return 'stack';
-  return 'other';
+  return err instanceof Error ? classifyLayoutErrorText(err.name, err.message) : classifyLayoutErrorText('', String(err));
+}
+
+/** How the fallbacks went for a layout that failed after trying them, carried by the error thrown. */
+const LAYOUT_LADDER = Symbol('layoutLadder');
+
+interface LadderOutcome {
+  /** The class of the last fallback's failure. */
+  lastFailure: LayoutFailure;
+}
+
+function clampCount(n: number): number {
+  return Number.isFinite(n) ? Math.min(LAYOUT_LOG_COUNT_MAX, Math.max(0, Math.round(n))) : 0;
+}
+
+/**
+ * What a page reports about a failed layout (`layoutFinished` on the canvas,
+ * `layoutFailed` on the draft page): its class, the diagram's size as buckets
+ * (worked out here, so the counts are in no field telemetry reads), whether
+ * every fallback was tried and how the last one failed, and, for the
+ * extension's own log only, the counts and the error's message.
+ */
+export function layoutFailureReport(err: unknown, size: { tables: number; relationships: number }): LayoutFailureDetail {
+  const ladder = typeof err === 'object' && err !== null ? (err as { [LAYOUT_LADDER]?: LadderOutcome })[LAYOUT_LADDER] : undefined;
+  const message = err instanceof Error
+    ? (err.name && err.name !== 'Error' && !err.message.startsWith(err.name) ? `${err.name}: ${err.message}` : err.message)
+    : String(err);
+  return {
+    failure: classifyLayoutFailure(err),
+    tableBucket: layoutTableBucket(size.tables),
+    relBucket: layoutRelBucket(size.relationships),
+    ...(ladder ? { exhausted: true as const, lastFailure: ladder.lastFailure } : {}),
+    log: {
+      tables: clampCount(size.tables),
+      relationships: clampCount(size.relationships),
+      message: message.slice(0, LAYOUT_LOG_MESSAGE_MAX),
+    },
+  };
 }
 
 /**
@@ -332,23 +380,45 @@ const POST_COMPACTION = 'elk.layered.compaction.postCompaction.strategy';
  * it) is skipped.
  */
 export function stackSafeFallbacks(options: LayoutOptions): LayoutOptions[] {
-  const steps: LayoutOptions[] = [];
+  return stackSafeFallbackRungs(options).map((step) => step.options);
+}
+
+/**
+ * {@link stackSafeFallbacks}, each with its rung: 2 for Brandes–Köpf, 3 for
+ * the one that leaves post-compaction out. A rung is named by what it drops,
+ * so a diagram whose own options already use Brandes–Köpf has only rung 3.
+ */
+export function stackSafeFallbackRungs(options: LayoutOptions): Array<{ rung: LayoutFallbackRung; options: LayoutOptions }> {
+  const steps: Array<{ rung: LayoutFallbackRung; options: LayoutOptions }> = [];
   let current = options;
   if (current['elk.layered.nodePlacement.strategy'] !== STACK_SAFE_NODE_PLACEMENT) {
     current = { ...current, 'elk.layered.nodePlacement.strategy': STACK_SAFE_NODE_PLACEMENT };
-    steps.push(current);
+    steps.push({ rung: 2, options: current });
   }
   if (current[POST_COMPACTION] !== undefined && current[POST_COMPACTION] !== 'NONE') {
     current = { ...current, [POST_COMPACTION]: 'NONE' };
-    steps.push(current);
+    steps.push({ rung: 3, options: current });
   }
   return steps;
 }
 
 /** A layout that failed because the worker ran out of stack (V8: RangeError, Firefox: InternalError). */
 export function isStackOverflow(err: unknown): boolean {
-  const message = err instanceof Error ? err.message : String(err);
-  return /Maximum call stack size exceeded|too much recursion/i.test(message);
+  return isStackOverflowText(err instanceof Error ? err.message : String(err));
+}
+
+/**
+ * Refuse a layout ELK returned without a usable place for every table: a
+ * table missing from the result, or one whose x or y is missing or not a
+ * finite number. Saving such a result would stack the tables on one spot (or
+ * be refused by the host), so it fails as its own class and the next
+ * fallback, if any, is tried.
+ */
+function assertUsableLayout(layouted: ElkNode, tableCount: number): void {
+  const children = layouted?.children ?? [];
+  const usable = children.length >= tableCount
+    && children.every((child) => Number.isFinite(child.x) && Number.isFinite(child.y));
+  if (!usable) throw guardError('ELK returned a layout with a table left unplaced', 'result');
 }
 
 /**
@@ -483,6 +553,8 @@ export function detectStrategy(
 export interface LayoutHooks {
   /** The layout overflowed the worker's stack and is being laid out again with the {@link stackSafeFallbacks} (told once). */
   onStackFallback?: () => void;
+  /** The default layout failed (for any reason) and this fallback produced the layout (told once). */
+  onFallbackRung?: (rung: LayoutFallbackRung) => void;
 }
 
 /**
@@ -544,9 +616,16 @@ export async function runElkLayout(
     edges: toElkEdges(edges),
   };
 
+  // One attempt: a layout, refused when it leaves a table unplaced.
+  const attempt = async (engine: IELK, attemptGraph: ElkNode): Promise<ElkNode> => {
+    const result = await layoutWithGuard(engine, attemptGraph);
+    assertUsableLayout(result, nodes.length);
+    return result;
+  };
+
   let layouted: ElkNode | undefined;
   try {
-    layouted = await layoutWithGuard(elk, graph);
+    layouted = await attempt(elk, graph);
   } catch (err) {
     // The default layout failed. On a large or densely related diagram its
     // node placement and its post-compaction recurse deeply and overflow the
@@ -558,7 +637,7 @@ export async function runElkLayout(
     // the user has waited long enough, and the worker has been replaced.
     const failure = classifyLayoutFailure(err);
     if (failure === 'timeout' || failure === 'worker') throw err;
-    const fallbacks = stackSafeFallbacks(mergedOptions);
+    const fallbacks = stackSafeFallbackRungs(mergedOptions);
     if (fallbacks.length === 0) throw err;
     if (isStackOverflow(err)) {
       try {
@@ -567,15 +646,33 @@ export async function runElkLayout(
         // Telemetry never stops a layout.
       }
     }
-    for (const fallbackOptions of fallbacks) {
+    let lastError: unknown = err;
+    for (const fallback of fallbacks) {
       try {
-        layouted = await layoutWithGuard(getElk(), { ...graph, layoutOptions: fallbackOptions });
+        layouted = await attempt(getElk(), { ...graph, layoutOptions: fallback.options });
+        try {
+          hooks.onFallbackRung?.(fallback.rung);
+        } catch {
+          // Telemetry never stops a layout.
+        }
         break;
-      } catch {
+      } catch (fallbackErr) {
         // The next fallback, if any.
+        lastError = fallbackErr;
       }
     }
-    if (!layouted) throw err;
+    if (!layouted) {
+      // Every fallback failed: the first error is the one thrown, carrying how the last one failed (telemetry).
+      if (typeof err === 'object' && err !== null) {
+        const outcome: LadderOutcome = { lastFailure: classifyLayoutFailure(lastError) };
+        try {
+          Object.defineProperty(err, LAYOUT_LADDER, { value: outcome, configurable: true });
+        } catch {
+          // A frozen error keeps its class; only the ladder's outcome is lost.
+        }
+      }
+      throw err;
+    }
   }
 
   // Extract positions from the layouted graph

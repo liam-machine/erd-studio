@@ -509,6 +509,25 @@ describe('validation — acceptance and normalisation', () => {
     );
   });
 
+  it('keeps what a failed layout was like (class, size bucket, duration, fallbacks), and drops a look-alike or a raw count', async () => {
+    const errors = {
+      layoutFailed: 2, firstLayoutFailed: 1, draftLayoutFailed: 1, layoutFailedStack: 1,
+      layoutFailedMemory: 1, layoutFailedUnsupported: 1, layoutFailedInput: 1, layoutFailedEngine: 1, layoutFailedResult: 1, layoutFailedOther: 1,
+      layoutFailedTablesUnder50: 1, layoutFailedTables50to199: 1, layoutFailedTables200to499: 1, layoutFailedTables500Plus: 1,
+      layoutFailedRelsUnder100: 1, layoutFailedRels100to499: 1, layoutFailedRels500to1999: 1, layoutFailedRels2000Plus: 1,
+      layoutFailedUnder1s: 1, layoutFailed1to5s: 1, layoutFailedOver5s: 1,
+      layoutFailedAllRungs: 1, layoutFailedLastRungTimeout: 1, layoutFailedLastRungWorker: 1, layoutFailedLastRungMemory: 1,
+    };
+    const params = await storedParams(
+      heartbeat({
+        features: { layoutFallbackRung2: 1, layoutFallbackRung3: 2, layoutFallbackRung4: 1 },
+        errors: { ...errors, layoutFailedTables1100: 1, layoutFailedTables: 1134, layoutFailedLastRungStack: 1 },
+      }),
+    );
+    assert.deepEqual(JSON.parse(params[17]), { layoutFallbackRung2: 1, layoutFallbackRung3: 2 });
+    assert.deepEqual(JSON.parse(params[18]), errors);
+  });
+
   it('keeps the automatic draft\'s time-limit drop key, after the import outcome keys', async () => {
     const params = await storedParams(heartbeat({ features: { draftDropTimeLimit: 1, importCauseTimeLimit: 1, draftDropTimeLimits: 1 } }));
     assert.equal(params[17], '{"importCauseTimeLimit":1,"draftDropTimeLimit":1}');

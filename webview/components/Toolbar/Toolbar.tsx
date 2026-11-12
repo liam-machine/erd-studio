@@ -27,9 +27,10 @@ import { useRevealRelationship } from '../../hooks/useRevealRelationship';
 import { useRevealTable } from '../../hooks/useRevealTable';
 import { otherProjectMatches, searchElsewhereLabel } from './searchElsewhere';
 import { GO_TO_TABLE_QUERY_MAX } from '../../../src/types/messages';
+import { layoutFailureSummary, type LayoutFallbackRung } from '../../../src/types/webviewError';
 import {
   runElkLayout,
-  classifyLayoutFailure,
+  layoutFailureReport,
   detectLayerBound,
   detectStrategy,
   type PartitionStrategy,
@@ -121,6 +122,7 @@ export function Toolbar({ nodes, edges }: ToolbarProps) {
   const registerSearchFocus = useEditorStore((s) => s.registerSearchFocus);
   const registerAutoLayout = useEditorStore((s) => s.registerAutoLayout);
   const setToastMessage = useEditorStore((s) => s.setToastMessage);
+  const recordError = useEditorStore((s) => s.recordError);
   const logicalOnly = useEditorStore((s) => s.logicalOnly);
   // Get current zoom level from React Flow store
   const zoom = useStore((s) => s.transform[2]);
@@ -476,27 +478,34 @@ export function Toolbar({ nodes, edges }: ToolbarProps) {
 
     setIsLayouting(true);
     const startedAt = performance.now();
-    // Usage telemetry (2.0 B17): the stack-safe fallback, and a failure's class (never its text).
+    // Usage telemetry (2.0 B17): the stack-safe fallback, the fallback that
+    // produced the layout, and a failure's class and size buckets (never its
+    // text; the counts and the message go to the extension's own log only).
     let fallback = false;
+    let rung: LayoutFallbackRung | undefined;
+    // Filter to model nodes/FK edges only — annotations are exempt from auto-layout.
+    const modelNodes = nodes.filter((n): n is import('@erd-studio/renderer/editor').TableFlowNode => n.type === 'model');
+    const fkEdges = edges.filter((e): e is import('@erd-studio/renderer/editor').FkFlowEdge => e.type === 'fk');
     const reportLayout = (ok: boolean, err?: unknown) => {
       const ms = Math.round(performance.now() - startedAt);
+      const failed = ok ? undefined : layoutFailureReport(err, { tables: modelNodes.length, relationships: fkEdges.length });
       const done: WebviewMessage = {
         type: 'layoutFinished',
         payload: {
           ms,
           ok,
           ...(firstOpen ? { firstOpen } : {}),
-          ...(!ok ? { failure: classifyLayoutFailure(err) } : {}),
+          ...(failed ?? {}),
           ...(fallback ? { fallback: true as const } : {}),
+          ...(ok && rung !== undefined ? { rung } : {}),
         },
       };
       vscode.postMessage(done);
+      // The Send Feedback diagnostics' recent canvas errors: fixed words only.
+      if (failed) recordError('layout', `Auto layout failed (${layoutFailureSummary(failed, ms)})`);
     };
 
     try {
-      // Filter to model nodes/FK edges only — annotations are exempt from auto-layout.
-      const modelNodes = nodes.filter((n): n is import('@erd-studio/renderer/editor').TableFlowNode => n.type === 'model');
-      const fkEdges = edges.filter((e): e is import('@erd-studio/renderer/editor').FkFlowEdge => e.type === 'fk');
       const positions = await runElkLayout(
         modelNodes,
         fkEdges,
@@ -506,7 +515,7 @@ export function Toolbar({ nodes, edges }: ToolbarProps) {
           domain.viewConfig.layoutOptions,
         ),
         partitionStrategy,
-        { onStackFallback: () => { fallback = true; } },
+        { onStackFallback: () => { fallback = true; }, onFallbackRung: (r) => { rung = r; } },
       );
 
       // Optimistic update: update domain in store so React Flow re-renders
@@ -540,7 +549,7 @@ export function Toolbar({ nodes, edges }: ToolbarProps) {
     } finally {
       setIsLayouting(false);
     }
-  }, [domain, nodes, edges, isLayouting, partitionStrategy, layerBound, layoutDirection, spacingPreset, setDomain, fitView, vscode, setToastMessage]);
+  }, [domain, nodes, edges, isLayouting, partitionStrategy, layerBound, layoutDirection, spacingPreset, setDomain, fitView, vscode, setToastMessage, recordError]);
 
   const handleAutoLayout = useCallback(() => {
     if (!domain || nodes.length === 0 || isLayouting) {

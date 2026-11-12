@@ -170,6 +170,23 @@ describe('trackedDraftPreview: the gate and the funnel', () => {
     expect(errors).toEqual(['draftLayoutFailed']);
   });
 
+  it('a failed layout with its detail also counts the canvas\'s class, size and fallback codes, never its log', () => {
+    const errors: string[] = [];
+    const events = draftPreviewEvents(() => undefined, (c) => errors.push(c));
+    events.layoutFailed('dbml', {
+      ms: 31000, failure: 'stack', tableBucket: '500plus', relBucket: '2000plus', exhausted: true, lastFailure: 'timeout',
+      log: { tables: 1134, relationships: 2417, message: 'Maximum call stack size exceeded' },
+    });
+    expect(errors).toEqual([
+      'draftLayoutFailed', 'layoutFailedStack', 'layoutFailedTables500Plus', 'layoutFailedRels2000Plus',
+      'layoutFailedOver5s', 'layoutFailedAllRungs', 'layoutFailedLastRungTimeout',
+    ]);
+    // The built-in examples too: a failure there is ours to fix.
+    errors.length = 0;
+    events.layoutFailed('example', { ms: 10, failure: 'engine', tableBucket: 'under50', relBucket: 'under100' });
+    expect(errors).toEqual(['draftLayoutFailed', 'layoutFailedEngine', 'layoutFailedTablesUnder50', 'layoutFailedRelsUnder100', 'layoutFailedUnder1s']);
+  });
+
   it('every key it counts is an allowlisted feature or error code (user cancels are features)', () => {
     for (const key of ['draftShown', 'draftShownAuto', 'draftExampleShown', 'draftKept', 'draftChangeOptions', 'draftDiscarded',
       'draftClosed', 'draftOtherStart', 'draftScopeChanged', 'draftDetailsOpened', 'draftRefreshed', 'draftUnavailable',

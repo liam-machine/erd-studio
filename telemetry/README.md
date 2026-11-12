@@ -1251,6 +1251,8 @@ mistake in it, a save VS Code refused) records no error code: only the
 - `layoutFailedWorker` (error) — the layout worker crashed.
 - `layoutFailedStack` (error) — an auto layout ran out of stack.
 
+The rest of a failed layout's codes (its other classes, size buckets, duration and how far the fallbacks got) are under "Keys added after 2.0.0" → "What a failed Auto Layout was like".
+
 **B18 — known-fix prompt answers, Welcome failures and small onboarding dead ends.**
 
 - `knownFixOffered` — the "a newer version fixes this" notification was shown.
@@ -1394,8 +1396,10 @@ Each loss-ledger cause class the import's ledger holds, once per import (with an
 Appended to `FEATURES` after the 2.0.0 list above (in
 `src/services/telemetryPayload.ts` and `src/index.js`, in the same order), on
 the same terms: fixed keys, never a name, a path, a message or a count of
-tables. Deploy the Worker before the extension release that records them, or
-their counts are dropped.
+tables (a failed layout's size is one of four fixed ranges, below). Deploy the
+Worker before the extension release that records them, or their counts are
+dropped. The failed-layout codes at the end of this section are appended to
+`ERROR_CODES` in the same way.
 
 **The import guide's Microsoft Fabric card.** A Warehouse or a Lakehouse's SQL
 analytics endpoint is read as SQL Server, so without these a Fabric import
@@ -1430,6 +1434,77 @@ the same installs. Not now and a closed notice are the remainder.
 - `majorUpdateNoticeShown` — the major update notice showed (once per machine per major version).
 - `majorUpdateNoticeShowMeAround` — its **Show Me Around** was pressed: the guide ran as the command runs it (counted beside `guideStarted` and `guideStartedFromCommand`).
 - `majorUpdateNoticeWhatsNew` — its **What's New** was pressed: the changelog that ships with the extension opened.
+
+**What a failed Auto Layout was like** (added after 2.0.4). Until then a daily
+record said only that a layout failed, whether it timed out, lost its worker
+or overflowed the stack, and whether the stack-safe fallback ran. These say,
+for each failure, what kind of diagram it was, how it failed and how far the
+fallbacks got. A layout tries up to three rungs: the default, then
+Brandes–Köpf node placement (rung 2), then that with post-compaction left out
+(rung 3); a rung is named by what it drops, so a diagram whose own options
+already use Brandes–Köpf has only rung 3. A timeout or a dead worker on the
+default layout tries no fallback.
+
+Everything is worked out in the webview and sent to the host as fixed enum
+values (`LayoutFailureDetail` in `src/types/webviewError.ts`): the size
+buckets from the counts, the class from the error's type and the engine's own
+fixed text (`classifyLayoutErrorText`: a stack overflow's wording, V8's and
+Firefox's out-of-memory wording, and the Java class name elkjs puts at the
+start of an ELK exception's message, mapped from a short fixed table, never
+sent). The real counts and the error's message travel in a separate `log`
+field that only the extension's own log reads (`layoutFailureLogLine`); the
+function that picks the keys does not take it.
+
+The two features, for a layout that **finished** (the canvas's or a draft
+page's; `layoutStackFallback` / `draftLayoutFallback` keep their meaning, a
+stack overflow on the default layout, so a rung without one of them is a
+fallback after another kind of failure):
+
+- `layoutFallbackRung2` — the default layout failed and Brandes–Köpf node placement produced the layout.
+- `layoutFallbackRung3` — the default layout failed and the layout was produced with post-compaction left out as well.
+
+The error codes, each counted once per failed layout beside `layoutFailed`
+(the canvas; `firstLayoutFailed` too when it was the automatic first-open
+layout, so the user's own clicks are `layoutFailed` minus `firstLayoutFailed`)
+or beside `draftLayoutFailed` (a draft page, built-in examples included). The
+canvas and the draft page share them, so on a day with both, the class codes
+sum to `layoutFailed` + `draftLayoutFailed`:
+
+- `layoutFailedMemory` (error) — the engine ran out of memory or asked for an array too long to allocate (a `RangeError` that is not a stack overflow).
+- `layoutFailedUnsupported` (error) — ELK refused the options or the graph's shape (`UnsupportedConfigurationException`, `UnsupportedGraphException`).
+- `layoutFailedInput` (error) — ELK refused the graph it was handed (`JsonImportException`: a relationship whose table is not in the graph).
+- `layoutFailedEngine` (error) — another exception of ELK's own (its compaction's `IllegalStateException`, …).
+- `layoutFailedResult` (error) — the result left a table out, or gave one a missing or non-finite coordinate; nothing was saved.
+- `layoutFailedOther` (error) — a failure of no listed class (before this, an unclassed failure had no code).
+- `layoutFailedTablesUnder50` (error) — the diagram had fewer than 50 tables.
+- `layoutFailedTables50to199` (error) — it had 50 to 199 tables.
+- `layoutFailedTables200to499` (error) — it had 200 to 499 tables.
+- `layoutFailedTables500Plus` (error) — it had 500 tables or more.
+- `layoutFailedRelsUnder100` (error) — it had fewer than 100 relationships.
+- `layoutFailedRels100to499` (error) — it had 100 to 499 relationships.
+- `layoutFailedRels500to1999` (error) — it had 500 to 1,999 relationships.
+- `layoutFailedRels2000Plus` (error) — it had 2,000 relationships or more.
+- `layoutFailedUnder1s` (error) — it failed in under 1 s (at once).
+- `layoutFailed1to5s` (error) — it failed after 1 to 5 s.
+- `layoutFailedOver5s` (error) — it failed after more than 5 s (a long run; each rung may take up to 30 s).
+- `layoutFailedAllRungs` (error) — every fallback was tried and failed; the class code is the default layout's failure.
+- `layoutFailedLastRungTimeout` (error) — beside `layoutFailedAllRungs`: the last fallback ran out of time.
+- `layoutFailedLastRungWorker` (error) — beside `layoutFailedAllRungs`: the worker died in the last fallback.
+- `layoutFailedLastRungMemory` (error) — beside `layoutFailedAllRungs`: the last fallback ran out of memory.
+
+Read one install's day as a sentence: `layoutFailed` 1, `firstLayoutFailed` 1,
+`layoutFailedStack` 1, `layoutFailedTables500Plus` 1, `layoutFailedRels2000Plus`
+1, `layoutFailedOver5s` 1, `layoutFailedAllRungs` 1, `layoutFailedLastRungTimeout`
+1 is a first-open layout of a diagram with 500 or more tables that overflowed
+the stack, then ran out of time in the last fallback. A failure with no
+`layoutFailedAllRungs` tried no fallback (a timeout, a dead worker, or options
+that already take both).
+
+```bash
+# Failed layouts by class, size and how far the fallbacks got (installs and failures, last 28 days)
+npx wrangler d1 execute erd-studio-telemetry --remote --command \
+  "SELECT h.os, j.key AS code, COUNT(DISTINCT h.install_id) AS installs, SUM(j.value) AS failures FROM heartbeats h, json_each(h.errors) j WHERE h.day >= date('now','-28 days') AND h.day < date('now') AND COALESCE(h.dev, 0) = 0 AND (j.key LIKE 'layoutFailed%' OR j.key IN ('firstLayoutFailed', 'draftLayoutFailed')) GROUP BY h.os, j.key ORDER BY h.os, installs DESC"
+```
 
 ## The local archive
 

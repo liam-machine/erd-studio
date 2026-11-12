@@ -40,7 +40,7 @@ import type { AnnotationColor, Cardinality, DesignTable, Stage } from './semanti
 import type { ColumnPair } from '@erd-studio/core';
 import type { GroundTruth } from './syncPlan';
 import type { CanvasGuideStart, GuideActionPayload } from './onboardingGuide';
-import type { CrashFallbackPayload, LayoutFailure, WebviewErrorPayload } from './webviewError';
+import type { CrashFallbackPayload, LayoutFailureDetail, LayoutFallbackRung, WebviewErrorPayload } from './webviewError';
 import type { CanvasLineStyle } from './lineStyle';
 import type { FilesNotShownPayload } from './filesNotShown';
 import type {
@@ -753,6 +753,14 @@ export interface RefreshManifestMessage {
  * Usage telemetry only: the host buckets the time into a feature key and
  * writes nothing, so it is allowed on the physical stage.
  */
+export interface LayoutFinishedPayload extends LayoutFailureDetail {
+  ms: number;
+  ok: boolean;
+  firstOpen?: boolean;
+  fallback?: true;
+  rung?: LayoutFallbackRung;
+}
+
 export interface LayoutFinishedMessage {
   type: 'layoutFinished';
   /**
@@ -760,8 +768,16 @@ export interface LayoutFinishedMessage {
    * webview (`LAYOUT_FAILURES`). `fallback` (2.0, optional): the layout
    * overflowed the worker's stack and was laid out again with the stack-safe
    * placement. An older webview sends neither.
+   *
+   * Added after 2.0.4, all optional (`LayoutFailureDetail`, an older webview sends
+   * none): a failed layout's `tableBucket` / `relBucket` (the diagram's size
+   * as buckets worked out in the webview), `exhausted` (every fallback was
+   * tried and failed) with `lastFailure` (the last one's class), and `log`
+   * (the real counts and the error's message, written to the extension's own
+   * log and never read by telemetry); a finished one's `rung`, the fallback
+   * that produced it (`LAYOUT_FALLBACK_RUNGS`).
    */
-  payload: { ms: number; ok: boolean; firstOpen?: boolean; failure?: LayoutFailure; fallback?: true };
+  payload: LayoutFinishedPayload;
 }
 
 /**

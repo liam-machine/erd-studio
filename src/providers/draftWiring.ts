@@ -26,7 +26,7 @@ import {
 } from '../services/draftTelemetry';
 import { crashFeedbackPrefill, noReadyFeedbackPrefill, type FeedbackPrefill } from '../services/commandErrors';
 import type { TelemetryErrorCode, TelemetryFeature } from '../services/telemetryPayload';
-import { draftLayoutFeatures, webviewErrorCodes } from '../services/telemetryCanvas';
+import { draftLayoutFeatures, layoutFailureCodes, webviewErrorCodes } from '../services/telemetryCanvas';
 import type { GuideActionPayload } from '../types/onboardingGuide';
 import type {
   Draft,
@@ -214,7 +214,12 @@ export function draftPreviewEvents(
       feature('draftDetailsOpened');
       onDetailsOpened?.();
     },
-    layoutFailed: () => error('draftLayoutFailed'),
+    layoutFailed: (_source, failure) => {
+      error('draftLayoutFailed');
+      // The same class, size and fallback codes a canvas layout failure records
+      // (its `log`, the counts and the message, is the preview's to write: never counted).
+      if (failure) for (const code of layoutFailureCodes(failure)) error(code);
+    },
     ...(showImportReport ? { importReport: (_source: DraftSource, reportId?: number) => { void Promise.resolve().then(() => showImportReport(reportId)).catch(() => undefined); } } : {}),
     ...(guide ? { guide: (action: GuideActionPayload) => guide(action) } : {}),
     pageReady: (_source, slow) => {

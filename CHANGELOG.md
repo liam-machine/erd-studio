@@ -31,6 +31,7 @@ heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that
 
 ### Changed
 
+- The anonymous daily usage report now records more about an Auto Layout that failed: the diagram's size as a range (never a number), the kind of failure, and which fallback, if any, produced a layout. Never names, paths or messages.
 - **Add to Diagram… offers the diagram you have open first.** Right-click a table (or a selection of tables) in the Table Library and choose **Add to Diagram…**: the diagram in the active tab is at the top, marked *open now*, so pressing Enter adds the tables to it. This needs no dragging.
 - **A diagram that shows two tables of one name needs this version of ERD Studio or later.** Its file says `erd_schema_version: '8'`, and older versions, and ERD Studio for Confluence until it is updated, refuse to open that one diagram and ask to update, rather than draw one table twice. Every other diagram is written exactly as before and opens in any 2.0 version. An older version also still shows the second table as a duplicate and can change its relationships when the first is renamed, so upgrade a team together.
 - **`erd-studio doctor` no longer calls two tables of one name in different schemas duplicates.** A duplicate is now the same schema and name in two layers: "sales.orders is declared in silver/… and gold/…: other DBML tools cannot tell two tables of one schema and name apart, and ERD Studio uses the first. Give this one its own name and keep the warehouse name in alias, or move it to its own schema folder." It also reports a relationship that names a table two schemas have without saying which, two table files that declare the same schema and name, and a diagram that shows both tables of one name but still says version 7.
@@ -48,6 +49,7 @@ heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that
 
 ### Fixed
 
+- **Auto Layout no longer saves a result that leaves a table without a position.** If the layout engine returns one, ERD Studio tries its lighter layouts and, if none works, says the layout failed and leaves the diagram as it was. The ERD Studio log now records why any layout failed, with the diagram's table and relationship counts.
 - **An edit on a table drawn from another schema's same-named file no longer goes to the wrong file.** When two schemas held a table of one name, a diagram showing the second drew it from its own file but saved column, description and other edits into the first one's file. Every edit now goes to the file the diagram shows, and a relationship written to the second table (`ccc.addresse.street`) is drawn on it, not on the first.
 - **Auto Layout tries its lighter layouts after any failure of the first one**, not only after it runs out of room to compute: a diagram the layout engine refused (two-way relationships between the same tables could do it) is now laid out instead of showing an error.
 - **Dropping tables on the Physical tab says why nothing was added**, instead of doing nothing: tables are added on the Logical tab.

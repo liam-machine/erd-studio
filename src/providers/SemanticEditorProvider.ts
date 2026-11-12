@@ -172,6 +172,7 @@ import { handlerFailureKeys, handlerGroupOf, type HandlerGroup } from '../servic
 import { markRecorded, wasRecorded } from '../services/telemetryOnce';
 import {
   canvasLayoutTelemetry,
+  layoutFailureLogLine,
   dbmlDiagramFeatures,
   isUserFileProblem,
   loaderWarningFeatures,
@@ -2892,10 +2893,15 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
                 telemetry.error('layoutFailed');
                 if (payload.firstOpen) telemetry.error('firstLayoutFailed');
               }
-              // 2.0 B17: the failure's class, the stack-safe fallback, a slow first-open layout.
+              // 2.0 B17: the failure's class, size buckets and how far the
+              // fallbacks got, the stack-safe fallback, a slow first-open layout.
               const big = canvasLayoutTelemetry(payload);
               for (const code of big.errors) telemetry.error(code);
               for (const feature of big.features) telemetry.feature(feature);
+              // The real counts and message, for the ERD Studio log only (never sent).
+              if (!payload.ok) log.warn(`[SemanticEditorProvider] ${layoutFailureLogLine('canvas', payload)}`);
+            } else {
+              log.warn('[SemanticEditorProvider] Ignoring a layoutFinished with a field out of range');
             }
             break;
           }
