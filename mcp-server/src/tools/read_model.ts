@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { buildServices } from '../services.js';
 import { isInitialized, NOT_INITIALIZED_TIP } from '../lib/setup.js';
+import { tableIdOfEntry } from '../../../src/services/tableLibraryIndex.js';
 
 export const read_model = {
   name: 'read_model',
@@ -17,6 +18,10 @@ export const read_model = {
       model_name: z
         .string()
         .describe('Logical model name (file name without its extension: a .dbml table file in <layer>/tables/<schema>/, or an older .yml in logical-models/ or tables/).'),
+      schema: z
+        .string()
+        .optional()
+        .describe('The table\'s schema folder (<layer>/tables/<schema>/). Needed only when tables in more than one schema folder have the name.'),
     },
     annotations: {
       readOnlyHint: true,
@@ -26,9 +31,11 @@ export const read_model = {
   async handler({
     project_path,
     model_name,
+    schema,
   }: {
     project_path: string;
     model_name: string;
+    schema?: string;
   }) {
     const { tableLibraryService, projectPath, semanticDir } = buildServices(project_path);
 
@@ -36,7 +43,24 @@ export const read_model = {
       throw new Error(NOT_INITIALIZED_TIP);
     }
 
-    const model = tableLibraryService.getTable(model_name);
+    // A name tables in more than one schema folder have is read by its schema folder, never by picking one.
+    const named = tableLibraryService.tablesNamed(model_name).map((e) => tableIdOfEntry(e));
+    let model;
+    if (schema !== undefined) {
+      const id = named.find((t) => t.schema.toLowerCase() === schema.trim().toLowerCase());
+      if (!id) {
+        throw new Error(
+          `No table ${model_name} in schema folder ${schema}` + (named.length > 0 ? ` (it is in: ${named.map((t) => t.schema || '(no schema folder)').join(', ')}).` : '. Use list_models to see what\'s available.'),
+        );
+      }
+      model = tableLibraryService.getTable(id);
+    } else if (tableLibraryService.isAmbiguousName(model_name)) {
+      throw new Error(
+        `Tables in more than one schema folder are named ${model_name} (${named.map((t) => t.schema).join(', ')}). Pass schema to say which.`,
+      );
+    } else {
+      model = tableLibraryService.getTable(model_name);
+    }
     if (!model) {
       throw new Error(
         `Model not found: ${model_name}. Use list_models to see what's available, or call get_editor_setup if you haven't created any models yet.`,

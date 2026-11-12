@@ -1,5 +1,5 @@
-// atlas_live.main_v1 and atlas_stable.main_v1 share a table name. A table's name is unique across the
-// whole project, so each takes its dataset as a prefix (<dataset>__<table>), with the BigQuery name in alias.
+// atlas_live.main_v1 and atlas_stable.main_v1 share a table name. This example gives each its dataset
+// as a prefix (<dataset>__<table>), with the BigQuery name in alias, so every name is unique.
 Table atlas_live.atlas_live__main_v1 [
   alias: 'main_v1',
   meta_retention: '30 days'

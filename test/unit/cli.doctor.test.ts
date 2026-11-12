@@ -1195,7 +1195,9 @@ describe('doctor on native DBML storage (§7.1, S8): dbmlProblems, next steps an
     expect(duplicates.map((p) => [p.file, p.severity])).toEqual(
       ['bridge_empty', 'customer_profile', 'dim_customer', 'dim_region', 'fct_order'].map((n) => [`.erd-studio/gold/tables/gold/${n}.dbml`, 'error']),
     );
-    expect(duplicates[4].message).toBe('fct_order is declared in gold-old/tables/gold/fct_order.dbml and gold/tables/gold/fct_order.dbml; give the tables unique names and keep the warehouse name in alias.');
+    // One schema folder and name in two layers is one table twice (reworded once one name in two schema folders became two tables).
+    expect(duplicates[4].message).toBe('gold.fct_order is declared in gold-old/tables/gold/fct_order.dbml and gold/tables/gold/fct_order.dbml: other DBML tools cannot tell two tables '
+      + 'of one schema and name apart, and ERD Studio uses the first. Give this one its own name and keep the warehouse name in alias, or move it to its own schema folder.');
     expect(ids(r)[0]).toBe('fix-dbml-file');
   });
 

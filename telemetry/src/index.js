@@ -837,6 +837,20 @@ const FEATURES = [
   'importCauseTimeLimit',
   'importCauseOther',
   'draftDropTimeLimit',
+  // Added after 2.0.0: the import guide's Microsoft Fabric card (its catalog
+  // query's button and copy), and how an import started from its SQL buttons ended.
+  'importGuideActionFabricCatalog',
+  'importGuideCopiedFabricCatalog',
+  'importFabricOutcomeClean',
+  'importFabricOutcomeRepaired',
+  'importFabricOutcomePartial',
+  'importFabricOutcomeFail',
+  'importFabricOutcomeCancelled',
+  'importFabricOutcomeTimedOut',
+  // The major update notice: it showed, and which of its two buttons was pressed.
+  'majorUpdateNoticeShown',
+  'majorUpdateNoticeShowMeAround',
+  'majorUpdateNoticeWhatsNew',
 ];
 
 /** The only keys `errors` may carry; anything else is dropped. */

@@ -1,0 +1,6 @@
+{
+  "schemaVersion": 1,
+  "layers": [
+    { "id": "bronze", "label": "Bronze", "abbreviation": "BRZ", "color": "#cd7f32", "creatable": true, "order": 1 }
+  ]
+}

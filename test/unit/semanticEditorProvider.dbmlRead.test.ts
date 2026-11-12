@@ -141,22 +141,31 @@ describe('a DBML diagram on the canvas', () => {
     expect(doc.getText()).toBe(diagram.replace('    fct_order 400 200\n', '    fct_order 10 20\n'));
   });
 
-  it('a taken name suggests `<layer>_<name>` from the diagram\'s layer, never `diagrams_<name>`', async () => {
+  // A table is its schema folder and name: gold's dim_customer refuses a new one in gold only (this pinned the
+  // project-wide rule, which refused it on a silver diagram and suggested silver_dim_customer).
+  it('a name the new table\'s own schema folder has is refused, naming that schema and file; another schema folder\'s is no clash', async () => {
     const provider = buildProvider(root);
     const panel = await resolve(provider, openDoc('silver/diagrams/staging.dbml'));
     await panel._simulateMessage({
       type: 'addModel',
-      payload: { name: 'dim_customer', columns: [{ name: 'customer_key', dataType: 'int', description: '' }] },
+      payload: { name: 'dim_customer', schemaFolder: 'gold', columns: [{ name: 'customer_key', dataType: 'int', description: '' }] },
     });
     const errors = () => panel._postedMessages
       .filter((m) => (m as { type: string }).type === 'error')
       .map((m) => (m as { payload: { message: string } }).payload.message);
     await vi.waitFor(() => expect(errors()).toHaveLength(1));
     const [message] = errors();
-    expect(message).toContain('already exists in the Table Library');
-    expect(message).toContain('name it silver_dim_customer');
+    expect(message).toBe('The schema gold already has a table called "dim_customer" (gold/tables/gold/dim_customer.dbml). '
+      + 'Use "Add Existing Tables" to add it to this diagram, or choose another name.');
     expect(message).not.toContain('diagrams_');
     expect(_appliedEdits).toHaveLength(0);
+    // In silver's own schema folder it is a new table beside gold's.
+    await panel._simulateMessage({
+      type: 'addModel',
+      payload: { name: 'dim_customer', columns: [{ name: 'customer_key', dataType: 'int', description: '' }] },
+    });
+    await vi.waitFor(() => expect(_appliedEdits).toHaveLength(1));
+    expect(errors()).toHaveLength(1);
   });
 
   it('a DBML table that a YAML file also has (part-way through Convert) is reported as in both folders, with no Fix…', async () => {

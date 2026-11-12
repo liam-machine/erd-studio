@@ -16,7 +16,8 @@
 
 import * as fs from 'fs';
 
-import { diagramPathOf } from '@erd-studio/core';
+import { diagramPathOf, tableIdOfPath } from '@erd-studio/core';
+import type { TableFileId } from '@erd-studio/core';
 import { diagramSummaryDbml } from '@erd-studio/core/dbml';
 
 /** A diagram's imports, from {@link diagramSummaryOf}. */
@@ -25,7 +26,12 @@ export interface DiagramSummary {
   rel: string;
   /** Its layer folder. */
   layer: string;
-  /** Its `use` members, by file stem, in file order. */
+  /**
+   * Its `use` members, in file order, each by its reference on the diagram:
+   * its file stem, or `<schema>.<stem>` where another member's file in
+   * another schema folder has the same stem. Each one's identity:
+   * {@link diagramMemberIds}.
+   */
   members: string[];
   /** Each member's `use` path, resolved (semantic-relative), in the same order. */
   memberPaths: string[];
@@ -52,6 +58,18 @@ export function diagramSummaryOf(rel: string, text: string): DiagramSummary | nu
     otherUses: summary.otherUses,
     unlinked: summary.unlinked,
   };
+}
+
+/**
+ * Each `use` member's identity (index for index with `summary.members`): the
+ * schema folder, name and layer of the table file its `use` line reads
+ * (`tableIdOfPath` of its resolved path), so a member is told from another
+ * table of its name by its file, never by splitting its reference.
+ * Undefined for a member whose `use` path is not a table file of the
+ * layer-first tree (outside it, or a stray path).
+ */
+export function diagramMemberIds(summary: Pick<DiagramSummary, 'memberPaths'>): Array<TableFileId | undefined> {
+  return summary.memberPaths.map((p) => tableIdOfPath(p));
 }
 
 /** The memo: one entry per diagram path. */

@@ -34,6 +34,7 @@ import { NO_LEGACY_ALIAS, PRE_REGISTERED_COMMANDS } from '../../src/extension';
 import { SubjectAreaService } from '../../src/services/domainService';
 import { LayerService } from '../../src/services/layerService';
 import { TableLibraryService } from '../../src/services/logicalModelService';
+import { importGuideSourceOfImportArg } from '../../src/services/importOutcomeTelemetry';
 import { sqlDialectOfImportArg, type SqlDialect } from '../../src/services/sqlDdlImport';
 import * as engine from '../../src/services/sqlImportEngine';
 import { telemetry } from '../../src/services/telemetryService';
@@ -440,6 +441,17 @@ describe('Import SQL DDL… with a dialect chosen ({ dialect }: the import guide
       { dialect: 'Databricks' }, { dialect: 1 }, { dialect: { toString: () => 'mysql' } }, { quick: true }, { quick: true, dialect: 'mysql' },
     ]) {
       expect(sqlDialectOfImportArg(arg), JSON.stringify(arg)).toBeUndefined();
+    }
+  });
+
+  it('the guide\'s Fabric buttons add { source: \'fabric\' }: the dialect is read as before, and the source is that one literal or nothing', () => {
+    const arg = { dialect: 'sqlserver', source: 'fabric' };
+    expect(sqlDialectOfImportArg(arg)).toBe('sqlserver');
+    expect(importGuideSourceOfImportArg(arg)).toBe('fabric');
+    // An unknown source never stops the dialect being read, and is never carried.
+    expect(sqlDialectOfImportArg({ dialect: 'sqlserver', source: 'onelake' })).toBe('sqlserver');
+    for (const other of [{ dialect: 'sqlserver' }, { dialect: 'sqlserver', source: 'onelake' }, { dialect: 'sqlserver', source: 'FABRIC' }, { quick: true, source: 'fabric' }, 'fabric', undefined]) {
+      expect(importGuideSourceOfImportArg(other), JSON.stringify(other)).toBeUndefined();
     }
   });
 

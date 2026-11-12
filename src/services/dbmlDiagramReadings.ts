@@ -24,8 +24,8 @@
  * No `vscode`: the CLI bundles the domain service.
  */
 
-import { erdLayoutOf, erdLayoutView, withMemberSpelling } from '@erd-studio/core';
-import type { Annotation, NodePosition } from '@erd-studio/core';
+import { DBML_TWIN_SCHEMA_VERSION, erdLayoutOf, erdLayoutView, withMemberRefs } from '@erd-studio/core';
+import type { Annotation, NodePosition, TableRefCandidate } from '@erd-studio/core';
 import { parseSubjectAreaDbml } from '@erd-studio/core/dbml';
 
 type DbmlSubjectAreaReading = ReturnType<typeof parseSubjectAreaDbml>;
@@ -77,24 +77,46 @@ export function rememberedDbmlMembers(text: string, filePath: string): string[] 
 }
 
 /**
+ * The members of `reading` as text names them (index for index with
+ * `reading.members`: its `use` members, then `erd_unlinked_tables`), each with
+ * the schema folder of its file and the qualifier its `use` line writes, as
+ * the diagram reader matches `erd_layout` lines with them.
+ */
+function memberTablesOf(reading: DbmlSubjectAreaReading): TableRefCandidate[] {
+  return [
+    ...(reading.uses ?? []).map((u) => ({ schema: u.schema ?? '', name: u.name, ref: u.ref ?? u.name, ...(u.qualifier !== undefined ? { qualifiers: [u.qualifier] } : {}) })),
+    ...(reading.unlinked ?? []).map((name) => ({ schema: '', name, ref: name })),
+  ];
+}
+
+/**
  * After a layout-only write (a drag: `oldText` → `newText`, only
  * `erd_layout` changed): remember `newText`'s reading without compiling it,
  * from `oldText`'s remembered one with the positions and sticky-note boxes
  * `parsedAfter` (the object the drag wrote) holds as the file now does —
- * what `erd_layout` keeps of them (rounded, members spelled as they are),
- * mapped back as the reader maps it, and the lines it recorded after
- * `erd_layout` moved as the value's line count changed. Does nothing when
- * `oldText` has no reading remembered: the next read compiles as usual.
+ * what `erd_layout` keeps of them (rounded, each member's line under its
+ * reference, as the layout writer spells them), mapped back as the reader
+ * maps it (with each member's schema folder and qualifier, so a
+ * `<schema>.<name>` line lands on its own table), and the lines it recorded
+ * after `erd_layout` moved as the value's line count changed. So the
+ * remembered reading is the one a fresh read of `newText` gives. Does
+ * nothing when `oldText` has no reading remembered: the next read compiles
+ * as usual.
  */
 export function primeLayoutOnlyReading(oldText: string, newText: string, filePath: string, parsedAfter: Record<string, unknown>): void {
   const before = memo.get(keyOf(oldText, filePath));
   if (!before) return;
+  // A drag on a diagram holding two tables of one name (a member named `<schema>.<name>`) that is
+  // not yet at erd_schema_version '8' also writes '8': not layout-only, so the next read compiles.
+  if (before.schemaVersion < DBML_TWIN_SCHEMA_VERSION && (before.uses ?? []).some((u) => u.ref !== undefined && u.ref !== u.name)) return;
   const reading = structuredClone(before);
+  const tables = memberTablesOf(reading);
   const viewAfter = (parsedAfter.viewConfig ?? {}) as { positions?: Record<string, NodePosition>; annotations?: Annotation[] };
-  const layout = withMemberSpelling(erdLayoutOf(viewAfter.positions, viewAfter.annotations), reading.members);
+  const layout = withMemberRefs(erdLayoutOf(viewAfter.positions, viewAfter.annotations), tables);
   const view = reading.obj.viewConfig as { positions?: Record<string, NodePosition>; annotations?: Annotation[] };
   const annotations = Array.isArray(view.annotations) ? view.annotations : [];
-  const shown = erdLayoutView(layout, reading.members, annotations.map((a) => a.id));
+  const shown = erdLayoutView(layout, reading.members, annotations.map((a) => a.id), tables);
+  if (shown.sharedBare) reading.layoutSharedBare = shown.sharedBare; else delete reading.layoutSharedBare;
   view.positions = shown.positions;
   for (const annotation of annotations) {
     const box = shown.boxes[annotation.id];

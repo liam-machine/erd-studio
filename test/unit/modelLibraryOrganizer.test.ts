@@ -214,3 +214,45 @@ describe('describeOrganizePlan', () => {
     expect(text).toContain('Left alone: folders that are not a layer in layers.json — Staging/ (2).');
   });
 });
+
+describe('planOrganizeByLayer with tables told apart by identity (domains give the table files their use lines read)', () => {
+  const S = '/p/.erd-studio';
+  /** A DBML table in `<layer>/tables/<schema>/`, as the command hands it over: its folder is its layer. */
+  const dbml = (layer: string, schema: string, name: string, shadowedBy?: string): TableFileEntry => ({
+    name, folder: layer, layer, storage: 'dbml', id: { schema, name },
+    filePath: `${S}/${layer}/tables/${schema}/${name}.dbml`, ...(shadowedBy ? { shadowedBy } : {}),
+  });
+  const dbmlTarget = (entries: readonly TableFileEntry[]) => (name: string, layer: string, from: string): string => {
+    const schema = entries.find((e) => e.filePath === from)!.id!.schema;
+    return `${S}/${layer}/tables/${schema}/${name}.dbml`;
+  };
+  const LAYERS = new Set(['bronze', 'silver', 'gold']);
+
+  it('of two tables of one name in different schema folders, moves only the one the other layer\'s diagram shows', () => {
+    const entries = [dbml('bronze', 'bqs', 'addresse'), dbml('bronze', 'ccc', 'addresse')];
+    const plan = planOrganizeByLayer(entries, [
+      // A diagram holding both lists them as bqs.addresse and ccc.addresse; a silver one shows only ccc's.
+      { layer: 'silver', modelNames: ['addresse'], modelIds: ['ccc/addresse'] },
+    ], dbmlTarget(entries), LAYERS);
+    expect(plan.moves).toEqual([{
+      name: 'addresse', layer: 'silver', from: `${S}/bronze/tables/ccc/addresse.dbml`, to: `${S}/silver/tables/ccc/addresse.dbml`, fromFolder: 'bronze',
+    }]);
+    expect(plan.conflicts).toEqual([]);
+  });
+
+  it('a table of the name in another schema folder of the target layer is no conflict; one of its own identity is (D-7)', () => {
+    const entries = [dbml('bronze', 'ccc', 'addresse'), dbml('silver', 'xyz', 'addresse')];
+    const usage = [{ layer: 'silver', modelNames: ['addresse', 'addresse'], modelIds: ['ccc/addresse', 'xyz/addresse'] }];
+    expect(planOrganizeByLayer(entries, usage, dbmlTarget(entries), LAYERS).moves.map((m) => m.to)).toEqual([`${S}/silver/tables/ccc/addresse.dbml`]);
+    const copied = [...entries, dbml('gold', 'ccc', 'addresse', `${S}/bronze/tables/ccc/addresse.dbml`)];
+    const plan = planOrganizeByLayer(copied, usage, dbmlTarget(copied), LAYERS);
+    expect(plan.moves).toEqual([]);
+    expect(plan.conflicts).toEqual([{ name: 'addresse', layer: 'silver' }]);
+  });
+
+  it('without identities a domain counts by name, as before', () => {
+    const entries = [dbml('bronze', 'bqs', 'addresse'), dbml('bronze', 'ccc', 'addresse')];
+    const plan = planOrganizeByLayer(entries, [{ layer: 'silver', modelNames: ['addresse'] }], dbmlTarget(entries), LAYERS);
+    expect(plan.moves.map((m) => m.from)).toEqual([`${S}/bronze/tables/bqs/addresse.dbml`, `${S}/bronze/tables/ccc/addresse.dbml`]);
+  });
+});

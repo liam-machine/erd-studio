@@ -59,7 +59,7 @@ The layout [Databricks describes](https://docs.databricks.com/aws/en/lakehouse/m
 ## What to notice
 
 - **One schema per layer is fine.** Each layer has a single schema folder named after it. The source system is in the bronze table names (`shopify_orders`, `stripe_charges`), as it is in the warehouse.
-- **The same warehouse name in two layers.** Silver and gold both have a table called `orders`. A table's name is unique across the whole project, so they are `silver_orders` and `gold_orders`, each with `alias: 'orders'`, the name the warehouse uses.
+- **The same warehouse name in two layers.** Silver and gold both have a table called `orders`. They are in different schemas (`silver` and `gold`), so both could be `orders`; this example names them `silver_orders` and `gold_orders`, each with `alias: 'orders'`, the name the warehouse uses, as earlier ERD Studio versions required. One schema holds a name once, across all layers.
 - **Conformed dimensions are one file each, on several diagrams**: `dim_date` and `dim_customer` appear on both the **sales** and **finance** diagrams.
 - **Relationships can be split by owner.** Gold's Refs are in `gold.dbml`, except the finance star's, which the finance team keeps in `finance.dbml`. New relationships of `fct_payment` land there too.
 - **A wide reporting table needs no relationships.** `gold_orders` is pre-joined for a dashboard tool and sits on its own diagram.

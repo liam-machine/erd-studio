@@ -93,18 +93,23 @@ describe('listing and shadowing', () => {
     expect(service().findTableFile('fct_order')).toBe(v6);
   });
 
-  it('a name in two layers or two schemas: the first (layers, then schemas, in name order) wins, any case', () => {
+  // A table is its schema folder and name: one name in two schema folders is two tables (this pinned
+  // the rule before that, where the first file of a name shadowed every other). The same schema folder
+  // and name in two layers, or in a folder spelled in another case, is still one table, the first wins.
+  it('a name in two schemas is two tables; one schema folder and name in two layers is one, the first (layers, then schemas, in name order) wins, any case', () => {
     const first = treeTable('gold', 'a_schema', 'dim_x');
     const second = treeTable('gold', 'b_schema', 'DIM_X');
-    const third = treeTable('silver', 'silver', 'dim_x');
+    treeTable('silver', 'A_SCHEMA', 'dim_x');
     const entries = service().listTableFiles();
     expect(entries.map((e) => [rel(e.filePath), e.shadowedBy ? rel(e.shadowedBy) : null])).toEqual([
       ['gold/tables/a_schema/dim_x.dbml', null],
-      ['gold/tables/b_schema/DIM_X.dbml', 'gold/tables/a_schema/dim_x.dbml'],
-      ['silver/tables/silver/dim_x.dbml', 'gold/tables/a_schema/dim_x.dbml'],
+      ['gold/tables/b_schema/DIM_X.dbml', null],
+      ['silver/tables/A_SCHEMA/dim_x.dbml', 'gold/tables/a_schema/dim_x.dbml'],
     ]);
+    // A bare read still answers the first file in index order; the other is found by its identity.
     expect(service().findTableFile('Dim_X')).toBe(first);
-    expect([second, third]).not.toContain(service().findTableFile('dim_x'));
+    expect(service().findTableById({ schema: 'b_schema', name: 'dim_x' })?.filePath).toBe(second);
+    expect(service().isAmbiguousName('dim_x')).toBe(true);
   });
 
   it('reads any non-dot schema folder (Finance, SAP FI), not only layer-shaped ones', () => {

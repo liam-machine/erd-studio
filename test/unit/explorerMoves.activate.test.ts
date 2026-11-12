@@ -298,12 +298,19 @@ describe('a table file renamed', () => {
     compilesClean();
   });
 
+  // A table is its schema folder and name: the name another table of the same schema folder has, in
+  // another layer, is taken (calendar's dim_date in silver is another table, and no longer refuses it).
+  const sameSchemaTwin = (): void => {
+    fs.mkdirSync(at('silver/tables/gold'), { recursive: true });
+    fs.writeFileSync(at('silver/tables/gold/dim_week.dbml'), 'Table gold.dim_week {\n  week_key int [pk]\n}\n');
+  };
   it.each([
-    ['not a table name', 'gold/tables/gold/fct-order.dbml', /"fct-order" is not a table name\./],
-    ['another table\'s name', 'gold/tables/gold/dim_date.dbml', /the table "dim_date" already has that name/],
-    ['the same name in other case', 'gold/tables/gold/FCT_ORDER.dbml', /differs from "fct_order" only in upper\/lower case/],
-    ['renamed and moved at once', 'silver/tables/calendar/fct_orders.dbml', /renamed and moved in one step/],
-  ])('%s: renames nothing, warns, and Rename File Back puts the file back', async (_label, to, why) => {
+    ['not a table name', 'gold/tables/gold/fct-order.dbml', /"fct-order" is not a table name\./, undefined],
+    ['another table\'s name', 'gold/tables/gold/dim_week.dbml', /the table "dim_week" already has that name/, sameSchemaTwin],
+    ['the same name in other case', 'gold/tables/gold/FCT_ORDER.dbml', /differs from "fct_order" only in upper\/lower case/, undefined],
+    ['renamed and moved at once', 'silver/tables/calendar/fct_orders.dbml', /renamed and moved in one step/, undefined],
+  ])('%s: renames nothing, warns, and Rename File Back puts the file back', async (_label, to, why, setup) => {
+    setup?.();
     await activate(context);
     const before = bytes();
     warnings.mockImplementation((async (...args: unknown[]) => (args.includes('Rename File Back') ? 'Rename File Back' : undefined)) as never);
@@ -561,11 +568,14 @@ describe('an undone move, or a file put back by hand, plans nothing', () => {
   });
 
   it('a rename refused (another table\'s name), then renamed straight back by hand: nothing asked, no warning', async () => {
+    // The same schema folder's table of the name, in another layer (another schema folder's is another table).
+    fs.mkdirSync(at('silver/tables/gold'), { recursive: true });
+    fs.writeFileSync(at('silver/tables/gold/dim_week.dbml'), 'Table gold.dim_week {\n  week_key int [pk]\n}\n');
     await activate(context);
     const before = bytes();
-    await explorerMove(['gold/tables/gold/fct_order.dbml', 'gold/tables/gold/dim_date.dbml']);
-    expect(String(warnings.mock.calls[0][0])).toMatch(/the table "dim_date" already has that name/);
-    await explorerMove(['gold/tables/gold/dim_date.dbml', 'gold/tables/gold/fct_order.dbml']);
+    await explorerMove(['gold/tables/gold/fct_order.dbml', 'gold/tables/gold/dim_week.dbml']);
+    expect(String(warnings.mock.calls[0][0])).toMatch(/the table "dim_week" already has that name/);
+    await explorerMove(['gold/tables/gold/dim_week.dbml', 'gold/tables/gold/fct_order.dbml']);
     expect(warnings).toHaveBeenCalledTimes(1);
     expect(questions()).toEqual([]);
     expect(bytes()).toEqual(before);

@@ -56,6 +56,25 @@ describe('native DBML storage docs', () => {
     expect(text).toContain('(`doctor`\'s one error, `legacyDbmlTree`)');
   });
 
+  it('the glossary and the examples never say a DBML table\'s name alone is its identity', () => {
+    const glossary = flat(read('docs/glossary.md'));
+    expect(glossary).toContain('A DBML table is its schema and its name, so two schemas may each have a table of one name; a YAML table\'s `name` is its identity everywhere.');
+    expect(glossary).not.toContain('grain and other fields. Its `name` is its identity everywhere.');
+    // An example that gives every table its own name says it is the example's choice, not the rule.
+    const exampleTables = ['enterprise-warehouse/.erd-studio/landing/tables/core_banking/core_customer.dbml',
+      'gitlab-style/.erd-studio/raw/tables/sfdc/sfdc_account.dbml', 'medallion/.erd-studio/silver/tables/silver/silver_orders.dbml',
+      'bigquery-versioned/.erd-studio/live/tables/atlas_live/atlas_live__main_v1.dbml'];
+    for (const rel of exampleTables) expect(flat(read(`docs/examples/${rel}`)), rel).not.toMatch(/unique across the whole project/);
+  });
+
+  it('the FAQ says New Schema… makes its folder with its first table, as the command does', () => {
+    // The command's own prompt: the folder is made with the table named next.
+    expect(read('src/commands/newTable.ts')).toContain('made with its first table: you name that table next.');
+    const faq = flat(read('docs/faq.md'));
+    expect(faq).toContain('**New Schema…** asks for the schema\'s name and then its first table, and makes the folder with that table');
+    expect(faq).not.toContain('a new schema folder is empty until you give it a table');
+  });
+
   it('the 2.0.0 notes mention the new telemetry keys, with no name or path sent', () => {
     const changelog = read('CHANGELOG.md');
     const start = changelog.search(/^## (Unreleased — 2\.0\.0|2\.0\.0 — )/m);

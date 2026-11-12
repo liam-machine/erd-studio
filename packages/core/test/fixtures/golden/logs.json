@@ -33,7 +33,7 @@
     "error: [SemanticEditorProvider] Failed to load domain: Subject area file <root>/.erd-studio/silver/diagrams/dbml-conflict.dbml has unresolved git merge conflicts (first at line 7). Resolve them in the file — if only the layout conflicts, either side is safe to keep."
   ],
   "errors.dbml-future.host": [
-    "error: [SemanticEditorProvider] Failed to load domain: .erd-studio/silver/diagrams/dbml-future.dbml has erd_schema_version 8 but this extension only supports up to version 7. Please update the extension."
+    "error: [SemanticEditorProvider] Failed to load domain: .erd-studio/silver/diagrams/dbml-future.dbml has erd_schema_version 9 but this extension only supports up to version 8. Please update the extension."
   ],
   "errors.dbml-legacy.host": [
     "error: [SemanticEditorProvider] Failed to load domain: gold/old.dbml was written by an ERD Studio 1.9 pre-release, whose folder layout 2.0 does not read. Run erd-studio doctor in the project for the steps to convert it again. To edit it as text, right-click the tab and choose Reopen Editor With… > Text Editor."

@@ -41,9 +41,12 @@ export function outlineDbmlFile(rawText: string, filePath: string): DbmlFileOutl
       const parts = plainNames(node.name);
       const column = String(node.targetKind?.value ?? '').toLowerCase() === 'column';
       if (!parts || parts.length < (column ? 2 : 1)) continue;
+      const tableAt = column ? parts.length - 2 : parts.length - 1;
       metadata.push({
-        table: column ? parts[parts.length - 2] : parts[parts.length - 1],
+        table: parts[tableAt],
         ...(column ? { column: parts[parts.length - 1] } : {}),
+        // The schema the block writes before its table, when it writes one.
+        ...(tableAt > 0 ? { qualifier: parts[tableAt - 1] } : {}),
         line: lineAt(text, node.start),
       });
     }

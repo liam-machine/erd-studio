@@ -19,7 +19,9 @@ import * as path from 'path';
 
 import type { DisplaySubjectArea, PhysicalColumnSource } from '../types/display';
 import { sameName, TABLE_NAME_PATTERN } from '../types/naming';
-import { readMeta } from '@erd-studio/core';
+import { readMeta, tableIdOfPath } from '@erd-studio/core';
+import { diagramSummaryDbml } from '@erd-studio/core/dbml';
+import { tableIdOfEntry } from '../services/tableLibraryIndex';
 import type { Cardinality, Meta, UnifiedSubjectArea } from '../types/semantic';
 import { mergeCompositeGroups, mergeUniqueMaps, subjectAreaTableNames } from '../services/domainService';
 import { normaliseName } from '../services/nameUtils';
@@ -96,6 +98,19 @@ export interface InventoryLogicalTable {
   domains: string[];
   /** The file does not parse (doctor names the problem); its other fields are empty. */
   unreadable?: true;
+  /**
+   * Its schema folder, where another schema folder has a table of its name
+   * (additive): `name` stays the table's own name, and the two are told
+   * apart by this and `file`.
+   */
+  schema?: string;
+}
+
+/** A diagram member's own name and schema folder, as `domains[].tables` lists it. */
+export interface InventoryDiagramTable {
+  name: string;
+  /** Its schema folder; absent for a member with no table file of a schema folder (a YAML table, an unlinked one). */
+  schema?: string;
 }
 
 export interface InventoryResult extends Envelope {
@@ -111,7 +126,15 @@ export interface InventoryResult extends Envelope {
    * its file, `format` (`json` or `dbml`, additive) and the tables it lists
    * (a DBML diagram's table `use` lines).
    */
-  domains: Array<{ file: string; layer: string; domain: string; models: string[]; format: 'json' | 'dbml' }>;
+  domains: Array<{
+    file: string; layer: string; domain: string; models: string[]; format: 'json' | 'dbml';
+    /**
+     * Each member's own name and schema folder, in `models` order: present
+     * only on a DBML diagram where a member's name is shared by another schema
+     * folder's table (additive). `models` holds the members' own names.
+     */
+    tables?: InventoryDiagramTable[];
+  }>;
   /**
    * Every table in the ERD Studio library (restricted to `--models` when
    * given), by name — in a logical-only folder, the inventory itself.
@@ -239,15 +262,34 @@ export function clustersOf(relationships: readonly InventoryRelationship[]): str
 
 /** Domain files under the semantic dir with the model names each references (raw read, any format). */
 export function listSubjectAreaFiles(ctx: CliContext): InventoryResult['domains'] {
+  const lib = ctx.tableLibraryService;
   return ctx.subjectAreaService.listSubjectAreas(ctx.root, ctx.semanticDir).map((d) => {
     let models: string[] = [];
+    let tables: InventoryDiagramTable[] | undefined;
     try {
       // The one raw membership reader: a JSON file's models, a DBML diagram's `use` lines.
-      models = subjectAreaTableNames(fs.readFileSync(d.filePath, 'utf-8'), d.filePath) ?? [];
+      const text = fs.readFileSync(d.filePath, 'utf-8');
+      models = subjectAreaTableNames(text, d.filePath) ?? [];
+      // A member whose name another schema folder's table shares (named `<schema>.<name>` on a diagram
+      // holding both): listed by its own name, with its schema folder beside it.
+      const shared = (m: string): boolean => m.includes('.') || lib.isAmbiguousName(m);
+      if (d.storage === 'dbml' && models.some(shared)) {
+        const summary = diagramSummaryDbml(text, d.filePath);
+        // A dot in a hand-written file stem is not a pair: only a member named apart from its own name
+        // (`<schema>.<name>`), or a name the library shares, is listed this way.
+        const named = summary !== null
+          && (summary.members.some((ref, i) => ref.toLowerCase() !== summary.memberUses[i]?.name.toLowerCase())
+            || models.some((m) => lib.isAmbiguousName(m)));
+        if (summary && named) {
+          const withUse = summary.memberUses.map((u) => ({ name: u.name, ...(tableIdOfPath(u.resolved) ? { schema: tableIdOfPath(u.resolved)!.schema } : {}) }));
+          tables = [...withUse, ...summary.unlinked.map((name) => ({ name }))];
+          models = tables.map((t) => t.name);
+        }
+      }
     } catch {
       // Unreadable or invalid: listed with no models; `diff` reports the error.
     }
-    return { file: relPath(ctx.root, d.filePath), layer: d.layer, domain: d.domain, models, format: d.storage ?? 'json' };
+    return { file: relPath(ctx.root, d.filePath), layer: d.layer, domain: d.domain, models, format: d.storage ?? 'json', ...(tables ? { tables } : {}) };
   });
 }
 
@@ -403,11 +445,18 @@ export function listLogicalTables(
 ): InventoryLogicalTable[] {
   const wanted = opts.models && opts.models.length > 0 ? opts.models : null;
   const out: InventoryLogicalTable[] = [];
-  for (const entry of ctx.tableLibraryService.listTableFiles()) {
+  const lib = ctx.tableLibraryService;
+  for (const entry of lib.listTableFiles()) {
     if (entry.shadowedBy) { continue; }
-    if (wanted && !wanted.some((n) => sameName(n, entry.name))) { continue; }
-    const table = ctx.tableLibraryService.getTable(entry.name);
-    const unreadable = ctx.tableLibraryService.getTableFileError(entry.name) !== null;
+    // A name another schema folder's table shares: the table is read by its own file and carries its schema folder.
+    const id = lib.isAmbiguousName(entry.name) ? tableIdOfEntry(entry) : undefined;
+    if (wanted && !wanted.some((n) => sameName(n, entry.name) || (id !== undefined && sameName(n, `${id.schema}.${id.name}`)))) { continue; }
+    const table = lib.getTable(id ?? entry.name);
+    const unreadable = lib.getTableFileError(id ?? entry.name) !== null;
+    // The diagrams that draw this table: by its schema folder too, where a diagram says which member is which.
+    const draws = (d: InventoryResult['domains'][number]): boolean => (d.tables && id
+      ? d.tables.some((t) => sameName(t.name, entry.name) && sameName(t.schema ?? '', id.schema))
+      : d.models.some((m) => sameName(m, entry.name)));
     const columns = unreadable ? [] : table?.columns ?? [];
     const item: InventoryLogicalTable = {
       name: entry.name,
@@ -418,7 +467,8 @@ export function listLogicalTables(
       grain: (unreadable ? undefined : table?.grain) || null,
       columnCount: columns.length,
       primaryKey: columns.filter((c) => c.isPrimaryKey).map((c) => c.name),
-      domains: domains.filter((d) => d.models.some((m) => sameName(m, entry.name))).map((d) => d.file),
+      domains: domains.filter(draws).map((d) => d.file),
+      ...(id ? { schema: id.schema } : {}),
     };
     if (!opts.summary) { item.columns = columns.map((c) => ({ name: c.name, dataType: c.dataType ?? '' })); }
     if (unreadable) { item.unreadable = true; }

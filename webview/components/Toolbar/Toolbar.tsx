@@ -39,6 +39,7 @@ import {
 import { FIRST_OPEN_LAYOUT, buildLayoutOptions } from '../../lib/firstOpenLayout';
 import { StageTabs } from './StageTabs';
 import { LineStyleSwitch } from './LineStyleSwitch';
+import { TableDetailSwitch } from './TableDetailSwitch';
 import { FIT_MAX_ZOOM, fitViewPadding, measureTopInsetFrom } from '../../lib/fitViewPadding';
 import { isSingleLayerProject, matchesTableSearch } from '@erd-studio/renderer/editor';
 import type { TableFlowNode, FkFlowEdge, AnnotationFlowNode, AnnotationFlowEdge } from '@erd-studio/renderer/editor';
@@ -96,19 +97,13 @@ const LAYER_ABBREV_FALLBACK: Record<string, string> = {
 interface ToolbarProps {
   nodes: (TableFlowNode | AnnotationFlowNode)[];
   edges: (FkFlowEdge | AnnotationFlowEdge)[];
-  /** Whether all columns are currently expanded. */
-  allExpanded: boolean;
-  /** Expand all columns in all nodes. */
-  onExpandAll: () => void;
-  /** Collapse all columns in all nodes. */
-  onCollapseAll: () => void;
 }
 
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
-export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll }: ToolbarProps) {
+export function Toolbar({ nodes, edges }: ToolbarProps) {
   const vscode = useVsCodeApi();
   const reactFlowInstance = useReactFlow();
   const { zoomIn, zoomOut, fitView, getNode } = reactFlowInstance;
@@ -926,16 +921,9 @@ export function Toolbar({ nodes, edges, allExpanded, onExpandAll, onCollapseAll 
         {/* Divider */}
         <div className="toolbar__divider" />
 
-        {/* Column Expansion Toggle (F405) */}
+        {/* Table detail level — a view preference, on every stage and read-only diagram too */}
         <div className="toolbar__section">
-          <button
-            className="toolbar__button toolbar__button--tooltip"
-            onClick={allExpanded ? onCollapseAll : onExpandAll}
-            data-tooltip={allExpanded ? 'Collapse All' : 'Expand All'}
-            aria-label={allExpanded ? 'Collapse all columns' : 'Expand all columns'}
-          >
-            {allExpanded ? '⊟' : '⊞'}
-          </button>
+          <TableDetailSwitch />
         </div>
 
         {/* Line style — a view preference, so on every stage and read-only diagram too */}

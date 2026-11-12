@@ -29,6 +29,8 @@ import {
   IMPORT_GUIDE_INTRO,
   IMPORT_GUIDE_ORDER,
   IMPORT_GUIDE_SNIPPETS,
+  IMPORT_GUIDE_SNIPPET_COPIED_FEATURES,
+  IMPORT_GUIDE_SQL_SOURCES,
   IMPORT_GUIDE_STYLE,
   IMPORT_GUIDE_SURFACES,
   IMPORT_GUIDE_SURFACE_FEATURES,
@@ -46,6 +48,7 @@ import {
 import { SQL_DIALECTS, convertSqlDdl, detectSqlDialect, type SqlDdlFile } from '../../src/services/sqlDdlImport';
 import { dbmlCoreSqlEngine, readsAsDbml } from '../../src/services/sqlImportEngine';
 import { catalogCsvToDbml } from '../../src/services/catalogCsvImport';
+import { importGuideSourceOfImportArg } from '../../src/services/importOutcomeTelemetry';
 import { FEATURES } from '../../src/services/telemetryPayload';
 import { START_INTENTS, type StartIntent } from '../../src/types/startActions';
 import packageJson from '../../package.json';
@@ -155,7 +158,14 @@ describe('the cards', () => {
     };
     expect(run('databricks')).toEqual(['erdStudio.importSqlDdl', { dialect: 'databricks' }]);
     expect(run('snowflake')).toEqual(['erdStudio.importSqlDdl', { dialect: 'snowflake' }]);
-    expect(run('fabricWarehouse')).toEqual(['erdStudio.importSqlDdl', { dialect: 'sqlserver' }]);
+    // Fabric's SQL buttons read as SQL Server and say where the import started (one fixed literal), so it is counted apart.
+    expect(run('fabricWarehouse')).toEqual(['erdStudio.importSqlDdl', { dialect: 'sqlserver', source: 'fabric' }]);
+    expect(run('fabricCatalog')).toEqual(['erdStudio.importSqlDdl', { dialect: 'sqlserver', source: 'fabric' }]);
+    expect(IMPORT_GUIDE_SQL_SOURCES).toEqual({ fabricWarehouse: 'fabric', fabricCatalog: 'fabric' });
+    for (const action of IMPORT_GUIDE_ACTIONS) {
+      const arg = importGuideActionCommand(action, 'blank')?.args[0];
+      expect(importGuideSourceOfImportArg(arg), action).toBe(action === 'fabricWarehouse' || action === 'fabricCatalog' ? 'fabric' : undefined);
+    }
     expect(run('sqlServer')).toEqual(['erdStudio.importSqlDdl', { dialect: 'sqlserver' }]);
     expect(run('postgres')).toEqual(['erdStudio.importSqlDdl', { dialect: 'postgres' }]);
     expect(run('mysql')).toEqual(['erdStudio.importSqlDdl', { dialect: 'mysql' }]);
@@ -181,7 +191,10 @@ describe('the cards', () => {
       expect([...p.doc.querySelectorAll(`[data-card="${id}"] [data-action="run"]`)].map((b) => b.getAttribute('data-guide-action'))).toEqual([id, id]);
     }
     expect([...p.doc.querySelectorAll('[data-card="fabric"] [data-action="run"]')].map((b) => b.textContent))
-      .toEqual(['Import Semantic Model…', 'Import SQL Server DDL…']);
+      .toEqual(['Import Semantic Model…', 'Import the CSV…', 'Import SQL Server DDL…']);
+    // Fabric's query route is its own action (its own key), unlike the other cards' catalog queries.
+    expect([...p.doc.querySelectorAll('[data-card="fabric"] [data-action="run"]')].map((b) => b.getAttribute('data-guide-action')))
+      .toEqual(['fabric', 'fabricCatalog', 'fabricWarehouse']);
   });
 
   it('lists live connections under Not yet, with Send Feedback; Oracle, BigQuery, Redshift and SQLite go through Import…', () => {
@@ -276,6 +289,7 @@ describe('the Copy buttons', () => {
       postgresCatalog: catalogQuery('postgres.sql'),
       mysqlCatalog: catalogQuery('mysql.sql'),
       sqlServerCatalog: catalogQuery('sqlserver.sql'),
+      fabricCatalog: catalogQuery('sqlserver.sql'),
       postgresCatalogRun: 'psql -d <database> --csv -f catalog.sql -o catalog.csv',
       mysqlCatalogRun: 'mysql --batch --execute="source catalog.sql" > catalog.tsv',
     });
@@ -378,7 +392,9 @@ describe('the protocol', () => {
   });
 
   it('counts fixed keys only, each in the telemetry allowlist', () => {
-    const keys = [...Object.values(IMPORT_GUIDE_SURFACE_FEATURES), ...Object.values(IMPORT_GUIDE_ACTION_FEATURES), 'importGuideOpened', 'importGuideCopied'];
+    const keys = [...Object.values(IMPORT_GUIDE_SURFACE_FEATURES), ...Object.values(IMPORT_GUIDE_ACTION_FEATURES), ...Object.values(IMPORT_GUIDE_SNIPPET_COPIED_FEATURES), 'importGuideOpened', 'importGuideCopied'];
+    expect(IMPORT_GUIDE_ACTION_FEATURES.fabricCatalog).toBe('importGuideActionFabricCatalog');
+    expect(IMPORT_GUIDE_SNIPPET_COPIED_FEATURES).toEqual({ fabricCatalog: 'importGuideCopiedFabricCatalog' });
     for (const key of keys) expect(FEATURES as readonly string[]).toContain(key);
     expect(new Set(keys).size).toBe(keys.length);
   });
@@ -446,6 +462,30 @@ describe('the panel host', () => {
     expect(deps.copied).toEqual([IMPORT_GUIDE_SNIPPETS.postgres, IMPORT_GUIDE_SNIPPETS.postgres]);
     expect(deps.features).toEqual([
       'importGuideActionDatabricks', 'importGuideActionFeedback', 'importGuideCopied', 'importGuideActionDatabricks', 'importGuideCopied',
+    ]);
+  });
+
+  it('the Fabric card: its query\'s button and its copy are counted by themselves, and both SQL buttons say the import started from Fabric', async () => {
+    ImportGuidePanel.createOrShow(deps);
+    const panel = panels()[0];
+    await panel._simulateMessage({ type: 'copy', snippet: 'fabricCatalog' });
+    await panel._simulateMessage({ type: 'run', action: 'fabricCatalog' });
+    await panel._simulateMessage({ type: 'run', action: 'fabricWarehouse' });
+    // The SQL Server card's copy of the same text and its button are counted as before: no Fabric key, no marker.
+    await panel._simulateMessage({ type: 'copy', snippet: 'sqlServerCatalog' });
+    await panel._simulateMessage({ type: 'run', action: 'sqlServer' });
+    // The page cannot choose the marker: an extra field is never read.
+    await panel._simulateMessage({ type: 'run', action: 'sqlServer', source: 'fabric' });
+    expect(deps.copied).toEqual([IMPORT_GUIDE_SNIPPETS.sqlServerCatalog, IMPORT_GUIDE_SNIPPETS.sqlServerCatalog]);
+    expect(deps.ran).toEqual([
+      ['erdStudio.importSqlDdl', { dialect: 'sqlserver', source: 'fabric' }],
+      ['erdStudio.importSqlDdl', { dialect: 'sqlserver', source: 'fabric' }],
+      ['erdStudio.importSqlDdl', { dialect: 'sqlserver' }],
+      ['erdStudio.importSqlDdl', { dialect: 'sqlserver' }],
+    ]);
+    expect(deps.features).toEqual([
+      'importGuideCopied', 'importGuideCopiedFabricCatalog', 'importGuideActionFabricCatalog', 'importGuideActionFabricWarehouse',
+      'importGuideCopied', 'importGuideActionSqlServer', 'importGuideActionSqlServer',
     ]);
   });
 
@@ -523,6 +563,10 @@ describe('the catalog queries (one query, a download): Databricks, SQL Server, P
     expect(IMPORT_GUIDE_SNIPPETS.postgresCatalog).toBe(catalogQuery('postgres.sql'));
     expect(IMPORT_GUIDE_SNIPPETS.mysqlCatalog).toBe(catalogQuery('mysql.sql'));
     expect(IMPORT_GUIDE_SNIPPETS.sqlServerCatalog).toBe(catalogQuery('sqlserver.sql'));
+    // Fabric's card gives SQL Server's query (a Warehouse or SQL analytics endpoint is read as SQL Server): the same text, never a second copy.
+    expect(IMPORT_GUIDE_SNIPPETS.fabricCatalog).toBe(IMPORT_GUIDE_SNIPPETS.sqlServerCatalog);
+    expect(docs.slice(docs.indexOf('\n## Microsoft Fabric\n'), docs.indexOf('\n## SQL Server and Azure SQL\n'))).toMatch(/\[SQL Server and Azure SQL\]\(#sql-server-and-azure-sql\)[\s\S]*has not been tried on every Fabric item[\s\S]*struct, array, map/);
+    expect(blocks('Microsoft Fabric')).toEqual([]);
     expect(blocks('Databricks (Unity Catalog)')).toContain(catalogQuery('databricks.sql'));
     expect(blocks('SQL Server and Azure SQL')).toEqual([catalogQuery('sqlserver.sql')]);
     expect(blocks('PostgreSQL')).toEqual(expect.arrayContaining([catalogQuery('postgres.sql'), IMPORT_GUIDE_SNIPPETS.postgresCatalogRun]));
@@ -542,7 +586,17 @@ describe('the catalog queries (one query, a download): Databricks, SQL Server, P
     expect(sections('mysql')).toEqual(['', 'Can\'t run mysqldump? Use one query instead.']);
     expect(sections('sqlServer')).toEqual(['', 'Need CHECK constraints, or already in SQL Server Management Studio? Use Generate Scripts instead.']);
     for (const id of ['snowflake', 'dbml', 'otherTools']) expect(sections(id), id).toEqual(['']);
-    expect(sections('fabric')).toEqual(['Semantic model', 'Warehouse or SQL analytics endpoint']);
+    expect(sections('fabric')).toEqual([
+      'Semantic model',
+      'Warehouse or SQL analytics endpoint: one query, saved as CSV',
+      'Warehouse or SQL analytics endpoint: scripts from SQL Server Management Studio',
+    ]);
+    // Fabric's query is SQL Server's, shown under its own snippet id, with a note that it was not tried on every Fabric item.
+    const fabric = p.doc.querySelector('[data-card="fabric"]')!;
+    expect([...fabric.querySelectorAll('[data-action="copy"]')].map((b) => b.getAttribute('data-snippet'))).toEqual(['fabricCatalog']);
+    expect(fabric.querySelector('.ig-snippet__code')?.textContent).toBe(catalogQuery('sqlserver.sql'));
+    expect(fabric.textContent).toMatch(/has not been tried on every Fabric item/);
+    expect(fabric.textContent).toMatch(/complex types \(struct, array, map\) may not come in/);
     expect(p.text).not.toMatch(/DuckDB/);
   });
 
@@ -617,8 +671,9 @@ describe('the catalog queries (one query, a download): Databricks, SQL Server, P
     // export; SQL Server: sqlserver/probe.csv against the SMO script of the same database), the dump where it keeps more.
     const shown = (id: string) => p.doc.querySelector(`[data-card="${id}"] .ig-section:not(.ig-alt) [data-action="run"]`)?.textContent;
     expect(cardsWithTwo.map(shown)).toEqual(['Import the CSV…', 'Import the CSV…', 'Import PostgreSQL DDL…', 'Import MySQL DDL…']);
-    // Fabric's two sections are different sources: both show, headed, and neither folds.
-    expect(p.doc.querySelectorAll('[data-card="fabric"] .ig-section__heading').length).toBe(2);
+    // Fabric's sections are different sources (a semantic model; a Warehouse or SQL analytics endpoint, two ways): all show, headed, and none folds.
+    expect(p.doc.querySelectorAll('[data-card="fabric"] .ig-section__heading').length).toBe(3);
+    expect(p.doc.querySelectorAll('[data-card="fabric"] .ig-alt').length).toBe(0);
     expect(p.text).not.toMatch(/Recommended/);
   });
 

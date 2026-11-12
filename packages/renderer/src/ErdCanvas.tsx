@@ -29,6 +29,8 @@
  *
  * Relationship lines are routed around the tables in one of two styles,
  * `lineStyle` `curved` (the default) or `hops`; the reader cannot change it.
+ * `tableDetail` (`name`, `keys` or `all`) sets how much of every table is
+ * drawn; without it tables draw as they always have.
  *
  * Derived from the extension webview's `EditorCanvas` (`webview/App.tsx`),
  * keeping its React Flow configuration.
@@ -74,6 +76,7 @@ import { DetailPanel } from './components/DetailPanel/DetailPanel';
 import { Legend } from './components/Legend/Legend';
 import { StatusBar } from './components/StatusBar/StatusBar';
 import { DEFAULT_LINE_STYLE, isLineStyle, type LineStyle } from './lib/edgeRouting/lineStyle';
+import { isTableDetail, type TableDetail } from './lib/tableDetail';
 
 /**
  * The canvas the reader last clicked, pointed at or focused. An Escape with
@@ -114,6 +117,14 @@ export interface ErdCanvasProps {
    * reads as `curved`.
    */
   lineStyle?: LineStyle;
+  /**
+   * How much of every table is drawn: `name` (the header only), `keys` (the
+   * primary, foreign and natural key columns) or `all` (every column). A
+   * reader can still open one table, and close it again; nothing is posted.
+   * Unset, or any other value: as before this prop existed — every column on
+   * a diagram under 30 tables, the first five columns on a larger one.
+   */
+  tableDetail?: TableDetail;
   /**
    * The URL of the host's copy of `@erd-studio/renderer/edge-routing-worker.js`,
    * served from the page's own origin. Diagrams over 100 lines route in that
@@ -229,6 +240,7 @@ function ErdCanvasInner({
   onReady,
   logicalOnly = false,
   lineStyle: lineStyleProp,
+  tableDetail: tableDetailProp,
   className,
   style,
   handleRef,
@@ -263,6 +275,14 @@ function ErdCanvasInner({
     storeApi.getState().setLineStyle(lineStyle);
   }, [lineStyle, storeApi]);
 
+  // The table detail level follows the prop; unset leaves the store without one.
+  const tableDetail = isTableDetail(tableDetailProp) ? tableDetailProp : null;
+  useEffect(() => {
+    if ((storeApi.getState().tableDetail ?? null) !== tableDetail) {
+      storeApi.getState().setTableDetail(tableDetail);
+    }
+  }, [tableDetail, storeApi]);
+
   // Latest callbacks, so a parent passing new closures re-runs nothing.
   const onLayoutModifiedChangeRef = useRef(onLayoutModifiedChange);
   onLayoutModifiedChangeRef.current = onLayoutModifiedChange;
@@ -287,16 +307,16 @@ function ErdCanvasInner({
   }, []);
 
   // Expand every model's columns on first load when the domain is small
-  // enough, as the extension does on a first-ever load.
+  // enough. Not at a table detail level, which decides the columns itself.
   const { expandAll } = useColumnExpansion();
   const hasAutoExpandedRef = useRef(false);
   useEffect(() => {
-    if (!domain || hasAutoExpandedRef.current) return;
+    if (!domain || tableDetail !== null || hasAutoExpandedRef.current) return;
     hasAutoExpandedRef.current = true;
     if (domain.models.length < NODE_THRESHOLD) {
       expandAll(domain.models.map((m) => m.name));
     }
-  }, [domain, expandAll]);
+  }, [domain, expandAll, tableDetail]);
 
   // Layout-modified tracking. Every rebuild from the domain is the new
   // baseline: nodes at the domain's positions, edges on their original sides.
@@ -480,6 +500,7 @@ export const ErdCanvas = forwardRef<ErdCanvasHandle, ErdCanvasProps>(function Er
       domain: renderable,
       logicalOnly: props.logicalOnly === true,
       lineStyle: isLineStyle(props.lineStyle) ? props.lineStyle : DEFAULT_LINE_STYLE,
+      tableDetail: isTableDetail(props.tableDetail) ? props.tableDetail : null,
       routingWorkerUrl: typeof props.routingWorkerUrl === 'string' && props.routingWorkerUrl !== '' ? props.routingWorkerUrl : null,
     }),
   );

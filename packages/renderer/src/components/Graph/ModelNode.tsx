@@ -20,7 +20,7 @@ import type { TableFlowNode, TableNodeData, ColumnDisplay } from '../../types/gr
 import type { TableLoadError, TableLoadWarning, Stage } from '@erd-studio/core';
 import type { ColumnDiscrepancy } from '@erd-studio/core';
 import type { PhysicalColumnSource, PhysicalProvenance } from '@erd-studio/core';
-import { COLLAPSED_COLUMN_LIMIT } from '../../hooks/useColumnExpansion';
+import { resolveVisibleColumns } from '../../lib/tableDetail';
 import { useLongPressDrag } from '../../hooks/useLongPressDrag';
 import { useEditorStore } from '../../store/editorStore';
 import { useIsViewer, useSend } from '../../host/canvasEnvironment';
@@ -35,6 +35,7 @@ import { tableFocusRole } from '../../lib/canvasFocus';
 import { STAGE_HEX } from '../../lib/stageColors';
 import { getDataTypeColor } from '../../lib/dataTypeColors';
 import { layerAbbreviation } from '../../lib/layerCues';
+import { headerName } from '../../lib/modelLabels';
 import { offDiagramChipTip, offDiagramRows } from '../../lib/canvasContext';
 import {
   SOURCE_LABEL,
@@ -571,7 +572,7 @@ function describeLoadWarning(warning: TableLoadWarning): string {
 }
 
 function TableNodeComponent({ id, data, selected }: NodeProps<TableFlowNode>) {
-  const { modelName, label, stage, layer, layerConfig, schema, tableLayer, tableLayerConfig, otherLayer, shownSchema, singleLayer, alias, columns, grain, meta, dimmed, readOnly, isGhost, ghostReason, provenance, loadError, loadWarning, isStub, isExpanded = false, onToggleExpansion, discrepancy, discrepancySourceStage, discrepancyTargetStage } = data;
+  const { modelName, tableName, label, stage, layer, layerConfig, schema, tableLayer, tableLayerConfig, otherLayer, shownSchema, singleLayer, alias, columns, grain, meta, dimmed, readOnly, isGhost, ghostReason, provenance, loadError, loadWarning, isStub, isExpanded = false, tableDetail, onToggleExpansion, discrepancy, discrepancySourceStage, discrepancyTargetStage } = data;
   const openNodeContextMenu = useEditorStore((s) => s.openNodeContextMenu);
   // Hover preview (useHoverFocus): the hovered table and its related tables
   // stay bright. A primitive, so a table outside the focus never re-renders.
@@ -596,17 +597,21 @@ function TableNodeComponent({ id, data, selected }: NodeProps<TableFlowNode>) {
     rowSelector: '.model-node__column',
   });
 
-  // Compute visible columns — stub models show only PK/NK; others respect expansion state
-  const { displayColumns, hiddenCount } = useMemo(() => {
-    const visibleColumns = isStub
-      ? columns.filter((c) => c.isPrimaryKey || c.isNaturalKey)
-      : columns;
-    const shouldCollapse = visibleColumns.length > COLLAPSED_COLUMN_LIMIT && !isExpanded;
-    return {
-      displayColumns: shouldCollapse ? visibleColumns.slice(0, COLLAPSED_COLUMN_LIMIT) : visibleColumns,
-      hiddenCount: shouldCollapse ? visibleColumns.length - COLLAPSED_COLUMN_LIMIT : 0,
-    };
-  }, [columns, isExpanded, isStub]);
+  // The rows this table draws: the diagram's detail level (name / keys / all),
+  // this table's own override, and the stub rule (PK / NK only), all decided
+  // by the helper the size estimate also calls.
+  const visible = useMemo(
+    () => resolveVisibleColumns({ columns, isStub, isExpanded, tableDetail, loadError }),
+    [columns, isExpanded, isStub, tableDetail, loadError],
+  );
+  const { columns: displayColumns, hiddenCount, toggle, toggleInFooter, isFullList } = visible;
+  // The button row under the columns; at the name level the footer is the button instead.
+  const rowToggle = toggleInFooter ? null : toggle;
+  // With a level the buttons name what they do; without one they read as before.
+  const hasLevel = tableDetail != null;
+  const rowNoun = isStub ? 'key column' : 'column';
+  // A stub's footer counts its key columns: all of them at a level, the rows drawn without one (as before).
+  const stubKeyCount = hasLevel ? visible.expandedCount : displayColumns.length;
 
   // Handler for expand/collapse button
   const handleToggleClick = (e: React.MouseEvent) => {
@@ -637,11 +642,17 @@ function TableNodeComponent({ id, data, selected }: NodeProps<TableFlowNode>) {
     return map;
   }, [discrepancy]);
 
-  // Missing columns (ghost rows) — only shown when expanded
+  // Missing columns (ghost rows) — only shown when every column is (the
+  // `all` level or an opened table), so a closed table draws nothing per row.
+  const showMissing = visible.expanded;
   const missingColumns = useMemo(() => {
-    if (!isExpanded || !columnDiscrepancyMap) return [];
+    if (!showMissing || !columnDiscrepancyMap) return [];
     return (discrepancy?.columns ?? []).filter((cd) => cd.status === 'missing');
-  }, [isExpanded, columnDiscrepancyMap, discrepancy]);
+  }, [showMissing, columnDiscrepancyMap, discrepancy]);
+  // The "No columns" line or the load error; at the `name` level only the error.
+  const showPlaceholder = visible.placeholder && !missingColumns.length;
+  // A table at a level with nothing to list is header and footer only.
+  const hasBody = !hasLevel || displayColumns.length > 0 || rowToggle !== null || missingColumns.length > 0 || showPlaceholder;
 
   // Determine CSS modifier for stage/ghost
   const isDiscExtra = discrepancy?.status === 'extra';
@@ -654,8 +665,11 @@ function TableNodeComponent({ id, data, selected }: NodeProps<TableFlowNode>) {
   // name (alias) after it. The tip names the warehouse table in full.
   // A label without an alias or a schema prefix (older node data) keeps the
   // label-first header: the label, then the model name beside it.
+  // One of two same-named tables prints its own name after its schema
+  // (`ccc.addresse`), never the schema twice; see `headerName`.
   const labelFirst = !!label && !shownSchema && !alias;
-  const qualified = `${shownSchema ? `${shownSchema}.` : ''}${modelName}`;
+  const shownName = headerName({ modelName, tableName, shownSchema });
+  const qualified = `${shownSchema ? `${shownSchema}.` : ''}${shownName}`;
   const title = alias ? `${qualified} (warehouse table ${alias})` : labelFirst ? `${label} (table ${modelName})` : qualified;
   const modelMeta = useMemo(() => metaRows(meta), [meta]);
   const nameTip = useHoverTip<HTMLSpanElement>(
@@ -718,7 +732,7 @@ function TableNodeComponent({ id, data, selected }: NodeProps<TableFlowNode>) {
           {!labelFirst ? (
             <>
               {shownSchema && <span className="model-node__schema">{shownSchema}.</span>}
-              {modelName}
+              {shownName}
               {alias && <span className="model-node__model-id">as {alias}</span>}
             </>
           ) : (
@@ -785,7 +799,8 @@ function TableNodeComponent({ id, data, selected }: NodeProps<TableFlowNode>) {
       )}
 
       {/* Columns */}
-      <div className="model-node__columns">
+      {hasBody && (
+      <div className={`model-node__columns${displayColumns.length === 0 && rowToggle !== null && !missingColumns.length ? ' model-node__columns--closed' : ''}`}>
         {displayColumns.map((col, idx) => (
           <ColumnRow
             key={col.name}
@@ -794,7 +809,9 @@ function TableNodeComponent({ id, data, selected }: NodeProps<TableFlowNode>) {
             readOnly={readOnly}
             existingColumnNames={columnNames}
             discrepancy={columnDiscrepancyMap?.get(col.name)}
-            dragHandleProps={showReorderHandles && hiddenCount === 0 ? getDragHandleProps(idx) : undefined}
+            // Only when the rows are the whole column list: `idx` is then the
+            // column's index in the file, which is what a reorder moves.
+            dragHandleProps={showReorderHandles && isFullList ? getDragHandleProps(idx) : undefined}
             isReorderDragging={dragIndex === idx}
             isReorderTarget={dropIndex === idx && dragIndex !== idx}
             discrepancySourceStage={discrepancySourceStage}
@@ -803,24 +820,32 @@ function TableNodeComponent({ id, data, selected }: NodeProps<TableFlowNode>) {
         ))}
 
         {/* F405: Expansion button when columns are collapsed */}
-        {hiddenCount > 0 && (
+        {rowToggle === 'expand' && (
           <button
+            type="button"
             className="model-node__expand-button"
             onClick={handleToggleClick}
-            title={`Show ${hiddenCount} more column${hiddenCount !== 1 ? 's' : ''}`}
+            title={hasLevel
+              ? `Show every ${rowNoun} of this table (${hiddenCount} hidden)`
+              : `Show ${hiddenCount} more column${hiddenCount !== 1 ? 's' : ''}`}
           >
-            ...and {hiddenCount} more
+            {hasLevel
+              ? `Show all ${visible.expandedCount} ${rowNoun}${visible.expandedCount !== 1 ? 's' : ''}`
+              : `...and ${hiddenCount} more`}
           </button>
         )}
 
         {/* F405: Collapse button when expanded */}
-        {isExpanded && columns.length > COLLAPSED_COLUMN_LIMIT && (
+        {rowToggle === 'collapse' && (
           <button
+            type="button"
             className="model-node__expand-button"
             onClick={handleToggleClick}
-            title="Show fewer columns"
+            title={hasLevel
+              ? (tableDetail === 'name' ? 'Show only the name of this table again' : 'Show only the key columns of this table again')
+              : 'Show fewer columns'}
           >
-            Show less
+            {hasLevel ? (tableDetail === 'name' ? 'Show name only' : 'Show keys only') : 'Show less'}
           </button>
         )}
 
@@ -847,7 +872,7 @@ function TableNodeComponent({ id, data, selected }: NodeProps<TableFlowNode>) {
           </>
         )}
 
-        {columns.length === 0 && !missingColumns.length && (loadError ? (
+        {showPlaceholder && (loadError ? (
           <div className="model-node__load-error" role="alert">
             <span className="model-node__load-error-text">{describeLoadError(loadError)}</span>
             {!viewer && (
@@ -867,21 +892,42 @@ function TableNodeComponent({ id, data, selected }: NodeProps<TableFlowNode>) {
           <div className="model-node__empty">No columns</div>
         ))}
       </div>
+      )}
 
-      {/* Footer */}
-      <div className="model-node__footer">
-        {isStub
-          ? `${displayColumns.length} key col${displayColumns.length !== 1 ? 's' : ''} of ${columns.length}`
-          : `${columns.length} ${columns.length === 1 ? 'column' : 'columns'}`}
-        {discrepancy && discrepancy.columns.length > 0 && (() => {
-          const issues = discrepancy.columns.filter((c) => c.status !== 'matched').length;
-          return issues > 0 ? (
-            <span className="model-node__footer-disc" title={`${issues} column discrepanc${issues === 1 ? 'y' : 'ies'}`}>
-              {' '}&middot; {issues} diff{issues !== 1 ? 's' : ''}
-            </span>
-          ) : null;
-        })()}
-      </div>
+      {/* Footer. At the name level a closed table's footer is its "show all" button. */}
+      {(() => {
+        const footerContent = (
+          <>
+            {isStub
+              ? `${stubKeyCount} key col${stubKeyCount !== 1 ? 's' : ''} of ${columns.length}`
+              : tableDetail === 'keys' && toggle === 'expand'
+                ? `${displayColumns.length} of ${columns.length} ${columns.length === 1 ? 'column' : 'columns'}`
+                : `${columns.length} ${columns.length === 1 ? 'column' : 'columns'}`}
+            {discrepancy && discrepancy.columns.length > 0 && (() => {
+              const issues = discrepancy.columns.filter((c) => c.status !== 'matched').length;
+              return issues > 0 ? (
+                <span className="model-node__footer-disc" title={`${issues} column discrepanc${issues === 1 ? 'y' : 'ies'}`}>
+                  {' '}&middot; {issues} diff{issues !== 1 ? 's' : ''}
+                </span>
+              ) : null;
+            })()}
+          </>
+        );
+        if (!toggleInFooter) return <div className="model-node__footer">{footerContent}</div>;
+        const showAll = `Show all ${visible.expandedCount} ${rowNoun}${visible.expandedCount !== 1 ? 's' : ''}`;
+        return (
+          <button
+            type="button"
+            className="model-node__footer model-node__footer--toggle"
+            onClick={handleToggleClick}
+            aria-label={showAll}
+            title={showAll}
+          >
+            {footerContent}
+            <span className="model-node__footer-chevron" aria-hidden="true">▾</span>
+          </button>
+        );
+      })()}
     </div>
   );
 }

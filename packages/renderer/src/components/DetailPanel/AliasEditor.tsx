@@ -19,7 +19,14 @@ import { TABLE_ALIAS_MAX_LENGTH, TABLE_ALIAS_RULE, isValidTableAlias } from '@er
 import { useCanvasHost } from '../../host/canvasEnvironment';
 
 interface AliasEditorProps {
+  /** What the diagram calls the table: the name the edit is posted for. */
   modelName: string;
+  /**
+   * The table's own name when `modelName` is not it (one of two same-named
+   * tables from different schema folders, `DisplayTable.tableName`): what
+   * the row shows and an alias is compared with. Absent: `modelName`.
+   */
+  tableName?: string;
   alias?: string;
   /** Physical stage and the viewer: show the value, offer no edit. */
   readOnly: boolean;
@@ -46,8 +53,9 @@ export function aliasTitle(modelName: string, alias: string | undefined, dbtWord
     : `Named ${alias} in the warehouse; the table's name is ${modelName}`;
 }
 
-export function AliasEditor({ modelName, alias, readOnly, dbtWording = true }: AliasEditorProps) {
+export function AliasEditor({ modelName, tableName, alias, readOnly, dbtWording = true }: AliasEditorProps) {
   const host = useCanvasHost();
+  const ownName = tableName || modelName;
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(alias ?? '');
   // Enter saves and closes the input, and the input's blur can follow it:
@@ -67,13 +75,14 @@ export function AliasEditor({ modelName, alias, readOnly, dbtWording = true }: A
   const handleSave = useCallback(() => {
     if (error || settled.current) return;
     settled.current = true;
-    const next = trimmed === modelName ? '' : trimmed;
+    // An alias equal to the table's own name is no alias.
+    const next = trimmed === ownName ? '' : trimmed;
     // Skip no-op saves to avoid spurious undo entries.
     if (next !== (alias ?? '')) {
       host.postMessage({ type: 'updateModelAlias', payload: { modelName, alias: next } });
     }
     setEditing(false);
-  }, [host, modelName, alias, trimmed, error]);
+  }, [host, modelName, ownName, alias, trimmed, error]);
 
   const handleCancel = useCallback(() => {
     settled.current = true;
@@ -107,7 +116,7 @@ export function AliasEditor({ modelName, alias, readOnly, dbtWording = true }: A
           <input
             className={`detail-panel__alias-input${error ? ' detail-panel__alias-input--error' : ''}`}
             value={value}
-            placeholder={modelName}
+            placeholder={ownName}
             maxLength={TABLE_ALIAS_MAX_LENGTH}
             onChange={(e) => setValue(e.target.value)}
             onKeyDown={handleKeyDown}
@@ -129,10 +138,10 @@ export function AliasEditor({ modelName, alias, readOnly, dbtWording = true }: A
       <span className="detail-panel__label detail-panel__label--wide">Warehouse name</span>
       <span
         className={`detail-panel__value${alias ? '' : ' detail-panel__value--muted'}`}
-        title={aliasTitle(modelName, alias, dbtWording)}
+        title={aliasTitle(ownName, alias, dbtWording)}
         onDoubleClick={readOnly ? undefined : startEditing}
       >
-        {alias || modelName}
+        {alias || ownName}
       </span>
       {!readOnly && (
         <button

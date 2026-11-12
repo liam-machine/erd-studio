@@ -11,7 +11,8 @@
  */
 
 import type { TableFlowNode, TableNodeData } from '../types/graph';
-import { COLLAPSED_COLUMN_LIMIT } from '../hooks/useColumnExpansion';
+import { resolveVisibleColumns } from './tableDetail';
+import { headerName } from './modelLabels';
 
 // ---------------------------------------------------------------------------
 // Node size estimation (matches TableNode CSS)
@@ -46,45 +47,51 @@ const NODE_GRAIN_HEIGHT = 15;
 /**
  * Estimate a node's rendered height from the number of column rows actually
  * drawn (see `countVisibleColumnRows`) and whether a grain subtitle is shown.
+ *
+ * `bare` is a card with no body at all (see `isBareTableBody`): header and
+ * footer only. Without it, zero rows means the "No columns" line.
  */
-export function estimateNodeHeight(rowCount: number, hasGrain: boolean): number {
+export function estimateNodeHeight(rowCount: number, hasGrain: boolean, bare = false): number {
   const grainHeight = hasGrain ? NODE_GRAIN_HEIGHT : 0;
 
   const columnsHeight =
     rowCount > 0
       ? NODE_COLUMNS_PADDING + rowCount * NODE_COLUMN_HEIGHT
-      : NODE_COLUMNS_PADDING + NODE_EMPTY_ROW_HEIGHT;
+      : bare ? 0 : NODE_COLUMNS_PADDING + NODE_EMPTY_ROW_HEIGHT;
 
   return NODE_BORDER + NODE_HEADER_HEIGHT + grainHeight + columnsHeight + NODE_FOOTER_HEIGHT;
 }
 
-/**
- * Number of rows TableNode actually renders in its columns section.
- *
- * Mirrors the rendering rules in `ModelNode.tsx`:
- *   - stub models show only PK/NK columns
- *   - collapsed nodes show at most `COLLAPSED_COLUMN_LIMIT` columns plus a
- *     "...and N more" button row
- *   - expanded nodes with more than the limit also render a "Show less" row
- *
- * Using the full column count (the old behaviour) over-reserved
- * `(columns - 5) * rowHeight` per node on auto-collapsed domains (≥30 models).
- */
-export function countVisibleColumnRows(
-  data: Pick<TableNodeData, 'columns' | 'isStub' | 'isExpanded'>,
-): number {
-  const visible = data.isStub
-    ? data.columns.filter((c) => c.isPrimaryKey || c.isNaturalKey)
-    : data.columns;
-  const expanded = data.isExpanded ?? false;
+/** What the row and width estimates read to know which rows a table draws. */
+type VisibleRowsData =
+  Pick<TableNodeData, 'columns' | 'isStub' | 'isExpanded'>
+  & Partial<Pick<TableNodeData, 'tableDetail' | 'loadError'>>;
 
-  if (expanded) {
-    return visible.length + (data.columns.length > COLLAPSED_COLUMN_LIMIT ? 1 : 0);
-  }
-  if (visible.length > COLLAPSED_COLUMN_LIMIT) {
-    return COLLAPSED_COLUMN_LIMIT + 1;
-  }
-  return visible.length;
+/**
+ * Number of rows TableNode actually renders in its columns section: the
+ * column rows `resolveVisibleColumns` picks (the same call `ModelNode.tsx`
+ * makes) plus one for the expand / collapse button when it is a row of its
+ * own (at the `name` level a closed table's footer is the button instead).
+ *
+ * With a table detail level (`tableDetail`): no rows at `name`, the key
+ * columns at `keys`, every column at `all` or when the table is opened.
+ * Without one (older callers), as before the levels: at most the first five
+ * columns plus the "...and N more" row, or every column plus "Show less".
+ */
+export function countVisibleColumnRows(data: VisibleRowsData): number {
+  const visible = resolveVisibleColumns(data);
+  return visible.columns.length + (visible.toggle && !visible.toggleInFooter ? 1 : 0);
+}
+
+/**
+ * Whether the card has no body: no column row, no button and no "No columns"
+ * line. Only a table at a detail level can be bare (every closed table at
+ * `name`, a stub with no key columns): header and footer, nothing between.
+ */
+export function isBareTableBody(data: VisibleRowsData): boolean {
+  if (data.tableDetail == null) return false;
+  const visible = resolveVisibleColumns(data);
+  return visible.columns.length === 0 && (!visible.toggle || visible.toggleInFooter) && !visible.placeholder;
 }
 
 /**
@@ -96,7 +103,8 @@ export function resolveNodeDimensions(
 ): { width: number; height: number } {
   return {
     width: node.measured?.width ?? estimateNodeWidth(node.data),
-    height: node.measured?.height ?? estimateNodeHeight(countVisibleColumnRows(node.data), !!node.data.grain),
+    height: node.measured?.height
+      ?? estimateNodeHeight(countVisibleColumnRows(node.data), !!node.data.grain, isBareTableBody(node.data)),
   };
 }
 
@@ -166,18 +174,24 @@ const MAX_NODE_WIDTH = 560;
  * A safety margin is added before clamping so ELK always reserves
  * slightly more space than the minimum estimate, preventing overlap
  * when font rendering or badge widths differ from the approximation.
+ *
+ * At a table detail level (`tableDetail`) only the rows the table draws are
+ * measured; without one every column is, as before.
  */
 export function estimateNodeWidth(
-  data: Pick<TableNodeData, 'modelName' | 'label' | 'columns' | 'provenance'> & Partial<Pick<TableNodeData, 'tableLayer' | 'shownSchema' | 'alias' | 'singleLayer'>>,
+  data: Pick<TableNodeData, 'modelName' | 'label' | 'columns' | 'provenance'> & Partial<Pick<TableNodeData, 'tableName' | 'tableLayer' | 'shownSchema' | 'alias' | 'singleLayer' | 'isStub' | 'isExpanded' | 'tableDetail'>>,
 ): number {
-  const { modelName, label, columns, provenance, shownSchema, alias, singleLayer } = data;
+  const { modelName, label, provenance, shownSchema, alias, singleLayer } = data;
+  // The name the header prints after its schema (the table's own name for one of two same-named tables).
+  const shownName = headerName(data);
+  const columns = data.tableDetail == null ? data.columns : resolveVisibleColumns(data).columns;
 
   // Header: the name as drawn + layer badge (none in a single-layer project)
   // + provenance chip (physical only) + padding. With a schema prefix or an
   // alias it reads `schema.name  as alias`; otherwise the label, with the
   // model name beside it when they differ.
   const nameWidth = shownSchema || alias
-    ? ((shownSchema ? shownSchema.length + 1 : 0) + modelName.length) * CHAR_WIDTH_BODY
+    ? ((shownSchema ? shownSchema.length + 1 : 0) + shownName.length) * CHAR_WIDTH_BODY
       + (alias ? ID_GAP + (alias.length + 3) * CHAR_WIDTH_ID : 0)
     : label ? label.length * CHAR_WIDTH_BODY + ID_GAP + modelName.length * CHAR_WIDTH_ID : modelName.length * CHAR_WIDTH_BODY;
   const headerWidth =

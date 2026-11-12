@@ -23,7 +23,7 @@
  * | (header)                            | `// erd-studio dbml-export v2 (DBML 9.1+)`, then `//` lines saying what `?` on a Ref means and what is left out |
  * | subject area name, description      | `Project <name> { Note: '<description>' }` (`Project {` when it has no name; no Project when it has neither and nothing is placed) |
  * | layer (+ layer colour, label)       | `TableGroup <layer> [color: <hex>, note: 'Layer: <label>'] { every exported table }` — the colour only when `layerConfig.color` is `#rgb` / `#rrggbb` |
- * | table (+ schema)                    | `Table [schema.]name` — the model name, never DBML's `as` (DBML aliases are unique; ours are not) |
+ * | table (+ schema)                    | `Table [schema.]name` — the model name, never DBML's `as` (DBML aliases are unique; ours are not); two tables of one name from different schema folders are `Table bqs.addresse` and `Table ccc.addresse` |
  * | description                         | the table's `Note: '…'`                                                 |
  * | modelRole, grain, alias             | `role`, `grain`, `alias` table properties                               |
  * | the schema `public`                 | also a `schema: 'public'` property: DBML reads `Table public.x` as a table with no schema |
@@ -44,7 +44,7 @@
  * | relationship role                   | the Ref's name: `Ref "ship date": …`                                    |
  * | relationship drawn backwards (`keysContradict`) | a `// This starts at …'s key (…), so it was probably drawn backwards.` line above the Ref, which stays as stored |
  * | sticky note                         | `Note sticky_<n> [color: <swatch hex>, linked_table: '<model>'] { '<text>' }` |
- * | canvas positions, sticky-note boxes | the Project's last key, `erd_layout: '''…'''`: a line per placed table (`<name> <x> <y>`) and per placed note (`note/sticky_<n> <x> <y>[ <w> <h>]`) |
+ * | canvas positions, sticky-note boxes | the Project's last key, `erd_layout: '''…'''`: a line per placed table (`<name> <x> <y>`, the name the diagram calls it, so `bqs.addresse` for one of two same-named tables, as a stored diagram writes it) and per placed note (`note/sticky_<n> <x> <y>[ <w> <h>]`) |
  * | table without columns               | one placeholder column `_erd_no_columns unknown [erd_placeholder: 'true', note: …]` (DBML needs one), which import drops |
  *
  * Strings: custom-property values are always quoted strings (`scd_type:
@@ -63,7 +63,7 @@
  */
 
 import type { DisplaySubjectArea } from './types/display.js';
-import { backwardsNoteOf, describeEnds, oneLine, prepareSubjectArea, text } from './exportShared.js';
+import { backwardsNoteOf, declaredName, describeEnds, oneLine, prepareSubjectArea, text } from './exportShared.js';
 import type { ExportColumn, ExportLink, ExportMeta, ExportTable } from './exportShared.js';
 import {
   DBML_DEFAULT_SCHEMA,
@@ -94,12 +94,12 @@ export type DbmlRichOptions = Record<string, never>;
 const META_KEY = /^[a-z_][a-z0-9_]*$/;
 
 function tableName(model: ExportTable): string {
-  return model.schema ? `${ident(model.schema)}.${ident(model.name)}` : ident(model.name);
+  return model.schema ? `${ident(model.schema)}.${ident(declaredName(model))}` : ident(declaredName(model));
 }
 
 /** How DBML tells tables apart: an unqualified table is in schema `public`. */
 function tableKey(model: ExportTable): string {
-  return `${model.schema || 'public'}\u0000${model.name}`;
+  return `${model.schema || 'public'}\u0000${declaredName(model)}`;
 }
 
 const columnKey = (model: ExportTable, column: string): string => `${tableKey(model)}\u0000${column}`;

@@ -47,6 +47,15 @@ const SOURCE_CONFIG: Record<SourceKey, { label: string; description: string }> =
   manifest: { label: 'Compiled', description: 'Compiled manifest only' },
 };
 
+/**
+ * What the dialog picks a row by: its name, unique among the rows, except a
+ * Table Library row the host lists with its schema folder (two tables of one
+ * name in different schema folders), which is picked by its name and file.
+ */
+function rowKey(model: ExistingTablePreview | ManifestModelPreview): string {
+  return 'schemaFolder' in model && model.schemaFolder !== undefined ? `${model.name}\u0000${model.sourcePath}` : model.name;
+}
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -71,7 +80,7 @@ export function AddExistingTableDialog() {
 
   // Local state
   const [searchQuery, setSearchQuery] = useState('');
-  // Picked names, in the order they were ticked.
+  // Picked rows (rowKey), in the order they were ticked.
   const [selected, setSelected] = useState<string[]>([]);
   const [activeFilters, setActiveFilters] = useState<Set<SourceKey>>(
     new Set(['logical', 'yml', 'manifest']),
@@ -161,7 +170,7 @@ export function AddExistingTableDialog() {
 
   // Only the rows on screen count: a pick hidden by the search or a filter is
   // dropped, so Add never adds a model the user cannot see ticked.
-  const shownNames = useMemo(() => new Set(filteredModels.map((m) => m.name)), [filteredModels]);
+  const shownNames = useMemo(() => new Set(filteredModels.map(rowKey)), [filteredModels]);
   const visibleSelected = useMemo(
     () => selected.filter((name) => shownNames.has(name)),
     [selected, shownNames],
@@ -183,10 +192,10 @@ export function AddExistingTableDialog() {
   // Ticks every shown row, up to the limit; picks hidden by the search go.
   const handleSelectAllShown = useCallback(() => {
     setSelected((prev) => {
-      const next = prev.filter((name) => filteredModels.some((m) => m.name === name));
+      const next = prev.filter((key) => filteredModels.some((m) => rowKey(m) === key));
       for (const m of filteredModels) {
         if (next.length >= ADD_EXISTING_TABLES_LIMIT) break;
-        if (!next.includes(m.name)) next.push(m.name);
+        if (!next.includes(rowKey(m))) next.push(rowKey(m));
       }
       return next;
     });
@@ -196,15 +205,20 @@ export function AddExistingTableDialog() {
     setSelected([]);
   }, []);
 
-  const addModels = useCallback((names: readonly string[]) => {
-    if (names.length === 0) return;
-    if (names.length === 1) {
-      send({ type: 'addExistingModel', payload: { modelName: names[0] } });
+  const addModels = useCallback((keys: readonly string[]) => {
+    const rows = keys.map((key) => models.find((m) => rowKey(m) === key)).filter((m): m is ExistingTablePreview | ManifestModelPreview => m !== undefined);
+    if (rows.length === 0) return;
+    // A row the host lists with its schema folder is named by its file too: another schema
+    // folder may hold a table of its name. Every other row goes by its name, as before.
+    const fileOf = (m: ExistingTablePreview | ManifestModelPreview): string => ('schemaFolder' in m && m.schemaFolder !== undefined ? m.sourcePath : '');
+    const byFile = rows.some((m) => fileOf(m) !== '');
+    if (rows.length === 1) {
+      send({ type: 'addExistingModel', payload: { modelName: rows[0].name, ...(byFile ? { sourcePath: fileOf(rows[0]) } : {}) } });
     } else {
-      send({ type: 'addExistingModels', payload: { modelNames: [...names] } });
+      send({ type: 'addExistingModels', payload: { modelNames: rows.map((m) => m.name), ...(byFile ? { sourcePaths: rows.map(fileOf) } : {}) } });
     }
     handleClose();
-  }, [send, handleClose]);
+  }, [send, handleClose, models]);
 
   const handleAdd = useCallback(() => addModels(visibleSelected), [addModels, visibleSelected]);
 
@@ -380,11 +394,12 @@ export function AddExistingTableDialog() {
               const sourcePath = 'sourcePath' in model ? (model as ExistingTablePreview).sourcePath : undefined;
               return (
                 <TableItem
-                  key={model.name}
+                  key={rowKey(model)}
                   model={model}
+                  rowKey={rowKey(model)}
                   source={source}
                   sourcePath={sourcePath}
-                  isSelected={visibleSelected.includes(model.name)}
+                  isSelected={visibleSelected.includes(rowKey(model))}
                   showCheck={canPickMany}
                   onToggle={handleToggle}
                   onDoubleClick={handleDoubleClick}
@@ -421,6 +436,8 @@ export function AddExistingTableDialog() {
 
 interface TableItemProps {
   model: ManifestModelPreview;
+  /** What the dialog picks the row by: its name, or for a row listed with its schema folder, its name and file. */
+  rowKey: string;
   source: SourceKey;
   sourcePath?: string;
   isSelected: boolean;
@@ -429,14 +446,14 @@ interface TableItemProps {
   onDoubleClick: (name: string) => void;
 }
 
-function TableItem({ model, source, sourcePath, isSelected, showCheck, onToggle, onDoubleClick }: TableItemProps) {
+function TableItem({ model, rowKey: key, source, sourcePath, isSelected, showCheck, onToggle, onDoubleClick }: TableItemProps) {
   const handleClick = useCallback(() => {
-    onToggle(model.name);
-  }, [onToggle, model.name]);
+    onToggle(key);
+  }, [onToggle, key]);
 
   const handleDblClick = useCallback(() => {
-    onDoubleClick(model.name);
-  }, [onDoubleClick, model.name]);
+    onDoubleClick(key);
+  }, [onDoubleClick, key]);
 
   return (
     <div

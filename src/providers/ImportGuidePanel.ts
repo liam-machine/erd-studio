@@ -13,6 +13,7 @@ import * as vscode from 'vscode';
 import {
   IMPORT_GUIDE_ACTION_FEATURES,
   IMPORT_GUIDE_COPIED_FEATURE,
+  IMPORT_GUIDE_SNIPPET_COPIED_FEATURES,
   IMPORT_GUIDE_SNIPPETS,
   IMPORT_GUIDE_TITLE,
   IMPORT_GUIDE_VIEW_TYPE,
@@ -100,10 +101,14 @@ export class ImportGuidePanel {
         await this.deps.executeCommand(run.command, ...run.args);
         return;
       }
-      case 'copy':
+      case 'copy': {
         this.deps.feature(IMPORT_GUIDE_COPIED_FEATURE);
+        // The Fabric card's query is also counted by itself: fixed keys only, never what was copied.
+        const copied = IMPORT_GUIDE_SNIPPET_COPIED_FEATURES[message.snippet];
+        if (copied) this.deps.feature(copied);
         await this.deps.writeClipboard(IMPORT_GUIDE_SNIPPETS[message.snippet]);
         return;
+      }
       case 'openFolder':
         await this.deps.executeCommand('vscode.openFolder');
         return;

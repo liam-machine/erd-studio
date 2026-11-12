@@ -25,8 +25,8 @@ import { useStatePersistence } from './hooks/useStatePersistence';
 import { useVsCodeApi } from './hooks/useVsCodeApi';
 import { INITIAL_FIT_VIEW_OPTIONS, initialFitViewOptions } from './lib/fitViewPadding';
 import {
-  useColumnExpansion,
-  NODE_THRESHOLD,
+  defaultTableDetail,
+  isTableDetail,
   useCanvasGraph,
   useHoverFocus,
   CanvasBackdrop,
@@ -164,12 +164,12 @@ function EditorCanvas() {
   }, []);
 
   // F405: Column expansion state (persisted in Zustand store via useStatePersistence)
-  const { collapseAll, expandAll, allExpanded } = useColumnExpansion();
+  const setTableDetail = useEditorStore((s) => s.setTableDetail);
   // Check synchronously on mount if we have persisted expansion state.
   // Used to distinguish "first ever load" from "returning after tab switch".
   const [hadPersistedExpansion] = useState(() => {
-    const s = vscode.getState() as { expandedNodes?: string[] } | null | undefined;
-    return s?.expandedNodes !== undefined;
+    const s = vscode.getState() as { expandedNodes?: string[]; tableDetail?: unknown } | null | undefined;
+    return s?.expandedNodes !== undefined || isTableDetail(s?.tableDetail);
   });
 
   // State persistence (zoom, pan, selection, mode, detail panel, expansion)
@@ -199,26 +199,24 @@ function EditorCanvas() {
   }, [setStoreToastMessage]);
   const activeToastMessage = toastMessage ?? storeToastMessage;
 
-  // F405: Auto-expand columns on first-ever domain load.
+  // The table detail level on a first-ever domain load.
   // This effect runs AFTER useStatePersistence's restore effect (React guarantees
   // effects execute in declaration order within a component). On first-ever load
-  // (no persisted state), expand all if below NODE_THRESHOLD. On restoration
-  // (persisted state exists), skip auto-expand entirely — the persisted state
-  // is the source of truth for which models are expanded.
+  // (no persisted state): every column below NODE_THRESHOLD tables, the key
+  // columns from there up (`defaultTableDetail`). On restoration (persisted
+  // state exists), skip it entirely — the persisted state is the source of
+  // truth for the level and for which tables are opened.
   const hasAutoExpandedRef = useRef(false);
   useEffect(() => {
     if (!domain || hasAutoExpandedRef.current) return;
     hasAutoExpandedRef.current = true;
 
-    // If we have persisted expansion state, trust it — don't auto-expand.
-    // This preserves "Collapse All" intent across tab switches.
+    // If we have persisted expansion state, trust it — the reader's chosen
+    // level survives tab switches.
     if (hadPersistedExpansion) return;
 
-    // First ever session: expand all if below node threshold for better UX.
-    if (domain.models.length < NODE_THRESHOLD) {
-      expandAll(domain.models.map((m) => m.name));
-    }
-  }, [domain, hadPersistedExpansion, expandAll]);
+    setTableDetail(defaultTableDetail(domain.models.length));
+  }, [domain, hadPersistedExpansion, setTableDetail]);
 
   // Discrepancy state
   const setDiscrepancyReport = useEditorStore((s) => s.setDiscrepancyReport);
@@ -241,7 +239,8 @@ function EditorCanvas() {
 
   // Drops of tables on the canvas (a Shift-drag from the Table Library or the
   // Explorer): the drop handlers, the highlight and the "Hold Shift" hint.
-  const { dropHandlers, dropActive, hintTables, libraryDragStarted } = useLibraryDrop();
+  // A drop that adds nothing (the physical stage) says why, as a notice.
+  const { dropHandlers, dropActive, hintTables, libraryDragStarted } = useLibraryDrop(setNotice);
 
   const onMessage = useCallback(
     (msg: ExtensionMessage) => {
@@ -804,7 +803,7 @@ function EditorCanvas() {
       // area rather than an overlay on top of the nodes. With the notice
       // hidden this is a one-child flex container — i.e. unchanged.
       style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}
-      // Undefined on the physical stage or a read-only diagram: nothing to drop on.
+      // On the physical stage or a read-only diagram a drop adds nothing and says why.
       {...dropHandlers}
     >
       {/* "dbt has not been compiled" strip. Renders nothing on the logical
@@ -862,9 +861,6 @@ function EditorCanvas() {
           <Toolbar
             nodes={nodes}
             edges={edges}
-            allExpanded={allExpanded}
-            onExpandAll={() => expandAll(nodes.filter((n) => n.type === 'model').map((n) => n.id))}
-            onCollapseAll={collapseAll}
           />
         </AreaErrorBoundary>
         <StatusBar />

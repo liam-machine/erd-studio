@@ -48,6 +48,8 @@ import { Document, parseDocument, isSeq, isMap } from 'yaml';
 import type { YAMLMap, YAMLSeq, Node, Scalar } from 'yaml';
 
 import type { SubjectAreaService } from './domainService';
+import { tableNameOf } from '@erd-studio/core';
+import type { UnifiedSubjectArea } from '../types/semantic';
 import { hasDbtProjectFile } from './projectDiscovery';
 import { log } from './logger';
 
@@ -108,6 +110,15 @@ export interface SelectorsServiceHooks {
    * happens with a `_2`/`_3` suffix; surface this so the user can rename.
    */
   onNameCollision?: (info: NameCollisionInfo) => void;
+  /**
+   * The dbt model each table of a diagram whose name two schema folders
+   * share was found as, by lower-case reference, null for one found as none
+   * (`SubjectAreaService.dbtModelNamesOf` over the dbt data last loaded). Such
+   * a table is written as that model, or left out; without this hook, one
+   * the diagram names `<schema>.<name>` is left out, never written as a
+   * reference.
+   */
+  dbtModelsOf?: (unified: UnifiedSubjectArea) => ReadonlyMap<string, string | null>;
 }
 
 export interface NameCollisionInfo {
@@ -230,12 +241,21 @@ export class SelectorsService {
         continue;
       }
 
+      // A table whose name two schema folders share is not its dbt model by name:
+      // it is the model the physical stage finds it as, or left out (D-12). Never a reference.
+      const dbtModels = this.hooks?.dbtModelsOf?.(unified);
       const seen = new Set<string>();
       const members: Array<{ method: 'fqn'; value: string }> = [];
       for (const model of models) {
-        if (seen.has(model.name)) { continue; }
-        seen.add(model.name);
-        members.push({ method: 'fqn', value: model.name });
+        const found = dbtModels?.get(model.name.toLowerCase());
+        const value = found !== undefined ? found : tableNameOf(model) !== undefined ? null : model.name;
+        if (value === null || seen.has(value)) { continue; }
+        seen.add(value);
+        members.push({ method: 'fqn', value });
+      }
+      // Every table left out: no selector, as for a diagram with no tables.
+      if (members.length === 0) {
+        continue;
       }
 
       modelsReferenced += members.length;

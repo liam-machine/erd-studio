@@ -48,6 +48,13 @@ export interface ExistingTablePreview extends ManifestModelPreview {
    * that was read, and on every row an older host sends.
    */
   detailsPending?: true;
+  /**
+   * A DBML table's layer and schema folder (`<layer>/tables/<schema>/`), where
+   * the host tells two tables of one name apart by them: the dialog shows
+   * them beside the name. Absent on every other row, and from an older host.
+   */
+  layer?: string;
+  schemaFolder?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -104,7 +111,19 @@ export interface PhysicalProvenance {
 
 /** Model ready for webview display. */
 export interface DisplayTable {
+  /**
+   * What the diagram calls the table, unique within it: what relationship
+   * ends, positions keys, `stubColumns` and sticky-note links name. The
+   * table's name, except on a DBML diagram that shows two tables of one name
+   * from different schema folders: each is then `<schema>.<name>`.
+   */
   name: string;
+  /**
+   * The table's own name, present only when `name` is not it (the
+   * `<schema>.<name>` case above): what a header, an export or a dbt lookup
+   * shows. Absent: `name`. Older cores never set it.
+   */
+  tableName?: string;
   schema: string;
   /**
    * The layer whose folder holds the table's file (`<layer>/tables/<schema>/`,

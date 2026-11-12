@@ -64,6 +64,18 @@ describe('findRevealNode', () => {
     expect(findRevealNode(nodes, ' FCT_Order ')).toBe('fct_order');
     expect(findRevealNode(nodes, 'note-1')).toBeUndefined();
   });
+
+  it('two tables of one name: the diagram\'s name for one first, then a bare name only one node has as its own', () => {
+    const nodes = [
+      { id: 'bqs.addresse', type: 'model', data: { tableName: 'addresse' } },
+      { id: 'ccc.addresse', type: 'model', data: { tableName: 'addresse' } },
+      { id: 'ccc.kunde', type: 'model', data: { tableName: 'kunde' } },
+      { id: 'kunde_alt', type: 'model', data: {} },
+    ];
+    expect(findRevealNode(nodes, 'CCC.addresse')).toBe('ccc.addresse');
+    expect(findRevealNode(nodes, 'addresse')).toBeUndefined();
+    expect(findRevealNode(nodes, 'kunde')).toBe('ccc.kunde');
+  });
 });
 
 describe('useRevealTable', () => {

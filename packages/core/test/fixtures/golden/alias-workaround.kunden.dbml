@@ -1,0 +1,49 @@
+// erd-studio dbml-export v1
+// Not exported: canvas positions and sizes, sticky-note colours, nested meta values (lists and maps).
+// ERD Studio's own fields (role, grain, alias, rationale, natural keys, SCD type, additivity, meta) are in the notes.
+
+Project kunden {
+  Note: '''Layer: bronze
+Stage: logical
+
+Customers and addresses from both source systems'''
+}
+
+Table bqs.addresse {
+  id INT [pk]
+  strasse VARCHAR
+  ort VARCHAR
+  Note: 'Addresses from the BQS system'
+}
+
+Table bqs.kunde {
+  id INT [pk]
+  name VARCHAR
+  addresse_id INT
+  Note: 'Customers from the BQS system'
+}
+
+Table ccc.ccc_addresse {
+  id INT [pk]
+  street VARCHAR
+  city VARCHAR
+  postcode VARCHAR
+  Note: '''Warehouse table (alias): addresse
+
+Addresses from the CCC system'''
+}
+
+Table ccc.ccc_kunde {
+  id INT [pk]
+  full_name VARCHAR
+  addresse_id INT
+  Note: '''Warehouse table (alias): kunde
+
+Customers from the CCC system'''
+}
+
+Ref: bqs.kunde.addresse_id > bqs.addresse.id
+Ref: ccc.ccc_addresse.id > bqs.addresse.id
+Ref: ccc.ccc_kunde.addresse_id > ccc.ccc_addresse.id
+
+// Sticky note 1 (linked to ccc_addresse): ccc_addresse is the warehouse table ccc.addresse
