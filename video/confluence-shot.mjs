@@ -8,9 +8,12 @@
 // a light page (the --vscode-* variables the renderer's README lists), 1200x640 at 2x.
 //
 //   node confluence-shot.mjs        (needs the repo root's npm install for esbuild and React)
+//   node confluence-shot.mjs --hero player/assets/confluence-hero.png, the README GIF's Confluence beat: the same
+//                                   render of the GIF's own `orders` diagram, as Claude Code left it in the
+//                                   real run record/heroRun.mjs made (record/hero-run.json, design.after)
 import { build } from '../node_modules/esbuild/lib/main.js';
 import { chromium } from 'playwright';
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DBT_ERD } from './record/fixtures.erd.mjs';
@@ -18,12 +21,16 @@ import { DBT_ERD } from './record/fixtures.erd.mjs';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, '..');
 const OUT = join(HERE, 'build', 'confluence');
-export const SHOT = { file: join(HERE, 'player', 'assets', 'confluence-sales.png'), width: 1200, height: 560 };
+const HERO = process.argv.includes('--hero');
+export const SHOT = { file: join(HERE, 'player', 'assets', HERO ? 'confluence-hero.png' : 'confluence-sales.png'), width: HERO ? 1300 : 1200, height: 560 };
 if (!Object.keys(DBT_ERD).length) throw new Error('record/fixtures.erd.mjs is empty: run `node record/fixtures.mjs --capture` after a plain take');
+/** The .erd-studio files drawn, and the diagram among them. */
+const ERD = HERO ? JSON.parse(readFileSync(join(HERE, 'record', 'hero-run.json'), 'utf8')).design.after : DBT_ERD;
+const DIAGRAM = HERO ? 'main/diagrams/orders.dbml' : 'main/diagrams/shop-analytics.dbml';
 rmSync(OUT, { recursive: true, force: true });
 mkdirSync(OUT, { recursive: true });
 
-writeFileSync(join(OUT, 'files.json'), JSON.stringify(Object.fromEntries(Object.entries(DBT_ERD).map(([k, v]) => [`.erd-studio/${k}`, v]))));
+writeFileSync(join(OUT, 'files.json'), JSON.stringify(Object.fromEntries(Object.entries(ERD).map(([k, v]) => [`.erd-studio/${k}`, v]))));
 writeFileSync(join(OUT, 'entry.tsx'), `import { createRoot } from 'react-dom/client';
 import { ErdCanvas } from '@erd-studio/renderer';
 import { loadDisplaySubjectArea } from '@erd-studio/core';
@@ -31,7 +38,7 @@ import { dbmlStorageReader } from '@erd-studio/core/dbml';
 import '@erd-studio/renderer/styles.css';
 import files from './files.json';
 const domain = await loadDisplaySubjectArea({
-  domainPath: '.erd-studio/main/diagrams/shop-analytics.dbml', readOnly: true, dbml: dbmlStorageReader,
+  domainPath: ${JSON.stringify(`.erd-studio/${DIAGRAM}`)}, readOnly: true, dbml: dbmlStorageReader,
   readFile: async (p) => (files as Record<string, string>)[p] ?? null,
 });
 createRoot(document.getElementById('root')!).render(
