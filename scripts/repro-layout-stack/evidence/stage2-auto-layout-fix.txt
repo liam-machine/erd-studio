@@ -1,0 +1,121 @@
+# Stage 2: Auto Layout stack overflow (Gerhard, 2026-11-12), after the fix
+# 2026-11-12T08:46Z, branch fix/gerhard-feedback-3, node v26.3.1
+
+## 1. Seed sweeps through the real runElkLayout (Auto grouping); stage 1 had 5/200, 3/30, 1/30 and 3/30 failing
+twoway 15t/28r auto: 0/200 failed (6288ms)
+twoway 40t/80r auto: 0/30 failed (11979ms)
+random 40t/80r auto: 0/30 failed (7170ms)
+twoway 130t/160r auto: 0/30 failed (62388ms)
+twoway 15t/28r depth: 0/100 failed (2965ms)
+
+## 2. Gerhard's mechanism (8 tables / 14 relationships) and his reported size, every grouping, default stack
+twoway       8t     14r  auto ->depth bound=3 bands=5/0/0/0/3  OK   rung=1 step=default bandsUsed=partitioned placed=8 358ms
+twoway       8t     14r  role ->role  bound=5 bands=-  OK   rung=1 step=default bandsUsed=off placed=8 13ms
+twoway       8t     14r  depth->depth bound=5 bands=5/0/0/0/3  OK   rung=1 step=default bandsUsed=partitioned placed=8 11ms
+twoway       8t     14r  none ->none  bound=5 bands=-  OK   rung=1 step=default bandsUsed=off placed=8 9ms
+gerhard    130t     80r  auto ->depth bound=10 bands=109/11/6/2/2  OK   rung=1 step=default bandsUsed=partitioned placed=130 414ms
+gerhard    130t     80r  role ->role  bound=5 bands=-  OK   rung=1 step=default bandsUsed=off placed=130 701ms
+gerhard    130t     80r  depth->depth bound=5 bands=109/11/6/2/2  OK   rung=1 step=default bandsUsed=partitioned placed=130 549ms
+gerhard    130t     80r  none ->none  bound=5 bands=-  OK   rung=1 step=default bandsUsed=off placed=130 259ms
+twoway     130t     80r  auto ->depth bound=10 bands=81/31/12/2/4  OK   rung=1 step=default bandsUsed=partitioned placed=130 131ms
+twoway     130t     80r  role ->role  bound=5 bands=-  OK   rung=1 step=default bandsUsed=off placed=130 119ms
+twoway     130t     80r  depth->depth bound=5 bands=81/31/12/2/4  OK   rung=1 step=default bandsUsed=partitioned placed=130 85ms
+twoway     130t     80r  none ->none  bound=5 bands=-  OK   rung=1 step=default bandsUsed=off placed=130 353ms
+
+## 3. Scale on a worker-sized stack (node --stack-size=500), Auto and None; 150 s cap per run
+random     300t    400r  auto ->depth bound=10 bands=131/58/35/69/7  OK   rung=1 step=default bandsUsed=direction placed=300 1134ms
+random     300t    400r  none ->none  bound=5 bands=-  OK   rung=1 step=default bandsUsed=off placed=300 1326ms
+twoway     500t   1000r  auto ->depth bound=10 bands=232/56/15/3/194  OK   rung=1 step=default bandsUsed=direction placed=500 2935ms
+twoway     500t   1000r  none ->none  bound=5 bands=-  OK   rung=1 step=default bandsUsed=off placed=500 3368ms
+random     999t   1000r  auto ->depth bound=10 bands=694/193/55/40/17  OK   rung=1 step=default bandsUsed=direction placed=999 3446ms
+random     999t   1000r  none ->none  bound=5 bands=-  OK   rung=1 step=default bandsUsed=off placed=999 4017ms
+twoway     999t   1999r  auto ->depth bound=10 bands=441/115/373/66/4  OK   rung=1 step=default bandsUsed=direction placed=999 10404ms
+twoway     999t   1999r  none ->none  bound=5 bands=-  OK   rung=1 step=default bandsUsed=off placed=999 15526ms
+chain      999t   1500r  auto ->depth bound=10 bands=999/0/0/0/0  OK   rung=1 step=default bandsUsed=off placed=999 7053ms
+chain      999t   1500r  none ->none  bound=5 bands=-  OK   rung=1 step=default bandsUsed=off placed=999 8339ms
+random    2000t   4000r  auto ->depth bound=10 bands=339/36/1540/83/2  OK   rung=3 step=grid bandsUsed=direction placed=2000 10ms
+random    2000t   4000r  none ->none  bound=5 bands=-  OK   rung=3 step=grid bandsUsed=off placed=2000 5ms
+twoway    5000t  10000r  auto ->depth bound=10 bands=2235/618/32/2045/70  OK   rung=3 step=grid bandsUsed=direction placed=5000 24ms
+twoway    5000t  10000r  none ->none  bound=5 bands=-  OK   rung=3 step=grid bandsUsed=off placed=5000 10ms
+chain     5000t   5000r  auto ->depth bound=10 bands=1382/1034/1033/1034/517  OK   rung=3 step=grid bandsUsed=direction placed=5000 15ms
+chain     5000t   5000r  none ->none  bound=5 bands=-  OK   rung=3 step=grid bandsUsed=off placed=5000 7ms
+cycles    5000t  10000r  auto ->depth bound=10 bands=5000/0/0/0/0  OK   rung=3 step=grid bandsUsed=off placed=5000 16ms
+cycles    5000t  10000r  none ->none  bound=5 bands=-  OK   rung=3 step=grid bandsUsed=off placed=5000 11ms
+parallel  5000t  10000r  auto ->depth bound=10 bands=3633/1146/169/48/4  OK   rung=3 step=grid bandsUsed=direction placed=5000 21ms
+parallel  5000t  10000r  none ->none  bound=5 bands=-  OK   rung=3 step=grid bandsUsed=off placed=5000 10ms
+selfref   5000t  10000r  auto ->depth bound=10 bands=1513/126/3094/257/10  OK   rung=3 step=grid bandsUsed=direction placed=5000 26ms
+selfref   5000t  10000r  none ->none  bound=5 bands=-  OK   rung=3 step=grid bandsUsed=off placed=5000 12ms
+islands   5000t   3766r  auto ->depth bound=10 bands=2492/1358/1105/44/1  OK   rung=3 step=grid bandsUsed=direction placed=5000 15ms
+islands   5000t   3766r  none ->none  bound=5 bands=-  OK   rung=3 step=grid bandsUsed=off placed=5000 6ms
+
+## 4. A deliberately tiny stack (node --stack-size=120), up to 50,000 tables
+twoway       8t     14r  auto ->depth bound=3 bands=4/0/3/0/1  OK   rung=1 step=default bandsUsed=partitioned placed=8 56ms
+twoway       8t     14r  none ->none  bound=5 bands=-  OK   rung=1 step=default bandsUsed=off placed=8 53ms
+twoway     130t    160r  auto ->depth bound=10 bands=82/22/21/3/2  OK   rung=2 step=brandesKoepf bandsUsed=partitioned placed=130 654ms
+twoway     130t    160r  none ->none  bound=5 bands=-  OK   rung=2 step=brandesKoepf bandsUsed=off placed=130 321ms
+gerhard    130t     80r  auto ->depth bound=10 bands=109/11/6/2/2  OK   rung=2 step=brandesKoepf bandsUsed=partitioned placed=130 193ms
+gerhard    130t     80r  none ->none  bound=5 bands=-  OK   rung=1 step=default bandsUsed=off placed=130 331ms
+chain     5000t   5000r  auto ->depth bound=10 bands=1382/1034/1033/1034/517  OK   rung=3 step=grid bandsUsed=direction placed=5000 13ms
+chain     5000t   5000r  none ->none  bound=5 bands=-  OK   rung=3 step=grid bandsUsed=off placed=5000 7ms
+twoway   50000t 100000r  auto ->depth bound=10 bands=26140/3229/158/20010/463  OK   rung=3 step=grid bandsUsed=direction placed=50000 226ms
+twoway   50000t 100000r  none ->none  bound=5 bands=-  OK   rung=3 step=grid bandsUsed=off placed=50000 89ms
+
+## 5. A real Chromium dedicated Web Worker (blob URL, as the canvas builds it), the graphs from planElkLayout, the full ladder and the 30 s guard
+## (stage 1, same three diagrams: Auto and Join depth FAILED on every rung)
+$ node scripts/repro-layout-stack/browser.cjs twoway:8:14:192 twoway:40:80:13 twoway:130:160:26 gerhard:130:80:1
+chromium 157.0.8103.52: trivial recursion depth main=8776 worker=5489
+twoway       8t     14r auto ->depth/partitioned   OK  default:ok71ms
+twoway       8t     14r role ->role/off            OK  default:ok67ms
+twoway       8t     14r depth->depth/partitioned   OK  default:ok69ms
+twoway       8t     14r none ->none/off            OK  default:ok65ms
+twoway      40t     80r auto ->depth/partitioned   OK  default:ok209ms
+twoway      40t     80r role ->role/off            OK  default:ok175ms
+twoway      40t     80r depth->depth/partitioned   OK  default:ok207ms
+twoway      40t     80r none ->none/off            OK  default:ok170ms
+twoway     130t    160r auto ->depth/partitioned   OK via brandesKoepf  default:x1462ms brandesKoepf:ok207ms
+twoway     130t    160r role ->role/off            OK  default:ok1319ms
+twoway     130t    160r depth->depth/partitioned   OK  default:ok3007ms
+twoway     130t    160r none ->none/off            OK  default:ok1291ms
+gerhard    130t     80r auto ->depth/partitioned   OK  default:ok311ms
+gerhard    130t     80r role ->role/off            OK  default:ok287ms
+gerhard    130t     80r depth->depth/partitioned   OK  default:ok452ms
+gerhard    130t     80r none ->none/off            OK  default:ok284ms
+
+## 6. Larger diagrams in the Chromium worker, one browser per diagram (see note in the PR: several 1,000-table layouts back to back in one headless page once closed the page)
+random     150t    200r auto ->depth/direction     OK  default:ok241ms
+random     150t    200r depth->depth/direction     OK  default:ok253ms
+random     150t    200r none ->none/off            OK  default:ok4543ms
+twoway     200t    300r auto ->depth/direction     OK  default:ok361ms
+twoway     200t    300r depth->depth/direction     OK  default:ok392ms
+twoway     200t    300r none ->none/off            OK  default:ok386ms
+random     300t    400r auto ->depth/direction     OK  default:ok798ms
+random     300t    400r depth->depth/direction     OK  default:ok826ms
+random     300t    400r none ->none/off            OK  default:ok829ms
+twoway     500t   1000r auto ->depth/direction     OK  default:ok1976ms
+twoway     500t   1000r depth->depth/direction     OK  default:ok2460ms
+twoway     500t   1000r none ->none/off            OK  default:ok2586ms
+random     999t   1000r auto ->depth/direction     OK  default:ok2570ms
+random     999t   1000r depth->depth/direction     OK  default:ok3160ms
+random     999t   1000r none ->none/off            OK  default:ok3009ms
+twoway     999t   1999r auto ->depth/direction     OK  default:ok7775ms
+twoway     999t   1999r depth->depth/direction     OK  default:ok10103ms
+twoway     999t   1999r none ->none/off            OK  default:ok11803ms
+random    2000t   4000r auto ->depth/direction     OK via grid (too large to try ELK; 2000/2000 placed in 2ms)  
+random    2000t   4000r depth->depth/direction     OK via grid (too large to try ELK; 2000/2000 placed in 2ms)  
+random    2000t   4000r none ->none/off            OK via grid (too large to try ELK; 2000/2000 placed in 1ms)  
+twoway    5000t  10000r auto ->depth/direction     OK via grid (too large to try ELK; 5000/5000 placed in 5ms)  
+twoway    5000t  10000r depth->depth/direction     OK via grid (too large to try ELK; 5000/5000 placed in 4ms)  
+twoway    5000t  10000r none ->none/off            OK via grid (too large to try ELK; 5000/5000 placed in 4ms)  
+
+## 7. The regression test, before and after
+test/unit/elkLayoutPartitionCycle.test.ts with webview/lib/elkLayout.ts swapped back to HEAD (pre-fix) for the run:
+  7 failed (13): Auto, Join depth and two-band Table type on the 8/14 diagram ("RangeError: Maximum call stack size exceeded"),
+  the 15/28 x 120-seed and 40/80 x 12-seed sweeps, and None / one-band Table type (pre-fix code has no onOutcome hook, so the outcome assertion fails);
+  the scale tests crashed the vitest worker with a V8 out-of-memory error (5,000 tables / 10,000 relationships in ELK) and were not reached.
+With the fix: 13 passed (about 17 s, including a child process on node --stack-size=200 laying out 8 to 5,000 tables).
+
+## Notes
+- "Invalid hitboxes for scanline constraint calculation" (ELK post-compaction) still happens on some two-way diagrams
+  (twoway 130/160 seed 26 above); Brandes-Koepf (rung 2) produces the layout, as before this fix.
+- In one headless Chrome page, running several ~1,000-table ELK layouts back to back closed the page twice (no 'crash'
+  event); each of those diagrams laid out fine in a fresh browser (section 6). Cause not established.

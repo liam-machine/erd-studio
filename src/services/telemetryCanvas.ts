@@ -23,6 +23,7 @@ import {
   type FitZoomBucket,
   type LayoutFailure,
   type LayoutFailureDetail,
+  type LayoutFailureLog,
   type LayoutFallbackRung,
   type LayoutRelBucket,
   type LayoutTableBucket,
@@ -190,6 +191,18 @@ export function layoutFailureLogLine(where: 'canvas' | 'draft', failure: LayoutF
   const ran = failure.ms !== undefined && Number.isFinite(failure.ms) ? `; after ${Math.round(failure.ms)} ms` : '';
   const message = failure.log?.message ? `: ${failure.log.message}` : '';
   return `${origin} failed (${layoutFailureSummary(failure)}${size}${ran})${message}`;
+}
+
+/**
+ * One line for the extension's own log about a layout that worked but not as
+ * asked (a fallback produced it, the grid placed the tables, or the grouping
+ * was kept by direction only): the page's own description from `log.message`
+ * with the real counts. Local only.
+ */
+export function layoutDegradedLogLine(where: 'canvas' | 'draft', payload: { log: LayoutFailureLog; ms?: number; firstOpen?: boolean }): string {
+  const origin = where === 'draft' ? 'Draft layout' : payload.firstOpen ? 'First-open auto layout' : 'Auto layout';
+  const ran = payload.ms !== undefined && Number.isFinite(payload.ms) ? `; after ${Math.round(payload.ms)} ms` : '';
+  return `${origin} ${payload.log.message} (${payload.log.tables} tables, ${payload.log.relationships} relationships${ran})`;
 }
 
 // ---------------------------------------------------------------------------

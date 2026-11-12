@@ -12,6 +12,7 @@ import {
   CANVAS_LOAD_SLOW_MS,
   canvasLayoutTelemetry,
   layoutFailureCodes,
+  layoutDegradedLogLine,
   layoutFailureLogLine,
   dbmlDiagramFeatures,
   draftLayoutFeatures,
@@ -113,6 +114,14 @@ describe('canvasLayoutTelemetry (B17)', () => {
     expect(layoutFailureLogLine('draft', { ...failure, ms: 10 })).toMatch(/^Draft layout failed \(/);
     // An older page: no detail at all.
     expect(layoutFailureLogLine('draft', {})).toBe('Draft layout failed (class unknown, no fallback tried)');
+  });
+
+  it('a layout that worked but not as asked gets a local log line of its own', () => {
+    const log = { tables: 130, relationships: 80, message: 'used fallback rung 2 (Brandes-Koepf node placement), grouping depth' };
+    expect(layoutDegradedLogLine('canvas', { log, ms: 812.6 })).toBe(
+      'Auto layout used fallback rung 2 (Brandes-Koepf node placement), grouping depth (130 tables, 80 relationships; after 813 ms)');
+    expect(layoutDegradedLogLine('canvas', { log, firstOpen: true })).toMatch(/^First-open auto layout used fallback rung 2 .*\(130 tables, 80 relationships\)$/);
+    expect(layoutDegradedLogLine('draft', { log })).toMatch(/^Draft layout used /);
   });
 
   it('flags the stack-safe fallback and a slow first-open layout', () => {

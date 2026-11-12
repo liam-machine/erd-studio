@@ -31,11 +31,14 @@ import { layoutFailureSummary, type LayoutFallbackRung } from '../../../src/type
 import {
   runElkLayout,
   layoutFailureReport,
+  layoutOutcomeLogMessage,
+  layoutOutcomeNotice,
   detectLayerBound,
   detectStrategy,
   type PartitionStrategy,
   type SpacingPreset,
   type LayoutDirection,
+  type LayoutOutcome,
 } from '../../lib/elkLayout';
 import { FIRST_OPEN_LAYOUT, buildLayoutOptions } from '../../lib/firstOpenLayout';
 import { StageTabs } from './StageTabs';
@@ -483,12 +486,19 @@ export function Toolbar({ nodes, edges }: ToolbarProps) {
     // text; the counts and the message go to the extension's own log only).
     let fallback = false;
     let rung: LayoutFallbackRung | undefined;
+    // How the layout that worked was produced: a fallback or the grid is
+    // written to the ERD Studio output, and the user is told when grouping
+    // was dropped or the grid was used.
+    let outcome: LayoutOutcome | undefined;
     // Filter to model nodes/FK edges only — annotations are exempt from auto-layout.
     const modelNodes = nodes.filter((n): n is import('@erd-studio/renderer/editor').TableFlowNode => n.type === 'model');
     const fkEdges = edges.filter((e): e is import('@erd-studio/renderer/editor').FkFlowEdge => e.type === 'fk');
     const reportLayout = (ok: boolean, err?: unknown) => {
       const ms = Math.round(performance.now() - startedAt);
       const failed = ok ? undefined : layoutFailureReport(err, { tables: modelNodes.length, relationships: fkEdges.length });
+      // A layout that worked but not as asked: the counts and what happened, for the extension's own log only.
+      const degraded = ok && outcome ? layoutOutcomeLogMessage(outcome) : undefined;
+      const degradedLog = degraded === undefined ? undefined : layoutFailureReport(new Error(degraded), { tables: modelNodes.length, relationships: fkEdges.length }).log;
       const done: WebviewMessage = {
         type: 'layoutFinished',
         payload: {
@@ -498,6 +508,7 @@ export function Toolbar({ nodes, edges }: ToolbarProps) {
           ...(failed ?? {}),
           ...(fallback ? { fallback: true as const } : {}),
           ...(ok && rung !== undefined ? { rung } : {}),
+          ...(degradedLog ? { log: degradedLog } : {}),
         },
       };
       vscode.postMessage(done);
@@ -515,7 +526,7 @@ export function Toolbar({ nodes, edges }: ToolbarProps) {
           domain.viewConfig.layoutOptions,
         ),
         partitionStrategy,
-        { onStackFallback: () => { fallback = true; }, onFallbackRung: (r) => { rung = r; } },
+        { onStackFallback: () => { fallback = true; }, onFallbackRung: (r) => { rung = r; }, onOutcome: (o) => { outcome = o; } },
       );
 
       // Optimistic update: update domain in store so React Flow re-renders
@@ -541,6 +552,8 @@ export function Toolbar({ nodes, edges }: ToolbarProps) {
       vscode.postMessage(message);
       reportLayout(true);
       setLayoutDirty(false);
+      const notice = outcome ? layoutOutcomeNotice(outcome, modelNodes.length) : undefined;
+      if (notice) setToastMessage(notice);
     } catch (err) {
       reportLayout(false, err);
       console.error('[Toolbar] Auto layout failed:', err);
@@ -813,6 +826,7 @@ export function Toolbar({ nodes, edges }: ToolbarProps) {
                     : partitionStrategy === 'depth'
                     ? 'Arranges tables so that relationship lines flow in one direction, reducing crossings.'
                     : 'No grouping. Tables are placed freely to reduce line crossings.'}
+                    {layoutDirty ? ' Press Re-apply Layout to use these choices.' : ''}
                   </span>
                 </div>
 

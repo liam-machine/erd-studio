@@ -25,7 +25,7 @@ import {
   type LayoutFailureDetail,
   type LayoutFallbackRung,
 } from '../../src/types/webviewError';
-import { resolveNodeDimensions } from '@erd-studio/renderer/sizing';
+import { NODE_WIDTH, resolveNodeDimensions } from '@erd-studio/renderer/sizing';
 
 // ---------------------------------------------------------------------------
 // Node size estimation — lives in @erd-studio/renderer (lib/nodeSizing.ts) so
@@ -79,6 +79,115 @@ export function roleToPartition(role: TableRole | undefined): number {
 }
 
 // ---------------------------------------------------------------------------
+// The relationship graph: strongly connected components and depths
+// ---------------------------------------------------------------------------
+//
+// Everything here is iterative (no recursion), so a diagram of any size or
+// shape (long chains, cycles, two-way relationships) cannot overflow the
+// stack of the Web Worker or the page that runs it.
+
+/** A diagram's relationships as adjacency lists over table indices. Self-references and relationships to a table not in the diagram are left out. */
+interface TableGraph {
+  ids: string[];
+  out: number[][];
+}
+
+function tableGraph(nodes: TableFlowNode[], edges: FkFlowEdge[]): TableGraph {
+  const ids = nodes.map((n) => n.id);
+  const index = new Map<string, number>();
+  ids.forEach((id, i) => { if (!index.has(id)) index.set(id, i); });
+  const out: number[][] = ids.map(() => []);
+  for (const edge of edges) {
+    const s = index.get(edge.source);
+    const t = index.get(edge.target);
+    if (s === undefined || t === undefined || s === t) continue;
+    out[s].push(t);
+  }
+  return { ids, out };
+}
+
+/**
+ * Each table's strongly connected component (tables that reach each other
+ * through relationships: a two-way pair, a circular chain), numbered in
+ * topological order of the components, sources first. Tarjan's algorithm
+ * with an explicit stack.
+ */
+function componentOrder(graph: TableGraph): Int32Array {
+  const n = graph.ids.length;
+  const idx = new Int32Array(n).fill(-1);
+  const low = new Int32Array(n);
+  const onStack = new Uint8Array(n);
+  const comp = new Int32Array(n).fill(-1);
+  const stack: number[] = [];
+  const work: Array<[number, number]> = [];
+  let next = 0;
+  let emitted = 0;
+  for (let root = 0; root < n; root++) {
+    if (idx[root] !== -1) continue;
+    idx[root] = low[root] = next++;
+    stack.push(root); onStack[root] = 1;
+    work.push([root, 0]);
+    while (work.length > 0) {
+      const top = work[work.length - 1];
+      const v = top[0];
+      const succ = graph.out[v];
+      if (top[1] < succ.length) {
+        const w = succ[top[1]++];
+        if (idx[w] === -1) {
+          idx[w] = low[w] = next++;
+          stack.push(w); onStack[w] = 1;
+          work.push([w, 0]);
+        } else if (onStack[w]) {
+          low[v] = Math.min(low[v], idx[w]);
+        }
+        continue;
+      }
+      work.pop();
+      if (work.length > 0) {
+        const parent = work[work.length - 1][0];
+        low[parent] = Math.min(low[parent], low[v]);
+      }
+      if (low[v] === idx[v]) {
+        let w: number;
+        do {
+          w = stack.pop()!;
+          onStack[w] = 0;
+          comp[w] = emitted;
+        } while (w !== v);
+        emitted++;
+      }
+    }
+  }
+  // Tarjan emits components sinks first: reverse to sources first.
+  for (let i = 0; i < n; i++) comp[i] = emitted - 1 - comp[i];
+  return comp;
+}
+
+/**
+ * Each table's depth: the longest chain of relationships leading to it, where
+ * the tables of one cycle (a two-way pair, a circular chain) share one depth
+ * and count as one step. Tables with no incoming relationship are at depth 0.
+ */
+function graphDepths(graph: TableGraph): { depth: Int32Array; comp: Int32Array } {
+  const n = graph.ids.length;
+  const comp = componentOrder(graph);
+  const compDepth = new Int32Array(n);
+  // Every relationship between components goes from a lower to a higher
+  // component number, so visiting tables by component number settles each
+  // component's depth before it is passed on.
+  const byComp = Array.from({ length: n }, (_, i) => i).sort((a, b) => comp[a] - comp[b]);
+  for (const v of byComp) {
+    const d = compDepth[comp[v]] + 1;
+    for (const w of graph.out[v]) {
+      if (comp[w] !== comp[v] && d > compDepth[comp[w]]) compDepth[comp[w]] = d;
+    }
+  }
+  const depth = new Int32Array(n);
+  for (let i = 0; i < n; i++) depth[i] = compDepth[comp[i]];
+  return { depth, comp };
+}
+
+// ---------------------------------------------------------------------------
 // Depth-based partitioning (structural fallback when no roles are assigned)
 // ---------------------------------------------------------------------------
 
@@ -95,78 +204,80 @@ export function roleToPartition(role: TableRole | undefined): number {
  * Depths are bucketed into 5 groups (0–4) so the partition count stays
  * stable regardless of how deep the graph is.
  *
- * Nodes that form cycles (uncommon but possible) or are otherwise unreachable
- * from any source are assigned depth 0.
+ * The tables of a cycle (a two-way relationship, a circular chain) share one
+ * depth and count as one step, so they and every table downstream of them
+ * get a real depth. Isolated tables are at depth 0.
  */
 export function computeDepthPartitions(
   nodes: TableFlowNode[],
   edges: FkFlowEdge[],
 ): Map<string, number> {
-  const nodeIds = new Set(nodes.map((n) => n.id));
-
-  // Build outgoing adjacency list and track in-degree for each node
-  const outEdges = new Map<string, string[]>();
-  const inDegree = new Map<string, number>();
-
-  for (const node of nodes) {
-    outEdges.set(node.id, []);
-    inDegree.set(node.id, 0);
-  }
-
-  for (const edge of edges) {
-    if (nodeIds.has(edge.source) && nodeIds.has(edge.target)) {
-      outEdges.get(edge.source)!.push(edge.target);
-      inDegree.set(edge.target, inDegree.get(edge.target)! + 1);
-    }
-  }
-
-  // Longest-path via Kahn's topological sort.
-  // Processing nodes in topological order guarantees that when we visit a
-  // node, all its predecessors have already been processed — so the depth
-  // stored at that point is already the maximum across all incoming paths.
-  const depth = new Map<string, number>();
-  const remainingIn = new Map(inDegree);
-  const queue: string[] = [];
-
-  for (const [id, deg] of inDegree) {
-    if (deg === 0) {
-      queue.push(id);
-      depth.set(id, 0);
-    }
-  }
-
-  while (queue.length > 0) {
-    const id = queue.shift()!;
-    const d = depth.get(id)!;
-
-    for (const neighbor of outEdges.get(id)!) {
-      const newD = d + 1;
-      if (newD > (depth.get(neighbor) ?? -1)) {
-        depth.set(neighbor, newD);
-      }
-      const rem = remainingIn.get(neighbor)! - 1;
-      remainingIn.set(neighbor, rem);
-      if (rem === 0) {
-        queue.push(neighbor);
-      }
-    }
-  }
-
-  // Assign cycle members and isolated nodes depth 0
-  for (const node of nodes) {
-    if (!depth.has(node.id)) {
-      depth.set(node.id, 0);
-    }
-  }
-
-  // Bucket into 5 partitions (0–4) relative to the deepest node
-  const maxDepth = Math.max(...depth.values(), 1);
+  const graph = tableGraph(nodes, edges);
+  const { depth } = graphDepths(graph);
+  // Bucket into 5 partitions (0–4) relative to the deepest node. A loop, not
+  // Math.max(...depths), which overflows the stack on a very large diagram.
+  let maxDepth = 1;
+  for (const d of depth) if (d > maxDepth) maxDepth = d;
   const partitions = new Map<string, number>();
-  for (const [id, d] of depth) {
-    partitions.set(id, Math.min(4, Math.round((d / maxDepth) * 4)));
-  }
-
+  graph.ids.forEach((id, i) => {
+    partitions.set(id, Math.min(4, Math.round((depth[i] / maxDepth) * 4)));
+  });
   return partitions;
+}
+
+/**
+ * The tables in one order that every relationship can follow: by band (when
+ * grouping), then by dependency (the components of {@link graphDepths}, so
+ * a referenced table comes before the tables that point at it, and a cycle's
+ * tables sit together), then by position in the diagram. Returns each table
+ * id's rank and the tables' depths.
+ */
+function dependencyOrder(
+  nodes: TableFlowNode[],
+  edges: FkFlowEdge[],
+  partitions: Map<string, number> | null,
+): { order: number[]; depth: Int32Array; comp: Int32Array; graph: TableGraph } {
+  const graph = tableGraph(nodes, edges);
+  const { depth, comp } = graphDepths(graph);
+  const band = graph.ids.map((id) => partitions?.get(id) ?? 0);
+  const order = Array.from({ length: graph.ids.length }, (_, i) => i)
+    .sort((a, b) => (band[a] - band[b]) || (depth[a] - depth[b]) || (comp[a] - comp[b]) || (a - b));
+  return { order, depth, comp, graph };
+}
+
+/**
+ * The relationships as ELK gets them when grouping (partitioning) is on:
+ * every one points along {@link dependencyOrder}, so the graph ELK lays out
+ * has no cycle and no relationship pointing back to an earlier band.
+ *
+ * Why: with partitioning on, ELK reverses a relationship that points to an
+ * earlier band, its greedy cycle breaker may then reverse one more that
+ * crosses bands, and its partition step joins every table of a band to every
+ * table of the next. Together those can close a cycle, and the Coffman–Graham
+ * layering walks round it until the stack overflows ("Maximum call stack size
+ * exceeded", on any machine and any stack size). Only positions are read
+ * back, so turning a relationship round changes nothing but which side ELK
+ * puts it on, which it was choosing anyway. Self-references are kept as they
+ * are; a relationship to a table not in the diagram is left out.
+ */
+export function orientEdgesForPartitions(
+  nodes: TableFlowNode[],
+  edges: FkFlowEdge[],
+  partitions: Map<string, number>,
+): ElkExtendedEdge[] {
+  const { order, graph } = dependencyOrder(nodes, edges, partitions);
+  const rank = new Map<string, number>();
+  order.forEach((v, r) => { if (!rank.has(graph.ids[v])) rank.set(graph.ids[v], r); });
+  const oriented: ElkExtendedEdge[] = [];
+  for (const edge of edges) {
+    const s = rank.get(edge.source);
+    const t = rank.get(edge.target);
+    if (s === undefined || t === undefined) continue;
+    oriented.push(s <= t
+      ? { id: edge.id, sources: [edge.source], targets: [edge.target] }
+      : { id: edge.id, sources: [edge.target], targets: [edge.source] });
+  }
+  return oriented;
 }
 
 // ---------------------------------------------------------------------------
@@ -486,9 +597,14 @@ export function toElkChildren(
   });
 }
 
-/** Convert React Flow edges into ELK extended edges. */
-function toElkEdges(edges: FkFlowEdge[]): ElkExtendedEdge[] {
-  return edges.map((edge) => ({
+/**
+ * Convert React Flow edges into ELK extended edges, leaving out a
+ * relationship to a table that is not in the layout (ELK refuses the whole
+ * graph for one).
+ */
+function toElkEdges(nodes: TableFlowNode[], edges: FkFlowEdge[]): ElkExtendedEdge[] {
+  const ids = new Set(nodes.map((n) => n.id));
+  return edges.filter((edge) => ids.has(edge.source) && ids.has(edge.target)).map((edge) => ({
     id: edge.id,
     sources: [edge.source],
     targets: [edge.target],
@@ -549,36 +665,184 @@ export function detectStrategy(
   return 'none';
 }
 
+/**
+ * What produced a layout's positions:
+ *
+ *   default      — ELK's layout with the options asked for.
+ *   brandesKoepf — ELK with Brandes–Köpf node placement (fallback rung 2).
+ *   noCompaction — that, with post-compaction left out too (rung 3).
+ *   ungrouped    — that, with grouping (ELK partitioning) turned off, as None lays out.
+ *   grid         — {@link gridLayout}: no ELK, the tables in dependency order in
+ *                  tidy columns (rows for Down), for a diagram ELK cannot lay out
+ *                  or one too large to try ({@link GRID_LAYOUT_MIN_TABLES}).
+ */
+export type LayoutStep = 'default' | 'brandesKoepf' | 'noCompaction' | 'ungrouped' | 'grid';
+
+/** How a layout that worked was produced (the toolbar's log line and notice). */
+export interface LayoutOutcome {
+  step: LayoutStep;
+  /** The grouping laid out, resolved from `auto`. */
+  grouping: 'role' | 'depth' | 'none';
+  /**
+   * Whether the grouping became ELK's bands (`partitioned`), was kept by the
+   * relationships' direction alone because the diagram is too large for ELK's
+   * bands ({@link PARTITION_JOIN_LIMIT}), or was not used (`off`: None, a
+   * single band, or the `ungrouped` step).
+   */
+  bands: 'partitioned' | 'direction' | 'off';
+  /** Why the default layout was not used: the diagram's size, or the first error's text (for the local log only). */
+  reason?: 'size' | string;
+}
+
 /** What a caller may hear about a layout as it runs (usage telemetry). */
 export interface LayoutHooks {
   /** The layout overflowed the worker's stack and is being laid out again with the {@link stackSafeFallbacks} (told once). */
   onStackFallback?: () => void;
-  /** The default layout failed (for any reason) and this fallback produced the layout (told once). */
+  /**
+   * The default layout failed (for any reason) and this fallback produced the
+   * layout (told once). The steps after rung 3 (grouping off, the grid) are
+   * told as 3 until telemetry has keys of their own.
+   */
   onFallbackRung?: (rung: LayoutFallbackRung) => void;
+  /** How the layout that worked was produced (told once, on success). */
+  onOutcome?: (outcome: LayoutOutcome) => void;
 }
 
 /**
- * Run ELK layout on a set of React Flow nodes and edges.
- *
- * @param nodes — current React Flow model nodes.
- * @param edges — current React Flow FK edges.
- * @param layoutOptions — optional per-domain ELK options from
- *   `viewConfig.layoutOptions`. Merged on top of defaults.
- * @param partitionStrategy — how to assign nodes to spatial bands.
- *   Defaults to 'auto' (auto-detect from graph structure).
- * @param hooks — told when the layout falls back to the stack-safe placement.
- * @returns a positions map keyed by model name, ready for
- *   `viewConfig.positions`.
+ * At or above this many tables, or {@link GRID_LAYOUT_MIN_RELATIONSHIPS}
+ * relationships, ELK is not tried: in a Web Worker it runs out of time
+ * (30 s), stack or memory long before it finishes, so the diagram goes
+ * straight to the {@link gridLayout}.
  */
-export async function runElkLayout(
+export const GRID_LAYOUT_MIN_TABLES = 1000;
+export const GRID_LAYOUT_MIN_RELATIONSHIPS = 2000;
+
+/**
+ * ELK's partitioning joins every table of one band to every table of the
+ * next (|band i| × |band i+1| constraint edges), and its layering then costs
+ * far more than the diagram itself: 300 tables in five bands took over a
+ * minute. Above this many joins the bands are kept by the relationships'
+ * direction alone ({@link orientEdgesForPartitions}): every relationship
+ * still points from an earlier band to a later one, but unrelated tables are
+ * placed freely.
+ */
+export const PARTITION_JOIN_LIMIT = 3000;
+
+/**
+ * Above this many tables a layout starts with Brandes–Köpf node placement
+ * rather than network simplex (see {@link planElkLayout}).
+ */
+export const NETWORK_SIMPLEX_MAX_TABLES = 150;
+
+/** How many constraint edges ELK's partitioning would add for these bands. */
+export function partitionJoinCount(partitions: Map<string, number>): number {
+  const sizes = new Map<number, number>();
+  for (const band of partitions.values()) sizes.set(band, (sizes.get(band) ?? 0) + 1);
+  const bands = [...sizes.keys()].sort((a, b) => a - b);
+  let joins = 0;
+  for (let i = 0; i + 1 < bands.length; i++) joins += sizes.get(bands[i])! * sizes.get(bands[i + 1])!;
+  return joins;
+}
+
+function positiveOr(value: unknown, fallback: number): number {
+  const n = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+}
+
+/**
+ * The last-resort layout, without ELK: the tables in dependency order (by
+ * band when grouping, then by depth, a cycle's tables together), filled into
+ * columns (rows for Down) of a length that gives the diagram ELK's aspect
+ * ratio, a new column starting at each band. Iterative, linear apart from one
+ * sort: 5,000 tables take milliseconds on any machine. Uses the same node
+ * sizes and spacing as ELK, so nothing overlaps.
+ */
+export function gridLayout(
+  nodes: TableFlowNode[],
+  edges: FkFlowEdge[],
+  options: LayoutOptions = {},
+  partitions: Map<string, number> | null = null,
+): Record<string, NodePosition> {
+  const n = nodes.length;
+  if (n === 0) return {};
+  const { order } = dependencyOrder(nodes, edges, partitions);
+  const gap = positiveOr(options['elk.spacing.nodeNode'], 70);
+  const layerGap = positiveOr(options['elk.layered.spacing.nodeNodeBetweenLayers'], 160);
+  const ratio = positiveOr(options['elk.aspectRatio'], 2.5);
+  const down = options['elk.direction'] === 'DOWN';
+  const sizes = nodes.map((node) => {
+    const { width, height } = resolveNodeDimensions(node);
+    return { w: positiveOr(width, NODE_WIDTH), h: positiveOr(height, 120) };
+  });
+  // "along" runs down a column (across a row for Down); "across" steps to the next one.
+  const alongOf = (i: number) => (down ? sizes[i].w : sizes[i].h);
+  const acrossOf = (i: number) => (down ? sizes[i].h : sizes[i].w);
+  let sumAlong = 0;
+  let sumAcross = 0;
+  for (let i = 0; i < n; i++) { sumAlong += alongOf(i) + gap; sumAcross += acrossOf(i) + layerGap; }
+  const along = sumAlong / n;
+  const across = sumAcross / n;
+  // k tables per line, n / k lines: width / height = ratio.
+  const perLine = down ? Math.sqrt((ratio * n * across) / along) : Math.sqrt((n * across) / (ratio * along));
+  const k = Math.max(1, Math.min(n, Math.round(perLine)));
+  const band = (i: number) => partitions?.get(nodes[i].id) ?? 0;
+
+  const positions: Record<string, NodePosition> = {};
+  let lineStart = 0; // position of the current line, across
+  let lineThickness = 0;
+  let cursor = 0; // position within the line, along
+  let count = 0;
+  let lastBand = order.length > 0 ? band(order[0]) : 0;
+  for (const i of order) {
+    if (count > 0 && (count >= k || band(i) !== lastBand)) {
+      lineStart += lineThickness + layerGap;
+      lineThickness = 0;
+      cursor = 0;
+      count = 0;
+    }
+    lastBand = band(i);
+    const a = Math.round(cursor);
+    const b = Math.round(lineStart);
+    positions[nodes[i].id] = down ? { x: a, y: b } : { x: b, y: a };
+    cursor += alongOf(i) + gap;
+    lineThickness = Math.max(lineThickness, acrossOf(i));
+    count++;
+  }
+  return positions;
+}
+
+/** A layout step's failure that no other ELK step can do better on: the grid takes over at once. */
+function goStraightToGrid(failure: LayoutFailure): boolean {
+  return failure === 'timeout' || failure === 'worker' || failure === 'memory';
+}
+
+/** What {@link planElkLayout} works out before ELK runs. */
+export interface ElkLayoutPlan {
+  /** The grouping, resolved from `auto`. */
+  grouping: 'role' | 'depth' | 'none';
+  /** How the grouping reaches ELK (see {@link LayoutOutcome.bands}). */
+  bands: LayoutOutcome['bands'];
+  /** The bands the {@link gridLayout} starts columns at, if any. */
+  gridBands: Map<string, number> | null;
+  /** The options of the default layout. */
+  options: Record<string, string>;
+  /** The default layout's graph. */
+  graph: ElkNode;
+  /** The lighter ELK layouts tried in turn when the default one fails, before the grid. */
+  fallbacks: Array<{ step: LayoutStep; rung: LayoutFallbackRung; graph: ElkNode }>;
+}
+
+/**
+ * The graph and options ELK gets for a layout, and the fallbacks after it.
+ * Pure: {@link runElkLayout} runs it; the repro scripts hand the same graphs
+ * to a real browser worker.
+ */
+export function planElkLayout(
   nodes: TableFlowNode[],
   edges: FkFlowEdge[],
   layoutOptions?: LayoutOptions,
   partitionStrategy: PartitionStrategy = 'auto',
-  hooks: LayoutHooks = {},
-): Promise<Record<string, NodePosition>> {
-  const elk = getElk();
-
+): ElkLayoutPlan {
   const resolved = partitionStrategy === 'auto'
     ? detectStrategy(nodes, edges)
     : partitionStrategy;
@@ -609,80 +873,218 @@ export async function runElkLayout(
     partitions = null;
   }
 
+  // Bands: ELK's own partitioning, or (a large diagram) the relationships'
+  // direction alone, or none. Either way every relationship ELK gets points
+  // forward along one order, so ELK is never handed a cycle across bands.
+  let bands: LayoutOutcome['bands'] = 'off';
+  let edgeBands: Map<string, number> | null = partitions;
+  if (partitions !== null && new Set(partitions.values()).size > 1) {
+    if (partitionJoinCount(partitions) > PARTITION_JOIN_LIMIT) {
+      bands = 'direction';
+      mergedOptions['elk.partitioning.activate'] = 'false';
+      partitions = null;
+    } else {
+      bands = 'partitioned';
+    }
+  }
+  if (edgeBands !== null && bands === 'off') edgeBands = null;
+
+  // Network-simplex node placement takes seconds to minutes on a large
+  // diagram, and overflows a worker's stack on larger ones: in a Chromium
+  // worker 150 tables took 5 s, 200 took 14 s and 300 ran past the 30 s guard,
+  // where Brandes–Köpf takes well under a second. A large diagram, or one
+  // whose bands are kept by direction, starts with Brandes–Köpf, unless the
+  // diagram's own options choose.
+  if ((nodes.length > NETWORK_SIMPLEX_MAX_TABLES || bands === 'direction')
+    && layoutOptions?.['elk.layered.nodePlacement.strategy'] === undefined) {
+    mergedOptions['elk.layered.nodePlacement.strategy'] = STACK_SAFE_NODE_PLACEMENT;
+  }
+
   const graph: ElkNode = {
     id: 'root',
     layoutOptions: mergedOptions,
     children: toElkChildren(nodes, partitions),
-    edges: toElkEdges(edges),
+    edges: edgeBands !== null ? orientEdgesForPartitions(nodes, edges, edgeBands) : toElkEdges(nodes, edges),
   };
 
+  const fallbacks: ElkLayoutPlan['fallbacks'] = [];
+  let lastOptions = mergedOptions;
+  for (const fallback of stackSafeFallbackRungs(mergedOptions)) {
+    fallbacks.push({ step: fallback.rung === 2 ? 'brandesKoepf' : 'noCompaction', rung: fallback.rung, graph: { ...graph, layoutOptions: fallback.options } });
+    lastOptions = fallback.options;
+  }
+  if (bands !== 'off') {
+    // Grouping off: what None lays out, on the lightest options so far.
+    fallbacks.push({
+      step: 'ungrouped',
+      rung: 3,
+      graph: {
+        ...graph,
+        layoutOptions: { ...lastOptions, 'elk.partitioning.activate': 'false' },
+        children: toElkChildren(nodes, null),
+        edges: toElkEdges(nodes, edges),
+      },
+    });
+  }
+
+  return { grouping: resolved, bands, gridBands: partitions ?? edgeBands, options: mergedOptions, graph, fallbacks };
+}
+
+/**
+ * Run ELK layout on a set of React Flow nodes and edges.
+ *
+ * Never fails on a diagram's size or shape: the default layout gives way to
+ * lighter ELK layouts ({@link stackSafeFallbackRungs}), then to ELK with the
+ * grouping off, then to the {@link gridLayout}, which needs no ELK. A diagram
+ * of {@link GRID_LAYOUT_MIN_TABLES} tables or more goes to the grid at once.
+ *
+ * @param nodes — current React Flow model nodes.
+ * @param edges — current React Flow FK edges.
+ * @param layoutOptions — optional per-domain ELK options from
+ *   `viewConfig.layoutOptions`. Merged on top of defaults.
+ * @param partitionStrategy — how to assign nodes to spatial bands.
+ *   Defaults to 'auto' (auto-detect from graph structure).
+ * @param hooks — told when the layout falls back, and how it was produced.
+ * @returns a positions map keyed by model name, ready for
+ *   `viewConfig.positions`.
+ */
+export async function runElkLayout(
+  nodes: TableFlowNode[],
+  edges: FkFlowEdge[],
+  layoutOptions?: LayoutOptions,
+  partitionStrategy: PartitionStrategy = 'auto',
+  hooks: LayoutHooks = {},
+): Promise<Record<string, NodePosition>> {
+  const plan = planElkLayout(nodes, edges, layoutOptions, partitionStrategy);
+  const { grouping: resolved, bands, graph } = plan;
+
+  const tell = (fn: () => void): void => {
+    try {
+      fn();
+    } catch {
+      // Telemetry never stops a layout.
+    }
+  };
+  const finish = (positions: Record<string, NodePosition>, outcome: LayoutOutcome): Record<string, NodePosition> => {
+    tell(() => hooks.onOutcome?.(outcome));
+    return positions;
+  };
+
+  // A diagram this large goes to the grid without trying ELK.
+  if (nodes.length >= GRID_LAYOUT_MIN_TABLES || edges.length >= GRID_LAYOUT_MIN_RELATIONSHIPS) {
+    const positions = gridLayout(nodes, edges, plan.options, plan.gridBands);
+    tell(() => hooks.onFallbackRung?.(3));
+    return finish(positions, { step: 'grid', grouping: resolved, bands: bands === 'off' ? 'off' : 'direction', reason: 'size' });
+  }
+
   // One attempt: a layout, refused when it leaves a table unplaced.
-  const attempt = async (engine: IELK, attemptGraph: ElkNode): Promise<ElkNode> => {
-    const result = await layoutWithGuard(engine, attemptGraph);
+  const attempt = async (attemptGraph: ElkNode): Promise<ElkNode> => {
+    const result = await layoutWithGuard(getElk(), attemptGraph);
     assertUsableLayout(result, nodes.length);
     return result;
   };
+  const elkPositions = (layouted: ElkNode): Record<string, NodePosition> => {
+    const positions: Record<string, NodePosition> = {};
+    for (const child of layouted.children ?? []) {
+      positions[child.id] = {
+        x: Math.round(child.x ?? 0),
+        y: Math.round(child.y ?? 0),
+      };
+    }
+    return positions;
+  };
 
-  let layouted: ElkNode | undefined;
+  let firstError: unknown;
   try {
-    layouted = await attempt(elk, graph);
+    return finish(elkPositions(await attempt(graph)), { step: 'default', grouping: resolved, bands });
   } catch (err) {
-    // The default layout failed. On a large or densely related diagram its
-    // node placement and its post-compaction recurse deeply and overflow the
-    // worker's stack, the compaction can throw on what it is given (ELK's
-    // "Invalid hitboxes for scanline", seen with two-way relationships).
-    // Lay it out again with each lighter fallback in turn rather than fail;
-    // the first error is the one reported when none of them works. A layout
-    // that ran out of time, or whose worker died, is not laid out again:
-    // the user has waited long enough, and the worker has been replaced.
-    const failure = classifyLayoutFailure(err);
-    if (failure === 'timeout' || failure === 'worker') throw err;
-    const fallbacks = stackSafeFallbackRungs(mergedOptions);
-    if (fallbacks.length === 0) throw err;
-    if (isStackOverflow(err)) {
+    firstError = err;
+  }
+
+  // The default layout failed. On a large or densely related diagram its
+  // node placement and its post-compaction recurse deeply and overflow the
+  // worker's stack, and the compaction can throw on what it is given (ELK's
+  // "Invalid hitboxes for scanline", seen with two-way relationships). Lay it
+  // out again with each lighter ELK step in turn, then with the grouping off,
+  // then with the grid, rather than fail. A layout that ran out of time or
+  // memory, or whose worker died, goes straight to the grid: the user has
+  // waited long enough, and another ELK run would fail the same way.
+  const err = firstError;
+  const reason = err instanceof Error ? (err.message || err.name) : String(err);
+  if (isStackOverflow(err)) tell(() => hooks.onStackFallback?.());
+
+  const steps = plan.fallbacks;
+  let lastError: unknown = err;
+  if (!goStraightToGrid(classifyLayoutFailure(err))) {
+    for (const step of steps) {
       try {
-        hooks.onStackFallback?.();
-      } catch {
-        // Telemetry never stops a layout.
+        const positions = elkPositions(await attempt(step.graph));
+        tell(() => hooks.onFallbackRung?.(step.rung));
+        return finish(positions, { step: step.step, grouping: resolved, bands: step.step === 'ungrouped' ? 'off' : bands, reason });
+      } catch (stepErr) {
+        lastError = stepErr;
+        if (goStraightToGrid(classifyLayoutFailure(stepErr))) break;
       }
-    }
-    let lastError: unknown = err;
-    for (const fallback of fallbacks) {
-      try {
-        layouted = await attempt(getElk(), { ...graph, layoutOptions: fallback.options });
-        try {
-          hooks.onFallbackRung?.(fallback.rung);
-        } catch {
-          // Telemetry never stops a layout.
-        }
-        break;
-      } catch (fallbackErr) {
-        // The next fallback, if any.
-        lastError = fallbackErr;
-      }
-    }
-    if (!layouted) {
-      // Every fallback failed: the first error is the one thrown, carrying how the last one failed (telemetry).
-      if (typeof err === 'object' && err !== null) {
-        const outcome: LadderOutcome = { lastFailure: classifyLayoutFailure(lastError) };
-        try {
-          Object.defineProperty(err, LAYOUT_LADDER, { value: outcome, configurable: true });
-        } catch {
-          // A frozen error keeps its class; only the ladder's outcome is lost.
-        }
-      }
-      throw err;
     }
   }
 
-  // Extract positions from the layouted graph
-  const positions: Record<string, NodePosition> = {};
-  for (const child of layouted.children ?? []) {
-    positions[child.id] = {
-      x: Math.round(child.x ?? 0),
-      y: Math.round(child.y ?? 0),
-    };
+  try {
+    const positions = gridLayout(nodes, edges, plan.options, plan.gridBands);
+    assertUsableLayout({ id: 'root', children: Object.entries(positions).map(([id, p]) => ({ id, ...p })) }, nodes.length);
+    tell(() => hooks.onFallbackRung?.(3));
+    return finish(positions, { step: 'grid', grouping: resolved, bands: bands === 'off' ? 'off' : 'direction', reason });
+  } catch (gridErr) {
+    lastError = gridErr;
   }
 
-  return positions;
+  // Even the grid failed: the first error is the one thrown, carrying how the last step failed (telemetry).
+  if (typeof err === 'object' && err !== null) {
+    const outcome: LadderOutcome = { lastFailure: classifyLayoutFailure(lastError) };
+    try {
+      Object.defineProperty(err, LAYOUT_LADDER, { value: outcome, configurable: true });
+    } catch {
+      // A frozen error keeps its class; only the ladder's outcome is lost.
+    }
+  }
+  throw err;
+}
+
+/**
+ * What the canvas says about a layout that worked but not as asked (for the
+ * user, as a notice), or `undefined` when it laid out as asked. The grouping
+ * names are the layout popover's.
+ */
+export function layoutOutcomeNotice(outcome: LayoutOutcome, tables: number): string | undefined {
+  const grouping = outcome.grouping === 'role' ? 'Table type' : outcome.grouping === 'depth' ? 'Join depth' : 'None';
+  if (outcome.step === 'grid') {
+    return outcome.reason === 'size'
+      ? `This diagram (${tables} tables) is too large for the full auto layout, so the tables were arranged in tidy columns in relationship order.`
+      : `The full auto layout failed on this diagram, so the tables were arranged in tidy columns in relationship order. Details are in the ERD Studio output.`;
+  }
+  if (outcome.step === 'ungrouped') {
+    return `Grouping by ${grouping} failed on this diagram, so it was laid out with no grouping. Details are in the ERD Studio output.`;
+  }
+  return undefined;
+}
+
+/**
+ * One line for the extension's own log about a layout that worked but not as
+ * asked (a fallback produced it, or the grouping was kept by direction only),
+ * or `undefined` when it laid out as asked. Local only.
+ */
+export function layoutOutcomeLogMessage(outcome: LayoutOutcome): string | undefined {
+  const grouping = `grouping ${outcome.grouping}`;
+  const why = outcome.reason === undefined ? '' : outcome.reason === 'size' ? '; too large to try ELK' : `; the default layout failed: ${outcome.reason}`;
+  switch (outcome.step) {
+    case 'default':
+      return outcome.bands === 'direction' ? `laid out with ${grouping} kept by relationship direction only (too many tables for ELK bands)` : undefined;
+    case 'brandesKoepf':
+      return `used fallback rung 2 (Brandes-Koepf node placement), ${grouping}${why}`;
+    case 'noCompaction':
+      return `used fallback rung 3 (no post-compaction), ${grouping}${why}`;
+    case 'ungrouped':
+      return `used the fallback with grouping off (asked for ${grouping})${why}`;
+    case 'grid':
+      return `used the grid fallback (no ELK), ${grouping}${why}`;
+  }
 }

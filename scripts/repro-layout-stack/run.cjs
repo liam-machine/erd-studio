@@ -146,14 +146,17 @@ async function runOne(shape, n, m, strategy, seed) {
   const resolved = strategy === 'auto' ? layout.detectStrategy(nodes, edges) : strategy;
   let rung;
   let stackFallback = false;
+  let outcome;
   const t0 = Date.now();
   const out = { shape, tables: n, rels: edges.length, strategy, resolved, bound: options['elk.layered.layering.coffmanGraham.layerBound'], bands: resolved === 'depth' ? bandSizes(nodes, edges).join('/') : '-' };
   try {
     const positions = await layout.runElkLayout(nodes, edges, options, strategy, {
       onStackFallback: () => { stackFallback = true; },
       onFallbackRung: (r) => { rung = r; },
+      onOutcome: (o) => { outcome = o; },
     });
-    Object.assign(out, { ok: true, placed: Object.keys(positions).length, rung: rung ?? 1, stackFallback, ms: Date.now() - t0 });
+    const finite = Object.values(positions).every((p) => Number.isFinite(p.x) && Number.isFinite(p.y));
+    Object.assign(out, { ok: true, placed: Object.keys(positions).length, finite, rung: rung ?? 1, step: outcome ? outcome.step : '-', bandsUsed: outcome ? outcome.bands : '-', stackFallback, ms: Date.now() - t0 });
   } catch (err) {
     // layoutFailureReport is develop-only (#299); a v2.0.4 bundle has just the error.
     const report = layout.layoutFailureReport
@@ -167,7 +170,7 @@ async function runOne(shape, n, m, strategy, seed) {
 function print(r) {
   if (process.env.REPRO_JSON) { console.log(JSON.stringify(r)); return; }
   const head = `${r.shape.padEnd(8)} ${String(r.tables).padStart(5)}t ${String(r.rels).padStart(6)}r  ${r.strategy.padEnd(5)}->${r.resolved.padEnd(5)} bound=${r.bound} bands=${r.bands}`;
-  if (r.ok) console.log(`${head}  OK   rung=${r.rung} ${r.ms}ms`);
+  if (r.ok) console.log(`${head}  OK   rung=${r.rung} step=${r.step} bandsUsed=${r.bandsUsed} placed=${r.placed}${r.finite ? '' : ' NON-FINITE'} ${r.ms}ms`);
   else {
     console.log(`${head}  FAIL ${r.error} [${r.failure}${r.exhausted ? `, every fallback failed, last=${r.lastFailure}` : ''}] ${r.ms}ms`);
     for (const f of r.frames) console.log(`        at ${f}`);

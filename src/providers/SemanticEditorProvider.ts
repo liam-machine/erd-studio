@@ -172,6 +172,7 @@ import { handlerFailureKeys, handlerGroupOf, type HandlerGroup } from '../servic
 import { markRecorded, wasRecorded } from '../services/telemetryOnce';
 import {
   canvasLayoutTelemetry,
+  layoutDegradedLogLine,
   layoutFailureLogLine,
   dbmlDiagramFeatures,
   isUserFileProblem,
@@ -2923,6 +2924,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
               for (const feature of big.features) telemetry.feature(feature);
               // The real counts and message, for the ERD Studio log only (never sent).
               if (!payload.ok) log.warn(`[SemanticEditorProvider] ${layoutFailureLogLine('canvas', payload)}`);
+              // A layout that worked but not as asked (a fallback, the grid): the page's description and the counts.
+              else if (payload.log) log.info(`[SemanticEditorProvider] ${layoutDegradedLogLine('canvas', { ...payload, log: payload.log })}`);
             } else {
               log.warn('[SemanticEditorProvider] Ignoring a layoutFinished with a field out of range');
             }
