@@ -94,6 +94,7 @@ export class TableLibraryDragController implements vscode.TreeDragAndDropControl
     dataTransfer.set('text/uri-list', new vscode.DataTransferItem(filePaths.map((p) => vscode.Uri.file(p).toString()).join('\r\n')));
     // JSON text, as VS Code would serialise it anyway on its way to another tree.
     dataTransfer.set(TABLE_LIBRARY_NAMES_MIME, new vscode.DataTransferItem(JSON.stringify(names)));
+    log.info(`[Table Library] Drag started: ${names.length} table(s)`);
     // A failure to remember the drag must never cost the drag its DataTransfer (VS Code drops
     // the whole drag when handleDrag throws), and must say so in the ERD Studio log.
     try {

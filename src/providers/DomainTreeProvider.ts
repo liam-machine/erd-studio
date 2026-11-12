@@ -113,6 +113,14 @@ export async function draggedTableNamesOf(dataTransfer: vscode.DataTransfer): Pr
 }
 
 /** Whether a drop is a Table Library drag: it carries the names' type or the view's own tree mime type. */
+/** What a drop landed on, for the log: a diagram's or layer's name, or the empty space. */
+function dropTargetLabel(target: TreeElement | undefined): string {
+  if (!target) return 'the empty space';
+  if (target.type === 'domain') return `diagram "${target.summary.domain}"`;
+  if (target.type === 'layer') return `layer "${target.layer}"`;
+  return `a ${target.type} row`;
+}
+
 export function isTableLibraryDrop(dataTransfer: vscode.DataTransfer): boolean {
   return dataTransfer.get(TABLE_LIBRARY_NAMES_MIME) !== undefined || dataTransfer.get(TABLE_LIBRARY_DRAG_MIME) !== undefined;
 }
@@ -367,7 +375,11 @@ export class SubjectAreaTreeProvider
     // This drop stays inside VS Code's own trees, so it needs no Shift and
     // does not depend on a drag reaching the canvas webview.
     if (isTableLibraryDrop(dataTransfer)) {
-      await this.dropTables(target, await draggedTableNamesOf(dataTransfer), await draggedTableUris(dataTransfer));
+      const tables = await draggedTableNamesOf(dataTransfer);
+      const uris = await draggedTableUris(dataTransfer);
+      // A support trail: a drop that changed nothing is otherwise silent in the log.
+      log.info(`[Diagrams] Table Library drop on ${dropTargetLabel(target)}: ${tables.length} table name(s), ${uris.length} file(s)`);
+      await this.dropTables(target, tables, uris);
       return;
     }
 
