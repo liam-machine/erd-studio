@@ -403,7 +403,7 @@ describe('disposed panels (H24)', () => {
 
     panel._simulateDispose();
 
-    (provider as unknown as { post: (w: unknown, m: unknown) => void }).post(panel.webview, { type: 'error', payload: { message: 'x' } });
+    (provider as unknown as { post: (w: unknown, m: unknown) => void }).post(panel._webview, { type: 'error', payload: { message: 'x' } });
     await provider.refreshAllOpenSubjectAreas();
     await new Promise((r) => setTimeout(r, 30));
 

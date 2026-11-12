@@ -757,20 +757,35 @@ export function createMockWebviewPanel() {
   const disposeHandlers: Array<() => void> = [];
   const postedMessages: unknown[] = [];
 
+  // Like VS Code's ExtHostWebviewPanel: once disposed, `webview`, `visible`,
+  // `active` and `title` throw "Webview is disposed", and
+  // onDidDispose fires only after the panel is marked disposed, so a dispose
+  // handler that reads `panel.webview` throws there as it does in VS Code.
+  const assertNotDisposed = (): void => {
+    if (panel._disposed) throw new Error('Webview is disposed');
+  };
+  let visibleState = true;
+  let activeState = true;
+  let titleState = '';
+  const webview = {
+    html: '',
+    options: {} as Record<string, unknown>,
+    cspSource: 'https://mock-csp-source',
+    asWebviewUri: (uri: any) => uri,
+    postMessage: async (message: unknown) => {
+      postedMessages.push(message);
+      return true;
+    },
+    onDidReceiveMessage: (handler: (message: unknown) => void | Promise<void>) => {
+      messageHandlers.push(handler);
+      return { dispose: () => {} };
+    },
+  };
+
   const panel = {
-    webview: {
-      html: '',
-      options: {} as Record<string, unknown>,
-      cspSource: 'https://mock-csp-source',
-      asWebviewUri: (uri: any) => uri,
-      postMessage: async (message: unknown) => {
-        postedMessages.push(message);
-        return true;
-      },
-      onDidReceiveMessage: (handler: (message: unknown) => void | Promise<void>) => {
-        messageHandlers.push(handler);
-        return { dispose: () => {} };
-      },
+    get webview() {
+      assertNotDisposed();
+      return webview;
     },
     onDidChangeViewState: (handler: (e: { webviewPanel: { visible: boolean } }) => void) => {
       viewStateHandlers.push(handler);
@@ -780,10 +795,28 @@ export function createMockWebviewPanel() {
       disposeHandlers.push(handler);
       return { dispose: () => {} };
     },
-    visible: true,
-    active: true,
+    get visible(): boolean {
+      assertNotDisposed();
+      return visibleState;
+    },
+    set visible(value: boolean) {
+      visibleState = value;
+    },
+    get active(): boolean {
+      assertNotDisposed();
+      return activeState;
+    },
+    set active(value: boolean) {
+      activeState = value;
+    },
     viewType: '',
-    title: '',
+    get title(): string {
+      assertNotDisposed();
+      return titleState;
+    },
+    set title(value: string) {
+      titleState = value;
+    },
     iconPath: undefined as unknown,
     /** Records each reveal's column in `_reveals`. */
     reveal: (column?: unknown) => {
@@ -799,6 +832,13 @@ export function createMockWebviewPanel() {
     },
 
     // Test helpers (not part of VS Code API)
+    /** The webview and title, readable after dispose (the real getters throw then). */
+    get _webview() {
+      return webview;
+    },
+    get _title(): string {
+      return titleState;
+    },
     _reveals: [] as unknown[],
     _disposed: false,
     _column: undefined as unknown,
@@ -810,7 +850,9 @@ export function createMockWebviewPanel() {
         handler({ webviewPanel: { visible } });
       }
     },
+    /** VS Code closed the panel: marked disposed first (its getters throw), then onDidDispose fires. */
     _simulateDispose: () => {
+      panel._disposed = true;
       for (const handler of disposeHandlers) {
         handler();
       }

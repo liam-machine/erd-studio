@@ -102,6 +102,14 @@ describe('TableLibraryDragController', () => {
     expect(started).toHaveBeenCalledWith(['fct_order', 'dim_customer']);
   });
 
+  it('a failure to note the drag keeps its DataTransfer and does not throw (VS Code would drop the whole drag)', () => {
+    const transfer = new vscode.DataTransfer();
+    const failing = new TableLibraryDragController(() => { throw new Error('Webview is disposed'); });
+    expect(() => failing.handleDrag([table('fct_order')], transfer)).not.toThrow();
+    expect(transfer.get(TABLE_LIBRARY_NAMES_MIME)?.value).toBe('["fct_order"]');
+    expect(transfer.get('text/uri-list')?.value).toBeTruthy();
+  });
+
   it('a drag with no table (an ignored duplicate alone) sets nothing and reports nothing', () => {
     const started = vi.fn();
     const transfer = new vscode.DataTransfer();
@@ -619,6 +627,38 @@ describe('noteLibraryDrag', () => {
     expect(posted(staging.panel, 'libraryDragEnded')).toEqual([{ type: 'libraryDragEnded' }]);
     expect(posted(sales.panel, 'libraryDragEnded')).toEqual([{ type: 'libraryDragEnded' }]);
     expect(provider.peekRememberedLibraryDrag()).toBeUndefined();
+  });
+
+  // Verifier's step J (real VS Code 1.145): once a diagram tab was closed, every later Table
+  // Library drag threw "Webview is disposed" here (the dispose handler read the disposed panel's
+  // `webview`, so the closed canvas stayed in openPanels, and its `visible` threw on the next drag).
+  // The drag was never remembered: a row drop did nothing again, and canvas Shift-drops raced.
+  it('still works after another diagram tab was closed (its panel throws once disposed, as in VS Code)', async () => {
+    const provider = buildProvider(root);
+    const closed = await loaded(provider, SALES);
+    const { panel, doc } = await loaded(provider, STAGING);
+    closed.panel.dispose();
+    const panels = (provider as unknown as { openPanels: Map<string, { webview: unknown }> }).openPanels;
+    expect(panels.size).toBe(1);
+    expect(() => provider.noteLibraryDrag(['dim_region'], [at(DIM_REGION)])).not.toThrow();
+    expect(posted(panel, 'libraryDragStarted')).toEqual([{ type: 'libraryDragStarted', payload: { tables: ['dim_region'] } }]);
+    // The drag is remembered: a drop that reached the canvas only as "the drag ended over it" lands.
+    await dragEndedOver(panel);
+    expect(doc.getText()).toContain('use { table gold.dim_region }');
+    expect(errors(panel)).toEqual([]);
+  });
+
+  it('a canvas whose dispose never reached us is skipped, not thrown on, by the next drag and drop', async () => {
+    const provider = buildProvider(root);
+    const gone = await loaded(provider, SALES);
+    const { panel, doc } = await loaded(provider, STAGING);
+    // Disposed without its onDidDispose (as when VS Code closes a tab under an Undo).
+    (gone.panel as unknown as { _disposed: boolean })._disposed = true;
+    expect(() => provider.noteLibraryDrag(['dim_region'], [at(DIM_REGION)])).not.toThrow();
+    await dragEndedOver(panel);
+    expect(doc.getText()).toContain('use { table gold.dim_region }');
+    const panels = (provider as unknown as { openPanels: Map<string, { webview: unknown }> }).openPanels;
+    expect(panels.size).toBe(1);
   });
 
   it('an empty drag tells no one', async () => {

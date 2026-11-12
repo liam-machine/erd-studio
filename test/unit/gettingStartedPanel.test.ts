@@ -1798,7 +1798,8 @@ describe('GettingStartedPanel', () => {
     const escaped = (t: string) => JSON.stringify(t).slice(1, 20);
     for (const deps of [makeDeps({ logicalOnly: true }), makeDeps({ workspaceRoot: null })]) {
       GettingStartedPanel.createOrShow(makeContext(), deps);
-      const html = vscode.window._webviewPanels[0].webview.html;
+      // The panel this pass opened (the one before it is disposed).
+      const html = vscode.window._webviewPanels.at(-1)!.webview.html;
       if (fs.existsSync(path.join(REPO_ROOT, 'media/onboarding', GETTING_STARTED_MEDIA.logicalVideo))) {
         expect(html).toContain('media/onboarding/getting-started-logical.mp4');
       }
@@ -1808,7 +1809,7 @@ describe('GettingStartedPanel', () => {
       // The two cuts share every scene but the default cut's dbt beat: its captions stay off these pages.
       const dbtCue = GETTING_STARTED_CUES.find((c) => /\bdbt\b/.test(c.text))!;
       expect(html).not.toContain(JSON.stringify(dbtCue.text).slice(1, -1));
-      vscode.window._webviewPanels[0].dispose();
+      vscode.window._webviewPanels.at(-1)!.dispose();
     }
   });
 

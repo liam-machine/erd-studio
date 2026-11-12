@@ -34,6 +34,7 @@ import * as vscode from 'vscode';
 
 import type { TableLibraryNode } from './ModelLibraryTreeProvider';
 import { ADD_EXISTING_TABLES_LIMIT, TABLE_LIBRARY_DRAG_MIME, TABLE_LIBRARY_NAMES_MIME } from '../types/messages';
+import { log } from '../services/logger';
 import { normaliseName } from '../services/nameUtils';
 import { tableIdKey } from '../types/tableId';
 
@@ -93,7 +94,13 @@ export class TableLibraryDragController implements vscode.TreeDragAndDropControl
     dataTransfer.set('text/uri-list', new vscode.DataTransferItem(filePaths.map((p) => vscode.Uri.file(p).toString()).join('\r\n')));
     // JSON text, as VS Code would serialise it anyway on its way to another tree.
     dataTransfer.set(TABLE_LIBRARY_NAMES_MIME, new vscode.DataTransferItem(JSON.stringify(names)));
-    if (this.options.withFiles) this.onDragStarted(names, filePaths);
-    else this.onDragStarted(names);
+    // A failure to remember the drag must never cost the drag its DataTransfer (VS Code drops
+    // the whole drag when handleDrag throws), and must say so in the ERD Studio log.
+    try {
+      if (this.options.withFiles) this.onDragStarted(names, filePaths);
+      else this.onDragStarted(names);
+    } catch (err) {
+      log.warn(`[TableLibraryDrag] Could not note the drag of ${names.join(', ')}: ${err instanceof Error ? err.message : String(err)}`);
+    }
   }
 }

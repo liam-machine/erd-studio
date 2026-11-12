@@ -2441,7 +2441,10 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
     // Track this panel — default to logical stage (v3 unified files have no stage in path)
     const panelKey = document.uri.toString();
-    this.openPanels.set(panelKey, { document, webview: webviewPanel.webview, activeStage: 'logical', panel: webviewPanel });
+    // Kept for the dispose handler: VS Code marks the panel disposed before it fires
+    // onDidDispose, and a disposed panel throws "Webview is disposed" on `webview`.
+    const panelWebview = webviewPanel.webview;
+    this.openPanels.set(panelKey, { document, webview: panelWebview, activeStage: 'logical', panel: webviewPanel });
     this.lastActivePanelKey = panelKey;
     // Usage telemetry (2.0 B13): a canvas that stays blank, timed only while it is visible.
     const readyWatch = new ReadyWatch(webviewPanel.visible !== false, {
@@ -3514,7 +3517,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       lineStyleSubscription.dispose();
       readyWatch.dispose();
       telemetry.canvasClosed(panelKey);
-      this.forgetPanel(panelKey, webviewPanel.webview);
+      // Never `webviewPanel.webview` here: it throws once disposed, and the closed canvas
+      // would stay in openPanels, where the next Table Library drag threw on its `visible`.
+      this.forgetPanel(panelKey, panelWebview);
       this.backwardsDrawn.delete(document.uri.toString());
     });
   }
@@ -6845,6 +6850,19 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   }
 
   /**
+   * Whether a canvas's panel is on screen. Never throws: a panel VS Code
+   * disposed without our hearing of it is forgotten and counts as not shown.
+   */
+  private panelOnScreen(panelKey: string): boolean {
+    if (this.forgetIfGone(panelKey)) return false;
+    try {
+      return this.openPanels.get(panelKey)?.panel?.visible === true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
    * Select and centre one relationship on the canvas of `uri` (the
    * Relationships view's Open in Diagram). A canvas that has loaded its
    * diagram gets it at once, switched to the logical stage first (the line is
@@ -6916,7 +6934,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     files?: readonly string[],
   ): void {
     if (tables.length === 0) return;
-    const onScreen = new Set(Array.from(this.openPanels.entries()).filter(([, p]) => p.panel?.visible === true).map(([key]) => key));
+    const onScreen = new Set(Array.from(this.openPanels.keys()).filter((key) => this.panelOnScreen(key)));
     this.pendingLibraryDrag = {
       tables: [...tables],
       ...(files !== undefined && files.length === tables.length ? { files: [...files] } : {}),
@@ -6987,7 +7005,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       // the drag still waiting, started while this canvas was on screen, and
       // only while it still is: anything else ended elsewhere (or a drop or a
       // missed-drop add already used it), and says nothing.
-      if (!afterDragLands(this.pendingLibraryDrag, panelKey, this.openPanels.get(panelKey)?.panel?.visible === true, Date.now())) return;
+      if (!afterDragLands(this.pendingLibraryDrag, panelKey, this.panelOnScreen(panelKey), Date.now())) return;
       payload = { position: given.position, uris: [], fromLibrary: true };
     }
     try {
