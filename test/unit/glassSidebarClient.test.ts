@@ -464,7 +464,7 @@ describe('selecting several rows (a section the host marks multiSelect)', () => 
     expect(lastPost(posted)).toEqual({ type: 'invoke', section: 'diagrams', id: 'diagrams:sales', menu: 'view/item/context', index: 3 });
   });
 
-  it('drags the whole selection (rows of the drag\'s kind), and the drag picture counts them', () => {
+  it('drags the whole selection (rows of the drag\'s kind), and the drag picture counts the tables it carries', () => {
     const { win, posted } = load();
     sendState(win, library());
     click(win, rowEl(win, 'tables:a')!);
@@ -473,7 +473,8 @@ describe('selecting several rows (a section the host marks multiSelect)', () => 
     const start = fire(win, rowEl(win, 'tables:b')!, 'dragstart');
     // Gold has no drag kind here: it is left out.
     expect(lastPost(posted)).toEqual({ type: 'dragStart', section: 'tables', ids: ['tables:a', 'tables:b', 'tables:c'] });
-    expect(start.dataTransfer.image).toEqual({ text: '3 rows', className: 'gs-dragpill gs-dragpill--many' });
+    // Tables, not rows: what the canvas's "Drop to add 3 tables" says.
+    expect(start.dataTransfer.image).toEqual({ text: '3 tables', className: 'gs-dragpill gs-dragpill--many' });
     expect([...win.document.querySelectorAll<HTMLElement>('.gs-row.is-dragging')].map((r) => r.dataset.id)).toEqual(['tables:a', 'tables:b', 'tables:c']);
     fire(win, rowEl(win, 'tables:b')!, 'dragend');
     // An unselected row drags alone, with its own label, and becomes the selection.
@@ -524,19 +525,80 @@ describe('selecting several rows (a section the host marks multiSelect)', () => 
   });
 });
 
+describe('the drag picture of several rows', () => {
+  /** A Table Library whose rows carry the host's table counts: a schema of 3, its tables, another schema of 2 (folded). */
+  function counted(): GlassSection[] {
+    const t = (id: string, label: string) => row(id, label, { drag: 'tables', dragCount: 1 });
+    return [{
+      key: 'tables', title: 'Table Library', visible: true, defaultCollapsed: false, multiSelect: true,
+      actions: { navigation: [], groups: [] }, welcome: [],
+      nodes: [
+        row('tables:sales', 'sales', { collapsible: 2, hasCommand: false, inline: undefined, drag: 'tables', dragCount: 3, children: [
+          t('tables:a', 'dim_customer'), t('tables:b', 'dim_date'), t('tables:c', 'fct_order'),
+        ] }),
+        row('tables:crm', 'crm', { collapsible: 1, hasCommand: false, inline: undefined, drag: 'tables', dragCount: 2, children: [t('tables:d', 'x'), t('tables:e', 'y')] }),
+        row('tables:dup', 'dim_customer', { drag: 'tables', dragCount: 0 }),
+      ],
+    }];
+  }
+  const dragOf = (win: Win, id: string) => fire(win, rowEl(win, id)!, 'dragstart').dataTransfer.image;
+
+  it('counts a schema\'s tables, a table under a dragged schema once, and a duplicate that is ignored not at all', () => {
+    const { win } = load();
+    sendState(win, counted());
+    // Ctrl-clicks only select (a plain click on a schema row would fold it).
+    click(win, rowEl(win, 'tables:sales')!, { ctrlKey: true });
+    click(win, rowEl(win, 'tables:a')!, { ctrlKey: true });
+    click(win, rowEl(win, 'tables:crm')!, { ctrlKey: true });
+    click(win, rowEl(win, 'tables:dup')!, { ctrlKey: true });
+    expect(dragOf(win, 'tables:sales')).toEqual({ text: '5 tables', className: 'gs-dragpill gs-dragpill--many' });
+  });
+
+  it('says "1 table" for several rows that carry one, and keeps a single row\'s own label', () => {
+    const { win } = load();
+    sendState(win, counted());
+    click(win, rowEl(win, 'tables:a')!);
+    click(win, rowEl(win, 'tables:dup')!, { ctrlKey: true });
+    expect(dragOf(win, 'tables:a')).toEqual({ text: '1 table', className: 'gs-dragpill gs-dragpill--many' });
+    fire(win, rowEl(win, 'tables:a')!, 'dragend');
+    // One row alone: its own picture, as before (a schema too).
+    click(win, rowEl(win, 'tables:dup')!);
+    expect(dragOf(win, 'tables:sales')).toEqual({ text: 'sales', className: 'gs-dragpill' });
+  });
+
+  it('never says more tables than one drop adds (the host\'s limit)', () => {
+    const { win } = load();
+    const state = counted();
+    state[0].nodes[0].dragCount = 150;
+    state[0].nodes[1].dragCount = 150;
+    sendState(win, state);
+    click(win, rowEl(win, 'tables:sales')!, { ctrlKey: true });
+    click(win, rowEl(win, 'tables:crm')!, { ctrlKey: true });
+    expect(dragOf(win, 'tables:sales').text).toBe('200 tables');
+  });
+});
+
 describe('Collapse All', () => {
   const groupsOf = (win: Win) => [...win.document.querySelectorAll('.gs-menu > *')].map((e) => (e.classList.contains('gs-menu__sep') ? '|' : e.textContent?.trim()));
+  const headerButtons = (win: Win, key: string) => [...win.document.querySelectorAll<HTMLElement>(`.gs-section[data-key="${key}"] .gs-section__actions > button`)]
+    .map((b) => b.getAttribute('data-act') === 'collapse-all' ? 'Collapse All' : b.getAttribute('data-act') === 'title-more' ? '…' : b.title);
 
-  it('ends the … menu of a section that has it, folds every row of the section (not the card), and sends nothing', () => {
+  it('is a header button after the + and before the …, folds every row of the section (not the card), and sends nothing', () => {
     const { win, posted, saved } = load();
-    const state = library();
+    const state = library({
+      actions: { navigation: [{ index: 9, menu: 'view/title', title: 'New…', icon: 'add', submenu: [[{ index: 4, menu: 'view/title', title: 'New Table…' }]] }], groups: [[{ index: 2, menu: 'view/title', title: 'Organise' }]] },
+    });
     state[1].nodes[1].collapsible = 2;
     sendState(win, state);
-    const more = win.document.querySelector<HTMLButtonElement>('.gs-section[data-key="tables"] [data-act="title-more"]')!;
-    more.click();
-    expect(groupsOf(win)).toEqual(['Table Library', 'Organise', '|', 'Collapse All']);
+    expect(headerButtons(win, 'tables')).toEqual(['New', 'Collapse All', '…']);
+    const button = win.document.querySelector<HTMLButtonElement>('.gs-section[data-key="tables"] [data-act="collapse-all"]')!;
+    expect(button.getAttribute('aria-label')).toBe('Table Library: collapse all');
+    // It left the … menu.
+    win.document.querySelector<HTMLButtonElement>('.gs-section[data-key="tables"] [data-act="title-more"]')!.click();
+    expect(groupsOf(win)).toEqual(['Table Library', 'Organise']);
+    win.document.querySelector<HTMLElement>('.gs-menu__item')!.dispatchEvent(new win.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
     const before = posted.length;
-    [...win.document.querySelectorAll<HTMLButtonElement>('.gs-menu__item')].pop()!.click();
+    win.document.querySelector<HTMLButtonElement>('.gs-section[data-key="tables"] [data-act="collapse-all"]')!.click();
     expect(posted.slice(before)).toEqual([]);
     expect(rowEl(win, 'tables:gold')!.getAttribute('aria-expanded')).toBe('false');
     expect(rowEl(win, 'tables:silver')!.getAttribute('aria-expanded')).toBe('false');
@@ -548,14 +610,18 @@ describe('Collapse All', () => {
     expect(expanded['tables\u0000tables:silver']).toBe(false);
   });
 
-  it('shows a … with only Collapse All where the section has no other title actions, and none without the flag', () => {
+  it('takes the first slot in a section with no +, needs no … of its own, and is not drawn without the flag', () => {
     const { win } = load();
     sendState(win, library());
-    win.document.querySelector<HTMLButtonElement>('.gs-section[data-key="diagrams"] [data-act="title-more"]')!.click();
-    expect(groupsOf(win)).toEqual(['Diagrams', 'Collapse All']);
+    // Diagrams here has no title actions at all: Collapse All alone, no empty ….
+    expect(headerButtons(win, 'diagrams')).toEqual(['Collapse All']);
+    // A non-add icon (a Clear Filter) comes after it.
+    const withClear = load();
+    sendState(withClear.win, library({ actions: { navigation: [{ index: 5, menu: 'view/title', title: 'Clear Filter', icon: 'clear-all' }], groups: [] } }));
+    expect(headerButtons(withClear.win, 'tables')).toEqual(['Collapse All', 'Clear Filter']);
     const plain = load();
     sendState(plain.win, sections(base));
-    win.document.dispatchEvent(new win.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    expect(plain.win.document.querySelector('[data-act="collapse-all"]')).toBeNull();
     plain.win.document.querySelector<HTMLButtonElement>('[data-act="title-more"]')!.click();
     expect(plain.win.document.querySelector('.gs-menu')!.textContent).not.toContain('Collapse All');
   });
@@ -569,8 +635,7 @@ describe('Collapse All', () => {
     // The search renders on the next frame.
     return new Promise<void>((resolve) => win.requestAnimationFrame(() => {
       expect(rowEl(win, 'tables:a')).toBeDefined();
-      win.document.querySelector<HTMLButtonElement>('.gs-section[data-key="tables"] [data-act="title-more"]')!.click();
-      [...win.document.querySelectorAll<HTMLButtonElement>('.gs-menu__item')].pop()!.click();
+      win.document.querySelector<HTMLButtonElement>('.gs-section[data-key="tables"] [data-act="collapse-all"]')!.click();
       expect(rowEl(win, 'tables:a')).toBeUndefined();
       expect(rowEl(win, 'tables:gold')!.getAttribute('aria-expanded')).toBe('false');
       input.value = 'dim_';
@@ -588,37 +653,22 @@ describe('Collapse All', () => {
     }));
   });
 
-  it('used from the keyboard in the header\'s … menu, leaves focus on that … button, focused while it is still drawn', () => {
+  it('used from the keyboard, leaves focus on its own button; the … menu still hands focus back to the …', () => {
     const { win } = load();
     sendState(win, library());
-    // A header's buttons are drawn only while it is hovered, holds focus or has its menu open
-    // (display: none otherwise, which jsdom does not apply): note, at each focus, whether its menu was still marked open.
-    const shownWhenFocused: boolean[] = [];
-    const focus = win.HTMLElement.prototype.focus;
-    win.HTMLElement.prototype.focus = function (this: HTMLElement, ...args: Parameters<HTMLElement['focus']>) {
-      const actions = this.closest('.gs-section__actions');
-      if (actions) shownWhenFocused.push(actions.classList.contains('is-open'));
-      return focus.apply(this, args);
-    };
+    const button = () => win.document.querySelector<HTMLButtonElement>('.gs-section[data-key="tables"] [data-act="collapse-all"]')!;
+    // Enter on the button (a click): the rows fold, the render may redraw the header, focus stays on the button.
+    button().focus();
+    button().click();
+    expect(rowEl(win, 'tables:a')).toBeUndefined();
+    expect(win.document.activeElement === button()).toBe(true);
+    // Escape in the … menu: back on the ….
     const more = win.document.querySelector<HTMLButtonElement>('.gs-section[data-key="tables"] [data-act="title-more"]')!;
-    // Enter on the … (a click), End, Enter on Collapse All (a click).
     more.focus();
     more.click();
-    const items = [...win.document.querySelectorAll<HTMLButtonElement>('.gs-menu__item')];
-    key(win, items[0], 'End');
-    expect(win.document.activeElement === items[items.length - 1]).toBe(true);
-    shownWhenFocused.length = 0;
-    items[items.length - 1].click();
-    expect(rowEl(win, 'tables:a')).toBeUndefined();
-    expect(win.document.activeElement === more).toBe(true);
-    expect(shownWhenFocused).toEqual([true]);
-    // Escape in the menu: the same.
-    more.click();
-    shownWhenFocused.length = 0;
     win.document.querySelector<HTMLElement>('.gs-menu__item')!.dispatchEvent(new win.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
     expect(win.document.querySelector('.gs-menu')).toBeNull();
     expect(win.document.activeElement === more).toBe(true);
-    expect(shownWhenFocused).toEqual([true]);
   });
 
   it('closes a header menu whose … button a new state took away onto the section\'s header, never the page', () => {
@@ -680,6 +730,22 @@ describe('double-click (as a VS Code tree)', () => {
     expect(posted.filter((m) => (m as { type: string }).type !== 'sectionsShown')).toEqual([{ type: 'ready' }]);
   });
 
+  it('sends doubleClick (the row\'s id only) for a row the host gave one, after its click ran once', () => {
+    const { win, posted } = load();
+    sendState(win, sections([row('tables:a', 'dim_customer', { secondary: true }), row('tables:b', 'fct_order')]));
+    dbl(win, rowEl(win, 'tables:a')!);
+    const sent = posted.filter((m) => ['activate', 'doubleClick'].includes((m as { type: string }).type));
+    expect(sent).toEqual([{ type: 'activate', section: 'tables', id: 'tables:a' }, { type: 'doubleClick', section: 'tables', id: 'tables:a' }]);
+    // A row without one: two clicks are one activation, nothing more.
+    dbl(win, rowEl(win, 'tables:b')!);
+    expect(posted.filter((m) => (m as { type: string }).type === 'doubleClick')).toHaveLength(1);
+    // Never from its buttons, nor with a modifier (Cmd/Ctrl- and Shift-click only select).
+    rowEl(win, 'tables:a')!.querySelector('[data-act="inline"]')!.dispatchEvent(new win.MouseEvent('dblclick', { bubbles: true, cancelable: true, detail: 2 }));
+    rowEl(win, 'tables:a')!.dispatchEvent(new win.MouseEvent('dblclick', { bubbles: true, cancelable: true, detail: 2, metaKey: true }));
+    rowEl(win, 'tables:a')!.dispatchEvent(new win.MouseEvent('dblclick', { bubbles: true, cancelable: true, detail: 2, shiftKey: true }));
+    expect(posted.filter((m) => (m as { type: string }).type === 'doubleClick')).toHaveLength(1);
+  });
+
   it('runs a row\'s hover button once per double-click', () => {
     const { win, posted } = load();
     sendState(win, sections(base));
@@ -687,6 +753,18 @@ describe('double-click (as a VS Code tree)', () => {
     click(win, b, { detail: 1 });
     click(win, b, { detail: 2 });
     expect(posted.filter((m) => (m as { type: string }).type === 'invoke')).toHaveLength(1);
+  });
+});
+
+describe('a row whose menu only repeats its hover button (hideMore)', () => {
+  it('draws the hover button and no …; right-click still asks for the menu', () => {
+    const { win, posted } = load();
+    sendState(win, sections([row('tables:s', 'sales', { inline: [{ index: 8, menu: 'view/item/context', title: 'New Table…', icon: 'add' }], hideMore: true }), row('tables:b', 'fct_order')]));
+    const actions = (id: string) => [...rowEl(win, id)!.querySelectorAll<HTMLElement>('.gs-row__actions [data-act]')].map((b) => b.dataset.act);
+    expect(actions('tables:s')).toEqual(['inline']);
+    expect(actions('tables:b')).toEqual(['inline', 'row-more']);
+    rowEl(win, 'tables:s')!.dispatchEvent(new win.MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2, clientX: 5, clientY: 5 }));
+    expect(lastPost(posted)).toEqual({ type: 'itemMenu', section: 'tables', id: 'tables:s' });
   });
 });
 

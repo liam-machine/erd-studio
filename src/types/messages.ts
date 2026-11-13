@@ -398,6 +398,13 @@ export interface RevealRelationshipMessage {
     toModel: string;
     /** Every column pair of the line (more than one for a composite key). */
     pairs: Array<{ fromColumn: string; toColumn: string }>;
+    /**
+     * Optional (additive): select the line without moving the zoom, panning
+     * only as far as it takes to bring its two tables into view, clear of
+     * the toolbar and the detail panel (a sidebar row's click). Absent: the
+     * view is fitted to the line, as before. An older webview ignores it.
+     */
+    gentle?: boolean;
   };
 }
 
@@ -456,6 +463,14 @@ export interface RevealTableMessage {
   type: 'revealTable';
   payload: {
     modelName: string;
+    /**
+     * Optional (additive): select the table without opening its detail panel
+     * or moving the zoom, panning only as far as it takes to bring it into
+     * view, clear of the toolbar and the detail panel (a sidebar row's
+     * click). Absent: centred with its panel open, as before. An older
+     * webview ignores it.
+     */
+    gentle?: boolean;
   };
 }
 
@@ -590,8 +605,23 @@ export interface LineStyleMessage {
   };
 }
 
+/**
+ * Whether the canvas's tab is on screen, sent whenever that changes
+ * (`onDidChangeViewState`). A webview behind another tab keeps running at a
+ * stand-in size, so a gentle reveal (`RevealTableMessage.gentle`,
+ * `RevealRelationshipMessage.gentle`) that arrives as the canvas goes behind
+ * another tab (a row's double-click opening the file) waits until it is back
+ * before it measures what is in sight. Additive: an older webview ignores it,
+ * and a webview that never gets it treats the canvas as on screen.
+ */
+export interface CanvasVisibilityMessage {
+  type: 'canvasVisibility';
+  payload: { visible: boolean };
+}
+
 export type ExtensionMessage =
   | GuideStartMessage
+  | CanvasVisibilityMessage
   | LineStyleMessage
   | LoadingMessage
   | ExistingTablesMessage

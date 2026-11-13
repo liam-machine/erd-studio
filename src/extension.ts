@@ -152,7 +152,8 @@ import { registerSidebarFilters } from './providers/sidebarFilter';
 import { registerRowDetails } from './providers/rowDetails';
 import { installContextKeyRecorder } from './providers/glassSidebar/contextKeys';
 import { FOCUS_GLASS_SEARCH_COMMAND, TOGGLE_GLASS_SIDEBAR_COMMAND, glassSidebarEnabled, registerGlassSidebar } from './providers/glassSidebar/GlassSidebarProvider';
-import { openInDiagram, openRelationshipSource, type RelationshipsViewDeps } from './commands/relationshipsView';
+import { diagramsShowing, openInDiagram, openRelationshipSource, openTableFile, type RelationshipsViewDeps } from './commands/relationshipsView';
+import { RowActivations, diagramTheClickChooses, rowActivationKey } from './commands/sidebarRowClick';
 import {
   ADD_TO_DIAGRAM_COMMAND,
   ADD_TO_OPEN_DIAGRAM_COMMAND,
@@ -851,6 +852,8 @@ export const NO_LEGACY_ALIAS = new Set([
   'erdStudio.newSchema',
   'erdStudio.openRelationshipSource',
   'erdStudio.openInDiagram',
+  'erdStudio.openTableFile',
+  'erdStudio.showOnAnotherDiagram',
   'erdStudio.groupRelationshipsByFile',
   'erdStudio.groupRelationshipsByTable',
   'erdStudio.goToTable',
@@ -913,6 +916,19 @@ export const PRE_REGISTERED_COMMANDS = new Set([
  * and domain JSON files show a helpful message instead of "command not
  * found" / a blank editor error.
  */
+/**
+ * The file or folder a side-panel row's Reveal in Explorer shows: a Table
+ * Library row's own (`filePath`: a table's file, a schema's, layer's or
+ * folder's folder), or a Diagrams diagram row's file. Undefined for anything else.
+ */
+export function revealInExplorerPath(node: unknown): string | undefined {
+  if (typeof node !== 'object' || node === null) return undefined;
+  const n = node as { type?: unknown; filePath?: unknown; summary?: { filePath?: unknown } };
+  if (n.type === 'domain') return typeof n.summary?.filePath === 'string' ? n.summary.filePath : undefined;
+  if (n.type === 'model' || n.type === 'folder' || n.type === 'layer') return typeof n.filePath === 'string' && n.filePath !== '' ? n.filePath : undefined;
+  return undefined;
+}
+
 function registerFallbackCommands(context: vscode.ExtensionContext): void {
   const contributed = (context.extension.packageJSON as {
     contributes?: { commands?: Array<{ command: string }> };
@@ -3375,6 +3391,8 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
         controller: tableLibraryDrag!,
         // A row that carries at least one table: a table (not an ignored duplicate), or a schema or layer with one.
         dragKind: (row) => (tablesOfDraggedRows([row], 1).names.length > 0 ? 'tables' : undefined),
+        // The tables a drag of the row carries, as the drop counts them: the drag picture says "4 tables".
+        dragCount: (row) => tablesOfDraggedRows([row]).names.length,
         // Let go outside the sidebar: the canvas under that point adds the drag at once (not at the pointer's next move).
         released: (at) => editorProvider.libraryDragReleased(at),
       });
@@ -3392,9 +3410,15 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
         usage: tableUsage,
         layerLabel: (layer) => layerService.getLabel(layer),
         revealRelationship: (filePath, target) => editorProvider.revealRelationship(vscode.Uri.file(filePath), target),
-        revealTable: (filePath, modelName) => editorProvider.revealTable(vscode.Uri.file(filePath), modelName),
+        revealTable: (filePath, modelName, options) => editorProvider.revealTable(vscode.Uri.file(filePath), modelName, options),
         addToDiagram: (tables) => addToDiagramCommand(addToDiagramDeps, tables),
+        // The diagram in front of the user: the active editor's, else the canvas last active while it is still on screen.
+        lookingAtDiagram: () => activeSubjectAreaCanvasPath() ?? editorProvider.lastActiveVisibleDiagramPath(),
       };
+      // A sidebar row's click and double-click (the native views have no double-click event: a second
+      // activation of the same row soon after is one; the glass page's dblclick settles through it too).
+      const rowActivations = new RowActivations();
+      const isPlainObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
       const addToDiagramDeps: AddToDiagramDeps = {
         listSubjectAreas: deps.listSubjectAreas,
         memberNames: deps.memberNames,
@@ -3534,22 +3558,57 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
           if (glassSidebarEnabled(context.globalState)) await glassSidebar.reveal('tables', node, { focus: true });
           else await tableLibraryView?.reveal(node, { select: true, focus: true });
         }),
-        vscode.commands.registerCommand('erdStudio.openRelationshipSource', (node?: RelationshipsNode) => openRelationshipSource(node, deps)),
-        vscode.commands.registerCommand('erdStudio.groupRelationshipsByFile', () => setRelationshipsGrouping('file')),
-        vscode.commands.registerCommand('erdStudio.groupRelationshipsByTable', () => setRelationshipsGrouping('table')),
-        // A relationship row's click passes `{ fallBackToFile: true }`: with no
-        // diagram to show it on, it opens where it is written.
-        vscode.commands.registerCommand('erdStudio.openInDiagram', (node?: RelationshipsNode | TableLibraryTableNode, options?: unknown) => {
-          if (!node) {
-            void vscode.window.showErrorMessage('Open in Diagram: Right-click a table in the Table Library, or a relationship or table in the Relationships view.');
+        // Open in File, and a relationship row's double-click (`{ doubleClick: true }`): a pick the click left open closes first.
+        vscode.commands.registerCommand('erdStudio.openRelationshipSource', async (node?: RelationshipsNode, options?: unknown) => {
+          if (isPlainObject(options) && options.doubleClick === true) await rowActivations.settle();
+          await openRelationshipSource(node, deps);
+        }),
+        // A table row's Open File, and its double-click (`{ doubleClick: true }`: the tab is kept, as the Explorer's is).
+        vscode.commands.registerCommand('erdStudio.openTableFile', async (node?: unknown, options?: unknown) => {
+          const doubleClick = isPlainObject(options) && options.doubleClick === true;
+          if (doubleClick) await rowActivations.settle();
+          await openTableFile(node, { pinned: doubleClick });
+        }),
+        // A table row's Show on Another Diagram…: the diagrams its click does not choose (the canvas's
+        // Show on Other Diagrams… path, `excludeDiagram`), selected gently as the click does.
+        vscode.commands.registerCommand('erdStudio.showOnAnotherDiagram', async (node?: unknown) => {
+          if (!isPlainObject(node) || node.type !== 'model' || typeof node.name !== 'string') {
+            void vscode.window.showErrorMessage('Show on Another Diagram: Right-click a table in the Table Library.');
             return;
           }
-          const fallBackToFile = typeof options === 'object' && options !== null && (options as { fallBackToFile?: unknown }).fallBackToFile === true;
-          // The canvas's Show on Other Diagrams… leaves out the diagram it is on.
-          const excludeDiagram = typeof options === 'object' && options !== null && typeof (options as { excludeDiagram?: unknown }).excludeDiagram === 'string'
-            ? (options as { excludeDiagram: string }).excludeDiagram
-            : undefined;
-          return openInDiagram(node, deps, { fallBackToFile, ...(excludeDiagram !== undefined ? { excludeDiagram } : {}) });
+          const row = node as unknown as TableLibraryTableNode;
+          const table = { name: row.name, ...(typeof row.filePath === 'string' ? { filePath: row.filePath } : {}) };
+          const shownOn = diagramsShowing([table], deps).map((s) => s.filePath);
+          const excludeDiagram = diagramTheClickChooses(shownOn, deps.lookingAtDiagram?.());
+          await openInDiagram(row, deps, { highlight: true, ...(excludeDiagram !== undefined ? { excludeDiagram } : {}) });
+        }),
+        vscode.commands.registerCommand('erdStudio.groupRelationshipsByFile', () => setRelationshipsGrouping('file')),
+        vscode.commands.registerCommand('erdStudio.groupRelationshipsByTable', () => setRelationshipsGrouping('table')),
+        // A row's click (a Table Library table, a relationship grouped by table) passes
+        // `{ fallBackToFile: true, rowClick: true }`: the diagram in front of the user, else
+        // the only one, else a pick, else the file; a second click soon after opens the file.
+        // From a row's menu (no options, or the Table Library's selection) it is the same
+        // rule without the file. The canvas's Show on Other Diagrams… (`excludeDiagram`)
+        // keeps centring the table with its panel open.
+        vscode.commands.registerCommand('erdStudio.openInDiagram', (node?: RelationshipsNode | TableLibraryTableNode, options?: unknown) => {
+          if (!node) {
+            void vscode.window.showErrorMessage('Open in Diagram: Right-click a relationship or a table in the Relationships view, or an ignored duplicate in the Table Library.');
+            return;
+          }
+          const opts = isPlainObject(options) ? options : {};
+          const fallBackToFile = opts.fallBackToFile === true;
+          const excludeDiagram = typeof opts.excludeDiagram === 'string' ? opts.excludeDiagram : undefined;
+          const highlight = excludeDiagram === undefined;
+          const run = (token?: vscode.CancellationToken): Promise<void> => openInDiagram(node, deps, {
+            fallBackToFile, highlight, ...(excludeDiagram !== undefined ? { excludeDiagram } : {}), ...(token ? { token } : {}),
+          });
+          if (opts.rowClick !== true) return run();
+          return rowActivations.click(
+            rowActivationKey(node),
+            run,
+            // The double-click: the code.
+            () => (node.type === 'model' ? openTableFile(node, { pinned: true }) : openRelationshipSource(node, deps)),
+          );
         }),
       );
     })(),
@@ -4040,12 +4099,14 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
           await editorProvider.refreshAllOpenSubjectAreas();
         },
       })),
-    vscode.commands.registerCommand('erdStudio.revealLogicalModel', (node: TableLibraryNode | undefined) => {
-      if (!node || node.type !== 'model') {
-        void vscode.window.showErrorMessage('Reveal in Explorer: No table selected. Right-click a table in the Table Library.');
+    // A Table Library table, schema, layer or folder row (its file or folder), or a Diagrams diagram row (its file).
+    vscode.commands.registerCommand('erdStudio.revealLogicalModel', (node: unknown) => {
+      const target = revealInExplorerPath(node);
+      if (!target) {
+        void vscode.window.showErrorMessage('Reveal in Explorer: Nothing selected. Right-click a table or a diagram in the ERD Studio side panel.');
         return;
       }
-      void vscode.commands.executeCommand('revealInExplorer', vscode.Uri.file(node.filePath));
+      void vscode.commands.executeCommand('revealInExplorer', vscode.Uri.file(target));
     }),
     vscode.commands.registerCommand('erdStudio.openDomain', async (filePath?: string, stage?: Stage) => {
       // From the palette or the status bar there is no file: ask which.

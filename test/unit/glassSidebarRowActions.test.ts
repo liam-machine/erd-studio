@@ -37,29 +37,29 @@ function rowOf(view: string, viewItem: string, extra: Record<string, unknown> = 
 const titles = (actions: MenuAction[]) => actions.map((a) => a.title);
 const shape = (view: string, viewItem: string, extra: Record<string, unknown> = {}) => {
   const { shaped } = rowOf(view, viewItem, extra);
-  return { hover: titles(shaped.inline), menu: shaped.groups.map(titles) };
+  return { hover: titles(shaped.inline), menu: shaped.groups.map(titles), ...(shaped.menuRepeatsHover ? { noMore: true } : {}) };
 };
 
 describe('consistentRowActions: Diagrams', () => {
   it('a layer that takes diagrams: + New Diagram…, then New / Edit / Remove', () => {
     expect(shape(DIAGRAMS, 'layerCreatable')).toEqual({
       hover: ['New Diagram…'],
-      menu: [['New Diagram…'], ['Edit Layer'], ['Remove Layer']],
+      menu: [['New Diagram…'], ['Edit Layer…'], ['Remove Layer']],
     });
   });
 
   it('any other layer: Edit, then Remove on its own', () => {
-    expect(shape(DIAGRAMS, 'layer')).toEqual({ hover: [], menu: [['Edit Layer'], ['Remove Layer']] });
+    expect(shape(DIAGRAMS, 'layer')).toEqual({ hover: [], menu: [['Edit Layer…'], ['Remove Layer']] });
   });
 
   it('a diagram: Rename / Move, then Export, then Delete last (not Export first)', () => {
     expect(shape(DIAGRAMS, 'domain')).toEqual({
       hover: [],
-      menu: [['Rename Diagram…', 'Move Diagram to Layer…'], ['Export Diagram…'], ['Delete Diagram']],
+      menu: [['Reveal in Explorer'], ['Rename Diagram…', 'Move Diagram to Layer…'], ['Export Diagram…'], ['Delete Diagram']],
     });
     expect(shape(DIAGRAMS, 'domain', { 'erdStudio.storage': 'yaml' })).toEqual({
       hover: [],
-      menu: [['Rename Diagram…'], ['Export Diagram…'], ['Delete Diagram']],
+      menu: [['Reveal in Explorer'], ['Rename Diagram…'], ['Export Diagram…'], ['Delete Diagram']],
     });
   });
 
@@ -71,30 +71,55 @@ describe('consistentRowActions: Diagrams', () => {
 });
 
 describe('consistentRowActions: Table Library', () => {
-  it('a layer and a schema: + New Table…, and the menu is the create group', () => {
-    expect(shape(TABLES, 'tableLibraryLayer')).toEqual({ hover: ['New Table…'], menu: [['New Table…', 'New Schema…']] });
-    expect(shape(TABLES, 'tableLibrarySchema')).toEqual({ hover: ['New Table…'], menu: [['New Table…']] });
-    expect(shape(TABLES, 'tableLibraryLayer', { 'erdStudio.storage': 'yaml' })).toEqual({ hover: [], menu: [] });
-    expect(shape(TABLES, 'logicalModelFolder')).toEqual({ hover: [], menu: [] });
+  it('a layer: + New Table…, Reveal in Explorer, New Schema… and Edit Layer… (the Diagrams layer\'s own); a schema: + New Table… and Reveal', () => {
+    expect(shape(TABLES, 'tableLibraryLayer')).toEqual({ hover: ['New Table…'], menu: [['Reveal in Explorer'], ['New Table…', 'New Schema…'], ['Edit Layer…']] });
+    // Its menu no longer only repeats the + (Reveal in Explorer is in it), so it keeps its ….
+    expect(shape(TABLES, 'tableLibrarySchema')).toEqual({ hover: ['New Table…'], menu: [['Reveal in Explorer'], ['New Table…']] });
+    expect(shape(TABLES, 'tableLibraryLayer', { 'erdStudio.storage': 'yaml' })).toEqual({ hover: [], menu: [['Reveal in Explorer'], ['Edit Layer…']] });
+    expect(shape(TABLES, 'logicalModelFolder')).toEqual({ hover: [], menu: [['Reveal in Explorer']] });
   });
 
-  it('a table: one hover button, the + (Add to Open Diagram); Open in Diagram… leads the menu', () => {
+  it('a table: the click goes to the diagram, so no Open in Diagram…; Open File leads the menu, + (Add to Open Diagram) is the button', () => {
     const { shaped } = rowOf(TABLES, 'logicalModel');
     expect(shaped.inline.map((a) => [a.title, a.icon])).toEqual([['Add to Open Diagram', 'add']]);
     expect(shaped.groups.map(titles)).toEqual([
-      ['Open in Diagram…', 'Reveal in Explorer'],
+      ['Open File', 'Reveal in Explorer'],
       ['Add to Open Diagram', 'Add to Diagram…'],
       ['Move Table…'],
       ['Delete Table'],
     ]);
     expect(shape(TABLES, 'logicalModel', { 'erdStudio.storage': 'yaml' }).menu).toEqual([
-      ['Open in Diagram…', 'Reveal in Explorer'],
+      ['Open File', 'Reveal in Explorer'],
       ['Add to Open Diagram', 'Add to Diagram…'],
       ['Delete Table'],
     ]);
   });
 
-  it('a duplicate table: its fix as the hover button, after Open / Reveal in the menu', () => {
+  it('a table two or more diagrams show also offers Show on Another Diagram… (the ones its click does not choose)', () => {
+    expect(shape(TABLES, 'logicalModelOnSeveral')).toEqual({
+      hover: ['Add to Open Diagram'],
+      menu: [
+        ['Open File', 'Show on Another Diagram…', 'Reveal in Explorer'],
+        ['Add to Open Diagram', 'Add to Diagram…'],
+        ['Move Table…'],
+        ['Delete Table'],
+      ],
+    });
+  });
+
+  it('a table whose file needs fixing: its click opens the file, so Open in Diagram… (not Open File) leads the menu', () => {
+    expect(shape(TABLES, 'logicalModelBroken')).toEqual({
+      hover: ['Add to Open Diagram'],
+      menu: [
+        ['Open in Diagram…', 'Reveal in Explorer'],
+        ['Add to Open Diagram', 'Add to Diagram…'],
+        ['Move Table…'],
+        ['Delete Table'],
+      ],
+    });
+  });
+
+  it('a duplicate table: its fix as the hover button, after Open in Diagram… / Reveal in the menu (its click opens the file)', () => {
     expect(shape(TABLES, 'logicalModelDuplicate')).toEqual({
       hover: ['Give Duplicate Table Its Own Name…'],
       menu: [['Open in Diagram…', 'Reveal in Explorer'], ['Give Duplicate Table Its Own Name…']],
@@ -107,16 +132,15 @@ describe('consistentRowActions: Table Library', () => {
 });
 
 describe('consistentRowActions: Relationships', () => {
-  it('a relationship: the open its click does not do as the button; both opens in the menu', () => {
-    expect(shape(RELATIONSHIPS, 'relationship')).toEqual({ hover: ['Open in File'], menu: [['Open in Diagram…', 'Open in File']] });
-    expect(shape(RELATIONSHIPS, 'relationship', { 'erdStudio.relationshipsGrouping': 'file' })).toEqual({
-      hover: ['Open in Diagram…'],
-      menu: [['Open in Diagram…', 'Open in File']],
-    });
+  it('a relationship: the open its click does not do is the button and the menu, never the click\'s own; no … that only repeats it', () => {
+    // Grouped by table: the click goes to the diagram.
+    expect(shape(RELATIONSHIPS, 'relationship')).toEqual({ hover: ['Open in File'], menu: [['Open in File']], noMore: true });
+    // Grouped by file, or a problem: the click opens the file.
+    expect(shape(RELATIONSHIPS, 'relationshipInFile')).toEqual({ hover: ['Open in Diagram…'], menu: [['Open in Diagram…']], noMore: true });
   });
 
   it('a table group: Open in Diagram…; layer, file and attention rows have none', () => {
-    expect(shape(RELATIONSHIPS, 'relationshipsTable')).toEqual({ hover: ['Open in Diagram…'], menu: [['Open in Diagram…']] });
+    expect(shape(RELATIONSHIPS, 'relationshipsTable')).toEqual({ hover: ['Open in Diagram…'], menu: [['Open in Diagram…']], noMore: true });
     for (const cv of ['relationshipsLayer', 'relationshipsFile', 'relationshipsAttention']) {
       expect(shape(RELATIONSHIPS, cv)).toEqual({ hover: [], menu: [] });
     }
@@ -125,7 +149,7 @@ describe('consistentRowActions: Relationships', () => {
 
 describe('consistentRowActions: Help', () => {
   it('My Reports: Refresh as the button, and in a menu now, so the keyboard reaches it too', () => {
-    expect(shape(HELP, 'myReports')).toEqual({ hover: ['Refresh My Reports'], menu: [['Refresh My Reports']] });
+    expect(shape(HELP, 'myReports')).toEqual({ hover: ['Refresh My Reports'], menu: [['Refresh My Reports']], noMore: true });
   });
 });
 
@@ -133,8 +157,8 @@ describe('consistentRowActions: the rules', () => {
   const ROWS: Array<[string, string, Record<string, unknown>?]> = [
     [DIAGRAMS, 'layerCreatable'], [DIAGRAMS, 'layer'], [DIAGRAMS, 'domain'], [DIAGRAMS, 'domain', { 'erdStudio.storage': 'yaml' }],
     [TABLES, 'tableLibraryLayer'], [TABLES, 'tableLibrarySchema'], [TABLES, 'logicalModel'], [TABLES, 'logicalModel', { 'erdStudio.storage': 'yaml' }],
-    [TABLES, 'logicalModelDuplicate'], [TABLES, 'logicalModelReadOnly'],
-    [RELATIONSHIPS, 'relationship'], [RELATIONSHIPS, 'relationship', { 'erdStudio.relationshipsGrouping': 'file' }], [RELATIONSHIPS, 'relationshipsTable'],
+    [TABLES, 'logicalModelOnSeveral'], [TABLES, 'logicalModelBroken'], [TABLES, 'logicalModelDuplicate'], [TABLES, 'logicalModelReadOnly'],
+    [RELATIONSHIPS, 'relationship'], [RELATIONSHIPS, 'relationshipInFile'], [RELATIONSHIPS, 'relationshipsTable'],
     [HELP, 'myReports'],
   ];
   const verb = (a: MenuAction) => rowVerb(commandOf(a), a.title);
@@ -172,6 +196,32 @@ describe('consistentRowActions: the rules', () => {
       expect(order, `${view} ${cv}`).toEqual([...order].sort((a, b) => a - b));
       expect(new Set(verbs).size).toBe(verbs.length);
     }
+  });
+
+  it('a row\'s menu never offers what its click does, nor its hover button (the click\'s command, per row value)', () => {
+    // What each row's click runs (the providers' TreeItem.command), by row value.
+    const CLICK: Array<[string, string, string]> = [
+      [TABLES, 'logicalModel', 'erdStudio.openInDiagram'],
+      [TABLES, 'logicalModelOnSeveral', 'erdStudio.openInDiagram'],
+      [RELATIONSHIPS, 'relationship', 'erdStudio.openInDiagram'],
+      [RELATIONSHIPS, 'relationshipInFile', 'erdStudio.openRelationshipSource'],
+      [DIAGRAMS, 'domain', 'erdStudio.openDomain'],
+    ];
+    for (const [view, cv, click] of CLICK) {
+      const { shaped } = rowOf(view, cv);
+      expect([...shaped.inline, ...shaped.groups.flat()].map(commandOf), `${view} ${cv}`).not.toContain(click);
+    }
+  });
+
+  it('marks a menu that only repeats the hover button, and no other', () => {
+    const a = (index: number, title: string): MenuAction => ({ index, menu: 'm', title });
+    const plus = a(1, 'New Thing…');
+    const commands: Record<number, string> = { 1: 'x.new', 2: 'x.new', 3: 'x.edit' };
+    const of = (x: MenuAction) => commands[x.index];
+    expect(consistentRowActions({ inline: [plus], navigation: [], groups: [[a(2, 'New Thing…')]] }, of).menuRepeatsHover).toBe(true);
+    expect(consistentRowActions({ inline: [plus], navigation: [], groups: [] }, of).menuRepeatsHover).toBe(true);
+    expect(consistentRowActions({ inline: [plus], navigation: [], groups: [[a(2, 'New Thing…'), a(3, 'Edit Thing')]] }, of).menuRepeatsHover).toBeUndefined();
+    expect(consistentRowActions({ inline: [], navigation: [], groups: [[a(3, 'Edit Thing')]] }, of).menuRepeatsHover).toBeUndefined();
   });
 
   it('every action keeps the (menu, index) it was resolved from, so the host re-checks it', () => {

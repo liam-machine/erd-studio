@@ -9,6 +9,7 @@
  * entry index; the host decides (and validates) what runs.
  */
 import { GLASS_ICON_FALLBACK, GLASS_ICONS } from './icons';
+import { ADD_EXISTING_TABLES_LIMIT } from '../../types/messages';
 import { GLASS_SEARCH_MAX_LENGTH, type GlassFilterGuide } from './protocol';
 
 export interface GlassSidebarHtmlOptions {
@@ -74,7 +75,7 @@ export function buildGlassSidebarHtml(options: GlassSidebarHtmlOptions): string 
 <div class="gs-menu-layer"></div>
 <div class="gs-live" aria-live="polite"></div>
 <script type="application/json" id="gs-icons" nonce="${n}">${inlineJson({ icons: GLASS_ICONS, fallback: GLASS_ICON_FALLBACK })}</script>
-<script type="application/json" id="gs-config" nonce="${n}">${inlineJson({ filterGuide: guide })}</script>
+<script type="application/json" id="gs-config" nonce="${n}">${inlineJson({ filterGuide: guide, dragTablesLimit: ADD_EXISTING_TABLES_LIMIT })}</script>
 <script nonce="${n}">${GLASS_SIDEBAR_SCRIPT}</script>
 </body>
 </html>`;
@@ -1389,6 +1390,8 @@ export const GLASS_SIDEBAR_SCRIPT = String.raw`
   var ICONS = iconData.icons || {};
   var FALLBACK = iconData.fallback || '';
   var config = JSON.parse(document.getElementById('gs-config').textContent || '{}');
+  // The most tables one drag adds (ADD_EXISTING_TABLES_LIMIT): the host caps a drag there, and so does its picture.
+  var DRAG_TABLES_LIMIT = typeof config.dragTablesLimit === 'number' ? config.dragTablesLimit : 200;
   // The filter keys (sidebarFilter.ts) and the field's debounce.
   var GUIDE = config.filterGuide || { keys: [], syntax: '', debounceMs: 150 };
 
@@ -1831,7 +1834,8 @@ export const GLASS_SIDEBAR_SCRIPT = String.raw`
         b.appendChild(icon(a.icon || ''));
         actions.appendChild(b);
       });
-      if (n.hasMenu) {
+      // No … that would only repeat the hover button (hideMore): right-click and Shift+F10 still list it.
+      if (n.hasMenu && !n.hideMore) {
         var more = el('button', 'gs-iconbtn');
         more.type = 'button';
         more.tabIndex = -1;
@@ -1912,7 +1916,22 @@ export const GLASS_SIDEBAR_SCRIPT = String.raw`
     var owner = menuOwner();
     var ownsMenu = !!(owner && !owner.id && owner.section === section.key);
     var actions = el('div', 'gs-section__actions' + (ownsMenu ? ' is-open' : ''));
-    (section.actions.navigation || []).forEach(function (a, i) {
+    // One header order in every section: "+", then Collapse All, then "…" (titleActions.ts).
+    var nav = section.actions.navigation || [];
+    var addCount = 0;
+    while (addCount < nav.length && (nav[addCount].submenu || nav[addCount].icon === 'add')) addCount++;
+    var collapseBtn = null;
+    if (section.collapseAll) {
+      collapseBtn = el('button', 'gs-iconbtn');
+      collapseBtn.type = 'button';
+      collapseBtn.title = 'Collapse All';
+      collapseBtn.setAttribute('aria-label', section.title + ': collapse all');
+      collapseBtn.dataset.act = 'collapse-all';
+      collapseBtn.dataset.slot = 'collapse';
+      collapseBtn.appendChild(icon('collapse-all'));
+    }
+    if (collapseBtn && addCount === 0) actions.appendChild(collapseBtn);
+    nav.forEach(function (a, i) {
       var b = el('button', 'gs-iconbtn' + (a.icon ? '' : ' gs-iconbtn--text'));
       b.type = 'button';
       b.title = a.title.replace(/…$/, '');
@@ -1926,8 +1945,9 @@ export const GLASS_SIDEBAR_SCRIPT = String.raw`
         b.setAttribute('aria-expanded', ownsMenu && owner.slot === b.dataset.slot ? 'true' : 'false');
       }
       actions.appendChild(b);
+      if (collapseBtn && i === addCount - 1) actions.appendChild(collapseBtn);
     });
-    if ((section.actions.groups && section.actions.groups.length) || section.collapseAll) {
+    if (section.actions.groups && section.actions.groups.length) {
       var more = el('button', 'gs-iconbtn');
       more.type = 'button';
       more.title = 'More Actions…';
@@ -2631,9 +2651,10 @@ export const GLASS_SIDEBAR_SCRIPT = String.raw`
     } else if (act === 'title-more') {
       if (swallowReopen(b)) return;
       var groups = (section.actions.groups || []).map(function (g) { return flattenSub(g).map(titleItem(section)); });
-      // Collapse All: the view's own action, so it ends the menu, apart from the project's actions above it.
-      if (section.collapseAll) groups.push([{ title: 'Collapse All', icon: 'collapse-all', run: function () { collapseAll(section.key); } }]);
       openMenu(groups, buttonAnchor(b), { section: section.key, slot: 'more', title: section.title });
+    } else if (act === 'collapse-all') {
+      // The header's own button (the native view's showCollapseAll): page-local, nothing is sent.
+      if (section.collapseAll) collapseAll(section.key);
     } else {
       var row = b.closest('.gs-row[data-id]');
       var info = row && index[section.key] && index[section.key][row.dataset.id];
@@ -2662,7 +2683,10 @@ export const GLASS_SIDEBAR_SCRIPT = String.raw`
   // 1, then 2) and a dblclick: the first click does what one click does, the
   // second does nothing again, and the dblclick folds or unfolds a row that
   // has a command (whose click ran it). A row without one was already
-  // toggled by its first click, so the dblclick leaves it as it is.
+  // toggled by its first click, so the dblclick leaves it as it is. A leaf
+  // row the host gave a double-click action ('secondary': a table's or a
+  // relationship's file, the code) sends 'doubleClick' with its id; the host
+  // decides what it opens and closes anything the first click left asking.
   sectionsEl.addEventListener('click', function (ev) {
     var act = ev.target.closest && ev.target.closest('[data-act]');
     if (act && sectionsEl.contains(act)) {
@@ -2699,7 +2723,9 @@ export const GLASS_SIDEBAR_SCRIPT = String.raw`
     if (!row || ev.target.closest('.gs-row__actions') || ev.target.closest('[data-role="twistie"]')) return;
     if (ev.shiftKey || ev.metaKey || ev.ctrlKey || ev.altKey) return;
     var info = index[row.dataset.section] && index[row.dataset.section][row.dataset.id];
-    if (info && info.node.collapsible && info.node.hasCommand) toggle(row.dataset.section, row.dataset.id);
+    if (!info) return;
+    if (info.node.secondary) { post({ type: 'doubleClick', section: row.dataset.section, id: row.dataset.id }); return; }
+    if (info.node.collapsible && info.node.hasCommand) toggle(row.dataset.section, row.dataset.id);
   });
 
   sectionsEl.addEventListener('contextmenu', function (ev) {
@@ -3534,12 +3560,40 @@ export const GLASS_SIDEBAR_SCRIPT = String.raw`
     return { x: x, y: y, refX: ref.x, refY: ref.y, refScreenX: ref.sx, refScreenY: ref.sy, windowX: ref.wx, windowY: ref.wy };
   }
 
-  /** The drag's picture: the row's icon and label, or for several rows their count, drawn as a small stack. */
-  function dragPill(row, node, count) {
+  /** What a drag of several rows is called, by its kind ('tables' counts the tables it carries). */
+  var DRAG_NOUNS = { tables: ['table', 'tables'], layer: ['layer', 'layers'] };
+
+  /**
+   * The words on a drag of several rows: what it carries, counted as the
+   * canvas's "Drop to add N tables" counts it. A 'tables' drag counts each
+   * row's tables (the host's dragCount: a schema or layer row carries all
+   * of its own), a row under another dragged row not again, at most the
+   * most one drop adds (DRAG_TABLES_LIMIT, as the host caps it).
+   */
+  function dragText(key, ids, kind) {
+    var nouns = DRAG_NOUNS[kind] || ['row', 'rows'];
+    var n = ids.length;
+    if (kind === 'tables') {
+      var dragged = {};
+      ids.forEach(function (id) { dragged[id] = true; });
+      n = 0;
+      ids.forEach(function (id) {
+        var info = index[key] && index[key][id];
+        if (!info) return;
+        for (var p = info.parent; p; p = index[key][p.id] && index[key][p.id].parent) if (dragged[p.id]) return;
+        n += typeof info.node.dragCount === 'number' ? info.node.dragCount : 1;
+      });
+      n = Math.min(n, DRAG_TABLES_LIMIT);
+    }
+    return n + ' ' + (n === 1 ? nouns[0] : nouns[1]);
+  }
+
+  /** The drag's picture: the row's icon and label, or for several rows what they carry, drawn as a small stack. */
+  function dragPill(row, node, count, text) {
     var pill = el('div', 'gs-dragpill' + (count > 1 ? ' gs-dragpill--many' : ''));
     // Drawn afresh, not cloned: a cloned row icon carries a style attribute, which the CSP refuses.
     if (node.icon) pill.appendChild(rowIcon(node.icon, node));
-    pill.appendChild(el('span', 'gs-dragpill__label', count > 1 ? count + ' rows' : node.label));
+    pill.appendChild(el('span', 'gs-dragpill__label', count > 1 ? text : node.label));
     document.body.appendChild(pill);
     setTimeout(function () { if (pill.parentNode) pill.parentNode.removeChild(pill); }, 0);
     return pill;
@@ -3576,7 +3630,7 @@ export const GLASS_SIDEBAR_SCRIPT = String.raw`
       ev.dataTransfer.effectAllowed = 'copyMove';
       ev.dataTransfer.setData(DRAG_MIME, drag.kind);
       if (drag.kind === 'tables') ev.dataTransfer.setData(LIBRARY_MIME, '[]');
-      ev.dataTransfer.setDragImage(dragPill(row, info.node, ids.length), 14, 14);
+      ev.dataTransfer.setDragImage(dragPill(row, info.node, ids.length, dragText(key, ids, drag.kind)), 14, 14);
     } catch (e) { /* the drag still works with the browser's own picture */ }
     ids.forEach(function (d) { var r = rowEl(key, d); if (r) r.classList.add('is-dragging'); });
     document.body.classList.add('gs-dragging');

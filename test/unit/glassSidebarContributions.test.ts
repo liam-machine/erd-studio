@@ -56,17 +56,20 @@ function inline(view: string, viewItem: string, keys: Record<string, ContextValu
 const PROJECT = { 'erdStudio.hasProject': true, 'erdStudio.hasSemanticDir': true, 'erdStudio.hasLogicalModelsDir': true };
 
 describe('real package.json: row context menus', () => {
-  it('a diagram row: Export / Rename / Delete; Move only with dbml or mixed storage', () => {
+  it('a diagram row: Reveal in Explorer (as a table row has), Export / Rename / Delete; Move only with dbml or mixed storage', () => {
     expect(contextMenu(DIAGRAMS, 'domain', { 'erdStudio.storage': 'yaml' })).toEqual([
+      ['Reveal in Explorer'],
       ['Export Diagram…'],
       ['Rename Diagram…', 'Delete Diagram'],
     ]);
     expect(contextMenu(DIAGRAMS, 'domain')).toEqual([
+      ['Reveal in Explorer'],
       ['Export Diagram…'],
       ['Rename Diagram…', 'Delete Diagram'],
     ]);
     for (const storage of ['dbml', 'mixed']) {
       expect(contextMenu(DIAGRAMS, 'domain', { 'erdStudio.storage': storage })).toEqual([
+        ['Reveal in Explorer'],
         ['Export Diagram…'],
         ['Rename Diagram…', 'Move Diagram to Layer…', 'Delete Diagram'],
       ]);
@@ -80,26 +83,33 @@ describe('real package.json: row context menus', () => {
 
   it('layer rows: New Diagram inline and first; Edit / Remove for every layer kind', () => {
     expect(inline(DIAGRAMS, 'layerCreatable')).toEqual(['New Diagram…']);
-    expect(contextMenu(DIAGRAMS, 'layerCreatable')).toEqual([['New Diagram…'], ['Edit Layer', 'Remove Layer']]);
+    expect(contextMenu(DIAGRAMS, 'layerCreatable')).toEqual([['New Diagram…'], ['Edit Layer…', 'Remove Layer']]);
     expect(inline(DIAGRAMS, 'layer')).toEqual([]);
-    expect(contextMenu(DIAGRAMS, 'layer')).toEqual([['Edit Layer', 'Remove Layer']]);
+    expect(contextMenu(DIAGRAMS, 'layer')).toEqual([['Edit Layer…', 'Remove Layer']]);
   });
 
-  it('a table in the Table Library: Add to Open Diagram and Open in Diagram inline, then Open / Reveal / Add, then Move / Delete', () => {
+  it('a table in the Table Library: Add to Open Diagram inline (its click goes to the diagram), then Open File / Reveal, then Add, then Move / Delete', () => {
     const dbml = { 'erdStudio.storage': 'dbml' };
     const row = index.resolve('view/item/context', ctx(TABLES, 'logicalModel', dbml));
-    // The native tree's hover buttons (the glass sidebar shows only the first: rowActions.ts).
-    expect(titles(row.inline)).toEqual(['Add to Open Diagram', 'Open in Diagram…']);
-    expect(row.inline.map((a) => a.icon)).toEqual(['add', 'open-preview']);
-    expect(titles(row.navigation)).toEqual(['Open in Diagram…', 'Reveal in Explorer', 'Add to Open Diagram', 'Add to Diagram…']);
-    expect(groupTitles(row.groups)).toEqual([['Move Table…', 'Delete Table']]);
+    // The native tree's hover buttons: the + alone (Open in Diagram… is the click now).
+    expect(titles(row.inline)).toEqual(['Add to Open Diagram']);
+    expect(row.inline.map((a) => a.icon)).toEqual(['add']);
+    expect(titles(row.navigation)).toEqual(['Open File', 'Reveal in Explorer']);
+    expect(groupTitles(row.groups)).toEqual([['Add to Open Diagram', 'Add to Diagram…'], ['Move Table…', 'Delete Table']]);
+    // Shown by two or more diagrams: Show on Another Diagram… after Open File.
+    const several = index.resolve('view/item/context', ctx(TABLES, 'logicalModelOnSeveral', dbml));
+    expect(titles(several.navigation)).toEqual(['Open File', 'Show on Another Diagram…', 'Reveal in Explorer']);
+    // A file that needs fixing opens on click: the diagram is the other way in.
+    const broken = index.resolve('view/item/context', ctx(TABLES, 'logicalModelBroken', dbml));
+    expect(titles(broken.navigation)).toEqual(['Open in Diagram…', 'Reveal in Explorer']);
 
     // Nothing in the row menus depends on the glass sidebar being on.
     const glass = index.resolve('view/item/context', ctx(TABLES, 'logicalModel', { ...dbml, 'erdStudio.glassSidebar': true }));
     expect(glass).toEqual(row);
 
     expect(contextMenu(TABLES, 'logicalModel', { 'erdStudio.storage': 'yaml' })).toEqual([
-      ['Open in Diagram…', 'Reveal in Explorer', 'Add to Open Diagram', 'Add to Diagram…'],
+      ['Open File', 'Reveal in Explorer'],
+      ['Add to Open Diagram', 'Add to Diagram…'],
       ['Delete Table'],
     ]);
   });
@@ -118,21 +128,25 @@ describe('real package.json: row context menus', () => {
   it('Table Library layer and schema rows: New Table (and New Schema on a layer) with dbml or mixed storage', () => {
     for (const storage of ['dbml', 'mixed']) {
       expect(inline(TABLES, 'tableLibraryLayer', { 'erdStudio.storage': storage })).toEqual(['New Table…']);
-      expect(contextMenu(TABLES, 'tableLibraryLayer', { 'erdStudio.storage': storage })).toEqual([['New Table…', 'New Schema…']]);
-      expect(contextMenu(TABLES, 'tableLibrarySchema', { 'erdStudio.storage': storage })).toEqual([['New Table…']]);
+      expect(contextMenu(TABLES, 'tableLibraryLayer', { 'erdStudio.storage': storage })).toEqual([['Reveal in Explorer'], ['New Table…', 'New Schema…'], ['Edit Layer…']]);
+      expect(contextMenu(TABLES, 'tableLibrarySchema', { 'erdStudio.storage': storage })).toEqual([['Reveal in Explorer'], ['New Table…']]);
     }
     expect(inline(TABLES, 'tableLibraryLayer', { 'erdStudio.storage': 'yaml' })).toEqual([]);
-    expect(contextMenu(TABLES, 'tableLibraryLayer', { 'erdStudio.storage': 'yaml' })).toEqual([]);
+    expect(contextMenu(TABLES, 'tableLibraryLayer', { 'erdStudio.storage': 'yaml' })).toEqual([['Reveal in Explorer'], ['Edit Layer…']]);
+    // A YAML library's folder row: its folder in the Explorer.
+    expect(contextMenu(TABLES, 'logicalModelFolder', { 'erdStudio.storage': 'yaml' })).toEqual([['Reveal in Explorer']]);
   });
 
-  it('relationship rows: the inline action follows erdStudio.relationshipsGrouping', () => {
+  it('relationship rows: the button and the menu are the way in the click does not take (the row value says which)', () => {
+    // Grouped by table: the click goes to the diagram.
     expect(inline(RELATIONSHIPS, 'relationship')).toEqual(['Open in File']);
-    expect(inline(RELATIONSHIPS, 'relationship', { 'erdStudio.relationshipsGrouping': 'table' })).toEqual(['Open in File']);
-    expect(inline(RELATIONSHIPS, 'relationship', { 'erdStudio.relationshipsGrouping': 'file' })).toEqual(['Open in Diagram…']);
-    for (const grouping of [undefined, 'file']) {
-      expect(contextMenu(RELATIONSHIPS, 'relationship', { 'erdStudio.relationshipsGrouping': grouping })).toEqual([
-        ['Open in Diagram…', 'Open in File'],
-      ]);
+    expect(contextMenu(RELATIONSHIPS, 'relationship')).toEqual([['Open in File']]);
+    // Grouped by file, or a problem: the click opens the file.
+    expect(inline(RELATIONSHIPS, 'relationshipInFile')).toEqual(['Open in Diagram…']);
+    expect(contextMenu(RELATIONSHIPS, 'relationshipInFile')).toEqual([['Open in Diagram…']]);
+    // The grouping's context key no longer decides it.
+    for (const grouping of [undefined, 'table', 'file']) {
+      expect(inline(RELATIONSHIPS, 'relationship', { 'erdStudio.relationshipsGrouping': grouping })).toEqual(['Open in File']);
     }
     expect(inline(RELATIONSHIPS, 'relationshipsTable')).toEqual(['Open in Diagram…']);
     expect(contextMenu(RELATIONSHIPS, 'relationshipsTable')).toEqual([['Open in Diagram…']]);

@@ -161,12 +161,12 @@ describe('the glass sidebar bridge', () => {
     await flush();
     expect(exec).toHaveBeenCalledWith('erdStudio.addToOpenDiagram', tables[0], [tables[0]]);
 
-    // Open in Diagram… left the hover buttons: the table's menu still has it, first.
+    // The click goes to the diagram, so the table's menu opens with Open File (never Open in Diagram…).
     send({ type: 'itemMenu', section: 'tables', id: 'tables:table:dim_customer' });
     await flush();
     const tableMenu = posted.filter((m): m is Extract<GlassHostMessage, { type: 'itemMenu' }> => m.type === 'itemMenu').pop()!;
     expect(tableMenu.groups.map((g) => g.map((a) => a.title))).toEqual([
-      ['Open in Diagram…', 'Reveal in Explorer'],
+      ['Open File', 'Reveal in Explorer'],
       ['Add to Open Diagram', 'Add to Diagram…'],
       ['Move Table…'],
       ['Delete Table'],
@@ -174,7 +174,73 @@ describe('the glass sidebar bridge', () => {
     const open = tableMenu.groups[0][0];
     send({ type: 'invoke', section: 'tables', id: 'tables:table:dim_customer', menu: open.menu, index: open.index });
     await flush();
-    expect(exec).toHaveBeenCalledWith('erdStudio.openInDiagram', tables[0], [tables[0]]);
+    expect(exec).toHaveBeenCalledWith('erdStudio.openTableFile', tables[0], [tables[0]]);
+  });
+
+  it('runs a row\'s double-click as its tree names it (row ids only), and marks the rows that have one', async () => {
+    const provider = new GlassSidebarProvider(vscode.Uri.file('/ext') as vscode.Uri, pkg.contributes);
+    const v = fakeView();
+    provider.resolveWebviewView(v.view as unknown as vscode.WebviewView);
+    const secondary = vi.fn((n: Node) => (n.kind === 'table' ? { command: 'erdStudio.openTableFile', title: 'Open File', arguments: [n, { doubleClick: true }] } : undefined));
+    provider.setSource('tables', tree([...tables, { kind: 'layer', name: 'gold', children: [] }], (n) => (n.kind === 'table' ? 'logicalModel' : 'tableLibraryLayer'), { secondaryCommand: secondary }));
+    v.send({ type: 'ready' });
+    await flush();
+    const rows = section(v.posted, 'tables').nodes;
+    expect(rows.find((r) => r.label === 'dim_customer')?.secondary).toBe(true);
+    expect(rows.find((r) => r.label === 'gold')?.secondary).toBeUndefined();
+    exec.mockClear();
+    v.send({ type: 'doubleClick', section: 'tables', id: 'tables:table:dim_customer' });
+    await flush();
+    expect(exec).toHaveBeenCalledWith('erdStudio.openTableFile', tables[0], { doubleClick: true });
+    // A row with none, a row never listed, a command the page names: nothing runs.
+    exec.mockClear();
+    v.send({ type: 'doubleClick', section: 'tables', id: 'tables:layer:gold' });
+    v.send({ type: 'doubleClick', section: 'tables', id: 'tables:table:nope' });
+    v.send({ type: 'doubleClick', section: 'tables', id: 'tables:table:dim_customer', command: 'workbench.action.terminal.new' });
+    await flush();
+    expect(exec.mock.calls.map((c) => c[0])).toEqual(['erdStudio.openTableFile']);
+    expect(parseGlassInbound({ type: 'doubleClick', section: 'tables', id: 'x', command: 'y' })).toEqual({ type: 'doubleClick', section: 'tables', id: 'x' });
+    expect(parseGlassInbound({ type: 'doubleClick', section: 'tables' })).toBeUndefined();
+  });
+
+  it('draws no … on a row whose menu only repeats its hover button (a relationship\'s Open in File), and still answers its right-click', async () => {
+    const provider = new GlassSidebarProvider(vscode.Uri.file('/ext') as vscode.Uri, pkg.contributes);
+    const v = fakeView();
+    provider.resolveWebviewView(v.view as unknown as vscode.WebviewView);
+    provider.setSource('tables', tree([{ kind: 'layer', name: 'gold', children: [{ kind: 'layer', name: 'sales', children: [] }] }],
+      (n) => (n.name === 'gold' ? 'tableLibraryLayer' : 'tableLibrarySchema')));
+    provider.setSource('relationships', tree([{ kind: 'table', name: 'dim_customer' }], () => 'relationship'));
+    v.send({ type: 'ready' });
+    await flush();
+    const layer = section(v.posted, 'tables').nodes[0];
+    const schema = layer.children![0];
+    // Their menus hold more than the + (Reveal in Explorer, New Schema…): the … stays.
+    expect(layer).toMatchObject({ hasMenu: true });
+    expect(layer.hideMore).toBeUndefined();
+    expect(schema.hideMore).toBeUndefined();
+    const rel = section(v.posted, 'relationships').nodes[0];
+    expect(rel).toMatchObject({ hasMenu: true, hideMore: true });
+    expect(rel.inline?.map((a) => a.title)).toEqual(['Open in File']);
+    v.send({ type: 'itemMenu', section: 'relationships', id: rel.id });
+    await flush();
+    const menu = v.posted.filter((m): m is Extract<GlassHostMessage, { type: 'itemMenu' }> => m.type === 'itemMenu').pop()!;
+    expect(menu.groups.map((g) => g.map((a) => a.title))).toEqual([['Open in File']]);
+  });
+
+  it('gives each draggable row the number of tables its drag carries (the drag picture\'s count)', async () => {
+    const provider = new GlassSidebarProvider(vscode.Uri.file('/ext') as vscode.Uri, pkg.contributes);
+    const v = fakeView();
+    provider.resolveWebviewView(v.view as unknown as vscode.WebviewView);
+    provider.setSource('tables', tree([{ kind: 'layer', name: 'gold', children: [{ kind: 'table', name: 'a' }, { kind: 'table', name: 'b' }] }], () => 'logicalModel'), {
+      controller: { handleDrag: () => undefined },
+      dragKind: () => 'tables',
+      dragCount: (n: Node) => (n.kind === 'layer' ? n.children!.length : 1),
+    });
+    v.send({ type: 'ready' });
+    await flush();
+    const layer = section(v.posted, 'tables').nodes[0];
+    expect(layer.dragCount).toBe(2);
+    expect(layer.children!.map((c) => c.dragCount)).toEqual([1, 1]);
   });
 
   it('refuses what it did not offer: unknown rows, entries whose when fails, menus a row cannot reach', async () => {

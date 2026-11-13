@@ -179,6 +179,20 @@ export interface EditorState extends CanvasState {
    */
   pendingTableReveal: string | null;
   /**
+   * The table reveal waiting is gentle (`RevealTableMessage.gentle`, a
+   * sidebar row's click): selected at the zoom the user has, panned only into
+   * view, no detail panel. Set with {@link pendingTableReveal}.
+   */
+  pendingTableRevealGentle: boolean;
+  /**
+   * The canvas is on screen (`canvasVisibility`: its tab is in front). A
+   * webview behind another tab keeps running but is laid out at a stand-in
+   * size (300 × 150), so a gentle reveal waits for this before it measures
+   * what is in sight. True until the host says otherwise (an older host
+   * never does). Not persisted.
+   */
+  canvasOnScreen: boolean;
+  /**
    * Tables the host asked to select after a drop on the canvas
    * (`selectTables`): `useSelectTables` marks them selected once the canvas
    * draws them, without moving the view or opening the detail panel, then
@@ -341,7 +355,9 @@ export interface EditorActions extends CanvasActions {
   /** Set / clear the tables to select (see `pendingTableSelection`). */
   setPendingTableSelection: (modelNames: string[] | null) => void;
   /** Set / clear the table to show (see `pendingTableReveal`). */
-  setPendingTableReveal: (modelName: string | null) => void;
+  setPendingTableReveal: (modelName: string | null, gentle?: boolean) => void;
+  /** Set whether the canvas is on screen (see `canvasOnScreen`). */
+  setCanvasOnScreen: (onScreen: boolean) => void;
 }
 
 /**
@@ -413,6 +429,8 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   toastMessage: null,
   pendingReveal: null,
   pendingTableReveal: null,
+  pendingTableRevealGentle: false,
+  canvasOnScreen: true,
   pendingTableSelection: null,
   physicalSourceNoticeDismissed: false,
   manifestMissing: false,
@@ -580,7 +598,8 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   setCanvasMode: (mode) => set({ canvasMode: mode }),
   setToastMessage: (message) => set({ toastMessage: message }),
   setPendingReveal: (target) => set({ pendingReveal: target }),
-  setPendingTableReveal: (modelName) => set({ pendingTableReveal: modelName }),
+  setPendingTableReveal: (modelName, gentle = false) => set({ pendingTableReveal: modelName, pendingTableRevealGentle: modelName !== null && gentle }),
+  setCanvasOnScreen: (onScreen) => set({ canvasOnScreen: onScreen }),
   setPendingTableSelection: (modelNames) => set({ pendingTableSelection: modelNames }),
 
   // Full editor reset on a new domain payload. Overrides the canvas slice's

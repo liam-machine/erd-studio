@@ -87,6 +87,18 @@ export interface SerialisedNode {
   inline?: GlassInlineAction[];
   /** The row has a context menu (ask with `itemMenu`). */
   hasMenu?: boolean;
+  /**
+   * The row's menu holds only its hover button's action: draw no `…` (it
+   * would repeat the button). Right-click and Shift+F10 still open the menu,
+   * so the action stays reachable from the keyboard.
+   */
+  hideMore?: boolean;
+  /**
+   * A double-click on the row does something of its own (a table's or a
+   * relationship's file: the code, where its click goes to a diagram): send
+   * `doubleClick` with the row's id. The host decides what it runs.
+   */
+  secondary?: boolean;
   children?: SerialisedNode[];
   /** false: a collapsed row past the host's listing budget; expanding it sends `expand` and a new `state` follows. */
   childrenLoaded?: boolean;
@@ -95,6 +107,12 @@ export interface SerialisedNode {
    * send `dragStart` when one begins. Opaque: only compared with `drop`.
    */
   drag?: string;
+  /**
+   * A `tables` drag of this row carries this many tables (a schema or layer
+   * row all of its own; an ignored duplicate none), as the drop counts them:
+   * the drag picture of several rows says "N tables" from it.
+   */
+  dragCount?: number;
   /** The drag kinds the row takes: send `drop` when a drag of one of them is let go on it. */
   drop?: string[];
 }
@@ -177,8 +195,9 @@ export interface GlassSection {
   multiSelect?: boolean;
   /**
    * The native view has Collapse All (`showCollapseAll`): the page offers it
-   * (last in the `…` menu, and Cmd/Ctrl+Left on a row). Page-local: it folds
-   * the section's rows and sends nothing.
+   * as an icon button in the header, after the `+` and before the `…`, and
+   * as Cmd/Ctrl+Left on a row. Page-local: it folds the section's rows and
+   * sends nothing.
    */
   collapseAll?: boolean;
   /**
@@ -247,6 +266,12 @@ export type GlassWebviewMessage =
   | { type: 'ready' }
   /** A row was clicked (or Enter): the host runs its TreeItem command. */
   | { type: 'activate'; section: GlassSectionKey; id: string }
+  /**
+   * A row with `secondary` was double-clicked (after its first click sent
+   * `activate`): the host runs the row's double-click action, which its tree
+   * names (`BridgedTree.secondaryCommand`), never anything the page says.
+   */
+  | { type: 'doubleClick'; section: GlassSectionKey; id: string }
   /** A row with `childrenLoaded: false` was expanded: the host lists it and sends `state`. */
   | { type: 'expand'; section: GlassSectionKey; id: string }
   /** Right-click / More / Shift+F10 on a row: the host answers with `itemMenu`. */
@@ -302,4 +327,4 @@ export type GlassWebviewMessage =
 /** The longest search text the host takes (longer is refused). */
 export const GLASS_SEARCH_MAX_LENGTH = 512;
 
-export const GLASS_WEBVIEW_MESSAGE_TYPES: ReadonlyArray<GlassWebviewMessage['type']> = ['ready', 'activate', 'expand', 'itemMenu', 'invoke', 'welcomeLink', 'dragStart', 'drop', 'dragEnd', 'search', 'sectionsShown'];
+export const GLASS_WEBVIEW_MESSAGE_TYPES: ReadonlyArray<GlassWebviewMessage['type']> = ['ready', 'activate', 'doubleClick', 'expand', 'itemMenu', 'invoke', 'welcomeLink', 'dragStart', 'drop', 'dragEnd', 'search', 'sectionsShown'];

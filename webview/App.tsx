@@ -325,13 +325,20 @@ function EditorCanvas() {
           // What the files hold that the canvas is not drawing: the whole list each time (empty clears the strip).
           useEditorStore.getState().setFilesNotShown(Array.isArray(msg.payload?.items) ? msg.payload.items.filter(isFileNote) : []);
           break;
-        case 'revealRelationship':
+        case 'revealRelationship': {
           // Shown once the diagram has settled (useRevealRelationship, in the Toolbar).
-          useEditorStore.getState().setPendingReveal(msg.payload);
+          // `gentle` (a sidebar row's click) is taken only as a real true.
+          const { gentle, ...target } = msg.payload;
+          useEditorStore.getState().setPendingReveal(gentle === true ? { ...target, gentle: true } : target);
           break;
+        }
         case 'revealTable':
-          // Shown once the diagram has settled (useRevealTable, in the Toolbar).
-          useEditorStore.getState().setPendingTableReveal(msg.payload.modelName);
+          // Shown once the diagram has settled (useRevealTable, in the Toolbar); gently for a sidebar row's click.
+          useEditorStore.getState().setPendingTableReveal(msg.payload.modelName, msg.payload.gentle === true);
+          break;
+        case 'canvasVisibility':
+          // The tab went behind another or came back: a gentle reveal waits for it to be on screen.
+          if (typeof msg.payload?.visible === 'boolean') useEditorStore.getState().setCanvasOnScreen(msg.payload.visible);
           break;
         case 'selectTables':
           // After a drop on the canvas: select these, no pan, no zoom, no panel (useSelectTables).

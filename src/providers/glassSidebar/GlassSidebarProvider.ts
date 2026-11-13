@@ -132,6 +132,14 @@ export interface BridgedTree<T = unknown> {
   /** The filter in force (sidebarFilter's FilterableTree). */
   getFilter?(): string;
   readonly onDidFilter?: vscode.Event<unknown>;
+  /**
+   * A row's double-click, where it does something its click does not (a
+   * table's or a relationship's file, where the click goes to a diagram):
+   * the command to run. Undefined: a double-click is two clicks. The native
+   * views reach the same action by a second activation of the row
+   * (`sidebarRowClick.ts`).
+   */
+  secondaryCommand?(element: T): vscode.Command | undefined;
 }
 
 /**
@@ -148,6 +156,8 @@ export interface BridgedDragAndDrop<T = unknown> {
   dragKind?(element: T): string | undefined;
   /** The drag kinds this row takes (from any section). */
   dropKinds?(element: T): readonly string[];
+  /** How many tables a drag of this row carries (a `tables` drag), for the drag picture's count. */
+  dragCount?(element: T): number;
   /**
    * A drag from this section was let go outside the sidebar at screen point
    * `at` (the page's `dragend`), after `handleDrag` has run. The Table
@@ -247,6 +257,7 @@ export function parseGlassInbound(raw: unknown): Inbound | undefined {
   const section = m.section as GlassSectionKey;
   switch (m.type) {
     case 'activate':
+    case 'doubleClick':
     case 'expand':
     case 'itemMenu':
     case 'drop':
@@ -749,7 +760,12 @@ export class GlassSidebarProvider implements vscode.WebviewViewProvider, vscode.
         const id = nodeId(section.key, parentId, item, seen);
         const node = serialiseTreeItem(item, id, toWebviewUri);
         const drag = dragKindOf(section.dragAndDrop, child);
-        if (drag) node.drag = drag;
+        if (drag) {
+          node.drag = drag;
+          const count = section.dragAndDrop?.dragCount?.(child);
+          if (typeof count === 'number' && Number.isInteger(count) && count >= 0) node.dragCount = count;
+        }
+        if (tree.secondaryCommand?.(child)?.command) node.secondary = true;
         const drop = dropKindsOf(section.dragAndDrop, child);
         if (drop.length) node.drop = drop;
         elements.set(id, child);
@@ -850,10 +866,12 @@ export class GlassSidebarProvider implements vscode.WebviewViewProvider, vscode.
       const decorate = (nodes: SerialisedNode[]): SerialisedNode[] => nodes.map((n) => {
         const menu = menuOf(n.contextValue);
         const out: SerialisedNode = { ...n };
-        // One hover button at most, then `…` (rowActions.ts).
+        // One hover button at most, then `…` (rowActions.ts); no `…` that only repeats the button.
         if (menu.inline.length) out.inline = menu.inline.map((a) => ({ index: a.index, menu: a.menu, title: a.title, ...(a.icon ? { icon: a.icon } : {}) }));
         else delete out.inline;
         out.hasMenu = menu.groups.length > 0;
+        if (menu.menuRepeatsHover) out.hideMore = true;
+        else delete out.hideMore;
         if (n.children) out.children = decorate(n.children);
         return out;
       });
@@ -1040,6 +1058,13 @@ export class GlassSidebarProvider implements vscode.WebviewViewProvider, vscode.
         const item = section.items.get(msg.id);
         if (!item) return;
         const command = item.command;
+        if (command?.command) await vscode.commands.executeCommand(command.command, ...(command.arguments ?? []));
+        return;
+      }
+      case 'doubleClick': {
+        // The row's own double-click action, asked of its tree now (never anything the page names).
+        if (!section.elements.has(msg.id)) return;
+        const command = section.tree?.secondaryCommand?.(section.elements.get(msg.id));
         if (command?.command) await vscode.commands.executeCommand(command.command, ...(command.arguments ?? []));
         return;
       }

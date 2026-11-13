@@ -1,7 +1,10 @@
 /**
  * The glass sidebar's section headers, made consistent: every section shows
- * at most a `+` (what it can create) and a `…` (everything else), in that
- * order. The native trees' title bars differ per view (a search here, a
+ * at most a `+` (what it can create), then Collapse All (an icon, in each
+ * section whose native view has `showCollapseAll`: Diagrams, Table Library,
+ * Relationships; drawn by the page, which also takes Cmd/Ctrl+Left on a
+ * row), then a `…` (everything else), in that order. A section with no `+`
+ * draws Collapse All first; Collapse All is never in the `…` menu. The native trees' title bars differ per view (a search here, a
  * filter there, a grouping toggle on one), and the glass sidebar has one
  * search field over all sections, so here:
  *

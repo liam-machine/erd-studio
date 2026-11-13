@@ -1,19 +1,26 @@
 /**
- * The Relationships view's two actions.
+ * The sidebar's "take me there" actions, for the Relationships view and the
+ * Table Library.
  *
- * A relationship row's click follows the view's grouping: grouped by file it
- * opens the file, grouped by table it opens a diagram; the row's icon and its
- * right-click menu offer the other.
+ * A row's click goes to the diagram: a Table Library table, and a
+ * relationship grouped by table, follow `sidebarRowClick.ts`'s rule (the
+ * diagram the user is looking at, else the only one, else a pick, else the
+ * file); a relationship grouped by file, and a row with a problem, open the
+ * file. A double-click opens the file. The row's hover button and its
+ * right-click menu offer the other way.
  *
  * - **Open in Diagram…** (`erdStudio.openInDiagram`): the diagram that shows a
  *   relationship's two tables (or a table row's table, here or in the Table
  *   Library), picked when there are several (the picker's last item opens the
- *   relationship's file instead), with the line selected and centred
- *   (`revealRelationship`). A relationship no diagram shows yet opens where it
- *   is written instead.
+ *   relationship's file instead), with the line selected (`revealRelationship`).
+ *   From the sidebar (`highlight`) the diagram in front of the user is used
+ *   without asking, and the table or line is selected without a zoom or the
+ *   detail panel (`gentle`); the canvas's own Show on Other Diagrams… and Go
+ *   to Table… keep centring it with its panel open.
  * - **Open in File** (`erdStudio.openRelationshipSource`): a DBML Ref at its
  *   line in the relationships file, a YAML table's `relationships:` entry in
  *   the FK table's file, or the diagram that keeps it (YAML/JSON projects).
+ * - **Open File** (`erdStudio.openTableFile`, {@link openTableFile}): a table's file.
  *
  * Where the library tells tables apart by their schema folders, a table is
  * the file it lives in (`sidebarTables.ts`): the diagrams that show it are
@@ -33,6 +40,7 @@ import type { RelationshipsNode } from '../providers/RelationshipsTreeProvider';
 import type { TableLibraryTableNode } from '../providers/ModelLibraryTreeProvider';
 import { normaliseName } from '../services/nameUtils';
 import { tableUsageByName, type SidebarTable, type TableUsageKeys } from '../services/sidebarTables';
+import { chooseDiagram } from './sidebarRowClick';
 
 export interface RelationshipsViewDeps {
   /** The DBML Ref's file and line, when a relationships file holds it. */
@@ -45,10 +53,24 @@ export interface RelationshipsViewDeps {
   /** How tables and diagram members are matched (`tableUsageOf`). Optional: without it, by name through `memberNames`. */
   usage?(): TableUsageKeys;
   layerLabel(layer: string): string;
-  /** Select and centre the line on the diagram at `filePath`, once it is open (`SemanticEditorProvider.revealRelationship`). */
+  /**
+   * Select the line on the diagram at `filePath`, once it is open
+   * (`SemanticEditorProvider.revealRelationship`): centred, or with
+   * `target.gentle` brought into view at the zoom the user has.
+   */
   revealRelationship(filePath: string, target: RevealRelationshipMessage['payload']): Promise<void>;
-  /** Select and centre a table on the diagram at `filePath`, once it is open (`SemanticEditorProvider.revealTable`). Optional. */
-  revealTable?(filePath: string, modelName: string): Promise<void>;
+  /**
+   * Select a table on the diagram at `filePath`, once it is open
+   * (`SemanticEditorProvider.revealTable`): centred with its detail panel, or
+   * `gentle`: brought into view at the zoom the user has, no panel. Optional.
+   */
+  revealTable?(filePath: string, modelName: string, options?: { gentle?: boolean }): Promise<void>;
+  /**
+   * The diagram the user is looking at: the active editor when it is a
+   * diagram, else the diagram editor last active while it is still open and
+   * on screen. Optional: without it a click never highlights in place.
+   */
+  lookingAtDiagram?(): string | undefined;
   /** Add to Diagram… for `tables` (`erdStudio.addToDiagram`), offered when no diagram shows them. Optional: without it the message only says so. */
   addToDiagram?(tables: ReadonlyArray<string | SidebarTable>): Promise<void>;
 }
@@ -89,6 +111,28 @@ export function relationshipLineInYaml(text: string, otherTable: string): number
 async function openAt(filePath: string, line?: number): Promise<void> {
   const at = new vscode.Position(line !== undefined && line >= 1 ? line - 1 : 0, 0);
   await vscode.commands.executeCommand('vscode.open', vscode.Uri.file(filePath), { selection: new vscode.Range(at, at), preview: true });
+}
+
+/**
+ * Open a Table Library table's file (its row's Open File, and its
+ * double-click). `pinned`: a double-click keeps the tab, as the Explorer's does.
+ */
+export async function openTableFile(node: unknown, options: { pinned?: boolean } = {}): Promise<void> {
+  const filePath = typeof node === 'object' && node !== null && (node as { type?: unknown }).type === 'model'
+    ? (node as { filePath?: unknown }).filePath
+    : undefined;
+  if (typeof filePath !== 'string' || filePath === '') {
+    void vscode.window.showErrorMessage('Open File: No table selected. Right-click a table in the Table Library.');
+    return;
+  }
+  await vscode.commands.executeCommand('vscode.open', vscode.Uri.file(filePath), ...(options.pinned ? [{ preview: false }] : []));
+}
+
+/** The status-bar line when a row's click opens the file because no diagram shows it (relationships say the same). */
+export function noDiagramYetMessage(subject: string, what: 'relationship' | 'table'): string {
+  return what === 'relationship'
+    ? `ERD Studio: No diagram shows ${subject} yet, so this is where the relationship is written.`
+    : `ERD Studio: No diagram shows ${subject} yet, so this is the table's file.`;
 }
 
 /** Open where a relationship row's relationship is written. */
@@ -141,22 +185,45 @@ export function diagramsShowing(
   });
 }
 
+/** How {@link openInDiagram} goes about it. */
+export interface OpenInDiagramOptions {
+  /**
+   * With no diagram to show it on, open where it is written (a relationship)
+   * or the table's file (a table): a row's click.
+   */
+  fallBackToFile?: boolean;
+  /** Leave this diagram out (the canvas's Show on Other Diagrams…, the row's Show on Another Diagram…). */
+  excludeDiagram?: string;
+  /**
+   * From the sidebar: the diagram the user is looking at
+   * (`deps.lookingAtDiagram`) is used without asking when it shows it, and
+   * the table or line is selected gently (no zoom, no detail panel), on the
+   * diagram already open or on the one opened.
+   */
+  highlight?: boolean;
+  /** Cancelled by a double-click on the row: the pick closes and nothing more opens. */
+  token?: vscode.CancellationToken;
+}
+
 /**
  * Open a diagram showing a relationship (both its tables), with its line
- * selected and centred, or a table row's table. A relationship that a
- * diagram file keeps (YAML/JSON) is shown on that diagram. With no diagram to
- * show it on, a relationship opens where it is written (`fallBackToFile`, a
- * row's click); otherwise the message says so and offers Add to Diagram….
- * A table is selected and centred on the diagram it opens (`revealTable`).
- * `excludeDiagram` leaves one diagram out (the canvas's Show on Other
- * Diagrams…, from the diagram already open).
+ * selected, or a table row's table. A relationship that a diagram file keeps
+ * (YAML/JSON) is shown on that diagram. Several diagrams: the user picks
+ * one (`sidebarRowClick.ts`'s rule c), unless `highlight` and the diagram in
+ * front of the user is one of them (rule a: selected there, nothing opened).
+ * With no diagram to show it on, a row's click (`fallBackToFile`) opens the
+ * file instead; otherwise the message says so and offers Add to Diagram….
+ * `excludeDiagram` leaves one diagram out.
  */
 export async function openInDiagram(
   node: RelationshipsNode | TableLibraryTableNode | (Pick<TableLibraryTableNode, 'type' | 'name'> & { readonly filePath?: string }) | undefined,
   deps: RelationshipsViewDeps,
-  options: { fallBackToFile?: boolean; excludeDiagram?: string } = {},
+  options: OpenInDiagramOptions = {},
 ): Promise<void> {
   if (!node || node.type === 'attention') return;
+  const token = options.token;
+  const cancelled = (): boolean => token?.isCancellationRequested === true;
+  const gentle = options.highlight === true;
   const usage = deps.usage?.() ?? tableUsageByName(deps.memberNames);
   const relationship = node.type === 'relationship' ? node : undefined;
   const entry = relationship?.entry;
@@ -166,20 +233,32 @@ export async function openInDiagram(
     : node.type === 'table' ? { name: node.group.table } : undefined;
   // What the diagram opened calls each table: told apart by identity, its member's reference there.
   const onDiagram = (filePath: string, t: SidebarTable | string): string => usage.refOn(filePath, t) ?? (typeof t === 'string' ? t : t.name);
-  const open = async (filePath: string): Promise<void> => {
-    await vscode.commands.executeCommand('erdStudio.openDomain', filePath);
+  // Select it on the diagram at `filePath` (held by the editor until that canvas has its diagram).
+  const reveal = async (filePath: string): Promise<void> => {
     if (entry) {
       const target = revealTarget(entry);
       // A diagram's own relationship already names its members as that diagram does.
-      await deps.revealRelationship(filePath, usage.byIdentity && entry.source.kind !== 'diagram'
+      const named = usage.byIdentity && entry.source.kind !== 'diagram'
         ? { ...target, fromModel: onDiagram(filePath, entry.fromModel), toModel: onDiagram(filePath, entry.toModel) }
-        : target);
+        : target;
+      await deps.revealRelationship(filePath, gentle ? { ...named, gentle: true } : named);
     } else if (table) {
-      await deps.revealTable?.(filePath, onDiagram(filePath, table));
+      const name = onDiagram(filePath, table);
+      await (gentle ? deps.revealTable?.(filePath, name, { gentle: true }) : deps.revealTable?.(filePath, name));
     }
   };
+  const open = async (filePath: string): Promise<void> => {
+    if (cancelled()) return;
+    await vscode.commands.executeCommand('erdStudio.openDomain', filePath);
+    // A double-click came meanwhile: its file opens next, so nothing is selected under it.
+    if (cancelled()) return;
+    await reveal(filePath);
+  };
+  const lookingAt = gentle ? deps.lookingAtDiagram?.() : undefined;
   if (entry?.source.kind === 'diagram') {
-    await open(entry.source.filePath);
+    const choice = chooseDiagram([entry.source.filePath], lookingAt);
+    if (choice.kind === 'here') await reveal(choice.filePath);
+    else await open(entry.source.filePath);
     return;
   }
   const tables = entry ? [entry.fromModel, entry.toModel] : [table?.name ?? ''];
@@ -191,10 +270,16 @@ export async function openInDiagram(
   const found = diagramsShowing(shown, { ...deps, usage: () => usage })
     .filter((s) => excluded === undefined || path.resolve(s.filePath) !== path.resolve(excluded));
   const other = excluded !== undefined ? ' other' : '';
-  if (found.length === 0) {
-    if (relationship && options.fallBackToFile) {
-      vscode.window.setStatusBarMessage(`ERD Studio: No diagram shows ${subject} yet, so this is where the relationship is written.`, 8000);
-      await openRelationshipSource(relationship, deps);
+  const choice = chooseDiagram(found.map((s) => s.filePath), lookingAt);
+  if (choice.kind === 'none') {
+    if (options.fallBackToFile && (relationship || node.type === 'model')) {
+      if (relationship) {
+        vscode.window.setStatusBarMessage(noDiagramYetMessage(subject, 'relationship'), 8000);
+        await openRelationshipSource(relationship, deps);
+      } else {
+        vscode.window.setStatusBarMessage(noDiagramYetMessage(subject, 'table'), 8000);
+        await openTableFile(node);
+      }
       return;
     }
     const them = [...new Set(tables.map(normaliseName))].length === 1 ? 'it' : 'them';
@@ -203,27 +288,35 @@ export async function openInDiagram(
       void vscode.window.showInformationMessage(`${message} To add ${them}, open a diagram and use + Add → Add Existing Tables.`);
       return;
     }
-    const choice = await vscode.window.showInformationMessage(`${message} Add ${them} to one?`, ADD_TO_DIAGRAM);
-    if (choice === ADD_TO_DIAGRAM) await deps.addToDiagram(usage.byIdentity ? shown : tables);
+    const answer = await vscode.window.showInformationMessage(`${message} Add ${them} to one?`, ADD_TO_DIAGRAM);
+    if (answer === ADD_TO_DIAGRAM) await deps.addToDiagram(usage.byIdentity ? shown : tables);
     return;
   }
-  let pick = found[0];
-  if (found.length > 1) {
-    // A relationship is saved once, whichever diagram shows it: the last item opens that file instead.
-    const at = entry && entry.source.kind === 'library' ? deps.relationshipLocation(entry.first) : undefined;
-    const fileItem = relationship && at
-      ? [{ label: '$(go-to-file) Open in File', description: `${at.filePath.split(/[\\/]/).slice(-3).join('/')}, line ${at.line}`, summary: undefined }]
-      : [];
-    const choice = await vscode.window.showQuickPick(
-      [...found.map((s) => ({ label: s.domain, description: deps.layerLabel(s.layer), summary: s as SubjectAreaSummary | undefined })), ...fileItem],
-      { placeHolder: `${found.length}${other} diagrams show ${subject}. Open which?` },
-    );
-    if (!choice) return;
-    if (!choice.summary) {
-      await openRelationshipSource(relationship, deps);
-      return;
-    }
-    pick = choice.summary;
+  if (choice.kind === 'here') {
+    // In front of the user already: selected there, the view left where it is unless it is out of sight.
+    await reveal(choice.filePath);
+    return;
   }
-  await open(pick.filePath);
+  if (choice.kind === 'open') {
+    await open(choice.filePath);
+    return;
+  }
+  // Several, none in front: ask, never guess. A relationship is saved once,
+  // whichever diagram shows it: the last item opens that file instead.
+  const at = entry && entry.source.kind === 'library' ? deps.relationshipLocation(entry.first) : undefined;
+  const fileItem = relationship && at
+    ? [{ label: '$(go-to-file) Open in File', description: `${at.filePath.split(/[\\/]/).slice(-3).join('/')}, line ${at.line}`, summary: undefined }]
+    : [];
+  if (cancelled()) return;
+  const picked = await vscode.window.showQuickPick(
+    [...found.map((s) => ({ label: s.domain, description: deps.layerLabel(s.layer), summary: s as SubjectAreaSummary | undefined })), ...fileItem],
+    { placeHolder: `${found.length}${other} diagrams show ${subject}. Open which?` },
+    ...(token ? [token] : []),
+  );
+  if (!picked || cancelled()) return;
+  if (!picked.summary) {
+    await openRelationshipSource(relationship, deps);
+    return;
+  }
+  await open(picked.summary.filePath);
 }

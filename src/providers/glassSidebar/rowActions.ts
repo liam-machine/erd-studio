@@ -5,9 +5,15 @@
  * - **One hover button, then `…`.** A row shows at most one of its `inline`
  *   entries as a hover button: the one that adds or creates (`+`: New
  *   Diagram… on a layer, New Table… on a layer or schema, Add to Open Diagram
- *   on a table), else the first other one (Open in File on a relationship, the
- *   duplicate's fix). A click already opens the row, so the button offers the
- *   next thing you do with it. Delete is never a hover button.
+ *   on a table), else the first other one (Open in File on a relationship
+ *   whose click goes to the diagram, Open in Diagram on one whose click opens
+ *   the file, the duplicate's fix). The button offers the next thing you do
+ *   with the row, never what its click already does (package.json's `when`s
+ *   keep the click's own action off the row). Delete is never a hover button.
+ * - **No `…` that repeats the button.** A row whose menu would hold nothing
+ *   but its hover button's action draws no `…` (`menuRepeatsHover`); its
+ *   right-click and Shift+F10 still open that one-entry menu, so the action
+ *   is reachable from the keyboard (the hover button is not in the tab order).
  * - **One menu order.** Every row's menu is the same verbs in the same order,
  *   one group per verb, separated: open / reveal, then add / create, then
  *   rename / move / edit, then export / copy, then anything else, then delete
@@ -34,7 +40,9 @@ const HOVER_RANK: Readonly<Record<RowVerb, number>> = { create: 0, open: 1, edit
 /** The row commands package.json contributes today, by verb. */
 const VERB_OF_COMMAND: Readonly<Record<string, RowVerb>> = {
   // open / reveal
+  'erdStudio.openTableFile': 'open',
   'erdStudio.openInDiagram': 'open',
+  'erdStudio.showOnAnotherDiagram': 'open',
   'erdStudio.openRelationshipSource': 'open',
   'erdStudio.revealLogicalModel': 'open',
   // add / create
@@ -80,6 +88,8 @@ export interface RowActions {
   inline: MenuAction[];
   /** The context menu: one group per verb, in {@link ROW_VERB_ORDER}. */
   groups: MenuAction[][];
+  /** The menu holds only the hover button's action: the row draws no `…` (right-click still lists it). */
+  menuRepeatsHover?: true;
 }
 
 /**
@@ -109,8 +119,10 @@ export function consistentRowActions(menu: RowMenu, commandOf: (action: MenuActi
   const buckets = new Map<RowVerb, MenuAction[]>(ROW_VERB_ORDER.map((v) => [v, []]));
   for (const a of entries) buckets.get(verbOf(a))!.push(a);
 
+  const repeats = !!hover && entries.length === 1 && (entries[0] === hover || (commandOf(entries[0]) !== undefined && commandOf(entries[0]) === commandOf(hover)));
   return {
     inline: hover ? [hover] : [],
     groups: ROW_VERB_ORDER.map((v) => buckets.get(v)!).filter((g) => g.length > 0),
+    ...(repeats ? { menuRepeatsHover: true as const } : {}),
   };
 }

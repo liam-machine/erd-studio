@@ -13,14 +13,20 @@
  * The line is matched on core's `linkKey` for each column pair, so case and
  * the order of its two ends do not matter. With no such line on the diagram,
  * a toast says so.
+ *
+ * A gentle reveal (`gentle`: a sidebar row's click) keeps the zoom and pans
+ * only when the two tables are not wholly in sight, as little as brings them
+ * in (`revealGently`), instead of fitting the view to them. It waits while
+ * the canvas is behind another tab (`canvasOnScreen`), as `useRevealTable` does.
  */
-import { useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNodesInitialized, useReactFlow } from '@xyflow/react';
 import { linkKey } from '@erd-studio/core';
 import { columnPairs, type FkFlowEdge } from '@erd-studio/renderer/editor';
 import { useEditorStore } from '../store/editorStore';
 import type { RevealRelationshipMessage } from '../../src/types/messages';
 import type { DisplaySubjectArea } from '../../src/types/display';
+import { isBehindAnotherTab, revealGently, type GentleFlow } from '../lib/gentleReveal';
 
 /** The pause after the canvas settles before the reveal's own fit. */
 export const REVEAL_SETTLE_MS = 150;
@@ -60,11 +66,18 @@ function hasNodeForEveryTable(domain: DisplaySubjectArea, nodes: readonly { id: 
 
 export function useRevealRelationship(isLayouting: boolean): void {
   const pending = useEditorStore((s) => s.pendingReveal);
+  const onScreen = useEditorStore((s) => s.canvasOnScreen);
   const domain = useEditorStore((s) => s.domain);
   const nodes = useEditorStore((s) => s.nodes);
   const pendingAutoLayout = useEditorStore((s) => s.pendingAutoLayout);
   const nodesInitialized = useNodesInitialized();
-  const { fitView } = useReactFlow();
+  const flow = useReactFlow();
+  const { fitView } = flow;
+  // The instance at the time the reveal runs (a ref: a new object each render must not restart the wait).
+  const flowRef = useRef(flow);
+  flowRef.current = flow;
+  // Bumped to look again while a gentle reveal waits for its tab to come back (`isBehindAnotherTab`).
+  const [retry, setRetry] = useState(0);
 
   // Only looked at while a reveal waits: the common case costs nothing.
   const settled = !!pending
@@ -73,11 +86,18 @@ export function useRevealRelationship(isLayouting: boolean): void {
     && !pendingAutoLayout
     && !isLayouting
     && nodesInitialized
-    && hasNodeForEveryTable(domain, nodes);
+    && hasNodeForEveryTable(domain, nodes)
+    // A gentle reveal measures what is in sight: never while the tab is behind another (a stand-in size).
+    && (!pending.gentle || onScreen);
 
   useEffect(() => {
     if (!pending || !settled) return;
     const timer = setTimeout(() => {
+      // Behind another tab before the host could say so: kept, and looked at again shortly.
+      if (pending.gentle && isBehindAnotherTab()) {
+        setRetry((n) => n + 1);
+        return;
+      }
       const state = useEditorStore.getState();
       state.setPendingReveal(null);
       const edge = findRevealEdge(state.edges, pending);
@@ -95,8 +115,13 @@ export function useRevealRelationship(isLayouting: boolean): void {
       state.selectNode(null);
       state.setDetailPanelOpen(false);
       state.setSelectedEdge(edge.id);
+      if (pending.gentle) {
+        // The zoom kept; panned only as far as brings both tables into sight.
+        revealGently(flowRef.current as unknown as GentleFlow, [edge.source, edge.target], 'center');
+        return;
+      }
       void fitView({ nodes: [{ id: edge.source }, { id: edge.target }], duration: 300, padding: 0.3 });
     }, REVEAL_SETTLE_MS);
     return () => clearTimeout(timer);
-  }, [pending, settled, fitView]);
+  }, [pending, settled, fitView, retry]);
 }

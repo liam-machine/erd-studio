@@ -226,7 +226,7 @@
       },
       {
         "command": "erdStudio.editLayer",
-        "title": "Edit Layer",
+        "title": "Edit Layer…",
         "category": "ERD Studio"
       },
       {
@@ -329,6 +329,17 @@
         "title": "Open in File",
         "category": "ERD Studio",
         "icon": "$(go-to-file)"
+      },
+      {
+        "command": "erdStudio.openTableFile",
+        "title": "Open File",
+        "category": "ERD Studio",
+        "icon": "$(go-to-file)"
+      },
+      {
+        "command": "erdStudio.showOnAnotherDiagram",
+        "title": "Show on Another Diagram…",
+        "category": "ERD Studio"
       },
       {
         "command": "erdStudio.goToTable",
@@ -954,6 +965,11 @@
     "menus": {
       "view/item/context": [
         {
+          "command": "erdStudio.revealLogicalModel",
+          "when": "view == erdStudio.domainTree && viewItem == domain",
+          "group": "navigation@1"
+        },
+        {
           "command": "erdStudio.exportDiagram",
           "when": "view == erdStudio.domainTree && viewItem == domain",
           "group": "5_export@1"
@@ -1009,43 +1025,58 @@
           "group": "1_new@2"
         },
         {
+          "command": "erdStudio.editLayer",
+          "when": "view == erdStudio.modelLibrary && viewItem == tableLibraryLayer",
+          "group": "7_modification@1"
+        },
+        {
           "command": "erdStudio.addToOpenDiagram",
-          "when": "view == erdStudio.modelLibrary && viewItem == logicalModel",
+          "when": "view == erdStudio.modelLibrary && viewItem =~ /^logicalModel(OnSeveral|Broken)?$/",
           "group": "inline"
         },
         {
-          "command": "erdStudio.openInDiagram",
-          "when": "view == erdStudio.modelLibrary && viewItem == logicalModel",
-          "group": "inline"
-        },
-        {
-          "command": "erdStudio.openInDiagram",
-          "when": "view == erdStudio.modelLibrary && viewItem =~ /^logicalModel(Duplicate|ReadOnly)?$/",
+          "command": "erdStudio.openTableFile",
+          "when": "view == erdStudio.modelLibrary && viewItem =~ /^logicalModel(OnSeveral)?$/",
           "group": "navigation@0"
         },
         {
-          "command": "erdStudio.revealLogicalModel",
-          "when": "view == erdStudio.modelLibrary && viewItem =~ /^logicalModel(Duplicate)?$/",
+          "command": "erdStudio.showOnAnotherDiagram",
+          "when": "view == erdStudio.modelLibrary && viewItem == logicalModelOnSeveral",
           "group": "navigation@1"
         },
         {
-          "command": "erdStudio.addToOpenDiagram",
-          "when": "view == erdStudio.modelLibrary && viewItem == logicalModel",
+          "command": "erdStudio.openInDiagram",
+          "when": "view == erdStudio.modelLibrary && viewItem =~ /^logicalModel(Duplicate|ReadOnly|Broken)$/",
           "group": "navigation@2"
         },
         {
-          "command": "erdStudio.addToDiagram",
-          "when": "view == erdStudio.modelLibrary && viewItem == logicalModel",
+          "command": "erdStudio.revealLogicalModel",
+          "when": "view == erdStudio.modelLibrary && viewItem =~ /^logicalModel(Duplicate|OnSeveral|Broken)?$/",
           "group": "navigation@3"
         },
         {
+          "command": "erdStudio.revealLogicalModel",
+          "when": "view == erdStudio.modelLibrary && viewItem =~ /^(tableLibraryLayer|tableLibrarySchema|logicalModelFolder)$/",
+          "group": "navigation@3"
+        },
+        {
+          "command": "erdStudio.addToOpenDiagram",
+          "when": "view == erdStudio.modelLibrary && viewItem =~ /^logicalModel(OnSeveral|Broken)?$/",
+          "group": "2_add@1"
+        },
+        {
+          "command": "erdStudio.addToDiagram",
+          "when": "view == erdStudio.modelLibrary && viewItem =~ /^logicalModel(OnSeveral|Broken)?$/",
+          "group": "2_add@2"
+        },
+        {
           "command": "erdStudio.moveTable",
-          "when": "view == erdStudio.modelLibrary && viewItem == logicalModel && erdStudio.storage =~ /^(dbml|mixed)$/",
+          "when": "view == erdStudio.modelLibrary && viewItem =~ /^logicalModel(OnSeveral|Broken)?$/ && erdStudio.storage =~ /^(dbml|mixed)$/",
           "group": "7_modification@0"
         },
         {
           "command": "erdStudio.deleteLogicalModel",
-          "when": "view == erdStudio.modelLibrary && viewItem == logicalModel",
+          "when": "view == erdStudio.modelLibrary && viewItem =~ /^logicalModel(OnSeveral|Broken)?$/",
           "group": "7_modification@1"
         },
         {
@@ -1065,17 +1096,17 @@
         },
         {
           "command": "erdStudio.openRelationshipSource",
-          "when": "view == erdStudio.relationships && viewItem == relationship && erdStudio.relationshipsGrouping != file",
+          "when": "view == erdStudio.relationships && viewItem == relationship",
           "group": "inline"
         },
         {
           "command": "erdStudio.openInDiagram",
-          "when": "view == erdStudio.relationships && viewItem == relationship && erdStudio.relationshipsGrouping == file",
+          "when": "view == erdStudio.relationships && viewItem == relationshipInFile",
           "group": "inline"
         },
         {
           "command": "erdStudio.openInDiagram",
-          "when": "view == erdStudio.relationships && viewItem =~ /^(relationship|relationshipsTable)$/",
+          "when": "view == erdStudio.relationships && viewItem =~ /^(relationshipInFile|relationshipsTable)$/",
           "group": "navigation@1"
         },
         {
@@ -1345,6 +1376,14 @@
           "when": "false"
         },
         {
+          "command": "erdStudio.openTableFile",
+          "when": "false"
+        },
+        {
+          "command": "erdStudio.showOnAnotherDiagram",
+          "when": "false"
+        },
+        {
           "command": "erdStudio.goToTable",
           "when": "erdStudio.hasProject"
         },
@@ -1414,6 +1453,14 @@
         },
         {
           "command": "erdStudio.start",
+          "when": "false"
+        },
+        {
+          "command": "erdStudio.revealLogicalModel",
+          "when": "false"
+        },
+        {
+          "command": "erdStudio.deleteLogicalModel",
           "when": "false"
         }
       ],

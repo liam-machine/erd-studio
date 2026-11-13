@@ -161,7 +161,7 @@ import type { YmlData } from '../types/ymlData';
 import type { DiscrepancyReport } from '../types/discrepancy';
 import type { DisplaySubjectArea, DisplayRelationship } from '../types/display';
 import type { Rationale, Cardinality, ColumnDef, DesignTable, Meta, Stage } from '../types/semantic';
-import type { CanvasFrame, CanvasNoticeMessage, DropTablesMessage, LibraryDragEndedMessage, LibraryDragRelease, LibraryDragReleasedMessage, LibraryDragStartedMessage, RevealRelationshipMessage, RevealTableMessage, SelectTablesMessage, UpdateColumnPayloadColumn, UpdateMetaMessage } from '../types/messages';
+import type { CanvasFrame, CanvasNoticeMessage, CanvasVisibilityMessage, DropTablesMessage, LibraryDragEndedMessage, LibraryDragRelease, LibraryDragReleasedMessage, LibraryDragStartedMessage, RevealRelationshipMessage, RevealTableMessage, SelectTablesMessage, UpdateColumnPayloadColumn, UpdateMetaMessage } from '../types/messages';
 import { GO_TO_TABLE_COMMAND, REVEAL_IN_TABLE_LIBRARY_COMMAND, projectRelativePath } from '../commands/goToTable';
 import { MOVE_TABLE_COMMAND } from '../commands/moveDbml';
 import type { GroundTruth } from '../types/syncPlan';
@@ -437,6 +437,8 @@ interface TableAction {
   reveal: string;
   add?: string[];
   files?: string[];
+  /** A reveal only: select gently (no zoom, no detail panel; `RevealTableMessage.gentle`). */
+  gentle?: boolean;
 }
 
 /** Why a chosen dbt model was left out of a batch add, in words. */
@@ -3522,6 +3524,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     const viewStateSubscription = webviewPanel.onDidChangeViewState((e) => {
       telemetry.canvasVisible(panelKey, e.webviewPanel.visible);
       readyWatch.visibility(e.webviewPanel.visible);
+      // A gentle reveal waits for the canvas to be on screen before it measures what is in sight.
+      this.post(webviewPanel.webview, { type: 'canvasVisibility', payload: { visible: e.webviewPanel.visible } } satisfies CanvasVisibilityMessage);
       if (e.webviewPanel.active && this.openPanels.get(panelKey)?.webview === webviewPanel.webview) {
         this.lastActivePanelKey = panelKey;
         // The safety net under the watchers: a canvas that gets the focus checks it still shows its files.
@@ -6889,7 +6893,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
   /**
    * Select and centre one relationship on the canvas of `uri` (the
-   * Relationships view's Open in Diagram). A canvas that has loaded its
+   * Relationships view's Open in Diagram), or with `target.gentle` (a row's
+   * click) select it at the zoom the user has, panning only to bring it into
+   * view. A canvas that has loaded its
    * diagram gets it at once, switched to the logical stage first (the line is
    * a design relationship); one still opening gets it from the `ready`
    * handler, so the caller may ask before or after opening the editor.
@@ -6910,12 +6916,27 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
   /**
    * Select and centre one table, with its detail panel open, on the canvas of
-   * `uri` (Open in Diagram / Go to Table on a table). As
+   * `uri` (Go to Table on a table, the canvas's Show on Other Diagrams…), or,
+   * `gentle` (a sidebar row's click), select it at the zoom the user has,
+   * panning only to bring it into view, with no panel. As
    * {@link revealRelationship}: posted at once to a loaded canvas (switched
    * to the logical stage first), else held until its `ready` has its diagram.
    */
-  async revealTable(uri: vscode.Uri, modelName: string): Promise<void> {
-    await this.runTableAction(uri, { reveal: modelName });
+  async revealTable(uri: vscode.Uri, modelName: string, options: { gentle?: boolean } = {}): Promise<void> {
+    await this.runTableAction(uri, { reveal: modelName, ...(options.gentle ? { gentle: true } : {}) });
+  }
+
+  /**
+   * The diagram of the canvas last active, while it is still open and on
+   * screen (a sidebar row's click highlights a table there when the active
+   * editor is not a diagram); undefined otherwise.
+   */
+  lastActiveVisibleDiagramPath(): string | undefined {
+    const key = this.lastActivePanelKey;
+    if (!key || !this.panelOnScreen(key)) return undefined;
+    const entry = this.openPanels.get(key);
+    if (!entry || this.disposedWebviews.has(entry.webview)) return undefined;
+    return entry.document.uri.fsPath;
   }
 
   /**
@@ -7183,7 +7204,10 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         reveal = addedNames[0];
       }
     }
-    this.post(panel.webview, { type: 'revealTable', payload: { modelName: reveal } } satisfies RevealTableMessage);
+    this.post(panel.webview, {
+      type: 'revealTable',
+      payload: { modelName: reveal, ...(action.gentle && !action.add ? { gentle: true } : {}) },
+    } satisfies RevealTableMessage);
     return addedNames;
   }
 
