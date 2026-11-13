@@ -65,6 +65,8 @@ import { ReconnectOverlay } from './components/ReconnectOverlay/ReconnectOverlay
 import { LOADING_STALL_MS, RECONNECT_GRACE_MS, useReconnectWatchdog } from './hooks/useReconnectWatchdog';
 import { useCanvasShortcuts } from './hooks/useCanvasShortcuts';
 import { useLibraryDrop } from './hooks/useLibraryDrop';
+import { useSelectTables } from './hooks/useSelectTables';
+import { ADD_EXISTING_TABLES_LIMIT } from '../src/types/messages';
 import { LibraryDropOverlay } from './components/Canvas/LibraryDropOverlay';
 import { CanvasGuide } from './components/Guide/CanvasGuide';
 import { AreaErrorBoundary } from './components/ErrorBoundary/AreaErrorBoundary';
@@ -240,7 +242,9 @@ function EditorCanvas() {
   // Drops of tables on the canvas (a Shift-drag from the Table Library or the
   // Explorer): the drop handlers, the highlight and the "Hold Shift" hint.
   // A drop that adds nothing (the physical stage) says why, as a notice.
-  const { dropHandlers, dropActive, hintTables, libraryDragStarted, libraryDragEnded } = useLibraryDrop(setNotice);
+  const { dropHandlers, dropActive, hintTables, libraryDragStarted, libraryDragEnded, libraryDragReleased, dropPosted } = useLibraryDrop(setNotice);
+  // A drop's tables, selected where they landed (the view does not move).
+  useSelectTables();
 
   const onMessage = useCallback(
     (msg: ExtensionMessage) => {
@@ -329,6 +333,13 @@ function EditorCanvas() {
           // Shown once the diagram has settled (useRevealTable, in the Toolbar).
           useEditorStore.getState().setPendingTableReveal(msg.payload.modelName);
           break;
+        case 'selectTables':
+          // After a drop on the canvas: select these, no pan, no zoom, no panel (useSelectTables).
+          if (Array.isArray(msg.payload?.modelNames)) {
+            const names = msg.payload.modelNames.filter((n): n is string => typeof n === 'string' && n.length > 0 && n.length <= 512).slice(0, ADD_EXISTING_TABLES_LIMIT);
+            if (names.length > 0) useEditorStore.getState().setPendingTableSelection(names);
+          }
+          break;
         case 'libraryDragStarted':
           // "Hold Shift and drop to add …": an editable logical diagram only (useLibraryDrop).
           if (Array.isArray(msg.payload?.tables)) libraryDragStarted(msg.payload.tables);
@@ -336,6 +347,10 @@ function EditorCanvas() {
         case 'libraryDragEnded':
           // The drag was used up (dropped somewhere, or missed the canvas): the hint goes.
           libraryDragEnded();
+          break;
+        case 'libraryDragReleased':
+          // A glass sidebar drag was let go at a screen point: dropped here at once if it is on this diagram.
+          libraryDragReleased(msg.payload, msg.payload?.frame);
           break;
         case 'feedbackContext':
           useEditorStore
@@ -355,7 +370,7 @@ function EditorCanvas() {
           break;
       }
     },
-    [setError, setDiscrepancyReport, setManifestStale, setSyncPlanGenerated, libraryDragStarted, libraryDragEnded],
+    [setError, setDiscrepancyReport, setManifestStale, setSyncPlanGenerated, libraryDragStarted, libraryDragEnded, libraryDragReleased],
   );
 
   useMessageBus(onMessage, /* sendReadyOnMount */ true);
@@ -845,7 +860,9 @@ function EditorCanvas() {
         onMoveEnd={onMoveEnd}
         onEdgeContextMenu={onEdgeContextMenu}
         {...hoverHandlers}
-        fitView={!shouldSkipFitView}
+        // Off once this canvas has posted a drop: a diagram that opened empty still has its first-open fit
+        // queued, and it would fire on the dropped tables (the view must stay as the user had it).
+        fitView={!shouldSkipFitView && !dropPosted}
         // Leave room for the floating toolbar above the top row of cards.
         fitViewOptions={initialFitRef.current ?? INITIAL_FIT_VIEW_OPTIONS}
         minZoom={0.05}

@@ -150,6 +150,7 @@ export const HANDLER_GROUP: Record<WebviewMessageType, HandlerGroup> = {
   openNotedFile: 'other',
   addRelationshipsImports: 'relationship',
   reloadFromDisk: 'refresh',
+  canvasFrame: 'other',
 };
 
 const HANDLER_FAILED: Record<Exclude<HandlerGroup, 'relationship'>, TelemetryErrorCode> = {

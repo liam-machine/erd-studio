@@ -41,6 +41,8 @@ import * as crypto from 'crypto';
 import * as vscode from 'vscode';
 
 import { log } from '../../services/logger';
+import type { LibraryDragRelease } from '../../types/messages';
+import { validateDragReleasePayload } from '../payloadValidation';
 import { describeFilterOutcome, type FilterNoun, type FilterOutcome } from '../../services/treeSearch';
 import {
   FILTER_DEBOUNCE_MS,
@@ -146,6 +148,13 @@ export interface BridgedDragAndDrop<T = unknown> {
   dragKind?(element: T): string | undefined;
   /** The drag kinds this row takes (from any section). */
   dropKinds?(element: T): readonly string[];
+  /**
+   * A drag from this section was let go outside the sidebar at screen point
+   * `at` (the page's `dragend`), after `handleDrag` has run. The Table
+   * Library's tells the editor provider (`libraryDragReleased`), so a canvas
+   * under that point adds the drag at once.
+   */
+  released?(at: LibraryDragRelease): void;
 }
 
 /** Rows listed eagerly per section before collapsed rows wait to be expanded. */
@@ -215,7 +224,13 @@ export function parseGlassInbound(raw: unknown): Inbound | undefined {
   const isIndex = (v: unknown): v is number => typeof v === 'number' && Number.isInteger(v) && v >= 0 && v < 10000;
   const isId = (v: unknown): v is string => typeof v === 'string' && v.length > 0 && v.length <= MAX_ID_LENGTH;
   if (m.type === 'ready') return { type: 'ready' };
-  if (m.type === 'dragEnd') return { type: 'dragEnd' };
+  if (m.type === 'dragEnd') {
+    // The release point, when the page could say: its eight finite numbers, in range. Anything else is
+    // left out (the drag still ends: a stale drag must never be kept for a later drop).
+    return validateDragReleasePayload(m.at) === null
+      ? { type: 'dragEnd', at: { ...(m.at as LibraryDragRelease) } }
+      : { type: 'dragEnd' };
+  }
   if (m.type === 'sectionsShown') {
     // Section keys only, each a known one: anything else refuses the message.
     if (!Array.isArray(m.open) || m.open.length > GLASS_SECTIONS.length * 4) return undefined;
@@ -282,7 +297,7 @@ export class GlassSidebarProvider implements vscode.WebviewViewProvider, vscode.
    * The drag in progress (from `dragStart` until `drop` or `dragEnd`): its
    * kind and, once the source view's `handleDrag` has run, what it collected.
    */
-  private drag: { kind: string; dataTransfer: Promise<vscode.DataTransfer> } | undefined;
+  private drag: { kind: string; dataTransfer: Promise<vscode.DataTransfer>; dragAndDrop: BridgedDragAndDrop } | undefined;
   /** A reveal asked for before the webview had loaded: run once it is ready. */
   private pendingReveal: { key: GlassSectionKey; element: unknown; options: GlassRevealOptions } | undefined;
   /**
@@ -974,7 +989,13 @@ export class GlassSidebarProvider implements vscode.WebviewViewProvider, vscode.
       return;
     }
     if (msg.type === 'dragEnd') {
+      const drag = this.drag;
       this.drag = undefined;
+      // Let go outside the sidebar: the source view says where, once its handleDrag has run.
+      if (drag && msg.at && drag.dragAndDrop.released) {
+        await drag.dataTransfer;
+        drag.dragAndDrop.released(msg.at);
+      }
       return;
     }
     if (msg.type === 'search') {
@@ -1000,7 +1021,7 @@ export class GlassSidebarProvider implements vscode.WebviewViewProvider, vscode.
           }
           return dataTransfer;
         })();
-        this.drag = { kind, dataTransfer: collected };
+        this.drag = { kind, dataTransfer: collected, dragAndDrop: dnd };
         await collected;
         return;
       }

@@ -26,7 +26,7 @@ import {
 import { TABLE_LIBRARY_DRAG_MIME, TABLE_LIBRARY_NAMES_MIME, TableLibraryDragController, tablesOfDraggedRows } from '../../src/providers/tableLibraryDrag';
 import type { TableLibraryFolderNode, TableLibraryLayerNode, TableLibraryTableNode } from '../../src/providers/ModelLibraryTreeProvider';
 import { DROP_GRID_COLUMNS, dropGridPositions, tableFilesOfDroppedUris, tablesOfDroppedUris, tablesOfTreeDrop } from '../../src/services/tableDrop';
-import { validateDropTablesPayload } from '../../src/providers/payloadValidation';
+import { CANVAS_FRAME_MAX, validateCanvasFramePayload, validateDragReleasePayload, validateDropTablesPayload } from '../../src/providers/payloadValidation';
 import { ADD_EXISTING_TABLES_LIMIT, DROP_TABLES_URI_LIMIT, DROP_TABLES_URI_MAX_LENGTH } from '../../src/types/messages';
 import { NODE_HEIGHT, NODE_WIDTH, PADDING } from '../../src/services/positionService';
 import { SubjectAreaService } from '../../src/services/domainService';
@@ -379,7 +379,7 @@ afterEach(() => {
 });
 
 describe('dropTables', () => {
-  it('adds the dropped table files in one edit, at the drop point, and selects the first', async () => {
+  it('adds the dropped table files in one edit, at the drop point, and selects them without moving the view', async () => {
     const provider = buildProvider(root);
     const { panel, doc } = await loaded(provider);
     await drop(panel, [fileUri(DIM_CUSTOMER), fileUri(DIM_REGION)]);
@@ -391,7 +391,9 @@ describe('dropTables', () => {
     const left = 500 - NODE_WIDTH / 2;
     expect(text).toMatch(new RegExp(`dim_customer ${left} 280\\b`));
     expect(text).toMatch(new RegExp(`dim_region ${left + NODE_WIDTH + PADDING} 280\\b`));
-    expect(posted(panel, 'revealTable')).toEqual([{ type: 'revealTable', payload: { modelName: 'dim_customer' } }]);
+    // Selected where they landed: no revealTable (it centres and zooms, and opens the detail panel).
+    expect(posted(panel, 'selectTables')).toEqual([{ type: 'selectTables', payload: { modelNames: ['dim_customer', 'dim_region'] } }]);
+    expect(posted(panel, 'revealTable')).toEqual([]);
   });
 
   it('with no table file among the URIs, adds the Table Library drag of the last minute, once', async () => {
@@ -459,7 +461,8 @@ describe('dropTables', () => {
     const info = vi.spyOn(vscode.window, 'showInformationMessage');
     await drop(panel, [fileUri(FCT_ORDER)]);
     expect(_appliedEdits).toHaveLength(0);
-    expect(posted(panel, 'revealTable')).toEqual([{ type: 'revealTable', payload: { modelName: 'fct_order' } }]);
+    expect(posted(panel, 'selectTables')).toEqual([{ type: 'selectTables', payload: { modelNames: ['fct_order'] } }]);
+    expect(posted(panel, 'revealTable')).toEqual([]);
     expect(notices(panel)).toEqual(['"fct_order" is already on this diagram.']);
     expect(info).not.toHaveBeenCalled();
     expect(errors(panel)).toEqual([]);
@@ -529,16 +532,18 @@ describe('dropTables', () => {
     await drop(panel, [fileUri(FCT_ORDER), fileUri(DIM_REGION)]);
     expect(_appliedEdits).toHaveLength(0);
     expect(notices(panel)).toEqual(['These 2 tables are already on this diagram.']);
-    expect(posted(panel, 'revealTable')).toEqual([{ type: 'revealTable', payload: { modelName: 'fct_order' } }]);
+    expect(posted(panel, 'selectTables')).toEqual([{ type: 'selectTables', payload: { modelNames: ['fct_order', 'dim_region'] } }]);
+    expect(posted(panel, 'revealTable')).toEqual([]);
   });
 
-  it('adds the new ones of a mix, names the one already there on the canvas, and selects the first new one', async () => {
+  it('adds the new ones of a mix, names the one already there on the canvas, and selects the new ones without moving the view', async () => {
     const provider = buildProvider(root);
     const { panel, doc } = await loaded(provider);
     await drop(panel, [fileUri(FCT_ORDER), fileUri(DIM_REGION)]);
     expect(_appliedEdits).toHaveLength(1);
     expect(doc.getText()).toContain('use { table gold.dim_region }');
-    expect(posted(panel, 'revealTable')).toEqual([{ type: 'revealTable', payload: { modelName: 'dim_region' } }]);
+    expect(posted(panel, 'selectTables')).toEqual([{ type: 'selectTables', payload: { modelNames: ['dim_region'] } }]);
+    expect(posted(panel, 'revealTable')).toEqual([]);
     expect(notices(panel)).toEqual(['Added 1 table. Already on this diagram: fct_order.']);
   });
 
@@ -666,5 +671,106 @@ describe('noteLibraryDrag', () => {
     const { panel } = await loaded(provider);
     provider.noteLibraryDrag([]);
     expect(posted(panel, 'libraryDragStarted')).toEqual([]);
+  });
+});
+
+describe('libraryDragReleased (a glass sidebar drag let go outside the sidebar)', () => {
+  const frame = { originX: 300, originY: 120, scale: 1, windowX: 40, windowY: 40, width: 1000, height: 700, pixelRatio: 2 };
+  const release = { x: 520, y: 449, refX: 30, refY: 40, refScreenX: 118, refScreenY: 148, windowX: 40, windowY: 40 };
+  const column = (panel: Panel, n: number | undefined) => { (panel as unknown as { viewColumn?: number }).viewColumn = n; };
+
+  it('tells each loaded logical canvas on screen then and now, with the last frame its editor group reported', async () => {
+    const provider = buildProvider(root);
+    const staging = await loaded(provider, STAGING);
+    const sales = await loaded(provider, SALES);
+    column(staging.panel, 1);
+    column(sales.panel, 2);
+    // Staging's group reported where it sits; the sales group did not.
+    await staging.panel._simulateMessage({ type: 'canvasFrame', payload: frame });
+    provider.noteLibraryDrag(['dim_region'], [at(DIM_REGION)]);
+    provider.libraryDragReleased(release);
+    expect(posted(staging.panel, 'libraryDragReleased')).toEqual([{ type: 'libraryDragReleased', payload: { ...release, frame } }]);
+    expect(posted(sales.panel, 'libraryDragReleased')).toEqual([{ type: 'libraryDragReleased', payload: release }]);
+    // Nothing is added by the release itself: the canvas's afterDrag drop does that, once.
+    expect(_appliedEdits).toHaveLength(0);
+    await dragEndedOver(staging.panel);
+    await dragEndedOver(sales.panel);
+    expect(_appliedEdits).toHaveLength(1);
+    expect(staging.doc.getText()).toContain('use { table gold.dim_region }');
+  });
+
+  it('tells no one with no drag waiting (used up, stale), and skips a canvas off screen or on the physical stage', async () => {
+    const provider = buildProvider(root);
+    const staging = await loaded(provider, STAGING);
+    const sales = await loaded(provider, SALES);
+    provider.libraryDragReleased(release);
+    expect(posted(staging.panel, 'libraryDragReleased')).toEqual([]);
+    const now = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(now);
+    provider.noteLibraryDrag(['dim_region']);
+    clock.mockReturnValue(now + PENDING_LIBRARY_DRAG_MS + 1);
+    provider.libraryDragReleased(release);
+    clock.mockRestore();
+    expect(posted(staging.panel, 'libraryDragReleased')).toEqual([]);
+    // Sales was hidden when the drag started; staging shows the physical stage.
+    (sales.panel as unknown as { visible: boolean }).visible = false;
+    provider.noteLibraryDrag(['dim_region']);
+    (sales.panel as unknown as { visible: boolean }).visible = true;
+    const panels = (provider as unknown as { openPanels: Map<string, { activeStage: string; webview: unknown }> }).openPanels;
+    [...panels.values()].find((p) => p.webview === staging.panel.webview)!.activeStage = 'physical';
+    provider.libraryDragReleased(release);
+    expect(posted(sales.panel, 'libraryDragReleased')).toEqual([]);
+    (sales.panel as unknown as { visible: boolean }).visible = true;
+    [...panels.values()].find((p) => p.webview === staging.panel.webview)!.activeStage = 'logical';
+    provider.libraryDragReleased({ ...release, x: Number.NaN });
+    expect(posted(staging.panel, 'libraryDragReleased')).toEqual([]);
+    expect(posted(sales.panel, 'libraryDragReleased')).toEqual([]);
+  });
+
+  it('keeps only a well-formed canvasFrame, per editor group, and on the physical stage too (it writes nothing)', async () => {
+    const provider = buildProvider(root);
+    const { panel } = await loaded(provider, STAGING);
+    column(panel, 3);
+    await panel._simulateMessage({ type: 'canvasFrame', payload: { ...frame, originX: 'x' } });
+    await panel._simulateMessage({ type: 'canvasFrame', payload: { ...frame, extra: 1 } });
+    const frames = (provider as unknown as { canvasFrames: Map<number, unknown> }).canvasFrames;
+    expect(frames.size).toBe(0);
+    const panels = (provider as unknown as { openPanels: Map<string, { activeStage: string }> }).openPanels;
+    [...panels.values()][0].activeStage = 'physical';
+    await panel._simulateMessage({ type: 'canvasFrame', payload: frame });
+    expect(errors(panel)).toEqual([]);
+    expect(frames.get(3)).toEqual(frame);
+  });
+});
+
+describe('validateCanvasFramePayload', () => {
+  const frame = { originX: -12.5, originY: 80, scale: 1.2, windowX: 0, windowY: -900, width: 1200, height: 800, pixelRatio: 2.4 };
+  it('takes exactly its eight finite numbers, in range', () => {
+    expect(validateCanvasFramePayload(frame)).toBeNull();
+  });
+  it('refuses anything else', () => {
+    expect(validateCanvasFramePayload(null)).not.toBeNull();
+    expect(validateCanvasFramePayload([1, 2])).not.toBeNull();
+    expect(validateCanvasFramePayload({ ...frame, width: undefined })).not.toBeNull();
+    expect(validateCanvasFramePayload({ ...frame, path: '/etc' })).not.toBeNull();
+    expect(validateCanvasFramePayload({ ...frame, originX: '1' })).not.toBeNull();
+    expect(validateCanvasFramePayload({ ...frame, originY: Number.POSITIVE_INFINITY })).not.toBeNull();
+    expect(validateCanvasFramePayload({ ...frame, windowX: CANVAS_FRAME_MAX + 1 })).not.toBeNull();
+    expect(validateCanvasFramePayload({ ...frame, height: 0 })).not.toBeNull();
+    expect(validateCanvasFramePayload({ ...frame, scale: 0 })).not.toBeNull();
+    expect(validateCanvasFramePayload({ ...frame, pixelRatio: 17 })).not.toBeNull();
+  });
+});
+
+describe('validateDragReleasePayload', () => {
+  const release = { x: 520.5, y: 449, refX: 30, refY: 40, refScreenX: 118, refScreenY: 148, windowX: 40, windowY: -1000 };
+  it('takes exactly its eight finite numbers, in range, and nothing else', () => {
+    expect(validateDragReleasePayload(release)).toBeNull();
+    expect(validateDragReleasePayload({ ...release, x: '1' })).not.toBeNull();
+    expect(validateDragReleasePayload({ ...release, y: Number.NaN })).not.toBeNull();
+    expect(validateDragReleasePayload({ ...release, refX: CANVAS_FRAME_MAX + 1 })).not.toBeNull();
+    expect(validateDragReleasePayload({ ...release, uri: 'file:///etc' })).not.toBeNull();
+    expect(validateDragReleasePayload({ x: 1, y: 2 })).not.toBeNull();
+    expect(validateDragReleasePayload(undefined)).not.toBeNull();
   });
 });

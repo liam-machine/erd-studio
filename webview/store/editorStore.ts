@@ -179,6 +179,13 @@ export interface EditorState extends CanvasState {
    */
   pendingTableReveal: string | null;
   /**
+   * Tables the host asked to select after a drop on the canvas
+   * (`selectTables`): `useSelectTables` marks them selected once the canvas
+   * draws them, without moving the view or opening the detail panel, then
+   * clears it. Not persisted.
+   */
+  pendingTableSelection: string[] | null;
+  /**
    * Whether the "no compiled dbt artifacts" strip has been dismissed.
    *
    * Session state only — deliberately not persisted. If dbt still has not been
@@ -331,6 +338,8 @@ export interface EditorActions extends CanvasActions {
   setToastMessage: (message: string | null) => void;
   /** Set / clear the relationship to show (see `pendingReveal`). */
   setPendingReveal: (target: RevealRelationshipMessage['payload'] | null) => void;
+  /** Set / clear the tables to select (see `pendingTableSelection`). */
+  setPendingTableSelection: (modelNames: string[] | null) => void;
   /** Set / clear the table to show (see `pendingTableReveal`). */
   setPendingTableReveal: (modelName: string | null) => void;
 }
@@ -404,6 +413,7 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   toastMessage: null,
   pendingReveal: null,
   pendingTableReveal: null,
+  pendingTableSelection: null,
   physicalSourceNoticeDismissed: false,
   manifestMissing: false,
   manifestHintDismissed: false,
@@ -571,6 +581,7 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   setToastMessage: (message) => set({ toastMessage: message }),
   setPendingReveal: (target) => set({ pendingReveal: target }),
   setPendingTableReveal: (modelName) => set({ pendingTableReveal: modelName }),
+  setPendingTableSelection: (modelNames) => set({ pendingTableSelection: modelNames }),
 
   // Full editor reset on a new domain payload. Overrides the canvas slice's
   // setDomain (which only clears the column selection) and must stay last.

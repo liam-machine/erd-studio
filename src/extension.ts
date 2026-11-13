@@ -3375,6 +3375,8 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
         controller: tableLibraryDrag!,
         // A row that carries at least one table: a table (not an ignored duplicate), or a schema or layer with one.
         dragKind: (row) => (tablesOfDraggedRows([row], 1).names.length > 0 ? 'tables' : undefined),
+        // Let go outside the sidebar: the canvas under that point adds the drag at once (not at the pointer's next move).
+        released: (at) => editorProvider.libraryDragReleased(at),
       });
       glassSidebar.setSource('relationships', relationshipsProvider);
       glassSidebar.setSource('help', helpProvider);

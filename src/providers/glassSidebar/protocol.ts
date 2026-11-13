@@ -16,6 +16,8 @@
  * Pure types (plus a few constants): no `vscode` import.
  */
 
+import type { LibraryDragRelease } from '../../types/messages';
+
 // ---------------------------------------------------------------------------
 // Shared shapes
 // ---------------------------------------------------------------------------
@@ -270,8 +272,16 @@ export type GlassWebviewMessage =
   | { type: 'dragStart'; section: GlassSectionKey; ids: string[] }
   /** The drag was let go on this row (its `drop` lists the drag's kind): the host runs that view's own `handleDrop`. */
   | { type: 'drop'; section: GlassSectionKey; id: string }
-  /** The drag is over, wherever it ended (sent after any `drop`). */
-  | { type: 'dragEnd' }
+  /**
+   * The drag is over, wherever it ended (sent after any `drop`). `at`: it was
+   * let go outside the sidebar with no drop taken: the `dragend`'s point in
+   * this page (outside its bounds), one pointer event of the page for
+   * reference (page and screen point) and the window's place
+   * (`LibraryDragRelease`, src/types/messages.ts). Absent when the page cannot
+   * say (or the drag ended in the sidebar). Numbers only; the host passes it
+   * to the canvases, which decide whether it is on their diagram.
+   */
+  | { type: 'dragEnd'; at?: LibraryDragRelease }
   /**
    * The search field's text (debounced as typed; at once when cleared): the
    * host filters every filterable section by it, through the same path the

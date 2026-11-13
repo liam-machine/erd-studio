@@ -3489,7 +3489,8 @@ export const GLASS_SIDEBAR_SCRIPT = String.raw`
     return { section: sectionKey, id: id, cls: cls, mark: mark };
   }
 
-  function endDrag() {
+  // at: where a drag let go outside the sidebar ended, on screen (releasePoint), or nothing.
+  function endDrag(at) {
     if (!drag) return;
     setDragOver(null);
     clearSpring();
@@ -3497,7 +3498,40 @@ export const GLASS_SIDEBAR_SCRIPT = String.raw`
     for (var i = 0; i < rows.length; i++) rows[i].classList.remove('is-dragging');
     document.body.classList.remove('gs-dragging');
     drag = null;
-    post({ type: 'dragEnd' });
+    post(at ? { type: 'dragEnd', at: at } : { type: 'dragEnd' });
+  }
+
+  // The page's last pointer event (page point and screen point) and the
+  // window's place then: the reference a canvas maps a release point by.
+  // Pointer events stop once a drag leaves the sidebar, so the last one
+  // before the drag is it.
+  var pointerRef = null;  // { x, y, sx, sy, wx, wy }
+  function notePointer(ev) {
+    if (isFinite(ev.clientX) && isFinite(ev.clientY) && isFinite(ev.screenX) && isFinite(ev.screenY)) {
+      pointerRef = { x: ev.clientX, y: ev.clientY, sx: ev.screenX, sy: ev.screenY, wx: window.screenX, wy: window.screenY };
+    }
+  }
+  window.addEventListener('pointerdown', notePointer, true);
+  window.addEventListener('pointermove', notePointer, true);
+
+  // A drag let go outside the sidebar, where no frame took the drop: where,
+  // so the canvas under it can add the drag at once (a canvas gets no pointer
+  // event until the pointer moves again). The dragend's clientX / clientY
+  // are the release point in this page's coordinates (outside its bounds);
+  // its screenX / screenY are not to be trusted (Chromium leaves the frame's
+  // place out), so the page's last pointer event goes with it instead: a
+  // canvas that knows its own place and scale on screen maps the point
+  // through it (screen and page pixels differ by VS Code's zoom). Null when
+  // anything is unknown or the drag ended over the sidebar itself.
+  function releasePoint(ev) {
+    var ref = pointerRef;
+    if (!ref || !ev || window.screenX !== ref.wx || window.screenY !== ref.wy) return null;
+    var x = ev.clientX, y = ev.clientY;
+    if (typeof x !== 'number' || typeof y !== 'number' || !isFinite(x) || !isFinite(y)) return null;
+    if (x >= 0 && y >= 0 && x < window.innerWidth && y < window.innerHeight) return null;
+    var effect = ev.dataTransfer && ev.dataTransfer.dropEffect;
+    if (effect && effect !== 'none') return null;
+    return { x: x, y: y, refX: ref.x, refY: ref.y, refScreenX: ref.sx, refScreenY: ref.sy, windowX: ref.wx, windowY: ref.wy };
   }
 
   /** The drag's picture: the row's icon and label, or for several rows their count, drawn as a small stack. */
@@ -3602,7 +3636,7 @@ export const GLASS_SIDEBAR_SCRIPT = String.raw`
     endDrag();
   });
 
-  document.addEventListener('dragend', endDrag);
+  document.addEventListener('dragend', function (ev) { endDrag(releasePoint(ev)); });
   // The dragged row can be redrawn away mid-drag, and its dragend then reaches nothing:
   // pointer events only come back once the drag is over, so the first one ends it.
   window.addEventListener('pointermove', function () { if (drag) endDrag(); }, true);

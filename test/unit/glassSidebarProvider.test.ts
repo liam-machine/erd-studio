@@ -408,6 +408,44 @@ describe('the glass sidebar\'s drag and drop (the native views\' own controllers
     expect(drags).toHaveLength(3);
   });
 
+  it('a drag let go outside the sidebar: the source view is told the release point once its handleDrag has run, and only then', async () => {
+    const s = await setUp();
+    const order: string[] = [];
+    const released: unknown[] = [];
+    const at = { x: 812, y: 455, refX: 30, refY: 40, refScreenX: 118, refScreenY: 148, windowX: 40, windowY: 40 };
+    let finishDrag: () => void = () => undefined;
+    s.provider.setSource('tables', s.tableTree, {
+      controller: { handleDrag: () => new Promise<void>((resolve) => { finishDrag = () => { order.push('handleDrag done'); resolve(); }; }) },
+      dragKind: () => 'tables',
+      released: (at) => { order.push('released'); released.push(at); },
+    });
+    await new Promise((r) => setTimeout(r, 200));
+    await flush();
+    s.send({ type: 'dragStart', section: 'tables', ids: ['tables:table:dim_customer'] });
+    s.send({ type: 'dragEnd', at });
+    await flush();
+    expect(released).toEqual([]);
+    finishDrag();
+    await flush();
+    expect(order).toEqual(['handleDrag done', 'released']);
+    expect(released).toEqual([at]);
+    // Used up: a second dragEnd, one with no point, or one with no drag says nothing.
+    s.send({ type: 'dragEnd', at });
+    s.send({ type: 'dragStart', section: 'tables', ids: ['tables:table:dim_customer'] });
+    finishDrag();
+    s.send({ type: 'dragEnd' });
+    await flush();
+    expect(released).toHaveLength(1);
+  });
+
+  it('a release point from a section whose bridge has no released handler (Diagrams layers) is ignored', async () => {
+    const { send, drops } = await setUpDnd();
+    send({ type: 'dragStart', section: 'diagrams', ids: ['diagrams:layer:gold'] });
+    send({ type: 'dragEnd', at: { x: 5, y: 5, refX: 1, refY: 1, refScreenX: 2, refScreenY: 2, windowX: 0, windowY: 0 } });
+    await flush();
+    expect(drops).toEqual([]);
+  });
+
   it('logs a handleDrag that throws and carries on: the target view gets an empty drop, nothing reaches the user', async () => {
     const s = await setUp();
     const dropped = vi.fn();
@@ -614,6 +652,12 @@ describe('parseGlassInbound', () => {
     expect(parseGlassInbound({ type: 'drop', section: 'diagrams', id: 'x', uris: ['file:///etc/passwd'] })).toEqual({ type: 'drop', section: 'diagrams', id: 'x' });
     expect(parseGlassInbound({ type: 'drop', section: 'diagrams' })).toBeUndefined();
     expect(parseGlassInbound({ type: 'dragEnd', anything: 1 })).toEqual({ type: 'dragEnd' });
+    // The release point: its eight finite numbers in range, else left out (the drag still ends).
+    const at = { x: -20.5, y: 900, refX: 30, refY: 40, refScreenX: 118, refScreenY: 148, windowX: 40, windowY: 40 };
+    expect(parseGlassInbound({ type: 'dragEnd', at })).toEqual({ type: 'dragEnd', at });
+    for (const bad of [{ ...at, x: '1' }, { x: 1, y: 2 }, { ...at, y: Number.NaN }, { ...at, refX: 1_000_001 }, { ...at, path: '/etc' }, [1, 2], null, 'here']) {
+      expect(parseGlassInbound({ type: 'dragEnd', at: bad })).toEqual({ type: 'dragEnd' });
+    }
   });
 
   it('accepts the six message types and drops everything else', () => {

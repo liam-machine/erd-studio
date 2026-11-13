@@ -249,6 +249,55 @@ describe('the glass sidebar page', () => {
       expect(posted.slice(before)).toEqual([{ type: 'dragEnd' }]);
     });
 
+    /** A pointer event with both its page and screen points (what the page reads where it sits on screen from). */
+    const pointer = (win: Win, el: Element, type: string, client: { x: number; y: number }, screen: { x: number; y: number }) => {
+      el.dispatchEvent(new win.MouseEvent(type, { bubbles: true, clientX: client.x, clientY: client.y, screenX: screen.x, screenY: screen.y }));
+    };
+    /** A dragend at a page point (outside the page when let go over a canvas), with the drop effect the browser reports. */
+    const dragendAt = (win: Win, el: Element, x: number, y: number, dropEffect = 'none') => {
+      const ev = new win.MouseEvent('dragend', { bubbles: true, clientX: x, clientY: y, screenX: 1, screenY: 1 });
+      Object.defineProperty(ev, 'dataTransfer', { value: { ...transfer(), dropEffect } });
+      el.dispatchEvent(ev);
+    };
+
+    it('says where a drag let go outside the sidebar ended: the dragend\'s page point and the page\'s last pointer event, never the dragend\'s screenX', () => {
+      const { win, posted } = load();
+      sendState(win, diagramsAndTables());
+      const a = rowEl(win, 'tables:a')!;
+      // The page sits at (48, 68) on screen: its pointer events say so.
+      pointer(win, a, 'pointerdown', { x: 30, y: 40 }, { x: 78, y: 108 });
+      fire(win, a, 'dragstart');
+      const before = posted.length;
+      // Let go over the canvas, right of the sidebar: 520 px past the page's left edge.
+      dragendAt(win, a, 1520, 449);
+      // The page point as the dragend gave it, the pointer event it is mapped by, and the window's place.
+      expect(posted.slice(before)).toEqual([{ type: 'dragEnd', at: { x: 1520, y: 449, refX: 30, refY: 40, refScreenX: 78, refScreenY: 108, windowX: 0, windowY: 0 } }]);
+    });
+
+    it('says nothing of where when the drag ended in the sidebar, something took the drop, the window moved, or the page never saw the pointer', () => {
+      const { win, posted } = load();
+      sendState(win, diagramsAndTables());
+      const a = rowEl(win, 'tables:a')!;
+      const before = posted.length;
+      // Never saw a pointer event: its place on screen is unknown.
+      fire(win, a, 'dragstart');
+      dragendAt(win, a, 1520, 449);
+      pointer(win, a, 'pointermove', { x: 30, y: 40 }, { x: 78, y: 108 });
+      // Let go inside the page (over the sidebar).
+      fire(win, a, 'dragstart');
+      dragendAt(win, a, 100, 200);
+      // A frame took the drop (an effect other than none).
+      fire(win, a, 'dragstart');
+      dragendAt(win, a, 1520, 449, 'copy');
+      // The window moved since the page last saw the pointer.
+      fire(win, a, 'dragstart');
+      Object.defineProperty(win, 'screenX', { value: 300, configurable: true });
+      dragendAt(win, a, 1520, 449);
+      expect(posted.slice(before).filter((m) => (m as { type: string }).type === 'dragEnd')).toEqual([
+        { type: 'dragEnd' }, { type: 'dragEnd' }, { type: 'dragEnd' }, { type: 'dragEnd' },
+      ]);
+    });
+
     it('draws a move within one tree as a line on the edge the row will sit at, under an open row\'s whole group', () => {
       const { win } = load();
       sendState(win, diagramsAndTables());
