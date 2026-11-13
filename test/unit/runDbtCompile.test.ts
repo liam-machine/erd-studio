@@ -10,8 +10,10 @@ import * as vscode from 'vscode';
 import { _resetDbtFlowsForTests } from '../../src/commands/dbtCandidate';
 import { _resetDbtRunsForTests, type runDbtInTerminal } from '../../src/commands/dbtTerminal';
 import { COMPILE_OK_MESSAGE, DBT_COMPILE_NOT_FOUND_MESSAGE, runDbtCompile, type RunDbtCompileDeps } from '../../src/commands/runDbtCompile';
-import { DBT_BUSY_MESSAGE, RUN_DBT_DEPS_ACTION } from '../../src/commands/runDbtParse';
-import type { DbtCandidate } from '../../src/services/dbtEnv';
+import { DBT_BUSY_MESSAGE, DBT_INSTALL_ACTION, RUN_DBT_DEPS_ACTION } from '../../src/commands/runDbtParse';
+import { TRY_AGAIN_BUTTON } from '../../src/services/commandErrors';
+import { couldNotStartNotice } from '../../src/services/dbtRunMessages';
+import { displayPath, type DbtCandidate } from '../../src/services/dbtEnv';
 import { LOG_ARGS, type DbtCommandKind, type DbtRunMode, type DbtSpawnPlan } from '../../src/services/dbtLaunch';
 import type { DbtProcessResult } from '../../src/services/dbtProcess';
 import { telemetry } from '../../src/services/telemetryService';
@@ -147,6 +149,28 @@ describe('runDbtCompile', () => {
     if (key === 'dbtCompileExitOk') expect(shown.at(-1)?.message).toBe(COMPILE_OK_MESSAGE);
     // No per-category telemetry for compile.
     expect(feature.mock.calls.some(([k]) => String(k).startsWith('dbtParseFail'))).toBe(false);
+  });
+
+  it('#296: compile and its dbt deps say why dbt did not start in the same words as parse, and Try Again runs compile again', async () => {
+    const shown = answer({ 'This project uses dbt packages': RUN_DBT_DEPS_ACTION, 'ERD Studio couldn\'t start': TRY_AGAIN_BUTTON });
+    const d = deps({ candidates: () => [onPath] });
+    const expected = couldNotStartNotice('ENOENT', { shown: displayPath(onPath.executable, ROOT), executable: onPath.executable, executableExists: false });
+
+    const start = await runDbtCompile(ROOT, d);
+    d.calls[0].finish({ outcome: 'notStarted', exitCode: null, startError: 'ENOENT' });
+    await start.settled;
+    expect(shown.at(-1)).toEqual({ message: expected.message, items: [TRY_AGAIN_BUTTON, DBT_INSTALL_ACTION] });
+    await vi.waitFor(() => expect(d.calls).toHaveLength(2), { timeout: 500 });
+    expect(d.calls[1].kind).toBe('compile');
+
+    // The retried compile needs packages; dbt deps then does not start either.
+    d.calls[1].finish({ exitCode: 2, tail: OUT.G_packages });
+    await vi.waitFor(() => expect(d.calls).toHaveLength(3), { timeout: 500 });
+    expect(d.calls[2].kind).toBe('deps');
+    d.calls[2].finish({ outcome: 'notStarted', exitCode: null, startError: 'ENOENT' });
+    await vi.waitFor(() => expect(d.calls).toHaveLength(4), { timeout: 500 });
+    expect(shown.filter((m) => m.message === expected.message)).toHaveLength(2);
+    expect(d.calls[3].kind).toBe('compile'); // Try Again after deps runs the command that offered it, from the click
   });
 
   it('a failure never offers Parse without your credentials', async () => {

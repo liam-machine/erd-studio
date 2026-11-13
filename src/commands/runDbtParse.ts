@@ -40,6 +40,13 @@ import {
   throwawayProfileYaml,
   type ThrowawayAdapter,
 } from '../services/dbtAdapters';
+import {
+  feedbackPrefill,
+  SEND_FEEDBACK_BUTTON,
+  showErrorWithActions,
+  TRY_AGAIN_BUTTON,
+  type ErrorActions,
+} from '../services/commandErrors';
 import { displayPath, isUntrustedProjectExecutable, type DbtCandidate } from '../services/dbtEnv';
 import {
   classifyDbtFailure,
@@ -53,8 +60,9 @@ import {
   profileUnreadable,
   type DbtFailureAction,
 } from '../services/dbtFailure';
-import { planDbtSpawn, THROWAWAY_PROFILE_DIR_NAME, type DbtRunMode } from '../services/dbtLaunch';
+import { planDbtSpawn, THROWAWAY_PROFILE_DIR_NAME, type DbtCommandKind, type DbtRunMode } from '../services/dbtLaunch';
 import type { DbtProcessResult } from '../services/dbtProcess';
+import { couldNotStartNotice, profileWriteNotice, type DbtNotice, type DbtNoticeAction } from '../services/dbtRunMessages';
 import { defaultDbtProjectConfig, manifestDisplayPath, resolveManifestPath, type DbtProjectConfig } from '../services/dbtProjectConfig';
 import { log } from '../services/logger';
 import { readTextStart } from '../services/readFileStart';
@@ -108,7 +116,6 @@ export const PARSE_NO_CREDS_OK_MESSAGE =
   'dbt parsed your project without your credentials. The Physical view shows your models\' columns and tests; schema names are left out because they came from placeholder connection details.';
 export const NO_CREDS_UNSUPPORTED_MESSAGE =
   'Parse without your credentials needs one of these dbt adapters installed with dbt: DuckDB, Postgres, Redshift, Snowflake, Databricks, BigQuery, Microsoft Fabric, SQL Server, Trino or Spark.';
-export const PROFILE_WRITE_FAILED_MESSAGE = 'ERD Studio couldn\'t write its placeholder dbt profile.';
 export const DEPS_FAILED_MESSAGE = 'dbt deps failed. The output shows why; it needs a network connection to download packages.';
 
 const ACTION_LABELS: Record<DbtFailureAction, string> = {
@@ -212,18 +219,65 @@ export function showDbtBusy(root: string, key: TelemetryFeature = 'dbtParseBusy'
   void vscode.window.showInformationMessage(running ? DBT_BUSY_MESSAGE : DBT_STARTING_MESSAGE);
 }
 
-/** M3: the executable could not be started (`startError`) or quoted (`refused`). */
-export function showCouldNotStart(executable: string, root: string, startError: string | 'refused'): void {
-  if (startError === 'refused') {
-    void vscode.window.showErrorMessage(
-      `ERD Studio couldn't start ${displayPath(executable, root)}: a path it needs can't be passed to cmd.exe safely.`,
-    );
-    return;
-  }
-  void vscode.window.showErrorMessage(
-    `ERD Studio couldn't start ${displayPath(executable, root)} (${startError}).`,
-    DBT_INSTALL_ACTION,
-  ).then((pick) => { if (pick === DBT_INSTALL_ACTION) openUrl(GETTING_STARTED_EXTERNAL_URLS.dbtInstallDocs); });
+const NOTICE_LABELS: Record<DbtNoticeAction, string> = {
+  tryAgain: TRY_AGAIN_BUTTON,
+  sendFeedback: SEND_FEEDBACK_BUTTON,
+  installDocs: DBT_INSTALL_ACTION,
+  profileDocs: PROFILE_DOCS_ACTION,
+};
+
+/**
+ * Show a `dbtRunMessages.ts` notice as an error, never awaited (see
+ * `claimDbtFlow`): `run` gives Try Again and Send Feedback their action; an
+ * action with none is left off.
+ */
+function showDbtNotice(notice: DbtNotice, run: Partial<Record<DbtNoticeAction, () => unknown>>): void {
+  const all: Partial<Record<DbtNoticeAction, () => unknown>> = {
+    installDocs: () => openUrl(GETTING_STARTED_EXTERNAL_URLS.dbtInstallDocs),
+    profileDocs: () => openUrl(DBT_DOCS_URLS.profiles),
+    ...run,
+  };
+  const actions: ErrorActions = Object.fromEntries(
+    notice.actions.flatMap((a) => { const act = all[a]; return act ? [[NOTICE_LABELS[a], act]] : []; }),
+  );
+  showErrorWithActions((m, ...items) => vscode.window.showErrorMessage(m, ...items), notice.message, actions, (_choice, err) => recordDbtRunFailure(err));
+}
+
+export interface CouldNotStartContext {
+  /** The dbt command that did not start, for Send Feedback's report. */
+  kind: DbtCommandKind;
+  /** Try Again: the command again from the click, so dbt is looked for again. */
+  retry?: () => unknown;
+  /** The placeholder profile folder, for a Parse without your credentials run (it can be what was refused). */
+  profilesDir?: string;
+  /** Test seam: the file is there. */
+  isFile?: (p: string) => boolean;
+}
+
+/**
+ * M3 (#296): the executable could not be started (`startError`, a code) or
+ * quoted (`refused`). The words are `couldNotStartNotice`'s; never Show
+ * output: a refused run has no terminal, and a start error's shows only the
+ * code.
+ */
+export function showCouldNotStart(executable: string, root: string, startError: string | 'refused', ctx: CouldNotStartContext): void {
+  const isFile = ctx.isFile ?? defaultFs.isFile;
+  const notice = couldNotStartNotice(startError, {
+    shown: displayPath(executable, root),
+    executable,
+    profilesDir: ctx.profilesDir,
+    profilesDirShown: ctx.profilesDir === undefined ? undefined : displayPath(ctx.profilesDir, root),
+    executableExists: startError === 'ENOENT' && isFile(executable),
+  });
+  const title = `Run dbt ${ctx.kind}`;
+  showDbtNotice(notice, {
+    tryAgain: ctx.retry,
+    // The code only (never a path): the toast leaves it out, the report carries it.
+    sendFeedback: () => vscode.commands.executeCommand(
+      'erdStudio.reportBug',
+      feedbackPrefill(title, 'while starting dbt', new Error(`dbt did not start (${startError})`)),
+    ),
+  });
 }
 
 /** Everything one Run dbt parse click carries through its runs. */
@@ -243,6 +297,15 @@ interface ParseFlow {
   platform: NodeJS.Platform;
   homeDir: string;
   fs: DbtParseFs;
+  /** Run dbt parse again from the click (Try Again after dbt did not start). */
+  again: () => Promise<unknown>;
+}
+
+/** What a Try Again after the placeholder profile was not saved carries over. */
+interface NoCredsRetry {
+  adapter: ThrowawayAdapter;
+  /** The manifest's modification time when the first attempt checked it (undefined: there was none). */
+  manifestMtime: number | undefined;
 }
 
 /**
@@ -334,6 +397,7 @@ async function parseFlow(root: string, opts: RunDbtParseOptions, deps: RunDbtPar
     platform: deps.platform ?? process.platform,
     homeDir: deps.homeDir ?? os.homedir(),
     fs: { ...defaultFs, ...deps.fs },
+    again: () => runDbtParse(root, opts, deps),
   };
   // Only when a supported adapter is installed: otherwise the offer would end at "needs one of these adapters".
   flow.noCredsAvailable = !!host && identity.flavour === 'core-v1'
@@ -361,7 +425,9 @@ function launchParse(flow: ParseFlow, mode: DbtRunMode): DbtParseStart {
   });
   if ('refused' in plan) {
     telemetry.feature('dbtParseNoStart');
-    showCouldNotStart(flow.chosen.executable, flow.root, 'refused');
+    showCouldNotStart(flow.chosen.executable, flow.root, 'refused', {
+      kind: 'parse', retry: flow.again, profilesDir: mode === 'noCreds' ? flow.profilesDir : undefined,
+    });
     return NOT_STARTED;
   }
   // The manifest's modification time before the run: a success must leave a new one, not the old file.
@@ -389,7 +455,9 @@ async function handleParseResult(flow: ParseFlow, mode: DbtRunMode, before: numb
   const hadManifest = before !== undefined;
   if (r.outcome === 'notStarted') {
     telemetry.feature('dbtParseNoStart');
-    showCouldNotStart(flow.chosen.executable, flow.root, r.startError ?? 'unknown');
+    showCouldNotStart(flow.chosen.executable, flow.root, r.startError ?? 'unknown', {
+      kind: 'parse', retry: flow.again, isFile: (p) => flow.fs.isFile(p),
+    });
     return;
   }
   if (r.outcome === 'stopped') {
@@ -465,6 +533,7 @@ async function handleParseResult(flow: ParseFlow, mode: DbtRunMode, before: numb
         root: flow.root, chosen: flow.chosen, mode, profilesDir: flow.profilesDir,
         run: flow.run, env: flow.env, platform: flow.platform, logFlags: takesLogFlags(flow.identity),
         stoppedKey: 'dbtParseStopped', noStartKey: 'dbtParseNoStart', busyKey: 'dbtParseBusy',
+        retry: flow.again,
         then: async () => { await launchParse(flow, mode).settled; },
       }))).settled;
       return;
@@ -517,17 +586,22 @@ async function followUp(flow: ParseFlow, start: () => Promise<DbtParseStart>): P
 /**
  * Parse without your credentials: a placeholder profiles.yml for the
  * project's adapter in ERD Studio's own storage, then `dbt parse` with it.
+ * `retry` is the Try Again after the profile was not saved (#296): the
+ * adapter already picked, and no second Replace question unless the
+ * manifest changed since the user answered the first.
  */
-async function parseWithoutCredentials(flow: ParseFlow): Promise<DbtParseStart> {
+async function parseWithoutCredentials(flow: ParseFlow, retry?: NoCredsRetry): Promise<DbtParseStart> {
   const host = flow.host;
   if (!host) return NOT_STARTED;
-  telemetry.feature('dbtParseNoCreds');
+  if (!retry) telemetry.feature('dbtParseNoCreds');
 
   // A manifest written with a real profile (the user's, or committed / copied from CI) is replaced only if they agree.
   let manifestStart: string | null = null;
+  const manifestMtime = flow.fs.mtimeMs(flow.manifestPath);
   if (flow.fs.existsSync(flow.manifestPath)) {
     try { manifestStart = await flow.fs.readTextStart(flow.manifestPath, 16 * 1024); } catch { manifestStart = null; }
-    if (!manifestStart || !manifestStart.includes(`"${THROWAWAY_MARKER_KEY}"`)) {
+    const agreedAlready = retry !== undefined && retry.manifestMtime !== undefined && retry.manifestMtime === manifestMtime;
+    if (!agreedAlready && (!manifestStart || !manifestStart.includes(`"${THROWAWAY_MARKER_KEY}"`))) {
       const shown = manifestDisplayPath(flow.root, flow.cfg);
       const pick = await vscode.window.showWarningMessage(
         `Replace ${shown}?`,
@@ -541,9 +615,9 @@ async function parseWithoutCredentials(flow: ParseFlow): Promise<DbtParseStart> 
     }
   }
 
-  const adapter = await pickAdapter(flow, manifestStart);
+  const adapter = retry?.adapter ?? await pickAdapter(flow, manifestStart);
   if (!adapter) return NOT_STARTED;
-  telemetry.feature(NO_CREDS_ADAPTER_FEATURES[adapter]);
+  if (!retry) telemetry.feature(NO_CREDS_ADAPTER_FEATURES[adapter]);
 
   const dir = path.join(host.storageDir, THROWAWAY_PROFILE_DIR_NAME, adapter);
   const tmp = path.join(dir, `profiles.yml.${process.pid}.${Date.now()}.tmp`);
@@ -557,7 +631,15 @@ async function parseWithoutCredentials(flow: ParseFlow): Promise<DbtParseStart> 
     const code = (err as NodeJS.ErrnoException)?.code;
     log.warn(`[dbt] placeholder profile not written: ${typeof code === 'string' && /^[A-Z0-9_]{1,32}$/.test(code) ? code : 'unknown'}`);
     try { flow.fs.unlinkSync(tmp); } catch { /* not there */ }
-    void vscode.window.showErrorMessage(PROFILE_WRITE_FAILED_MESSAGE);
+    const again: NoCredsRetry = { adapter, manifestMtime };
+    showDbtNotice(profileWriteNotice(err, { folderShown: displayPath(dir, flow.root, flow.homeDir), platform: flow.platform }), {
+      // Through `followUp`: the project was let go when this attempt ended, so the retry claims it again.
+      tryAgain: () => followUp(flow, () => parseWithoutCredentials(flow, again)),
+      sendFeedback: () => vscode.commands.executeCommand(
+        'erdStudio.reportBug',
+        feedbackPrefill('Parse without your credentials', 'while saving its placeholder dbt profile', err),
+      ),
+    });
     return NOT_STARTED;
   }
   flow.profilesDir = dir;
@@ -626,6 +708,8 @@ export interface DepsRun {
   stoppedKey: TelemetryFeature;
   noStartKey: TelemetryFeature;
   busyKey: TelemetryFeature;
+  /** Try Again when dbt deps did not start: the command that offered it, from its click. */
+  retry?: () => unknown;
   /** Runs after `dbt deps` exits 0 (parse or compile again, with the same dbt and no new prompt). */
   then: () => Promise<void>;
 }
@@ -635,7 +719,7 @@ export async function runDbtDeps(d: DepsRun): Promise<DbtParseStart> {
   const plan = planDbtSpawn(d.chosen, 'deps', d.mode, { root: d.root, env: d.env, platform: d.platform, logFlags: d.logFlags });
   if ('refused' in plan) {
     telemetry.feature(d.noStartKey);
-    showCouldNotStart(d.chosen.executable, d.root, 'refused');
+    showCouldNotStart(d.chosen.executable, d.root, 'refused', { kind: 'deps', retry: d.retry });
     return NOT_STARTED;
   }
   const start = d.run(d.root, 'deps', d.mode, plan);
@@ -650,7 +734,7 @@ export async function runDbtDeps(d: DepsRun): Promise<DbtParseStart> {
   const settled = Promise.resolve(result).then(async (r) => {
     if (r.outcome === 'notStarted') {
       telemetry.feature(d.noStartKey);
-      showCouldNotStart(d.chosen.executable, d.root, r.startError ?? 'unknown');
+      showCouldNotStart(d.chosen.executable, d.root, r.startError ?? 'unknown', { kind: 'deps', retry: d.retry });
       return;
     }
     if (r.outcome === 'stopped') {
