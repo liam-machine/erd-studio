@@ -46,9 +46,6 @@ export function activationFailureCodes(phase: ActivationPhase): TelemetryErrorCo
 /** Project read later than this into activation counts `activationOver10s`. */
 export const SLOW_ACTIVATION_MS = 10_000;
 
-/** How the host's own search for dbt_project.yml ended. */
-export type DbtSearchOutcome = 'ok' | 'timeout' | 'error';
-
 /**
  * Why a search that ended in `error` failed (#304): `findFiles` rejected,
  * the code that sorts what it returned threw, or `findFiles` threw before
@@ -56,7 +53,11 @@ export type DbtSearchOutcome = 'ok' | 'timeout' | 'error';
  */
 export type DbtSearchFailure = 'rejected' | 'sort' | 'threw';
 
-/** What `findHostDbtProjects` returns: paths only when it answered, a reason only when it failed. */
+/**
+ * What `findHostDbtProjects` returns, by how the host's own search for
+ * dbt_project.yml ended: paths only when it answered (`ok`), a reason only
+ * when it failed (`error`).
+ */
 export type DbtSearchResult =
   | { paths: string[]; outcome: 'ok' }
   | { paths?: undefined; outcome: 'timeout' }

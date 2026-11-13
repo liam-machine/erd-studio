@@ -1577,8 +1577,10 @@ And one feature, recorded at activation only:
 Where `dbtSearchFailed` is counted: at activation; once more when activation's
 search timed out and the late retry (a window that opened without dbt lets the
 search finish, for up to 60 s, to point out a deeper project) then failed — a
-window whose activation search already failed retries but never counts twice;
-and each time **Select dbt Project…** runs its own search (no key tells that
+window whose activation search already failed retries but never counts twice
+(versions up to 2.0.4 counted it twice: such a window without dbt recorded
+`dbtSearchFailed` at activation and again when the late retry failed, so
+compare the total per install across that release with care); and each time **Select dbt Project…** runs its own search (no key tells that
 command's failures apart). So `dbtSearchFailed` above
 `dbtSearchFailedWalkFound` means "may have cost the user their project" only
 roughly: the excess also holds a picker's failures, and a late failure belongs

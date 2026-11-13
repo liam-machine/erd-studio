@@ -118,26 +118,39 @@ describe('#304: findHostDbtProjects says why it failed', () => {
 
 describe('#304: the keys are appended', () => {
   const SPLIT = ['dbtSearchFailedRejected', 'dbtSearchFailedSort', 'dbtSearchFailedThrew'];
+  // The last keys before #304's. Checked relative to them, not as the lists'
+  // very end, so a key appended later does not break this test (the full
+  // tails are pinned in telemetryPayload.test.ts).
+  const ERROR_BEFORE = 'layoutFailedLastRungMemory';
+  const FEATURE_BEFORE = 'layoutFallbackRung3';
 
-  it('ERROR_CODES ends with the three reasons, in order; dbtSearchFailed stays', () => {
+  /** The `count` keys right after `before`. */
+  const after = (list: readonly string[], before: string, count: number) => {
+    const at = list.indexOf(before);
+    expect(at, before).toBeGreaterThanOrEqual(0);
+    return list.slice(at + 1, at + 1 + count);
+  };
+
+  it('ERROR_CODES holds the three reasons, in order, appended after the earlier keys; dbtSearchFailed stays', () => {
     const codes = [...ERROR_CODES] as string[];
     expect(codes).toContain('dbtSearchFailed');
-    expect(codes.slice(-3)).toEqual(SPLIT);
+    expect(codes.indexOf('dbtSearchFailed')).toBeLessThan(codes.indexOf(ERROR_BEFORE));
+    expect(after(codes, ERROR_BEFORE, 3)).toEqual(SPLIT);
   });
 
-  it('FEATURES ends with dbtSearchFailedWalkFound', () => {
-    expect(([...FEATURES] as string[]).at(-1)).toBe('dbtSearchFailedWalkFound');
+  it('FEATURES holds dbtSearchFailedWalkFound, appended after the earlier keys', () => {
+    expect(after([...FEATURES] as string[], FEATURE_BEFORE, 1)).toEqual(['dbtSearchFailedWalkFound']);
   });
 
-  it("the Worker's lists end the same way", () => {
+  it("the Worker's lists hold them at the same places", () => {
     const worker = fs.readFileSync(path.join(REPO_ROOT, 'telemetry/src/index.js'), 'utf8');
     const list = (name: string) => {
       const start = worker.indexOf(`const ${name} = [`);
       const end = worker.indexOf('];', start);
       return [...worker.slice(start, end).matchAll(/^\s*'([^']+)',/gm)].map((m) => m[1]);
     };
-    expect(list('ERROR_CODES').slice(-3)).toEqual(SPLIT);
-    expect(list('FEATURES').at(-1)).toBe('dbtSearchFailedWalkFound');
+    expect(after(list('ERROR_CODES'), ERROR_BEFORE, 3)).toEqual(SPLIT);
+    expect(after(list('FEATURES'), FEATURE_BEFORE, 1)).toEqual(['dbtSearchFailedWalkFound']);
   });
 });
 
@@ -171,6 +184,33 @@ describe('#304: activation records the reason, and whether the walk saved the da
       }
     });
   }
+
+  // Controls: WalkFound needs the search to have failed. Without the guard it
+  // would count nearly every dbt window and mean nothing (#304 review).
+  it('a dbt project the search finds (ok): no failure codes and no WalkFound', async () => {
+    fs.cpSync(FIXTURE_ROOT, root, { recursive: true });
+    vi.spyOn(vscode.workspace, 'findFiles').mockResolvedValue([vscode.Uri.file(path.join(root, 'dbt_project.yml'))] as never);
+    const error = vi.spyOn(telemetry, 'error');
+    const feature = vi.spyOn(telemetry, 'feature');
+    await activate(context);
+    await flush();
+    expect(calls(feature)).toContain('activatedDbt');
+    expect(searchCodes(error)).toEqual([]);
+    expect(calls(feature)).not.toContain('dbtSearchFailedWalkFound');
+  });
+
+  it('a dbt project the walk finds while the search never answers (timeout): dbtSearchTimedOut, no failure codes and no WalkFound', async () => {
+    fs.cpSync(FIXTURE_ROOT, root, { recursive: true });
+    vi.spyOn(vscode.workspace, 'findFiles').mockImplementation((() => new Promise(() => {})) as never);
+    const error = vi.spyOn(telemetry, 'error');
+    const feature = vi.spyOn(telemetry, 'feature');
+    await activate(context);
+    await flush();
+    expect(calls(feature)).toContain('activatedDbt');
+    expect(calls(feature)).toContain('dbtSearchTimedOut');
+    expect(searchCodes(error)).toEqual([]);
+    expect(calls(feature)).not.toContain('dbtSearchFailedWalkFound');
+  });
 
   it('a folder without dbt, while findFiles rejects: the failure counts once per window (the late retry adds none), no WalkFound', async () => {
     vi.spyOn(vscode.workspace, 'findFiles').mockRejectedValue(new Error('search refused') as never);
