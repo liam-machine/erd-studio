@@ -125,6 +125,14 @@ export function startDraftTriggerOf(arg: unknown): StartDraftTrigger | undefined
 const QUICK_STARTS: ReadonlySet<StartAction> = new Set<StartAction>(['importSemanticModel', 'importSqlDdl', 'importDbmlFile']);
 
 /**
+ * Whether a start, or a suggested start, is one of the three direct imports
+ * (the suggestions only a look at the folder's files can make).
+ */
+export function isDirectImport(start: StartAction | StartIntent): boolean {
+  return (QUICK_STARTS as ReadonlySet<string>).has(start);
+}
+
+/**
  * The arguments {@link START_ACTION_COMMANDS}[action] runs with from a start:
  * a direct import's quick path, and for it and Import from dbt the draft's
  * trigger (`start` by default, `prompt` for Show Me); none for the others.

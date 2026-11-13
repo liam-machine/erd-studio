@@ -1023,7 +1023,7 @@ a message or a count of tables. A sum over `features` excludes
 **B4 — activation timing, the host dbt search, and why activation failed (by phase).**
 
 - `activationOver10s` — activation took more than 10 s up to the project summary (once a day).
-- `dbtSearchTimedOut` — the host search for a dbt_project.yml timed out.
+- `dbtSearchTimedOut` — the host search for a dbt_project.yml timed out. Since `dbtSearchSkipped` ("Keys added after 2.0.0"), a window whose dbt project already holds ERD data does not wait for the search and never records this key, so its share falls without any search getting faster: read it beside `dbtSearchSkipped`, and judge speed by `activationOver10s`.
 - `activationFailed` (error) — activation threw (the total; one phase code beside it).
 - `activationFailedDiscovery` (error) — activation threw while finding the project.
 - `activationFailedServices` (error) — activation threw while creating the services.
@@ -1572,9 +1572,12 @@ on every version that has them; an older version sends the total alone.
 
 And one feature, recorded at activation only:
 
-- `dbtSearchFailedWalkFound` — the search failed and the bounded walk still found a dbt project (it alone would have opened one), so nothing was lost. A project chosen by `erdStudio.projectPath` or **Select dbt Project…** does not count: only what the walk found.
+- `dbtSearchFailedWalkFound` — the search failed and the bounded walk still found a dbt project (it alone would have opened one), so nothing was lost. A project chosen by `erdStudio.projectPath` or **Select dbt Project…** does not count: only what the walk found. Since #295, also when activation did not wait for the search (`dbtSearchSkipped`) and the search it left running then failed: that window opened the dbt project the walk found, so nothing was lost there either.
 
-Where `dbtSearchFailed` is counted: at activation; once more when activation's
+Where `dbtSearchFailed` is counted: at activation; when activation did not wait
+for the search (`dbtSearchSkipped`, #295) and the search it left running fails
+(with `dbtSearchFailedWalkFound` beside it, since that window's project came
+from the walk); once more when activation's
 search timed out and the late retry (a window that opened without dbt lets the
 search finish, for up to 60 s, to point out a deeper project) then failed — a
 window whose activation search already failed retries but never counts twice
@@ -1591,6 +1594,35 @@ in which a project deeper than the walk would be missed).
 # Why the dbt project search failed, and whether the walk saved the day (installs and counts, last 14 days)
 npx wrangler d1 execute erd-studio-telemetry --remote --command \
   "SELECT 'errors' AS kind, e.key, COUNT(DISTINCT h.install_id) AS installs, SUM(e.value) AS total FROM heartbeats h, json_each(h.errors) e WHERE COALESCE(h.dev, 0) = 0 AND e.key LIKE 'dbtSearchFailed%' AND h.day >= date('now','-14 days') GROUP BY e.key UNION ALL SELECT 'features', f.key, COUNT(DISTINCT h.install_id), SUM(f.value) FROM heartbeats h, json_each(h.features) f WHERE COALESCE(h.dev, 0) = 0 AND f.key = 'dbtSearchFailedWalkFound' AND h.day >= date('now','-14 days') GROUP BY f.key"
+```
+
+**What a slow start was waiting for** (#295, also added after 2.0.4). About a
+quarter of Windows installs on 2.x recorded `activationOver10s`, and the first
+six of them all recorded `dbtSearchTimedOut` too, which could not tell the
+reasons apart: the host's dbt search is capped at 1 s, so it cannot be the 10 s
+itself. These name the stretch that held the longest share of such an
+activation, once a day, beside `activationOver10s`. Only the stretches before
+the measurement can be named: the Watchers, Views, Commands and Prompts phases
+(the `activationFailed*` phases after Services) start after it, so they have
+no key. The search's own stretch is the time spent *waiting* on it; with its
+1 s cap, a long one means the shared extension host thread was busy (another
+extension's start, or our own synchronous work), so its timer ran late too.
+
+- `activationSlowDbtSearch` — the longest stretch of a start over 10 s was the wait on the host's search for a dbt_project.yml: the extension host thread was busy.
+- `activationSlowDiscovery` — the longest stretch was the rest of finding the project, without the folder walk (`activationSlowWalk`) and without the wait on the search: the globalState writes before the search and, after an update with a diagram open, the save-and-reload prompt (it waits for the user, so a slow answer counts here).
+- `activationSlowServices` — the longest stretch was creating the services, up to the project read (reading a large ERD folder).
+
+What the start screen's first timeout cost, and the search activation no
+longer waits for:
+
+- `startLookLateSuggestion` — the start screen's look at the folder ran out of time, the blank-diagram suggestion was shown, and the retry (the next look that answered, with twice the time) found something to import, so the suggestion changed to an import. Decided on that one look only: a later look that finds a file added after it does not count. The retry runs at the next refresh, so a file saved between the timeout and the retry can still count; that should be rare. Read beside `startLookTimeout` (the installs whose first look ran out of time) and `startLookGaveUp`.
+- `dbtSearchSkipped` — activation did not wait for the host's search for a dbt_project.yml: no `erdStudio.projectPath`, no picked project, and the first dbt workspace folder already holds ERD data, so nothing the search could find changes the project that opens (`hostSearchCannotChangeRoot`). The search still runs, off activation's path, to count the workspace's dbt projects for **Select dbt Project**; if it fails, `dbtSearchFailed` and its reason are still recorded (with `dbtSearchFailedWalkFound`), but a timeout is not.
+- `activationSlowWalk` — the longest stretch of a start over 10 s was the synchronous walk of the workspace folders that finds the dbt project (up to 5,000 folders; `resolveWorkspaceProject`, timed on its own). `activationSlowDiscovery` is then the rest of Discovery, without the walk.
+
+```bash
+# What held starts over 10 s, per OS (installs, last 28 days)
+npx wrangler d1 execute erd-studio-telemetry --remote --command \
+  "SELECT h.os, j.key, COUNT(DISTINCT h.install_id) AS installs FROM heartbeats h, json_each(h.features) j WHERE h.day >= date('now','-28 days') AND h.day < date('now') AND COALESCE(h.dev, 0) = 0 AND (j.key LIKE 'activationSlow%' OR j.key IN ('activationOver10s', 'dbtSearchTimedOut', 'dbtSearchSkipped')) GROUP BY h.os, j.key ORDER BY h.os, installs DESC"
 ```
 
 ## The local archive

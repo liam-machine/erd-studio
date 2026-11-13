@@ -688,6 +688,8 @@ describe('allowlists agree with the Worker', () => {
       'majorUpdateNoticeShown', 'majorUpdateNoticeShowMeAround', 'majorUpdateNoticeWhatsNew',
       'layoutFallbackRung2', 'layoutFallbackRung3',
       'dbtSearchFailedWalkFound',
+      'activationSlowDbtSearch', 'activationSlowDiscovery', 'activationSlowServices',
+      'startLookLateSuggestion', 'dbtSearchSkipped', 'activationSlowWalk',
     ]);
     // #262's per-step load codes follow the logged-error ones and close the 2.0.0 error list;
     // what a failed layout was like (after 2.0.4) is appended after them.
@@ -736,6 +738,8 @@ describe('allowlists agree with the Worker', () => {
       'majorUpdateNoticeShown', 'majorUpdateNoticeShowMeAround', 'majorUpdateNoticeWhatsNew',
       'layoutFallbackRung2', 'layoutFallbackRung3',
       'dbtSearchFailedWalkFound',
+      'activationSlowDbtSearch', 'activationSlowDiscovery', 'activationSlowServices',
+      'startLookLateSuggestion', 'dbtSearchSkipped', 'activationSlowWalk',
     ]);
     for (const key of added) expect(section, key).toMatch(new RegExp(`^- \`${key}\` `, 'm'));
     // The error codes appended after the 2.0.0 list (a failed layout's class, size, duration and fallbacks;
