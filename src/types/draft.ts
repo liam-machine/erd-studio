@@ -146,7 +146,7 @@ export type DraftOtherStart = (typeof DRAFT_OTHER_STARTS)[number];
 
 export interface DraftOtherStartItem {
   id: DraftOtherStart;
-  /** `New Diagram…`, `Import…`, `Bring In Your Data Model…`, `Open an Example…`, `Open Folder…`. */
+  /** `New Diagram…`, `Import…`, `Import Your Data Model…`, `Open an Example…`, `Open Folder…`. */
   label: string;
 }
 

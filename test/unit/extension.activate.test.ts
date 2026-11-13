@@ -724,6 +724,19 @@ describe('activate() in a folder without dbt_project.yml (logical-only)', () => 
     expect(warn).not.toHaveBeenCalledWith(expect.stringContaining('Open a folder first'), expect.anything(), expect.anything());
   });
 
+  it('an empty folder: erdStudio.hasTables is false, and Help & Feedback has no import row (the Diagrams view\'s button is first)', async () => {
+    const exec = vi.spyOn(vscode.commands, 'executeCommand');
+    const createTreeView = vi.spyOn(vscode.window, 'createTreeView');
+    await activate(context);
+    expect(exec).toHaveBeenCalledWith('setContext', 'erdStudio.hasTables', false);
+    const help = (createTreeView.mock.calls.find((c) => c[0] === 'erdStudio.help')![1] as {
+      treeDataProvider: { getChildren(): unknown[]; getTreeItem(e: unknown): { label?: unknown } };
+    }).treeDataProvider;
+    const labels = help.getChildren().map((r) => help.getTreeItem(r).label);
+    expect(labels[0]).toBe('Set Up My AI Helper');
+    expect(labels).not.toContain('Import Your Data Model…');
+  });
+
   describe('the empty Diagrams view is counted as seen only when it is on screen (sidebarStartShown)', () => {
     const counted = (spy: ReturnType<typeof vi.spyOn>) => spy.mock.calls.filter((c) => c[0] === 'sidebarStartShown').length;
 
@@ -1099,6 +1112,20 @@ describe('activate() in a native DBML project (S4)', () => {
     const loaded = panel._postedMessages.find((m) => (m as { type: string }).type === 'domainLoaded') as { payload: { schemaVersion: number } };
     expect(loaded.payload.schemaVersion).toBe(7);
     expect(listTree(ws)).toEqual(before);
+  });
+
+  it('a project with diagrams and tables: erdStudio.hasTables is set, and Help & Feedback leads with Import Your Data Model…', async () => {
+    const exec = vi.spyOn(vscode.commands, 'executeCommand');
+    const createTreeView = vi.spyOn(vscode.window, 'createTreeView');
+    await activate(context);
+    expect(exec).toHaveBeenCalledWith('setContext', 'erdStudio.hasTables', true);
+    expect(exec).toHaveBeenCalledWith('setContext', 'erdStudio.hasDiagrams', true);
+    const help = (createTreeView.mock.calls.find((c) => c[0] === 'erdStudio.help')![1] as {
+      treeDataProvider: { getChildren(): unknown[]; getTreeItem(e: unknown): { label?: unknown; command?: unknown } };
+    }).treeDataProvider;
+    const first = help.getTreeItem(help.getChildren()[0]);
+    expect(first.label).toBe('Import Your Data Model…');
+    expect(first.command).toEqual({ command: 'erdStudio.showImportGuide', title: 'Import Your Data Model…', arguments: [{ from: 'sidebar' }] });
   });
 
   describe('the glass sidebar, wired to the real trees (its search, progress and reveals)', () => {
@@ -3497,7 +3524,7 @@ describe('Import…, Import SQL DDL… and Import Semantic Model…', () => {
     expect([...sources].sort()).toEqual(['dbml', 'semanticModel', 'sqlDdl']);
     // The three sources, then the import guide, last.
     expect(items).toHaveLength(4);
-    expect(items[3]).toMatchObject({ guide: true, label: '$(question) Bring In Your Data Model…' });
+    expect(items[3]).toMatchObject({ guide: true, label: '$(question) Import Your Data Model…' });
     expect(feature.mock.calls.map((c) => c[0])).toEqual(['sidebarImport', 'importPickSqlDdl']);
   });
 });
@@ -4281,7 +4308,7 @@ describe('the import guide', () => {
     vscode._resetMockWebviewPanels();
   });
 
-  it('erdStudio.showImportGuide opens the guide in an empty window too, counted with where it came from (a draft\'s Bring In Your Data Model… included)', async () => {
+  it('erdStudio.showImportGuide opens the guide in an empty window too, counted with where it came from (a draft\'s Import Your Data Model… included)', async () => {
     const feature = vi.spyOn(telemetry, 'feature');
     await activate(context);
     expect(count('erdStudio.showImportGuide')).toBe(1);
@@ -4723,7 +4750,7 @@ describe('draft-first (docs/dev/draft-first.md)', () => {
       (command.startsWith('erdStudio.openExample') ? realExecute(command, ...args) : undefined)) as never);
     await activate(context);
     await settle();
-    // The example draft in a folder offers blank, guide (Bring In Your Data Model…) and import; Open an Example… and Open Folder… are unit-tested in draftWiring.test.ts.
+    // The example draft in a folder offers blank, guide (Import Your Data Model…) and import; Open an Example… and Open Folder… are unit-tested in draftWiring.test.ts.
     for (const start of ['blank', 'guide', 'import'] as const) {
       exec.mockClear();
       const run = vscode.commands.executeCommand('erdStudio.openExampleProject');

@@ -9,7 +9,9 @@
  * outside the viewport, so panning never repaints it. The dots and the
  * minimap take their colours from theme tokens (`--canvas-dot`,
  * `--minimap-mask`, `--minimap-view-stroke`); the minimap's glass tile is
- * styled by `.erd-minimap` in theme.css.
+ * styled by `.erd-minimap` in theme.css. Its size follows the canvas
+ * (`lib/canvasChrome.ts`): at most React Flow's 200 × 150, a modest share of
+ * a small canvas, and none on a canvas too small for it to help.
  */
 
 import { Background, BackgroundVariant, MiniMap, useStore, type Node } from '@xyflow/react';
@@ -17,6 +19,7 @@ import { stageNodeColor } from '../lib/stageColors';
 import type { TableFlowNode, AnnotationFlowNode } from '../types/graph';
 import { useEditorStore } from '../store/editorStore';
 import { EdgeRouter, EdgeOverlay, LayerLineColour } from './EdgeRouting';
+import { useCanvasChrome } from './useCanvasChrome';
 
 /** Minimap fill for annotation nodes, keyed by annotation colour. */
 export const ANNOTATION_MINIMAP_COLORS: Record<string, string> = {
@@ -53,14 +56,16 @@ export function CanvasBackdrop() {
   const logicalOnly = useEditorStore((s) => s.logicalOnly) === true;
   // An empty diagram gets no minimap (it would be an empty framed tile).
   const hasNodes = useStore((s) => s.nodes.length > 0);
+  const { minimap } = useCanvasChrome();
   return (
     <>
       <Background variant={BackgroundVariant.Dots} gap={20} size={1.1} color="var(--canvas-dot)" />
       <EdgeRouter />
       <LayerLineColour />
       <EdgeOverlay />
-      {hasNodes && <MiniMap
+      {hasNodes && minimap && <MiniMap
         position="bottom-right"
+        style={{ width: minimap.width, height: minimap.height }}
         pannable
         zoomable
         className="erd-minimap"

@@ -65,6 +65,23 @@ function makeSubjectArea(readOnly: boolean): DisplaySubjectArea {
 
 const flush = () => act(async () => { await new Promise((r) => setTimeout(r, 20)); });
 
+/**
+ * Give React Flow's pane a size (jsdom has no layout: it reads 0 and React
+ * Flow falls back to 500 × 500). Only the pane (`.react-flow__renderer`,
+ * what React Flow measures): the nodes keep jsdom's zero.
+ */
+function stubFlowSize(width: number, height: number): () => void {
+  const proto = HTMLElement.prototype;
+  const w = Object.getOwnPropertyDescriptor(proto, 'offsetWidth')!;
+  const h = Object.getOwnPropertyDescriptor(proto, 'offsetHeight')!;
+  Object.defineProperty(proto, 'offsetWidth', { configurable: true, get(this: HTMLElement) { return this.classList?.contains('react-flow__renderer') ? width : w.get!.call(this); } });
+  Object.defineProperty(proto, 'offsetHeight', { configurable: true, get(this: HTMLElement) { return this.classList?.contains('react-flow__renderer') ? height : h.get!.call(this); } });
+  return () => {
+    Object.defineProperty(proto, 'offsetWidth', w);
+    Object.defineProperty(proto, 'offsetHeight', h);
+  };
+}
+
 async function renderCanvas(readOnly: boolean) {
   const view = render(
     <div style={{ width: 1200, height: 800 }}>
@@ -449,7 +466,7 @@ describe('ErdCanvas — closing the detail panel keeps the table selected', () =
     expect((await openPanel(container, 'products')).querySelector('.detail-panel__title')!.textContent).toBe('products');
   });
 
-  it('clears the selection on a click on the empty canvas', async () => {
+  it('clears the selection on a click on the empty canvas once the panel is closed', async () => {
     const { container } = await renderThree();
     const panel = await openPanel(container, 'orders');
     fireEvent.click(panel.querySelector('.detail-panel__close')!);
@@ -461,19 +478,79 @@ describe('ErdCanvas — closing the detail panel keeps the table selected', () =
     expect(container.querySelector('.model-node--selected')).toBeNull();
   });
 
-  it('clears the selection on Escape, with the panel open or closed', async () => {
+  it('takes two clicks on the empty canvas: the first closes the panel only, the second clears the selection', async () => {
+    const { container } = await renderThree();
+    await openPanel(container, 'orders');
+
+    fireEvent.click(container.querySelector('.react-flow__pane')!);
+    await flush();
+    // Exactly the state the close button leaves: no panel, the table selected, its lines lit.
+    expect(container.querySelector('.detail-panel')).toBeNull();
+    expect(card(container, 'orders').classList.contains('model-node--selected')).toBe(true);
+    expect(card(container, 'customers').classList.contains('model-node--dimmed')).toBe(false);
+    expect(card(container, 'products').classList.contains('model-node--dimmed')).toBe(true);
+
+    // A click on the selected table opens its panel again.
+    expect((await openPanel(container, 'orders')).querySelector('.detail-panel__title')!.textContent).toBe('orders');
+    fireEvent.click(container.querySelector('.react-flow__pane')!);
+    await flush();
+    expect(container.querySelector('.detail-panel')).toBeNull();
+
+    fireEvent.click(container.querySelector('.react-flow__pane')!);
+    await flush();
+    expect(container.querySelector('.model-node--selected')).toBeNull();
+    expect(card(container, 'products').classList.contains('model-node--dimmed')).toBe(false);
+  });
+
+  it('after the first click away, a click on another table selects it and opens its panel', async () => {
+    const { container } = await renderThree();
+    await openPanel(container, 'orders');
+    fireEvent.click(container.querySelector('.react-flow__pane')!);
+    await flush();
+    const panel = await openPanel(container, 'products');
+    expect(panel.querySelector('.detail-panel__title')!.textContent).toBe('products');
+    expect(card(container, 'orders').classList.contains('model-node--selected')).toBe(false);
+    expect(card(container, 'products').classList.contains('model-node--selected')).toBe(true);
+  });
+
+  it('keeps a multi-selection on the first click away, and clears it on the second', async () => {
+    const { container } = await renderThree();
+    await openPanel(container, 'orders');
+    // React Flow reads its multi-selection key from key presses.
+    fireEvent.keyDown(document, { key: 'Shift' });
+    fireEvent.click(tableNode(container, 'products'), { shiftKey: true });
+    fireEvent.keyUp(document, { key: 'Shift' });
+    await flush();
+    expect(container.querySelectorAll('.model-node--selected')).toHaveLength(2);
+
+    fireEvent.click(container.querySelector('.react-flow__pane')!);
+    await flush();
+    expect(container.querySelector('.detail-panel')).toBeNull();
+    expect(container.querySelectorAll('.model-node--selected')).toHaveLength(2);
+
+    fireEvent.click(container.querySelector('.react-flow__pane')!);
+    await flush();
+    expect(container.querySelectorAll('.model-node--selected')).toHaveLength(0);
+  });
+
+  it('takes the same two steps on Escape, with the panel open or closed', async () => {
     const { container } = await renderThree();
     await openPanel(container, 'orders');
     fireEvent.keyDown(tableNode(container, 'orders'), { key: 'Escape' });
     await flush();
     expect(container.querySelector('.detail-panel')).toBeNull();
+    expect(card(container, 'orders').classList.contains('model-node--selected')).toBe(true);
+    expect(card(container, 'products').classList.contains('model-node--dimmed')).toBe(true);
+
+    fireEvent.keyDown(tableNode(container, 'orders'), { key: 'Escape' });
+    await flush();
     expect(container.querySelector('.model-node--selected')).toBeNull();
     expect(card(container, 'products').classList.contains('model-node--dimmed')).toBe(false);
 
     const panel = await openPanel(container, 'orders');
     fireEvent.click(panel.querySelector('.detail-panel__close')!);
     await flush();
-    // The close button is gone, so nothing in the page has the focus.
+    // The close button is gone, so nothing in the page has the focus; the panel is closed already.
     fireEvent.keyDown(document.body, { key: 'Escape' });
     await flush();
     expect(container.querySelector('.model-node--selected')).toBeNull();
@@ -523,15 +600,20 @@ describe('ErdCanvas — closing the detail panel keeps the table selected', () =
     await flush();
     await openPanel(b.container, 'customers');
 
-    // B was used last: only B clears.
+    // B was used last: only B's panel closes, then only B clears.
+    fireEvent.keyDown(document.body, { key: 'Escape' });
+    await flush();
+    expect(b.container.querySelector('.detail-panel')).toBeNull();
+    expect(b.container.querySelector('.model-node--selected')).not.toBeNull();
     fireEvent.keyDown(document.body, { key: 'Escape' });
     await flush();
     expect(card(a.container, 'orders').classList.contains('model-node--selected')).toBe(true);
-    expect(b.container.querySelector('.detail-panel')).toBeNull();
     expect(b.container.querySelector('.model-node--selected')).toBeNull();
 
-    // Back in A: now A clears.
+    // Back in A: now A's panel closes, then A clears.
     fireEvent.click(tableNode(a.container, 'orders'));
+    await flush();
+    fireEvent.keyDown(document.body, { key: 'Escape' });
     await flush();
     fireEvent.keyDown(document.body, { key: 'Escape' });
     await flush();
@@ -596,21 +678,32 @@ describe('ErdCanvas — legend entries for the stage shown', () => {
     expect(legend.querySelector('.legend__swatch')).toBeNull();
     expect(legend.textContent).not.toContain('Line colour follows the stage');
     expect(legend.textContent).not.toContain('Comparing Stages');
-    // What a logical diagram does draw is still explained.
-    expect(legend.querySelectorAll('.legend__items--cardinality .legend__item')).toHaveLength(4);
-    expect(legend.querySelectorAll('.legend__items--flow .legend__item')).toHaveLength(3);
+    // What this diagram draws is explained, and only that: one many-to-one,
+    // its flow, the note, PK and FK (no natural key on it).
+    expect([...legend.querySelectorAll('.legend__items--cardinality .legend__item-desc')].map((e) => e.textContent)).toEqual(['Many-to-one']);
+    expect(legend.querySelectorAll('.legend__items--flow .legend__item')).toHaveLength(1);
     expect(legend.querySelector('.legend__annotation-card')).not.toBeNull();
-    for (const label of ['PK', 'FK', 'NK']) expect(legend.textContent).toContain(label);
+    for (const label of ['PK', 'FK']) expect(legend.textContent).toContain(label);
+    expect(legend.textContent).not.toContain('Natural key');
+    // The viewer has no Shift+? shortcut, so its button names none.
+    fireEvent.click(legend.querySelector('.legend__close')!);
+    await flush();
+    expect(document.querySelector('.legend-toggle__button')!.getAttribute('title')).toBe('Show legend');
     // Not the neutral look: the stage colours are kept.
-    expect(legend.closest('.editor-canvas')!.classList.contains('editor-canvas--neutral')).toBe(false);
-    expect(legend.classList.contains('legend--stage-physical')).toBe(false);
+    expect(document.querySelector('.editor-canvas')!.classList.contains('editor-canvas--neutral')).toBe(false);
   });
 
-  it('a physical diagram: Physical, ghosts and provenance, but no Logical, line-colour or comparison entries', async () => {
-    const legend = await openLegend({ ...makeSubjectArea(true), stage: 'physical' });
+  it('a physical diagram: Physical, its ghosts and provenance, but no Logical, line-colour or comparison entries', async () => {
+    const domain = { ...makeSubjectArea(true), stage: 'physical' as const };
+    domain.models = [
+      { ...domain.models[0], provenance: { columns: ['yml'], types: 'yml' } },
+      { ...domain.models[1], existsInProject: false },
+    ];
+    const legend = await openLegend(domain);
     expect(legend.querySelector('.legend__model-card--physical')).not.toBeNull();
     expect(legend.querySelector('.legend__model-card--ghost')).not.toBeNull();
-    expect(legend.querySelector('.legend__items--sources')).not.toBeNull();
+    expect(legend.querySelector('.legend__model-card--ghost-disabled')).toBeNull();
+    expect(legend.querySelectorAll('.legend__items--sources .legend__item')).toHaveLength(1);
     expect(legend.querySelector('.legend__model-card--logical')).toBeNull();
     expect(legend.textContent).not.toContain('Line colour follows the stage');
     expect(legend.querySelector('.legend__swatch')).toBeNull();
@@ -628,6 +721,7 @@ describe('ErdCanvas — the counts beside the legend', () => {
       { fromModel: 'orders', fromColumn: 'product_version', toModel: 'products', toColumn: 'version', cardinality: 'many-to-one', compositeKey: 'p' },
     ];
     const post = vi.spyOn(NOOP_CANVAS_HOST, 'postMessage');
+    const restore = stubFlowSize(1200, 800);
     const { container } = render(
       <div style={{ width: 1200, height: 800 }}>
         <ErdCanvas domain={domain} />
@@ -648,9 +742,27 @@ describe('ErdCanvas — the counts beside the legend', () => {
     expect(container.querySelector('.status-bar')!.classList.contains('status-bar--beside-legend')).toBe(true);
     expect(post).not.toHaveBeenCalled();
     post.mockRestore();
+    restore();
   });
 
-  it('keeps the counts in one group and the layer key in another, with a divider the viewer hides between them', async () => {
+  it('hides beside the open legend on a canvas with no room for both, and comes back when it closes', async () => {
+    const restore = stubFlowSize(500, 380);
+    try {
+      const { container } = render(<ErdCanvas domain={threeTables()} />);
+      await flush();
+      expect(container.querySelector('.status-bar')).not.toBeNull();
+      fireEvent.click(container.querySelector('.legend-toggle__button')!);
+      await flush();
+      expect(container.querySelector('.status-bar')).toBeNull();
+      fireEvent.click(container.querySelector('.legend__close')!);
+      await flush();
+      expect(container.querySelector('.status-bar')).not.toBeNull();
+    } finally {
+      restore();
+    }
+  });
+
+  it('keeps the counts in one group and the layer key in another, on one line', async () => {
     const domain = threeTables();
     domain.layer = 'gold';
     domain.layerConfigs = [
@@ -658,19 +770,57 @@ describe('ErdCanvas — the counts beside the legend', () => {
       { id: 'gold', label: 'Gold', abbreviation: 'GLD', color: '#d4a800', order: 2, creatable: true },
     ] as never;
     domain.models = domain.models.map((m, i) => ({ ...m, layer: i === 0 ? 'silver' : 'gold' }));
+    const restore = stubFlowSize(1200, 800);
     const { container } = render(
-      <div style={{ width: 760, height: 600 }}>
+      <div style={{ width: 1200, height: 800 }}>
         <ErdCanvas domain={domain} />
       </div>,
     );
     await flush();
+    restore();
     const bar = container.querySelector('.status-bar')!;
     const counts = bar.querySelector(':scope > .status-bar__counts')!;
     expect([...counts.querySelectorAll('.status-bar__item')].map((i) => i.textContent)).toEqual(['3 tables', '1 relationship']);
     expect(counts.querySelector('.status-bar__divider')).not.toBeNull();
     expect(bar.querySelector(':scope > .status-bar__divider--layers')).not.toBeNull();
     expect(bar.querySelector(':scope > .status-bar__layers')!.querySelectorAll('.status-bar__layer')).toHaveLength(2);
-    // The canvas root is the size container the bar's narrow-canvas rule queries.
-    expect((container.querySelector('.editor-canvas') as HTMLElement).style.containerType).toBe('inline-size');
+    expect(bar.getAttribute('data-fit')).toBe('full');
+  });
+});
+
+describe('ErdCanvas — the minimap follows the canvas size', () => {
+  async function minimapAt(width: number, height: number) {
+    const restore = stubFlowSize(width, height);
+    try {
+      const { container } = render(<ErdCanvas domain={threeTables()} />);
+      await flush();
+      const svg = container.querySelector('.react-flow__minimap svg');
+      return svg ? { width: Number(svg.getAttribute('width')), height: Number(svg.getAttribute('height')) } : null;
+    } finally {
+      restore();
+      cleanup();
+    }
+  }
+
+  it('today\'s 200 × 150 on a big canvas, smaller in a short embedded frame, none on a tiny one', async () => {
+    expect(await minimapAt(1600, 1000)).toEqual({ width: 200, height: 150 });
+    const inline = (await minimapAt(760, 380))!;
+    expect(inline.width).toBeLessThan(140);
+    expect(inline.height).toBeLessThan(100);
+    expect(await minimapAt(420, 380)).toBeNull();
+  });
+
+  it('gives the detail panel the room a smaller minimap leaves', async () => {
+    const restore = stubFlowSize(760, 380);
+    try {
+      const { container } = render(<ErdCanvas domain={threeTables()} />);
+      await flush();
+      const panel = await openPanel(container, 'orders');
+      const reserve = parseInt(panel.style.getPropertyValue('--detail-panel-bottom-reserve'), 10);
+      expect(reserve).toBeLessThan(15 + 150 + 10);
+      expect(reserve).toBeGreaterThanOrEqual(15 + 28 + 10);
+    } finally {
+      restore();
+    }
   });
 });

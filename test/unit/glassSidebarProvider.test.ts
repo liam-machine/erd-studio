@@ -278,10 +278,16 @@ describe('the glass sidebar bridge', () => {
     await flush();
     const d = section(v.posted, 'diagrams');
     expect(d.nodes).toEqual([]);
-    const entry = d.welcome.find((w) => w.paragraphs.some((p) => p.parts.some((part) => part.kind === 'text' && part.text.startsWith('No diagrams yet'))))!;
+    const entry = d.welcome.find((w) => w.paragraphs.some((p) => p.parts.some((part) => part.kind === 'text' && part.text.startsWith('No diagrams or tables yet'))))!;
+    // An empty project: the one button is Import Your Data Model…, New Diagram… a quiet link under it.
     const button = entry.paragraphs.find((p) => p.button)!.parts[0] as { kind: 'link'; label: string; link: number };
-    expect(button.label).toBe('New Diagram…');
+    expect(button.label).toBe('Import Your Data Model…');
     v.send({ type: 'welcomeLink', section: 'diagrams', entry: entry.entry, link: button.link });
+    await flush();
+    expect(exec).toHaveBeenCalledWith('erdStudio.showImportGuide', { from: 'sidebar' });
+    exec.mockClear();
+    const blank = entry.paragraphs.flatMap((p) => p.parts).find((part) => part.kind === 'link' && part.label === 'New Diagram…') as { kind: 'link'; link: number };
+    v.send({ type: 'welcomeLink', section: 'diagrams', entry: entry.entry, link: blank.link });
     await flush();
     expect(exec).toHaveBeenCalledWith('erdStudio.start', { action: 'blank', from: 'sidebar' });
     // An entry whose when does not hold now is refused.

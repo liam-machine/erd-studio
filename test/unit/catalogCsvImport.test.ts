@@ -262,7 +262,7 @@ describe('keys and relationships', () => {
 describe('what the file did not carry is said as the file\'s', () => {
   it('no key columns: the banner says the file had none (never that the tables have none), with where to find a query that has them', () => {
     const r = ok(csv('table_schema,table_name,column_name,data_type,is_nullable', 's,a,id,int,NO', 's,b,a_id,int,YES'));
-    expect(r.notice).toBe('This file has no key columns, so its tables came in without primary keys, unique keys or relationships. The catalog queries in ERD Studio: Bring In Your Data Model… include them.');
+    expect(r.notice).toBe('This file has no key columns, so its tables came in without primary keys, unique keys or relationships. The catalog queries in ERD Studio: Import Your Data Model… include them.');
     expect([r.notice, ...r.notes].join(' ')).not.toMatch(/(tables|model) (have|has) no (primary )?keys/i);
     expect(r.coverage).toMatchObject({ primaryKeyColumn: false, foreignKeyColumns: false });
   });
@@ -275,9 +275,9 @@ describe('what the file did not carry is said as the file\'s', () => {
 
   it('keys but no foreign key columns, and the other way round', () => {
     expect(ok(csv('table_name,column_name,data_type,is_primary_key', 'a,id,int,YES')).notes)
-      .toContain('The file has no foreign key columns, so no relationships came in. The catalog queries in ERD Studio: Bring In Your Data Model… include them.');
+      .toContain('The file has no foreign key columns, so no relationships came in. The catalog queries in ERD Studio: Import Your Data Model… include them.');
     expect(ok(csv('table_name,column_name,data_type,fk_table,fk_column', 'a,id,int,,', 'b,a_id,int,a,id')).notes)
-      .toContain('The file has no primary key column, so its tables came in without primary keys. The catalog queries in ERD Studio: Bring In Your Data Model… include them.');
+      .toContain('The file has no primary key column, so its tables came in without primary keys. The catalog queries in ERD Studio: Import Your Data Model… include them.');
   });
 
   it('views: skipped and said when table_type says so; without table_type, the notes say views may have come in as tables', () => {

@@ -38,10 +38,11 @@ export default story({
       const toast = await s.ui.waitForNotification(FOUND, { timeout: 30000 });
       s.assert.equal(toast.message, `${FOUND}. Show its models as a diagram? Nothing is saved until you keep it.`);
       s.assert.deepEqual(toast.buttons, ['Show Me', "Don't Ask Again for This Folder"], 'the suggestion\'s buttons');
-      // The same start in the sidebar: Import from dbt is the empty Diagrams view's one button.
+      // The sidebar: the empty Diagrams view says it is a dbt project, and its one button is Import Your Data Model… (the guide leads with Import from dbt).
       await s.ui.openSidebar('ERD Studio');
-      await s.expectVisible(s.sel.welcomeLink('Import from dbt'), { what: 'the Import from dbt button in the empty Diagrams view' });
-      s.assert.deepEqual(await s.wb.ev(s.sel.welcomeButtons), ['Import from dbt'], 'Import from dbt should be the one button in the empty Diagrams view');
+      await s.expectVisible(s.sel.welcomeLink('Import Your Data Model…'), { what: 'the Import Your Data Model… button in the empty Diagrams view' });
+      s.assert.deepEqual(await s.wb.ev(s.sel.welcomeButtons), ['Import Your Data Model…'], 'Import Your Data Model… should be the one button in the empty Diagrams view (the guide leads with the dbt card)');
+      s.expect((await s.ui.sidebarText()).includes('This folder is a dbt project.'), 'the empty Diagrams view should say the folder is a dbt project');
       await s.wb.highlight(s.sel.notification(FOUND));
       await s.pause(1800);
       await s.wb.unhighlight();

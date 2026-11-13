@@ -16,7 +16,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { moreStartsCommandLink, moreStartsFor, startCommandLink } from '../../src/types/startActions';
+import { importGuideCommandLink, moreStartsCommandLink, moreStartsFor, startCommandLink } from '../../src/types/startActions';
 import * as vscode from 'vscode';
 
 import { toDbmlRich } from '@erd-studio/core';
@@ -1232,24 +1232,24 @@ describe('Import DBML — contributed', () => {
       .toEqual([{ command: IMPORT_DBML_COMMAND, when: 'erdStudio.hasProject' }]);
   });
 
-  it('is in the Diagrams view\'s + menu and both "No diagrams yet" welcomes (with and without dbt)', () => {
-    // The + on the Diagrams view's title bar is the New… submenu, holding every way to start a diagram.
+  it('is reached from the Diagrams view\'s + menu and both empty-project welcomes (with and without dbt) through Import Your Data Model…', () => {
+    // The + on the Diagrams view's title bar is the New… submenu: what creates, then one import entry, the guide,
+    // whose dbdiagram.io card runs this command (importGuide.test.ts → "the one way in").
     expect(pkg.contributes.menus['view/title']).toContainEqual({
       submenu: 'erdStudio.newMenu', when: 'view == erdStudio.domainTree && erdStudio.hasProject', group: 'navigation@0',
     });
-    expect(pkg.contributes.menus['erdStudio.newMenu']).toContainEqual({
-      command: IMPORT_DBML_COMMAND, when: 'erdStudio.hasProject', group: '1_diagram@3',
-    });
-    const dbt = pkg.contributes.viewsWelcome.find((v) => v.view === 'erdStudio.domainTree' && v.when === 'erdStudio.hasDbtProject && !erdStudio.diagramsLoading && erdStudio.storage != yaml && erdStudio.storage != mixed')!;
-    expect(dbt.contents.startsWith('No diagrams yet.')).toBe(true);
-    // Each start goes through erdStudio.start, which counts the sidebar click (src/types/startActions.ts).
-    expect(dbt.contents).toContain(`[Import from dbt](${startCommandLink('drawFromDbt', 'sidebar')})`);
-    // The other starts (New Diagram…, Import…, whose first source is this command) are behind "More ways to start…".
-    expect(dbt.contents).toContain(`[More ways to start…](${moreStartsCommandLink('sidebar')})`);
-    expect(moreStartsFor({ hasProject: true, hasDbt: true })).toEqual(['blank', 'import', 'example']);
-    const plain = pkg.contributes.viewsWelcome.find((v) => v.view === 'erdStudio.domainTree' && v.when?.startsWith('erdStudio.hasProject && !erdStudio.hasDbtProject && !erdStudio.diagramsLoading') && v.when.includes('erdStudio.startIntent == blank'))!;
-    expect(plain.contents.startsWith(`No diagrams yet.\n\n[New Diagram…](${startCommandLink('blank', 'sidebar')})`)).toBe(true);
-    expect(moreStartsFor({ hasProject: true, hasDbt: false, found: [] })).toEqual(['example', 'import']);
+    expect(pkg.contributes.menus['erdStudio.newMenu'].map((m) => m.command)).toEqual(['erdStudio.showImportGuide', 'erdStudio.createDomain']);
+    const guide = `[Import Your Data Model…](${importGuideCommandLink('sidebar')})`;
+    const dbt = pkg.contributes.viewsWelcome.find((v) => v.view === 'erdStudio.domainTree' && v.when === 'erdStudio.hasDbtProject && !erdStudio.hasTables && !erdStudio.diagramsLoading && erdStudio.storage != yaml && erdStudio.storage != mixed')!;
+    expect(dbt.contents.startsWith('No diagrams or tables yet. This folder is a dbt project.')).toBe(true);
+    expect(dbt.contents).toContain(guide);
+    // New Diagram… goes through erdStudio.start, which counts the sidebar click (src/types/startActions.ts).
+    expect(dbt.contents).toContain(`Or: [New Diagram…](${startCommandLink('blank', 'sidebar')})`);
+    const plain = pkg.contributes.viewsWelcome.find((v) => v.view === 'erdStudio.domainTree' && v.when?.startsWith('erdStudio.hasProject && !erdStudio.hasDbtProject && !erdStudio.hasTables && !erdStudio.diagramsLoading') && v.when.includes('erdStudio.startIntent == blank'))!;
+    expect(plain.contents.startsWith('No diagrams or tables yet.')).toBe(true);
+    expect(plain.contents).toContain(guide);
     expect(plain.contents).not.toContain('drawFromDbt');
+    expect(plain.contents).not.toContain(moreStartsCommandLink('sidebar'));
+    expect(moreStartsFor({ hasProject: true, hasDbt: false, found: [] })).toEqual(['example', 'import']);
   });
 });

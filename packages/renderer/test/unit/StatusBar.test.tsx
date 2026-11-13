@@ -7,10 +7,13 @@
  *    however many column pairs it has.
  *  - The layer key names each layer as the table badges do: "[GLD] Gold 4".
  *  - A single-layer project has no key.
+ *  - It is always one line: short of room it drops the layer names, then
+ *    folds layers into "+N", then drops the key, keeping the two counts.
  */
 import { describe, it, expect, afterEach } from 'vitest';
+import { useLayoutEffect } from 'react';
 import { cleanup, render } from '@testing-library/react';
-import { ReactFlowProvider } from '@xyflow/react';
+import { ReactFlowProvider, useStoreApi } from '@xyflow/react';
 import type { DisplaySubjectArea } from '@erd-studio/core';
 import { createCanvasStore, CanvasStoreProvider } from '../../src/store/editorStore';
 import { CanvasEnvironmentProvider, NOOP_CANVAS_HOST } from '../../src/host/canvasEnvironment';
@@ -37,6 +40,24 @@ function renderBar(domain: Record<string, unknown>) {
 }
 
 afterEach(cleanup);
+
+/** Set React Flow's pane size, as the canvas measures it. */
+function SizeTo({ width, height }: { width: number; height: number }) {
+  const api = useStoreApi();
+  useLayoutEffect(() => { api.setState({ width, height }); }, [api, width, height]);
+  return null;
+}
+
+function renderSized(domain: Record<string, unknown>, width: number, height: number, viewer = true, legendOpen = false) {
+  const store = createCanvasStore({ domain: domainOf(domain), legendOpen });
+  return render(
+    <CanvasStoreProvider store={store}>
+      <CanvasEnvironmentProvider host={NOOP_CANVAS_HOST} viewer={viewer}>
+        <ReactFlowProvider><SizeTo width={width} height={height} /><StatusBar /></ReactFlowProvider>
+      </CanvasEnvironmentProvider>
+    </CanvasStoreProvider>,
+  );
+}
 
 describe('StatusBar relationship count', () => {
   it('counts a composite foreign key once, as the one line the canvas draws', () => {
@@ -181,5 +202,88 @@ describe('StatusBar.css', () => {
     expect(css).not.toMatch(/#[0-9a-f]{3,8}\b|\b(?:rgba?|hsla?)\(/i);
     expect(css).not.toMatch(/--vscode-/);
     expect(readFileSync(join(__dirname, '../../src/styles.css'), 'utf8')).toContain("@import './components/StatusBar/StatusBar.css';");
+  });
+});
+
+describe('StatusBar — one line at every size', () => {
+  const BRONZE = { id: 'bronze', label: 'Bronze', abbreviation: 'BRZ', color: '#cd7f32', order: 0, creatable: true };
+  const threeLayers = {
+    layerConfigs: [BRONZE, SILVER, GOLD],
+    models: [
+      { name: 'a', layer: 'gold' }, { name: 'b', layer: 'silver' }, { name: 'c', layer: 'silver' }, { name: 'd', layer: 'bronze' },
+    ],
+  };
+  const bar = (c: HTMLElement) => c.querySelector<HTMLElement>('.status-bar')!;
+
+  it('a wide canvas: counts and every layer with its name', () => {
+    const { container } = renderSized(threeLayers, 1600, 900);
+    expect(bar(container).getAttribute('data-fit')).toBe('full');
+    expect([...container.querySelectorAll('.status-bar__layer')].map((i) => i.textContent)).toEqual(['GLDGold 1', 'BRZBronze 1', 'SLVSilver 2']);
+    expect(bar(container).style.maxWidth).not.toBe('');
+  });
+
+  it('a short embedded frame (760 × 380): the counts and the whole layer key, on one line', () => {
+    const { container } = renderSized(threeLayers, 760, 380);
+    expect(bar(container).getAttribute('data-fit')).toBe('full');
+    expect(container.querySelectorAll('.status-bar__layer')).toHaveLength(3);
+  });
+
+  it('a little narrower: the names go, each badge and count stays, and the tooltips name them', () => {
+    const { container } = renderSized(threeLayers, 640, 380);
+    expect(bar(container).getAttribute('data-fit')).toBe('badges');
+    const chips = [...container.querySelectorAll('.status-bar__layer')];
+    expect(chips.map((c) => c.textContent)).toEqual(['GLD1', 'BRZ1', 'SLV2']);
+    expect(chips[0].getAttribute('title')).toBe('Gold (GLD): 1 table');
+    expect(bar(container).getAttribute('title')).toContain('Silver (SLV): 2 tables');
+    expect([...container.querySelectorAll('.status-bar__item')].map((i) => i.textContent)).toEqual(['4 tables', '0 relationships']);
+  });
+
+  it('narrower: layers fold into "+N", then go, the two counts always kept', () => {
+    const some = renderSized(threeLayers, 480, 600);
+    expect(bar(some.container).getAttribute('data-fit')).toBe('some');
+    expect(some.container.querySelectorAll('.status-bar__layer')).toHaveLength(1);
+    const more = some.container.querySelector('.status-bar__more')!;
+    expect(more.textContent).toBe('+2');
+    expect(more.getAttribute('title')).toBe('Bronze (BRZ): 1 table\nSilver (SLV): 2 tables');
+    cleanup();
+    const counts = renderSized(threeLayers, 330, 600);
+    expect(bar(counts.container).getAttribute('data-fit')).toBe('counts');
+    expect(counts.container.querySelector('.status-bar__layers')).toBeNull();
+    expect(counts.container.querySelectorAll('.status-bar__item')).toHaveLength(2);
+  });
+
+  it('as a last resort it truncates (still one line); beside the viewer\'s open legend it steps aside', () => {
+    const { container } = renderSized(threeLayers, 180, 600);
+    expect(bar(container).getAttribute('data-fit')).toBe('truncate');
+    cleanup();
+    const beside = renderSized(threeLayers, 520, 600, true, true);
+    expect(beside.container.querySelector('.status-bar')).toBeNull();
+  });
+
+  it('the editor clears its open detail panel too', () => {
+    const store = createCanvasStore({
+      domain: domainOf({ ...threeLayers, models: threeLayers.models }),
+      selectedNode: 'a', detailPanelOpen: true,
+    });
+    const { container } = render(
+      <CanvasStoreProvider store={store}>
+        <ReactFlowProvider><SizeTo width={900} height={700} /><StatusBar /></ReactFlowProvider>
+      </CanvasStoreProvider>,
+    );
+    // 900 − the ? button − the 340px panel: no room for the layer names.
+    expect(bar(container).getAttribute('data-fit')).not.toBe('full');
+    expect(parseInt(bar(container).style.maxWidth, 10)).toBeLessThanOrEqual(900 - 53 - 15 - 340 - 10);
+  });
+
+  it('its stylesheet never wraps', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const css = readFileSync(join(__dirname, '../../src/components/StatusBar/StatusBar.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+    const rule = (sel: string) => css.match(new RegExp(`(?:^|\\})\\s*${sel.replace('.', '\\.')}\\s*\\{([^}]*)\\}`))?.[1] ?? '';
+    expect(rule('.status-bar')).toMatch(/flex-wrap:\s*nowrap/);
+    expect(rule('.status-bar')).toMatch(/white-space:\s*nowrap/);
+    expect(rule('.status-bar')).toMatch(/overflow:\s*hidden/);
+    expect(css).not.toMatch(/flex-wrap:\s*wrap/);
+    expect(css).not.toMatch(/flex-direction:\s*column/);
   });
 });

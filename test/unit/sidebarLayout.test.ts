@@ -8,7 +8,7 @@ import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 
-import { HelpTreeProvider, HELP_ACTIONS } from '../../src/providers/HelpTreeProvider';
+import { HelpTreeProvider, HELP_ACTIONS, HELP_IMPORT_ACTION } from '../../src/providers/HelpTreeProvider';
 import { NO_LEGACY_ALIAS, revealInExplorerPath } from '../../src/extension';
 import type { ReportTrackingService } from '../../src/services/reportTrackingService';
 import type { TrackedReport } from '../../src/types/feedback';
@@ -94,19 +94,22 @@ describe('sidebar views', () => {
     }
   });
 
-  it('put every way to start a diagram, and New Layer, in the + menu', () => {
+  it('put two entries in the + menu: Import Your Data Model…, then New Diagram…', () => {
     expect(contributes.submenus).toContainEqual({ id: 'erdStudio.newMenu', label: 'New…', icon: '$(add)' });
-    expect(contributes.menus['erdStudio.newMenu'].map((m) => m.command)).toEqual([
-      'erdStudio.createDomain', 'erdStudio.drawFromDbt', 'erdStudio.importDbml', 'erdStudio.importSqlDdl', 'erdStudio.importSemanticModel', 'erdStudio.showImportGuide', 'erdStudio.addLayer',
+    expect(contributes.menus['erdStudio.newMenu']).toEqual([
+      // One import entry, first: the guide, which offers every source (importGuide.test.ts →
+      // "offers every import the sidebar used to list"). The separate imports stay in the Command Palette.
+      { command: 'erdStudio.showImportGuide', when: 'erdStudio.hasProject', group: '1_start@1' },
+      { command: 'erdStudio.createDomain', when: 'erdStudio.hasProject', group: '1_start@2' },
+      // New Layer… is not here: it is the Diagrams tree's last row and the last option of New Diagram…'s layer picker.
     ]);
-    // The guide to every source sits in a group of its own under the imports, so a project that already has diagrams
-    // (no welcome view, no start screen) still has a visible way to it besides the Command Palette.
-    expect(contributes.menus['erdStudio.newMenu'].find((m) => m.command === 'erdStudio.showImportGuide'))
-      .toEqual({ command: 'erdStudio.showImportGuide', when: 'erdStudio.hasProject', group: '1_import_guide@1' });
-    // The imports sit together, after Import DBML…, in the diagram group.
-    expect(contributes.menus['erdStudio.newMenu'].filter((m) => m.command?.startsWith('erdStudio.import')).map((m) => m.group))
-      .toEqual(['1_diagram@3', '1_diagram@4', '1_diagram@5']);
-    expect(contributes.commands.find((c) => c.command === 'erdStudio.addLayer')?.title).toBe('New Layer…');
+    const title = (id: string) => contributes.commands.find((c) => c.command === id)?.title;
+    expect(title('erdStudio.showImportGuide')).toBe('Import Your Data Model…');
+    expect(title('erdStudio.addLayer')).toBe('New Layer…');
+    for (const command of ['erdStudio.drawFromDbt', 'erdStudio.importDbml', 'erdStudio.importSqlDdl', 'erdStudio.importSemanticModel', 'erdStudio.importModel']) {
+      expect(contributes.commands.some((c) => c.command === command), command).toBe(true);
+      expect(contributes.menus.commandPalette.find((m) => m.command === command)?.when, command).not.toBe('false');
+    }
   });
 
   it('offer New Diagram on a layer row that takes new diagrams (inline + and right-click)', () => {
@@ -190,16 +193,42 @@ describe('HelpTreeProvider', () => {
   it('lists labelled rows, each running a contributed command', () => {
     const provider = new HelpTreeProvider(tracking([]));
     const rows = provider.getChildren();
+    // An empty project: no import row here, the empty Diagrams view's button is the first thing in the sidebar.
     expect(rows.map((r) => provider.getTreeItem(r).label)).toEqual([
-      'Set Up My AI Helper', 'Bring In Your Data Model…', 'Watch the Tour', 'Show Me Around', 'Send Feedback', 'Show Logs',
+      'Set Up My AI Helper', 'Watch the Tour', 'Show Me Around', 'Send Feedback', 'Show Logs',
     ]);
     const contributed = new Set(contributes.commands.map((c) => c.command));
-    for (const action of HELP_ACTIONS) expect(contributed.has(action.command), action.command).toBe(true);
+    for (const action of [HELP_IMPORT_ACTION, ...HELP_ACTIONS]) expect(contributed.has(action.command), action.command).toBe(true);
+    provider.dispose();
+  });
+
+  it('leads with Import Your Data Model… once the project has a diagram or a table, and only then', () => {
+    const provider = new HelpTreeProvider(tracking([]));
+    let fired = 0;
+    provider.onDidChangeTreeData(() => { fired++; });
+    provider.setProjectHasModel(true);
+    expect(fired).toBe(1);
+    const rows = provider.getChildren();
+    expect(rows.map((r) => provider.getTreeItem(r).label)).toEqual([
+      'Import Your Data Model…', 'Set Up My AI Helper', 'Watch the Tour', 'Show Me Around', 'Send Feedback', 'Show Logs',
+    ]);
+    const first = provider.getTreeItem(rows[0]);
+    // An import-style icon, and the guide counted as opened from the sidebar (the empty view's key).
+    expect((first.iconPath as { id: string }).id).toBe('cloud-download');
+    expect(first.command).toEqual({ command: 'erdStudio.showImportGuide', title: 'Import Your Data Model…', arguments: [{ from: 'sidebar' }] });
+    expect(first.id).toBe('erdStudio.help.importGuide');
+    // The same answer again lists nothing again; the project emptied again drops the row.
+    provider.setProjectHasModel(true);
+    expect(fired).toBe(1);
+    provider.setProjectHasModel(false);
+    expect(fired).toBe(2);
+    expect(provider.getChildren().map((r) => provider.getTreeItem(r).label)).not.toContain('Import Your Data Model…');
     provider.dispose();
   });
 
   it('adds My Reports after Send Feedback once there is a report, with the open count', () => {
     const provider = new HelpTreeProvider(tracking([report(2), report(1, 'closed')]));
+    provider.setProjectHasModel(true);
     const rows = provider.getChildren();
     expect(rows[5]).toEqual({ type: 'reports' });
     const item = provider.getTreeItem(rows[5]);

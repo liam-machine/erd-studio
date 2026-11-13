@@ -166,7 +166,7 @@ describe('Import SQL DDL… with a catalog export', () => {
     await importSqlDdl(deps(sqlUi({ files: [csv] }), importUi(), { draft: { preview, trigger: 'palette' } }));
     const shown = preview.drafts[0];
     expect(shown.banner.headline).toBe('Draft from a catalog export (columns.csv) · 1 table, no relationships · not saved');
-    expect(shown.banner.notice).toBe('This file has no key columns, so its tables came in without primary keys, unique keys or relationships. The catalog queries in ERD Studio: Bring In Your Data Model… include them.');
+    expect(shown.banner.notice).toBe('This file has no key columns, so its tables came in without primary keys, unique keys or relationships. The catalog queries in ERD Studio: Import Your Data Model… include them.');
     expect(JSON.stringify(shown)).not.toMatch(/(tables|model) (have|has) no (primary )?keys/i);
     expect(preview.settled).toEqual([{ kept: true }]);
     // A generic download name names the diagram after the tables' schema.
@@ -179,7 +179,7 @@ describe('Import SQL DDL… with a catalog export', () => {
     const ui = importUi();
     expect(await importSqlDdl(deps(sql, ui))).toBeUndefined();
     expect(sql.errors).toHaveLength(1);
-    expect(sql.errors[0].message).toBe('Import SQL DDL: seeds/customers.csv is not a catalog export ERD Studio can read: it has no table_name, no column_name, no data_type column. Its first line is read as the column names: id, first_name, email. The queries in ERD Studio: Bring In Your Data Model… write one.');
+    expect(sql.errors[0].message).toBe('Import SQL DDL: seeds/customers.csv is not a catalog export ERD Studio can read: it has no table_name, no column_name, no data_type column. Its first line is read as the column names: id, first_name, email. The queries in ERD Studio: Import Your Data Model… write one.');
     expect(sql.errors[0].items).toContain('Open File');
     expect(ui.confirms).toEqual([]);
     expect(erdFiles()).toEqual([]);

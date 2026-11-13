@@ -249,6 +249,68 @@ describe('useCanvasShortcuts', () => {
     expect(useEditorStore.getState().canvasMode).toBe('pan');
   });
 
+  it('Escape takes the two click-away steps: the open panel closes (the table stays selected), then the selection clears', () => {
+    renderHook(() => useCanvasShortcuts());
+    act(() => {
+      useEditorStore.setState({ nodes: [tableNode('a', true), tableNode('b'), tableNode('c')] });
+      useEditorStore.getState().selectNode('a');
+      useEditorStore.getState().setDetailPanelOpen(true);
+    });
+
+    press('Escape');
+    let s = useEditorStore.getState();
+    expect(s.detailPanelOpen).toBe(false);
+    expect(s.selectedNode).toBe('a');
+    expect(s.nodes.find((n) => n.id === 'a')!.selected).toBe(true);
+
+    press('Escape');
+    s = useEditorStore.getState();
+    expect(s.selectedNode).toBeNull();
+    expect(s.nodes.some((n) => n.selected)).toBe(false);
+  });
+
+  it('Escape clears selected column rows before closing the panel', () => {
+    renderHook(() => useCanvasShortcuts());
+    act(() => {
+      useEditorStore.getState().selectNode('a');
+      useEditorStore.getState().setDetailPanelOpen(true);
+      useEditorStore.getState().selectColumn('b_id');
+    });
+    press('Escape');
+    expect(useEditorStore.getState().selectedColumns).toEqual([]);
+    expect(useEditorStore.getState().detailPanelOpen).toBe(true);
+    press('Escape');
+    expect(useEditorStore.getState().detailPanelOpen).toBe(false);
+    expect(useEditorStore.getState().selectedNode).toBe('a');
+  });
+
+  it('after the first click away, Delete acts on the table still visibly selected (asks first, reopening its panel)', () => {
+    renderHook(() => useCanvasShortcuts());
+    act(() => {
+      useEditorStore.setState({ nodes: [tableNode('a', true), tableNode('b'), tableNode('c')] });
+      useEditorStore.getState().selectNode('a');
+      useEditorStore.getState().setDetailPanelOpen(true);
+    });
+    press('Escape');
+    press('Delete');
+    expect(sent()).toEqual([]);
+    expect(useEditorStore.getState().detailPanelOpen).toBe(true);
+    expect(useEditorStore.getState().pendingDeleteConfirmation).toBe(true);
+    expect(useEditorStore.getState().selectedNode).toBe('a');
+  });
+
+  it('after the first click away, Delete removes a multi-selection that is still marked', () => {
+    renderHook(() => useCanvasShortcuts());
+    act(() => {
+      useEditorStore.setState({ nodes: [tableNode('a', true), tableNode('b', true), tableNode('c')] });
+      useEditorStore.getState().selectNode('b');
+      useEditorStore.getState().setDetailPanelOpen(true);
+    });
+    press('Escape');
+    press('Delete');
+    expect(sent()).toEqual([{ type: 'removeModels', payload: { modelNames: ['a', 'b'] } }]);
+  });
+
   it('reads the latest store state at keypress time (no stale closure)', () => {
     renderHook(() => useCanvasShortcuts());
     press('s');

@@ -1606,7 +1606,7 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
       pick: (items) => vscode.window.showQuickPick(items, { title: START_PICK_TITLE, placeHolder: START_PICK_PLACEHOLDER }),
     })),
   );
-  // Bring In Your Data Model… (src/services/importGuide.ts): how to export from
+  // Import Your Data Model… (src/services/importGuide.ts): how to export from
   // Databricks, Snowflake, Power BI, Fabric and more, each card's import one click away.
   // Pre-registered, so it opens in an empty window too (its imports then say "Open a
   // folder first"). The project path fills in the folder's context and suggestion.
@@ -2206,6 +2206,31 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
   // `erdStudio.hasDiagrams` follows the same count: the walkthrough shows
   // "Open a diagram from this project" instead of the first-diagram steps.
   let hasDiagramsKey: boolean | undefined;
+  // `erdStudio.hasTables`: the library holds a table (the automatic draft's own
+  // "no table" check). With neither a diagram nor a table the project is empty:
+  // the Diagrams view's empty state leads with Import Your Data Model…; once
+  // there is either, Help & Feedback's first row does (setProjectHasModel).
+  let hasTablesKey: boolean | undefined;
+  const refreshHasTables = (): void => {
+    const has = tableLibraryService.listTableFiles().length > 0;
+    if (hasTablesKey === has) return;
+    hasTablesKey = has;
+    void vscode.commands.executeCommand('setContext', 'erdStudio.hasTables', has);
+    helpProvider.setProjectHasModel(has || hasDiagramsKey === true);
+  };
+  // A table written or deleted (an import, the canvas, the user's AI assistant, a pull):
+  // the Table Library lists again, so look again, once per burst of changes.
+  let hasTablesTimer: ReturnType<typeof setTimeout> | undefined;
+  context.subscriptions.push(
+    tableLibraryProvider.onDidChangeTreeData(() => {
+      if (hasTablesTimer) clearTimeout(hasTablesTimer);
+      hasTablesTimer = setTimeout(() => {
+        hasTablesTimer = undefined;
+        try { refreshHasTables(); } catch (err) { log.warn('[ERD Studio] Checking for tables failed:', err); }
+      }, 50);
+    }),
+    { dispose: () => { if (hasTablesTimer) clearTimeout(hasTablesTimer); } },
+  );
   const refreshDiagramsStatus = (): void => {
     const count = subjectAreaService.listSubjectAreas(workspaceRoot, semanticDir).length;
     // The folder's first diagram was made while this window was open (a Keep, New
@@ -2218,6 +2243,7 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     if (hasDiagramsKey !== count > 0) {
       hasDiagramsKey = count > 0;
       void vscode.commands.executeCommand('setContext', 'erdStudio.hasDiagrams', hasDiagramsKey);
+      helpProvider.setProjectHasModel(hasDiagramsKey || hasTablesKey === true);
     }
     if (count === 0) {
       diagramsStatus.hide();
@@ -2246,6 +2272,7 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     // so does a DBML project (its tables live under the layer folders).
     void vscode.commands.executeCommand('setContext', 'erdStudio.hasLogicalModelsDir',
       tableLibraryService.dirExists() || (hasSemanticDir && (tableLibraryService.writesTableNaming() || knownStorage !== 'yaml')));
+    refreshHasTables();
     refreshDiagramsStatus();
     if (!legacyDbmlTreeShown && hasSemanticDir) {
       // Path-only and memoised by the directories' signatures: an unchanged project costs a few stats.

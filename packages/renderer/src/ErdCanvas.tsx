@@ -5,11 +5,11 @@
  * read-only domain: model nodes, FK edges, annotations, the minimap, the
  * detail panel a click on a model opens, the legend (only the entries the
  * stage shown can draw) and, beside its button, the table and relationship
- * counts. Closing the detail panel keeps the table selected, its
- * relationships lit; a click on the empty canvas, or Escape, clears the
- * selection. There are no editing
- * affordances (the canvas runs in viewer mode) and nothing is ever sent
- * anywhere.
+ * counts. A click on the empty canvas, or Escape, works in two steps: the
+ * first closes the detail panel and keeps the table selected (its
+ * relationships lit), as the panel's close button does; the second clears
+ * the selection. There are no editing affordances (the canvas runs in
+ * viewer mode) and nothing is ever sent anywhere.
  *
  *   <ErdCanvas domain={domain} />
  *
@@ -53,7 +53,6 @@ import {
   SelectionMode,
   applyNodeChanges,
   useNodesInitialized,
-  useStoreApi,
   type NodeChange,
 } from '@xyflow/react';
 import type { DisplayColumn, DisplaySubjectArea, DisplayTable } from '@erd-studio/core';
@@ -77,6 +76,7 @@ import { Legend } from './components/Legend/Legend';
 import { StatusBar } from './components/StatusBar/StatusBar';
 import { DEFAULT_LINE_STYLE, isLineStyle, type LineStyle } from './lib/edgeRouting/lineStyle';
 import { isTableDetail, type TableDetail } from './lib/tableDetail';
+import { applyClickAway } from './lib/clickAway';
 
 /**
  * The canvas the reader last clicked, pointed at or focused. An Escape with
@@ -246,7 +246,6 @@ function ErdCanvasInner({
   handleRef,
 }: ErdCanvasInnerProps) {
   const storeApi = useEditorStoreApi();
-  const flowApi = useStoreApi();
   const containerRef = useRef<HTMLDivElement>(null);
   const domain = useEditorStore((s) => s.domain);
   const nodes = useEditorStore((s) => s.nodes);
@@ -338,13 +337,13 @@ function ErdCanvasInner({
     [setModified],
   );
 
-  const { onNodeClick, onEdgeClick, onPaneClick, onSelectionChange } = useCanvasGraph({ onTransformed });
+  const { onNodeClick, onEdgeClick, onPaneClick, onSelectionChange, keepSelection } = useCanvasGraph({ onTransformed });
 
-  // Escape clears the selection, as a click on the empty canvas does (the
-  // panel may already be closed, with the table still selected). Only when
-  // the key is pressed in the canvas, or with nothing focused (focus fell
-  // back to the page) and this is the canvas the reader last used, so it
-  // never takes Escape from the rest of the page or from another canvas.
+  // Escape takes the same two steps as a click on the empty canvas: an open
+  // panel closes (the table stays selected), then the selection clears. Only
+  // when the key is pressed in the canvas, or with nothing focused (focus
+  // fell back to the page) and this is the canvas the reader last used, so
+  // it never takes Escape from the rest of the page or from another canvas.
   useEffect(() => {
     const container = containerRef.current;
     const markActive = () => {
@@ -358,10 +357,7 @@ function ErdCanvasInner({
         (target === document.body || target === document.documentElement || target === document) &&
         lastActiveCanvas === container;
       if (!inCanvas && !nowhere) return;
-      const s = storeApi.getState();
-      if (s.selectedNode === null && s.selectedEdge === null && s.selectedAnnotation === null) return;
-      onPaneClick();
-      flowApi.getState().resetSelectedElements();
+      if (applyClickAway(storeApi) !== 'none') storeApi.getState().setHoverFocus(null);
     };
     const activity = ['pointerdown', 'click', 'focusin'] as const;
     for (const type of activity) container?.addEventListener(type, markActive, true);
@@ -371,7 +367,7 @@ function ErdCanvasInner({
       window.removeEventListener('keydown', onKeyDown);
       if (lastActiveCanvas === container) lastActiveCanvas = null;
     };
-  }, [storeApi, flowApi, onPaneClick]);
+  }, [storeApi]);
   // Hover preview and relationship flow (ephemeral, no posts).
   const { hoverHandlers, flowClassName } = useHoverFocus();
 
@@ -380,7 +376,7 @@ function ErdCanvasInner({
   const onNodesChange = useCallback(
     (changes: NodeChange<GraphNode>[]) => {
       const state = storeApi.getState();
-      const updatedNodes = applyNodeChanges(changes, state.nodes);
+      const updatedNodes = applyNodeChanges(keepSelection(changes), state.nodes);
       setNodes(updatedNodes);
 
       const moved = new Set<string>();
@@ -393,7 +389,7 @@ function ErdCanvasInner({
       if (updatedEdges !== state.edges) setEdges(updatedEdges);
       setModified(differsFromBaseline(updatedNodes, baselineRef.current));
     },
-    [storeApi, setNodes, setEdges, setModified],
+    [storeApi, setNodes, setEdges, setModified, keepSelection],
   );
 
   const resetLayout = useCallback(() => {
@@ -447,9 +443,9 @@ function ErdCanvasInner({
       ref={containerRef}
       className={`editor-canvas${logicalOnly ? ' editor-canvas--neutral' : ''}${className ? ` ${className}` : ''}`}
       // The extension's canvas layout (a column flex box around the flow area),
-      // positioned so the legend and panels anchor to the canvas, and a size
-      // container so the counts can react to the canvas's width (StatusBar.css).
-      style={{ position: 'relative', width: '100%', height: '100%', display: 'flex', flexDirection: 'column', containerType: 'inline-size', ...style }}
+      // positioned so the legend and panels anchor to the canvas. The chrome
+      // sizes itself from React Flow's measured pane (lib/canvasChrome.ts).
+      style={{ position: 'relative', width: '100%', height: '100%', display: 'flex', flexDirection: 'column', ...style }}
     >
       <ReactFlow
         className={flowClassName}

@@ -55,12 +55,12 @@ export default story({
       await s.pause(2000);
     }, { say: 'I press Show Me. A draft opens, and a short guide starts on it. This is a draft of my model, drawn from my 2 SQL files: 4 tables and 3 relationships. Nothing is saved yet.' });
 
-    await s.step('2 of 3, More ways to start: Import… and Bring In Your Data Model…', async () => {
+    await s.step('2 of 3, More ways to start: Import… and Import Your Data Model…', async () => {
       const mark = await nextMark(s, draft.page, 'More ways to start', { progress: '2 of 3' });
-      s.assert.equal(mark.text, 'Is your data model somewhere else? Import… reads SQL scripts, Power BI and Fabric models, and DBML. Bring In Your Data Model… shows how to get it out of Databricks, Snowflake, SQL Server, Fabric and more, into an open format.');
+      s.assert.equal(mark.text, 'Is your data model somewhere else? Import… reads SQL scripts, Power BI and Fabric models, and DBML. Import Your Data Model… shows how to get it out of Databricks, Snowflake, SQL Server, Fabric and more, into an open format.');
       s.expect(await draft.page.ev(`!!${GUIDE_TARGET('draft-more')}`), 'the More ways to start button is on the page');
       await s.pause(2000);
-    }, { say: 'Next. If my data model lives somewhere else, Import reads SQL scripts, Power BI and Fabric models, and DBML. And Bring In Your Data Model shows how to get it out of Databricks, Snowflake, SQL Server and more.' });
+    }, { say: 'Next. If my data model lives somewhere else, Import reads SQL scripts, Power BI and Fabric models, and DBML. And Import Your Data Model shows how to get it out of Databricks, Snowflake, SQL Server and more.' });
 
     await s.step('3 of 3, Keep it: the guide waits for me to press Keep as Diagram', async () => {
       const mark = await nextMark(s, draft.page, 'Keep it', { progress: '3 of 3' });

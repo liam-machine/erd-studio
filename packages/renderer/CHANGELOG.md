@@ -2,6 +2,15 @@
 
 All notable changes to `@erd-studio/renderer`. While `0.x`, a breaking change bumps the minor version.
 
+## Unreleased
+
+No `DisplaySubjectArea` or `ErdCanvas` prop change; everything new is additive. No new `--vscode-*` variables.
+
+### Changed
+- **Two-step click-away, in the viewer and the editor.** A click on the empty canvas (or Escape) with a table's detail panel open closes the panel and keeps the table selected (its lines lit, React Flow's selection marks kept, a multi-selection included); the next click or Escape clears the selection. The panel's close button leaves the same state in both (the editor's used to clear the selection). Anything selected without an open panel clears on the first click. Shared logic: `lib/clickAway.ts` (`clickAwayStep`, `clickAwayPatch`, `applyClickAway`, `CLOSE_PANEL_PATCH`, exported from `/editor`). `useCanvasGraph` also returns `keepSelection`: a host that applies React Flow's node changes itself passes them through it, so the deselection React Flow makes on that first click is dropped.
+- **Chrome sized from the canvas** (`lib/canvasChrome.ts`, `useCanvasChrome`, exported from `/editor`): the minimap is at most 200 × 150, a modest share of a small canvas, and hidden below 480 × 260; the counts pill is one line (it drops layer names, then folds layers into "+N", then drops the key, truncating the counts only last; `data-fit` on the pill says which) and moves beside the open legend in the editor too; the legend's height is capped to the canvas; the viewer's detail panel stops above the (smaller) minimap row. The `ErdCanvas` root no longer sets `container-type`.
+- **The legend lists what the diagram draws** (`legendFacts`, `hasXray`, exported from `/editor`): stage card only with stage colours, ghosts and provenance chips present, the layer badge in the diagram's layer colour worded for DBML (per-table layers) or YAML/JSON, the schema prefix, warehouse name, grain, "+n" chip (editor), key badges, SCD / additive symbols, cardinalities, roles, composite keys, the ⚠ (editor), x-ray stretches, the lit line colour, notes, and the comparison colours only while a comparison is open. The viewer's ? button no longer names a Shift+? shortcut it does not have. `legendEntries` is kept, deprecated.
+
 ## 0.5.0
 
 > Pins `@erd-studio/core` 0.5.0, whose `DisplayTable.name` can be `<schema>.<name>` for two tables of one name on one diagram (see its changelog). Bump the cache key with the pin.

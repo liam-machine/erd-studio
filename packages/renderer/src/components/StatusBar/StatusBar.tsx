@@ -14,9 +14,15 @@
  * Shared by the extension's editor and the viewer (`ErdCanvas`): it only reads
  * the store's domain, posts nothing and offers nothing to click. Render it as
  * a child of `<ReactFlow>` (it is a React Flow `Panel`, beside the legend's
- * `?` button). In the viewer it stays in sight while the legend is open, to
- * the legend's right (the counts on one row, the layer key under them), and
+ * `?` button). While the legend is open it moves to the legend's right, and
  * is hidden while the legend is open on a canvas too narrow for both.
+ *
+ * It is always one line. Its room is what the canvas leaves between the ?
+ * button (or the open legend) and the minimap / the editor's detail panel
+ * (`lib/canvasChrome.ts`); when that is short it drops, in order, the layer
+ * names (badges and counts stay), then layer badges into a "+N", then the
+ * layer key, keeping the two counts, and truncates them only as a last
+ * resort (`fitStatusBar`). What it drops is in its tooltip.
  */
 
 import { useMemo } from 'react';
@@ -27,6 +33,8 @@ import { useEditorStore } from '../../store/editorStore';
 import { useIsViewer } from '../../host/canvasEnvironment';
 import { foldComposites } from '../../lib/relationshipDisplayKey';
 import { isSingleLayerProject, layerAbbreviation } from '../../lib/layerCues';
+import { fitStatusBar } from '../../lib/canvasChrome';
+import { useCanvasChrome } from '../../canvas/useCanvasChrome';
 import './StatusBar.css';
 
 // ---------------------------------------------------------------------------
@@ -100,40 +108,68 @@ export function StatusBar() {
   const domain = useEditorStore((s) => s.domain);
   const legendOpen = useEditorStore((s) => s.legendOpen);
   const viewer = useIsViewer();
+  const { statusBarLeft, statusBarRoom } = useCanvasChrome();
 
   const stats = useMemo(() => (domain ? statusBarStats(domain) : null), [domain]);
+  // Beside the open legend (it covers the corner) in the editor and the viewer.
+  const besideLegend = legendOpen;
+  const tablesText = stats ? counted(stats.tables, 'table') : '';
+  const relationshipsText = stats ? counted(stats.relationships, 'relationship') : '';
+  const fit = useMemo(
+    () => (stats ? fitStatusBar({ tables: tablesText, relationships: relationshipsText }, stats.layers, statusBarRoom, besideLegend) : null),
+    [stats, tablesText, relationshipsText, statusBarRoom, besideLegend],
+  );
 
-  if (!stats) {
+  if (!stats || !fit || fit.mode === 'hidden') {
     return null;
   }
 
-  const { tables, relationships, layers } = stats;
+  const { layers } = stats;
+  const shown = layers.slice(0, fit.shownLayers);
+  const hidden = layers.slice(fit.shownLayers);
+  const named = fit.mode === 'full';
+  const layerKey = (l: StatusBarLayer) => `${l.label} (${l.abbreviation}): ${counted(l.count, 'table')}`;
+  // Whatever the pill leaves out is in its tooltip.
+  const title = fit.mode === 'full' || layers.length === 0
+    ? undefined
+    : [`${tablesText}, ${relationshipsText}`, ...layers.map(layerKey)].join('\n');
 
   return (
     <Panel
       position="bottom-left"
-      className={viewer ? `status-bar status-bar--viewer${legendOpen ? ' status-bar--beside-legend' : ''}` : 'status-bar'}
+      className={viewer ? `status-bar status-bar--viewer${besideLegend ? ' status-bar--beside-legend' : ''}` : 'status-bar'}
+      data-fit={fit.mode}
+      title={title}
+      style={{ marginLeft: statusBarLeft, ...(statusBarRoom !== null ? { maxWidth: statusBarRoom } : {}) }}
     >
       <span className="status-bar__counts">
-        <span className="status-bar__item">{counted(tables, 'table')}</span>
+        <span className="status-bar__item">{tablesText}</span>
         <span className="status-bar__divider">|</span>
-        <span className="status-bar__item">{counted(relationships, 'relationship')}</span>
+        <span className="status-bar__item">{relationshipsText}</span>
       </span>
-      {layers.length > 0 && (
+      {shown.length > 0 && (
         <>
           <span className="status-bar__divider status-bar__divider--layers">|</span>
-          <span className="status-bar__layers" title="The layers this diagram's tables belong to. Each table's header strip and badge are drawn in its layer's colour.">
-            {layers.map((l) => (
-              <span key={l.id} className="status-bar__layer">
+          <span
+            className="status-bar__layers"
+            title={named ? 'The layers this diagram\'s tables belong to. Each table\'s header strip and badge are drawn in its layer\'s colour.' : undefined}
+          >
+            {shown.map((l) => (
+              <span key={l.id} className="status-bar__layer" title={named ? undefined : layerKey(l)}>
                 <span
                   className="status-bar__badge"
                   style={l.color ? { backgroundColor: `${l.color}33`, color: l.color } : undefined}
                 >
                   {l.abbreviation}
                 </span>
-                {l.label} {l.count}
+                {named ? `${l.label} ${l.count}` : l.count}
               </span>
             ))}
+            {hidden.length > 0 && (
+              <span className="status-bar__more" title={hidden.map(layerKey).join('\n')}>
+                +{hidden.length}
+              </span>
+            )}
           </span>
         </>
       )}

@@ -1,5 +1,5 @@
 /**
- * Bring In an Existing Data Model… (`erdStudio.showImportGuide`): the guide's
+ * Import Your Data Model… (`erdStudio.showImportGuide`): the guide's
  * cards per window (the dbt card only in a dbt project, the folder's
  * suggestion first, then the sources in telemetry's order, Not yet last), the
  * page (nonce-only CSP, no inline style or handler, no remote resource, one
@@ -27,6 +27,9 @@ import {
   IMPORT_GUIDE_ACTION_FEATURES,
   IMPORT_GUIDE_COMMAND,
   IMPORT_GUIDE_COMMAND_TITLE,
+  IMPORT_GUIDE_EXAMPLE_COMMAND,
+  IMPORT_GUIDE_EXAMPLE_LABEL,
+  IMPORT_GUIDE_EXAMPLE_TEXT,
   IMPORT_GUIDE_INTRO,
   IMPORT_GUIDE_ORDER,
   IMPORT_GUIDE_SNIPPETS,
@@ -43,6 +46,7 @@ import {
   importGuideCommandLink,
   isImportGuideToHost,
   parseImportGuideArgs,
+  type ImportGuideAction,
   type ImportGuideContext,
   IMPORT_GUIDE_IMPORT_STEP,
 } from '../../src/services/importGuide';
@@ -375,10 +379,11 @@ describe('the page', () => {
 });
 
 describe('the protocol', () => {
-  it('accepts a known action, a known snippet or openFolder; nothing else', () => {
+  it('accepts a known action, a known snippet, openFolder or openExample; nothing else', () => {
     for (const action of IMPORT_GUIDE_ACTIONS) expect(isImportGuideToHost({ type: 'run', action })).toBe(true);
     for (const snippet of Object.keys(IMPORT_GUIDE_SNIPPETS)) expect(isImportGuideToHost({ type: 'copy', snippet })).toBe(true);
     expect(isImportGuideToHost({ type: 'openFolder' })).toBe(true);
+    expect(isImportGuideToHost({ type: 'openExample' })).toBe(true);
     for (const bad of [
       undefined, null, 'run', [], [{ type: 'run', action: 'dbml' }], {},
       { type: 'run' }, { type: 'run', action: 'erdStudio.importDbml' }, { type: 'run', action: 'bigquery' },
@@ -408,11 +413,58 @@ describe('the protocol', () => {
   it('is contributed with its real title, in category ERD Studio, shown in every window', () => {
     expect(pkg.contributes.commands.find((c) => c.command === IMPORT_GUIDE_COMMAND)).toEqual({
       command: 'erdStudio.showImportGuide', title: IMPORT_GUIDE_COMMAND_TITLE, category: 'ERD Studio',
+      // Its icon shows beside it in the glass sidebar's + menu (an import, not a create).
+      icon: '$(cloud-download)',
     });
     // One label everywhere: the palette, the tab (without its ellipsis), the quick picks and a draft's button.
-    expect(IMPORT_GUIDE_COMMAND_TITLE).toBe('Bring In Your Data Model…');
+    expect(IMPORT_GUIDE_COMMAND_TITLE).toBe('Import Your Data Model…');
     const palette = (packageJson as unknown as { contributes: { menus: { commandPalette: Array<{ command: string }> } } }).contributes.menus.commandPalette;
     expect(palette.filter((m) => m.command === IMPORT_GUIDE_COMMAND)).toEqual([]);
+  });
+});
+
+describe('the one way in: every route the sidebar\'s + menu used to list', () => {
+  /** The commands a page's buttons run, read from the page itself (each section's data-guide-action). */
+  const commandsOn = (ctx: ImportGuideContext): Set<string> => {
+    const p = page(ctx);
+    const actions = [...p.doc.querySelectorAll('[data-action="run"]')].map((b) => b.getAttribute('data-guide-action') as ImportGuideAction);
+    return new Set(actions.map((a) => importGuideActionCommand(a, ctx.intent)?.command).filter((c): c is string => !!c));
+  };
+
+  it('offers every import the + menu listed (Import DBML…, Import SQL DDL…, Import Semantic Model…, Import…), and Import from dbt in a dbt project', () => {
+    for (const ctx of [BLANK, NOFOLDER, DBT, { hasProject: true, hasDbt: false, intent: 'importSqlDdl' } as ImportGuideContext]) {
+      const commands = commandsOn(ctx);
+      for (const command of ['erdStudio.importDbml', 'erdStudio.importSqlDdl', 'erdStudio.importSemanticModel', 'erdStudio.importModel']) {
+        expect(commands.has(command), `${command} in ${JSON.stringify(ctx)}`).toBe(true);
+      }
+      // The + menu showed Import from dbt only in a dbt project (erdStudio.hasDbtProject): so does the guide.
+      expect(commands.has('erdStudio.drawFromDbt'), JSON.stringify(ctx)).toBe(ctx.hasDbt);
+    }
+    // Import SQL DDL… with no dialect chosen (the + menu's own entry) is Import…'s SQL DDL scripts, on the other-tools card.
+    expect(importGuideActionCommand('otherTools', undefined)).toEqual({ command: 'erdStudio.importModel', args: [] });
+    // Every one of them stays a contributed command (the Command Palette keeps them).
+    const contributed = new Set(pkg.contributes.commands.map((c) => c.command));
+    for (const command of ['erdStudio.importDbml', 'erdStudio.importSqlDdl', 'erdStudio.importSemanticModel', 'erdStudio.importModel', 'erdStudio.drawFromDbt']) {
+      expect(contributed.has(command), command).toBe(true);
+    }
+  });
+
+  it('ends with a quiet Open an Example… link, in every window: the example the sidebar\'s More ways to start… offered', () => {
+    for (const ctx of [BLANK, NOFOLDER, DBT]) {
+      const p = page(ctx);
+      const link = p.doc.querySelector<HTMLElement>('[data-action="openExample"]')!;
+      expect(link.tagName).toBe('BUTTON');
+      expect(link.className).toBe('gp-link');
+      expect(link.textContent).toBe(IMPORT_GUIDE_EXAMPLE_LABEL);
+      expect(link.closest('p')?.textContent).toBe(`${IMPORT_GUIDE_EXAMPLE_TEXT} ${IMPORT_GUIDE_EXAMPLE_LABEL}`);
+      // After the cards, never a second primary button.
+      expect(link.compareDocumentPosition(p.doc.querySelector('.ig__cards')!) & p.dom.window.Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
+      p.click('[data-action="openExample"]');
+      expect(p.posted).toEqual([{ type: 'openExample' }]);
+    }
+    expect(IMPORT_GUIDE_EXAMPLE_LABEL).toBe('Open an Example…');
+    expect(IMPORT_GUIDE_EXAMPLE_COMMAND).toBe('erdStudio.openExampleProject');
+    expect(IMPORT_GUIDE_EXAMPLE_TEXT).not.toContain('?');
   });
 });
 
@@ -441,7 +493,7 @@ describe('the panel host', () => {
   it('is one tab: opening it again brings it forward, drawn for the window as it is now', () => {
     ImportGuidePanel.createOrShow(deps);
     expect(panels()).toHaveLength(1);
-    expect(panels()[0].title).toBe('Bring In Your Data Model');
+    expect(panels()[0].title).toBe('Import Your Data Model');
     expect(panels()[0].webview.html).not.toContain('data-card="found"');
     ctx = { hasProject: true, hasDbt: false, intent: 'importSqlDdl' };
     ImportGuidePanel.createOrShow(deps);
@@ -504,6 +556,19 @@ describe('the panel host', () => {
     await panel._simulateMessage({ type: 'openFolder' });
     expect(deps.noFolders).toBe(1);
     expect(deps.ran.map((r) => r[0])).toEqual(['erdStudio.reportBug', 'vscode.openFolder']);
+  });
+
+  it('Open an Example… runs the fixed example command, with a folder open or not, and counts nothing of its own', async () => {
+    for (const c of [BLANK, NOFOLDER]) {
+      ctx = c;
+      ImportGuidePanel.createOrShow(deps);
+      await panels()[0]._simulateMessage({ type: 'openExample' });
+      // The page cannot name another command: extra fields are never read.
+      await panels()[0]._simulateMessage({ type: 'openExample', command: 'workbench.action.terminal.new' });
+    }
+    expect(deps.ran).toEqual([['erdStudio.openExampleProject'], ['erdStudio.openExampleProject'], ['erdStudio.openExampleProject'], ['erdStudio.openExampleProject']]);
+    expect(deps.features).toEqual([]);
+    expect(deps.noFolders).toBe(0);
   });
 
   it('the found card runs nothing when the folder no longer suggests a direct import', async () => {

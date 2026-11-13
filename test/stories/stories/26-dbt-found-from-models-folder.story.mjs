@@ -40,8 +40,9 @@ export default story({
       s.assert.equal(toast.message, `${FOUND}. Show its models as a diagram? Nothing is saved until you keep it.`);
       s.assert.deepEqual(toast.buttons, ['Show Me', "Don't Ask Again for This Folder"], 'the suggestion\'s buttons');
       await s.ui.openSidebar('ERD Studio');
-      await s.expectVisible(s.sel.welcomeLink('Import from dbt'), { what: 'the Import from dbt button in the empty Diagrams view' });
-      s.assert.deepEqual(await s.wb.ev(s.sel.welcomeButtons), ['Import from dbt'], 'Import from dbt should be the one button');
+      await s.expectVisible(s.sel.welcomeLink('Import Your Data Model…'), { what: 'the Import Your Data Model… button in the empty Diagrams view' });
+      s.assert.deepEqual(await s.wb.ev(s.sel.welcomeButtons), ['Import Your Data Model…'], 'Import Your Data Model… should be the one button in the empty Diagrams view (the guide leads with the dbt card)');
+      s.expect((await s.ui.sidebarText()).includes('This folder is a dbt project.'), 'the empty Diagrams view should say the folder is a dbt project');
       await s.wb.highlight(s.sel.notification(FOUND));
       await s.pause(1800);
       await s.wb.unhighlight();

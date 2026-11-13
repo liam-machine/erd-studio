@@ -8,7 +8,7 @@
 // never its own export), so nothing pops up: no "found CREATE TABLE
 // scripts", no "found a DBML file". One click on the ERD Studio icon shows
 // the example draft, as in an empty folder, and what to do instead is its
-// Bring In Your Data Model…: the import guide, with no "Found in this
+// Import Your Data Model…: the import guide, with no "Found in this
 // folder" card (nothing here is a model to bring in) and a card per place a
 // model can come from. Nothing unasked in the first minute.
 
@@ -19,7 +19,7 @@ import { DRAFT, waitForDraft } from '../lib/draft.mjs';
 import { givenVSCode, installStep, nothingPopsUp, quietFirstMinute } from '../lib/firstMinute.mjs';
 import { story } from '../lib/story.mjs';
 
-const GUIDE_TAB = 'Bring In Your Data Model';
+const GUIDE_TAB = 'Import Your Data Model';
 const FILES = {
   'README.md': '# Warehouse utilities\n\nShared dbt macros, ad-hoc analyses and the exported model.\n',
   // dbt macros, with no dbt_project.yml anywhere: Jinja that writes tables, not tables.
@@ -91,22 +91,22 @@ export default story({
       await s.oneClick(() => s.ui.openSidebar('ERD Studio'));
       draft = await waitForDraft(s, 'Example: Coffee shop');
       s.assert.deepEqual(draft.primary, ['New Diagram…']);
-      s.expect(draft.buttons.includes('Bring In Your Data Model…'), `the draft should offer Bring In Your Data Model…: ${draft.buttons.join(', ')}`);
+      s.expect(draft.buttons.includes('Import Your Data Model…'), `the draft should offer Import Your Data Model…: ${draft.buttons.join(', ')}`);
       const tabs = (await s.ui.tabs()).map((t) => t.label);
       s.expect(!tabs.some((t) => t.startsWith('Draft: ')), `no draft of the lookalikes: ${tabs.join(', ')}`);
       s.expectNoFile('.erd-studio');
-      await draft.page.highlight(DRAFT.button('Bring In Your Data Model…'));
+      await draft.page.highlight(DRAFT.button('Import Your Data Model…'));
       await s.pause(2000);
       await s.wb.unhighlight();
     }, { say: 'One click on the ERD Studio icon. It shows the example, not a draft of my lookalikes, and offers to bring my real model in.' });
 
-    await s.step('"Bring In Your Data Model…" tells me where to get a real one, and finds nothing here', async () => {
-      s.noise.expect(GUIDE_TAB, { kind: 'tab', why: 'Bring In Your Data Model…' });
-      await draft.page.click(DRAFT.button('Bring In Your Data Model…'));
+    await s.step('"Import Your Data Model…" tells me where to get a real one, and finds nothing here', async () => {
+      s.noise.expect(GUIDE_TAB, { kind: 'tab', why: 'Import Your Data Model…' });
+      await draft.page.click(DRAFT.button('Import Your Data Model…'));
       draft.page.close();
       await s.ui.waitForActiveTab(GUIDE_TAB);
       const guide = await s.webview();
-      await guide.waitFor(`doc.querySelector('.ig__heading')?.textContent.trim() === 'Bring In Your Data Model'`, { what: 'the guide' });
+      await guide.waitFor(`doc.querySelector('.ig__heading')?.textContent.trim() === 'Import Your Data Model'`, { what: 'the guide' });
       const cards = await guide.ev(`[...doc.querySelectorAll('.ig-card')].map(c => c.dataset.card)`);
       // No "Found in this folder" card (no macro, CTAS or export is offered), and no dbt card (no dbt project).
       s.expect(!cards.includes('found'), `the guide should have no "Found in this folder" card: ${cards.join(', ')}`);
@@ -117,7 +117,7 @@ export default story({
       await s.pause(2500);
       await s.wb.unhighlight();
       guide.close();
-    }, { say: 'Bring In Your Data Model shows how to export a real model from each place it can live. It found nothing to import here.' });
+    }, { say: 'Import Your Data Model shows how to export a real model from each place it can live. It found nothing to import here.' });
 
     await quietFirstMinute(s, { max: 0 });
   },

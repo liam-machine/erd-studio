@@ -9,7 +9,7 @@
 import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
-import { startCommandLink } from '../../src/types/startActions';
+import { importGuideCommandLink } from '../../src/types/startActions';
 
 const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '../../package.json'), 'utf8'));
 
@@ -114,10 +114,14 @@ describe('package.json storage wording (native DBML storage, 2.0)', () => {
     expect(diagrams.find((w) => w.contents === 'Loading diagrams…')?.when).toBe(
       'erdStudio.hasProject && (erdStudio.diagramsLoading || (!erdStudio.hasDbtProject && erdStudio.storage != yaml && erdStudio.storage != mixed && !erdStudio.startIntent))',
     );
-    // A folder without dbt (New Diagram, or one per direct import the folder suggests) and a dbt project.
-    const empty = diagrams.filter((w) => w.contents.startsWith('No diagrams yet.'));
+    // An empty project: a folder without dbt (one per suggestion: nothing found, or a direct
+    // import the folder suggests) and a dbt project; then a project with tables but no diagram.
+    const empty = diagrams.filter((w) => w.contents.startsWith('No diagrams or tables yet.'));
     expect(empty).toHaveLength(5);
-    for (const w of empty) expect(w.when).toMatch(/&& !erdStudio\.diagramsLoading( &&|$)/);
+    for (const w of empty) expect(w.when).toMatch(/&& !erdStudio\.hasTables && !erdStudio\.diagramsLoading( &&|$)/);
+    const tablesOnly = diagrams.filter((w) => w.contents.startsWith('No diagrams yet.'));
+    expect(tablesOnly).toHaveLength(1);
+    expect(tablesOnly[0].when).toMatch(/erdStudio\.hasTables && !erdStudio\.diagramsLoading &&/);
   });
 
   it('the Table Library says "Loading tables…" while it loads, and its empty state only once loaded', () => {
@@ -248,7 +252,9 @@ describe('package.json: dbt shows up only in dbt projects', () => {
 
   it('keeps the dbt text in a dbt project', () => {
     const welcome = pkg.contributes.viewsWelcome as Array<{ contents: string; when?: string }>;
-    expect(welcome.find((w) => w.when === 'erdStudio.hasDbtProject && !erdStudio.diagramsLoading && erdStudio.storage != yaml && erdStudio.storage != mixed')?.contents).toContain(`[Import from dbt](${startCommandLink('drawFromDbt', 'sidebar')})`);
+    // An empty dbt project says what the folder is; its button opens the import guide, which leads with the dbt card.
+    expect(welcome.find((w) => w.when === 'erdStudio.hasDbtProject && !erdStudio.hasTables && !erdStudio.diagramsLoading && erdStudio.storage != yaml && erdStudio.storage != mixed')?.contents)
+      .toContain(`This folder is a dbt project.\n\n[Import Your Data Model…](${importGuideCommandLink('sidebar')})`);
     expect(welcome.find((w) => w.when === 'erdStudio.hasDbtProject && erdStudio.hasMultipleDbtProjects')?.contents).toContain('[Select dbt Project](command:erdStudio.selectDbtProject)');
     const steps = (pkg.contributes.walkthroughs[0].steps as Array<{ id: string; title: string; when?: string }>);
     expect(steps.filter((s) => dbtOnly(s.when)).map((s) => [s.id, s.title])).toEqual([

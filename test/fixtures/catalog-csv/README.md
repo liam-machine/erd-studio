@@ -1,6 +1,6 @@
 # Catalog exports (real)
 
-Real exports of the catalog queries the import guide ships (**Bring In Your Data Model…** and `docs/import-existing-models.md`), each the unchanged file the engine or its client wrote. `test/unit/catalogCsvImport.fixtures.test.ts` imports every one and checks the result; `test/unit/importGuide.test.ts` holds each query in `queries/` to the guide's and the docs' copy, byte for byte.
+Real exports of the catalog queries the import guide ships (**Import Your Data Model…** and `docs/import-existing-models.md`), each the unchanged file the engine or its client wrote. `test/unit/catalogCsvImport.fixtures.test.ts` imports every one and checks the result; `test/unit/importGuide.test.ts` holds each query in `queries/` to the guide's and the docs' copy, byte for byte.
 
 | File | Engine | How it was written | Schema |
 |---|---|---|---|

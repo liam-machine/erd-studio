@@ -164,7 +164,7 @@ describe('the 257-table SQL draft (large)', () => {
     expect(draft.banner.primary).toBe('keep');
     expect(draft.banner.keepLabel).toBe(KEEP_AS_DIAGRAM);
     expect(draft.banner.changeOptions).toBe(true);
-    expect(draft.otherStarts.map((s) => s.label)).toEqual(['New Diagram…', 'Import…', 'Bring In Your Data Model…', 'Open an Example…']);
+    expect(draft.otherStarts.map((s) => s.label)).toEqual(['New Diagram…', 'Import…', 'Import Your Data Model…', 'Open an Example…']);
     expect(draft.keep).toMatchObject({ writer: 'importDbml', importSource: 'sql', target: target('warehouse') });
     expect(draft.autoLayout).toBe(true);
     expect(draft.trigger).toBe('sidebar');

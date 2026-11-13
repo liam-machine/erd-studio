@@ -1,5 +1,5 @@
 /**
- * **Bring In Your Data Model…** (`erdStudio.showImportGuide`): the
+ * **Import Your Data Model…** (`erdStudio.showImportGuide`): the
  * guide to turning the model a team already has — in Databricks, Snowflake,
  * Power BI, Fabric, SQL Server, PostgreSQL, MySQL, a DBML tool or another
  * modelling tool — into DBML, an open format, with ERD Studio's own imports.
@@ -48,6 +48,7 @@ import {
   IMPORT_GUIDE_COMMAND,
   IMPORT_GUIDE_LABEL,
   START_ACTION_COMMANDS,
+  START_ACTION_LABELS,
   START_INTENT_REASONS,
   importGuideCommandLink,
   startActionArgs,
@@ -66,11 +67,14 @@ export const IMPORT_GUIDE_TITLE = IMPORT_GUIDE_LABEL.replace(/…$/, '');
 // ---------------------------------------------------------------------------
 
 /**
- * The surfaces that link the guide: the Welcome panel's start card, the
- * walkthrough's blank start step, the empty Diagrams view's blank variant,
+ * The surfaces that link the guide: the Welcome panel's start card (no
+ * longer shown), the walkthrough's More ways to start…, the sidebar
+ * (`sidebar`: the empty Diagrams view's button, the empty Table Library's
+ * link, Help & Feedback's first row, and the sidebar's More ways to start…),
  * Import…'s picker, the start quick pick, the nothing-found notification
- * (no longer shown: kept so an old link still counts) and a draft's Other
- * Ways to Start (`draft`). The palette passes nothing.
+ * (no longer shown: kept so an old link still counts) and a draft's More
+ * ways to start (`draft`). The palette and the Diagrams view's + menu pass
+ * nothing.
  */
 export const IMPORT_GUIDE_SURFACES = ['welcome', 'walkthrough', 'sidebar', 'picker', 'startPick', 'prompt', 'draft'] as const;
 export type ImportGuideSurface = (typeof IMPORT_GUIDE_SURFACES)[number];
@@ -784,7 +788,19 @@ export type ImportGuideToHost =
   /** A Copy button: the host copies that snippet's fixed text. */
   | { type: 'copy'; snippet: ImportGuideSnippet }
   /** No folder open: VS Code's own folder picker. */
-  | { type: 'openFolder' };
+  | { type: 'openFolder' }
+  /** The closing line's Open an Example…: the host runs {@link IMPORT_GUIDE_EXAMPLE_COMMAND}. */
+  | { type: 'openExample' };
+
+/**
+ * The closing line's command: Open an Example… (`START_ACTION_COMMANDS.example`,
+ * pre-registered, so it works in an empty window too). It counts its own use
+ * (the example draft's keys); the guide adds no key for it.
+ */
+export const IMPORT_GUIDE_EXAMPLE_COMMAND = START_ACTION_COMMANDS.example;
+/** The closing line: a finished data model, for someone with nothing to bring in yet. */
+export const IMPORT_GUIDE_EXAMPLE_TEXT = 'Or see a finished data model first:';
+export const IMPORT_GUIDE_EXAMPLE_LABEL = START_ACTION_LABELS.example;
 
 export function isImportGuideToHost(value: unknown): value is ImportGuideToHost {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
@@ -795,6 +811,7 @@ export function isImportGuideToHost(value: unknown): value is ImportGuideToHost 
     case 'copy':
       return typeof msg.snippet === 'string' && Object.prototype.hasOwnProperty.call(IMPORT_GUIDE_SNIPPETS, msg.snippet);
     case 'openFolder':
+    case 'openExample':
       return true;
     default:
       return false;
@@ -839,6 +856,9 @@ export const IMPORT_GUIDE_STYLE = `
   margin: var(--space-4) 0 0; padding: var(--space-4) var(--space-4) var(--space-4) var(--space-6);
 }
 .ig__nofolder-text { flex: 1 1 32ch; margin: 0; }
+
+/* The closing line: a quiet link to an example, for someone with nothing to bring in yet. */
+.ig__example { margin: var(--space-7) 0 0; color: var(--text-secondary); font-size: var(--text-sm); }
 
 /* --- The cards ------------------------------------------------------------- */
 
@@ -1057,6 +1077,8 @@ const SCRIPT = `
       setTimeout(function () { el.textContent = before; el.classList.remove('ig-btn--copied'); }, 1600);
     } else if (action === 'openFolder') {
       vscode.postMessage({ type: 'openFolder' });
+    } else if (action === 'openExample') {
+      vscode.postMessage({ type: 'openExample' });
     }
   });
 })();
@@ -1194,6 +1216,7 @@ export function buildImportGuideHtml(ctx: ImportGuideContext, nonce: string): st
   </header>
   <ol class="ig__cards">${cards}
   </ol>
+  <p class="ig__example">${escapeHtml(IMPORT_GUIDE_EXAMPLE_TEXT)} <button class="gp-link" type="button" data-action="openExample">${escapeHtml(IMPORT_GUIDE_EXAMPLE_LABEL)}</button></p>
 </main>
 <script nonce="${n}">${SCRIPT}</script>
 </body>
