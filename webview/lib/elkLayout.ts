@@ -1095,7 +1095,7 @@ export function layoutLeftTablesInPlace(
 
 /**
  * What the canvas says when a re-applied layout moved nothing, so the user
- * does not take it for a layout that never ran (Gerhard, 2026-11-12: "None
+ * does not take it for a layout that never ran (the reporter, 2026-11-12: "None
  * does not fail but I cannot tell whether it did anything"). With no table
  * types set, Table type and None produce the same arrangement.
  */

@@ -1,5 +1,5 @@
-// Verification of the fix (gerhard-feedback-3, stage 2). Usage, after npm run build:
-//   node test/stories/repro/gerhard3-verify-fix.mjs <evidence dir>
+// Verification of the fix (reporter-feedback-3, stage 2). Usage, after npm run build:
+//   node test/stories/repro/reporter3-verify-fix.mjs <evidence dir>
 // Launches an isolated VS Code (fresh /tmp profile, --use-mock-keychain via launch.mjs): in a real isolated VS Code, on a /tmp copy of
 // test/fixtures/dbt-project-dbml:
 //   1. the Table Library row's inline + (Add to Open Diagram) adds dim_location to the open showcase, no pick

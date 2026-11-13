@@ -1,5 +1,5 @@
 Project sap {
-  Note: 'Gerhard photo-2: two unqualified Table adresse files, imported side by side as ERD Studio 2.0.4 wrote them'
+  Note: 'The reporter\'s photo-2: two unqualified Table adresse files, imported side by side as ERD Studio 2.0.4 wrote them'
   erd_schema_version: '8'
   erd_layout: '''
     bqs.adresse 400 40

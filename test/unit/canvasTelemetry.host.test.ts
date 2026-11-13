@@ -167,7 +167,7 @@ describe('webviewError and layoutFinished (B13, B17)', () => {
     await panel._simulateMessage({ type: 'layoutFinished', payload: { ms: 900, ok: true, fallback: true, rung: 3 } });
     expect(featureKeys()).toEqual(['layoutUnder1s', 'layoutStackFallback', 'layoutFallbackRung3']);
 
-    // A layout that worked but not as asked (Gerhard, 2026-11-12): what the
+    // A layout that worked but not as asked (the reporter, 2026-11-12): what the
     // page says it did, with the counts, goes to the log as an info line;
     // telemetry counts only the rung, never the text or the counts.
     const info = vi.spyOn(log, 'info').mockImplementation(() => {});

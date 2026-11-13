@@ -1,5 +1,5 @@
 /**
- * `planDbmlLibraryWrites`' `qualify` op (Qualify Tables) over Gerhard's
+ * `planDbmlLibraryWrites`' `qualify` op (Qualify Tables) over the reporter's
  * photo-2 shape (packages/core/test/fixtures/dbml/same-name-unqualified:
  * `Table adresse` with no schema in tables/bqs/ and tables/ccc/, and the
  * relationships file 2.0.4 wrote, which imports both as `adresse`).

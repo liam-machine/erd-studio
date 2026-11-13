@@ -1,6 +1,6 @@
 /**
  * `use` lines of one DBML file that import two different table files under
- * the same spelling (Gerhard, photo-2):
+ * the same spelling (the reporter, photo-2):
  *
  *   use { table adresse } from '../tables/bqs/adresse.dbml'
  *   use { table adresse } from '../tables/ccc/adresse.dbml'

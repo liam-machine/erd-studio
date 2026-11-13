@@ -1,5 +1,5 @@
-# Stage 1 evidence: Auto layout 'Maximum call stack size exceeded' (Gerhard, 2026-11-12)
-# worktree 26f635d2 on fix/gerhard-feedback-3 (origin/develop 9e246d57 + repro commits), node v26.3.1, 2026-11-12 19:05 AEDT
+# Stage 1 evidence: Auto layout 'Maximum call stack size exceeded' (the reporter, 2026-11-12)
+# worktree 26f635d2 on fix/reporter-feedback-3 (origin/develop 9e246d57 + repro commits), node v26.3.1, 2026-11-12 19:05 AEDT
 
 $ node scripts/repro-layout-stack/build.mjs
 built scripts/repro-layout-stack/.out/layout.cjs
@@ -53,8 +53,8 @@ $ node scripts/repro-layout-stack/sweep.cjs twoway 40 80 30 auto
 twoway 40t/80r auto: 3/30 failed (21696ms)
 $ node scripts/repro-layout-stack/sweep.cjs twoway 130 80 40 auto
 twoway 130t/80r auto: 0/40 failed (8616ms)
-$ node scripts/repro-layout-stack/sweep.cjs gerhard 130 80 40 auto
-gerhard 130t/80r auto: 0/40 failed (18058ms)
+$ node scripts/repro-layout-stack/sweep.cjs reporter 130 80 40 auto
+reporter 130t/80r auto: 0/40 failed (18058ms)
 
 ## 6. Fix prototype: orient every edge along one order consistent with the partitions (raw vs orient, rung 1 only)
 $ node scripts/repro-layout-stack/proto-orient.cjs twoway 15 28 200 raw|orient
@@ -67,7 +67,7 @@ $ npx vitest run test/unit/elkLayoutPartitionCycle.test.ts
  Test Files  1 passed (1)
       Tests  6 passed (6)
 
-## 1b. All four Grouping choices on the 8-table diagram (frames omitted): Auto and Join depth fail, Table type and None work, as Gerhard saw
+## 1b. All four Grouping choices on the 8-table diagram (frames omitted): Auto and Join depth fail, Table type and None work, as the reporter saw
 $ node scripts/repro-layout-stack/run.cjs twoway 8 14 all 192 | grep -v "^        at"
 twoway       8t     14r  auto ->depth bound=3 bands=5/0/0/0/3  FAIL RangeError: Maximum call stack size exceeded [stack, every fallback failed, last=stack] 136ms
 twoway       8t     14r  role ->role  bound=5 bands=-  OK   rung=1 25ms

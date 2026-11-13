@@ -1,5 +1,5 @@
 /**
- * The CLI on Gerhard's photo-2 shape (packages/core/test/fixtures/dbml/
+ * The CLI on the reporter's photo-2 shape (packages/core/test/fixtures/dbml/
  * same-name-unqualified): two `Table adresse` files with no schema, in
  * tables/bqs/ and tables/ccc/, imported side by side under one spelling as
  * ERD Studio 2.0.4 wrote them. doctor says which line imports the spelling

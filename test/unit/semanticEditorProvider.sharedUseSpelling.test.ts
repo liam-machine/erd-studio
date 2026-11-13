@@ -1,5 +1,5 @@
 /**
- * Gerhard 2026-11-12, photo-2: "DBML has issues importing the same table
+ * the reporter 2026-11-12, photo-2: "DBML has issues importing the same table
  * twice — the official diagram view only shows one adresse table".
  *
  * His diagram:
@@ -79,8 +79,8 @@ function everyFileParses(): string[] {
   return Object.keys(dbmlFiles()).filter((f) => !f.includes('/tables/')).flatMap(officialParser);
 }
 
-/** Gerhard's shape: unqualified headers (photo-2's use lines) or, for the control, qualified ones. */
-function gerhardProject(qualified: boolean): void {
+/** the reporter's shape: unqualified headers (photo-2's use lines) or, for the control, qualified ones. */
+function reporterProject(qualified: boolean): void {
   const q = (s: string): string => (qualified ? `${s}.` : '');
   write('layers.json', JSON.stringify({ schemaVersion: 1, layers: [{ id: 'bronze', label: 'Bronze', color: '#cd7f32', creatable: true, order: 1 }] }, null, 2));
   write('bronze/tables/bqs/adresse.dbml', `Table ${q('bqs')}adresse {\n  id INT [pk]\n  strasse VARCHAR\n  ort VARCHAR\n}\n`);
@@ -115,9 +115,9 @@ const WRITTEN_BY_2_0_4 = [
   '',
 ].join('\n');
 
-/** Gerhard's project as 2.0.4 left it: both adresse on the diagram (photo-2's lines), Refs to each and between them. */
+/** the reporter's project as 2.0.4 left it: both adresse on the diagram (photo-2's lines), Refs to each and between them. */
 function writtenBy204(relationships = WRITTEN_BY_2_0_4): void {
-  gerhardProject(false);
+  reporterProject(false);
   write('bronze/diagrams/sap.dbml', [
     'Project sap {',
     "  erd_schema_version: '8'",
@@ -204,7 +204,7 @@ function buttonsOf(text: string): unknown[] {
 
 beforeEach(() => {
   _resetMockWorkspace();
-  root = fs.mkdtempSync(path.join(os.tmpdir(), 'erd-gerhard-adresse-'));
+  root = fs.mkdtempSync(path.join(os.tmpdir(), 'erd-reporter-adresse-'));
   warnings = [];
   answer = undefined;
   vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -220,9 +220,9 @@ afterEach(() => {
   fs.rmSync(root, { recursive: true, force: true });
 });
 
-describe('Gerhard photo-2: the shape itself', () => {
+describe('reported photo-2: the shape itself', () => {
   it('the pinned DBML parser refuses photo-2 as written ([3003] on the second use line): why "the official diagram view only shows one"', () => {
-    gerhardProject(false);
+    reporterProject(false);
     write('bronze/diagrams/photo2.dbml', [
       "use { table bqs__v_sap_prod_unit2 } from '../tables/bqs/bqs__v_sap_prod_unit2.dbml'",
       "use { table adresse } from '../tables/bqs/adresse.dbml'",
@@ -235,7 +235,7 @@ describe('Gerhard photo-2: the shape itself', () => {
   });
 });
 
-describe('Gerhard photo-2: reading a project 2.0.4 wrote', () => {
+describe('reported photo-2: reading a project 2.0.4 wrote', () => {
   it('draws each Ref on the adresse whose columns it names, never on the first use line\'s (no collapse, no self-loop)', async () => {
     writtenBy204();
     const canvas = await open('bronze/diagrams/sap.dbml');
@@ -287,9 +287,9 @@ describe('Gerhard photo-2: reading a project 2.0.4 wrote', () => {
   });
 });
 
-describe('Gerhard photo-2: an edit that would write the shape', () => {
+describe('reported photo-2: an edit that would write the shape', () => {
   it('Add Existing of the second adresse asks first; Cancel writes nothing', async () => {
-    gerhardProject(false);
+    reporterProject(false);
     const before = dbmlFiles();
     const canvas = await open('bronze/diagrams/sap.dbml');
     const errors = await canvas.send({ type: 'addExistingModel', payload: { modelName: 'adresse', sourcePath: '.erd-studio/bronze/tables/ccc/adresse.dbml' } });
@@ -302,7 +302,7 @@ describe('Gerhard photo-2: an edit that would write the shape', () => {
   });
 
   it('Add Existing with Qualify Tables writes headers and use lines the pinned parser accepts, in one edit, and shows both tables', async () => {
-    gerhardProject(false);
+    reporterProject(false);
     const canvas = await open('bronze/diagrams/sap.dbml');
     answer = 'Qualify Tables';
     const errors = await canvas.send({ type: 'addExistingModel', payload: { modelName: 'adresse', sourcePath: '.erd-studio/bronze/tables/ccc/adresse.dbml' } });
@@ -321,7 +321,7 @@ describe('Gerhard photo-2: an edit that would write the shape', () => {
   });
 
   it('a drop of the second adresse asks the same, and with Qualify Tables writes a diagram the pinned parser accepts', async () => {
-    gerhardProject(false);
+    reporterProject(false);
     const canvas = await open('bronze/diagrams/sap.dbml');
     answer = 'Qualify Tables';
     const errors = await canvas.send({ type: 'dropTables', payload: { position: { x: 600, y: 300 }, uris: [`file://${at('bronze/tables/ccc/adresse.dbml')}`] } });
@@ -333,7 +333,7 @@ describe('Gerhard photo-2: an edit that would write the shape', () => {
   });
 
   it('relationships to each adresse and between them, once qualified: written qualified, drawn on the right tables, every file compiles', async () => {
-    gerhardProject(false);
+    reporterProject(false);
     const canvas = await open('bronze/diagrams/sap.dbml');
     answer = 'Qualify Tables';
     await canvas.send({ type: 'addExistingModel', payload: { modelName: 'adresse', sourcePath: '.erd-studio/bronze/tables/ccc/adresse.dbml' } });
@@ -350,7 +350,7 @@ describe('Gerhard photo-2: an edit that would write the shape', () => {
 
 describe('control: the same project with qualified headers (what ERD Studio writes itself)', () => {
   it('Add Existing writes qualified use lines the official parser accepts, and asks nothing', async () => {
-    gerhardProject(true);
+    reporterProject(true);
     const canvas = await open('bronze/diagrams/sap.dbml');
     const errors = await canvas.send({ type: 'addExistingModel', payload: { modelName: 'adresse', sourcePath: '.erd-studio/bronze/tables/ccc/adresse.dbml' } });
     expect(errors).toEqual([]);
@@ -370,7 +370,7 @@ describe('control: the same project with qualified headers (what ERD Studio writ
  * offered the same useless fix again on reopen, and a relationship drawn
  * after declining was written ambiguously with no prompt.
  */
-describe('Gerhard photo-2: both adresse tables have the Ref column', () => {
+describe('reported photo-2: both adresse tables have the Ref column', () => {
   /** Two source systems' address tables that BOTH have `id`, with a Ref to each as 2.0.4 wrote them. */
   function bothHaveId(refs = ['Ref: unit.bqs_adresse_id >? adresse.id', 'Ref: unit.ccc_adresse_id >? adresse.id']): void {
     write('layers.json', JSON.stringify({ schemaVersion: 1, layers: [{ id: 'bronze', label: 'Bronze', color: '#cd7f32', creatable: true, order: 1 }] }, null, 2));

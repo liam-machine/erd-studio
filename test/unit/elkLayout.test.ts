@@ -547,7 +547,7 @@ describe('gridLayout (the fallback that needs no ELK)', () => {
   });
 });
 
-// Gerhard (2026-11-12): None "does not fail but I cannot tell whether it did anything".
+// the reporter (2026-11-12): None "does not fail but I cannot tell whether it did anything".
 describe('a re-applied layout that moved nothing', () => {
   it('tableTypeBandCount counts Table type bands (no type and a fact share one)', () => {
     expect(tableTypeBandCount([makeNode('a'), makeNode('b')])).toBe(1);

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /*
- * REPRO (Gerhard, 2026-11-12) in a real Chromium Web Worker: the canvas runs
+ * REPRO (the reporter, 2026-11-12) in a real Chromium Web Worker: the canvas runs
  * ELK in a dedicated Worker made from a blob URL (webview/lib/elkLayout.ts
  * getElk), whose V8 stack is far smaller than Node's main thread. This runs
  * the same worker code (elk-worker.min.js) the same way, with the same graph

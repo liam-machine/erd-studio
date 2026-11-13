@@ -262,7 +262,7 @@ describe('Toolbar layout-dirty button', () => {
     consoleSpy.mockRestore();
   });
 
-  // Gerhard (2026-11-12): a degraded layout must say so, on the canvas and in the ERD Studio output.
+  // the reporter (2026-11-12): a degraded layout must say so, on the canvas and in the ERD Studio output.
   it('a layout that dropped the grouping says so, and sends what happened for the log', async () => {
     mockRunElkLayout.mockImplementationOnce(async (_nodes, _edges, _options, _strategy, hooks) => {
       hooks?.onFallbackRung?.(3);

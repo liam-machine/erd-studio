@@ -1,5 +1,5 @@
-# Gerhard photo-2, stage 4 (repair): CLI before/after
-# BEFORE = origin/develop base 5b5f85a9 (stage 1 found v2.0.4 identical for this shape); AFTER = fix/gerhard-feedback-3 (fix ba2770aa + this repair)
+# the reporter's photo-2, stage 4 (repair): CLI before/after
+# BEFORE = origin/develop base 5b5f85a9 (stage 1 found v2.0.4 identical for this shape); AFTER = fix/reporter-feedback-3 (fix ba2770aa + this repair)
 # Project A: packages/core/test/fixtures/dbml/same-name-unqualified (the two adresse tables have different columns: id vs adr_id)
 # Project B: both adresse tables have 'id' (the Breaker's case), Refs as 2.0.4 wrote them:
 #   Ref: unit.bqs_adresse_id >? adresse.id   /   Ref: unit.ccc_adresse_id >? adresse.id

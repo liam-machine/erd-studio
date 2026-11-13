@@ -1,7 +1,7 @@
-// REPRO (gerhard-feedback-3, stage 1) CONTROL: a tree-to-tree drop through the same CDP mechanism as
-// experiment A of gerhard3-dragdrop.mjs (Gold layer row dropped on Silver): VS Code delivers it and
+// REPRO (reporter-feedback-3, stage 1) CONTROL: a tree-to-tree drop through the same CDP mechanism as
+// experiment A of reporter3-dragdrop.mjs (Gold layer row dropped on Silver): VS Code delivers it and
 // layers.json is reordered, so A's silent no-op is the extension's, not the harness's.
-// Usage: node gerhard3-control-layer.mjs <cdp port> <project>/.erd-studio/layers.json
+// Usage: node reporter3-control-layer.mjs <cdp port> <project>/.erd-studio/layers.json
 import fs from 'node:fs';
 const L='../lib/';
 const { Workbench, sleep } = await import(L+'act.mjs');

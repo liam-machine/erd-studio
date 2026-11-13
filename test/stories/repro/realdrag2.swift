@@ -1,7 +1,7 @@
-// REPRO helper (gerhard-feedback-3, Shift-drop probe): a REAL macOS drag from a
+// REPRO helper (reporter-feedback-3, Shift-drop probe): a REAL macOS drag from a
 // Table Library row to a point on the canvas, with the Shift key pressed in a
 // chosen pattern. Posts HID events, so it MOVES THE REAL POINTER: run it only
-// against a scripted VS Code window (gerhard3-dragprobe.mjs).
+// against a scripted VS Code window (reporter3-dragprobe.mjs).
 //
 //   swiftc -O realdrag2.swift -o /tmp/g3-realdrag2
 //   /tmp/g3-realdrag2 <pid> <fromX> <fromY> <toX> <toY> <mode>

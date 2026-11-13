@@ -1,5 +1,5 @@
 /**
- * Gerhard (2026-11-12): "Auto layout failed: Maximum call stack size
+ * the reporter (2026-11-12): "Auto layout failed: Maximum call stack size
  * exceeded" with Grouping Auto or Join depth, while Table type and None work.
  *
  * Runs the real `runElkLayout` with the real ELK engine (in-process, the same
@@ -122,7 +122,7 @@ function twoWay(n: number, m: number, seed: number): { nodes: TableFlowNode[]; e
 const placedEverywhere = (positions: Record<string, { x: number; y: number }>, n: number) =>
   Object.keys(positions).length === n && Object.values(positions).every((p) => Number.isFinite(p.x) && Number.isFinite(p.y));
 
-describe('grouped layout of a diagram with two-way relationships (Gerhard, 2026-11-12)', () => {
+describe('grouped layout of a diagram with two-way relationships (the reporter, 2026-11-12)', () => {
   it('None lays every table out', async () => {
     const { nodes, edges } = diagram();
     const { positions, outcome } = await layOut(nodes, edges, 'none');
@@ -150,7 +150,7 @@ describe('grouped layout of a diagram with two-way relationships (Gerhard, 2026-
     expect(outcome).toEqual({ step: 'default', grouping: 'depth', bands: 'partitioned' });
   });
 
-  // Table type was only safe for Gerhard because his imported tables have no
+  // Table type was only safe for the reporter because his imported tables have no
   // roles; with roles in two bands it took the same path and failed too.
   it('Table type with roles in two bands lays every table out with ELK\'s own grouped layout', async () => {
     const { nodes, edges } = diagram(goldFacts);
@@ -179,7 +179,7 @@ describe('grouped layout of a diagram with two-way relationships (Gerhard, 2026-
 });
 
 /**
- * Gerhard: "None does not fail but I cannot tell whether it did anything".
+ * the reporter: "None does not fail but I cannot tell whether it did anything".
  * Real-app check (2026-11-12): Table type -> None -> Re-apply moved nothing,
  * with no message. With no table types, Table type and None ARE the same
  * layout; the canvas must say so instead of looking like it never ran.
@@ -259,9 +259,9 @@ describe('layout on a small stack (child process, node --stack-size)', () => {
       logLevel: 'error',
     });
     // The diagrams are made here and handed over as JSON; the child only lays them out.
-    const gerhard8 = diagram();
+    const reporter8 = diagram();
     const cases: Array<{ label: string; strategy: PartitionStrategy; nodes: TableFlowNode[]; edges: FkFlowEdge[] }> = [
-      ...(['auto', 'depth', 'none'] as const).map((strategy) => ({ label: '8/14 two-way', strategy, ...gerhard8 })),
+      ...(['auto', 'depth', 'none'] as const).map((strategy) => ({ label: '8/14 two-way', strategy, ...reporter8 })),
       { label: '8/14 two bands', strategy: 'role', ...diagram(goldFacts) },
       ...(['auto', 'none'] as const).map((strategy) => ({ label: '130/160 two-way', strategy, ...twoWay(130, 160, 1) })),
       { label: '130/80 two-way', strategy: 'auto', ...twoWay(130, 80, 2) },

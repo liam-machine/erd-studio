@@ -372,7 +372,7 @@ describe('Add to Diagram…', () => {
     expect(addTables).toHaveBeenCalledWith(`${SEM}/silver/diagrams/staging.dbml`, ['dim_region', 'dim_date']);
   });
 
-  // Gerhard: Add to Diagram should add to the diagram that is open, without asking.
+  // the reporter: Add to Diagram should add to the diagram that is open, without asking.
   describe('with a diagram open', () => {
     const STAGING = `${SEM}/silver/diagrams/staging.dbml`;
     const SALES = `${SEM}/gold/diagrams/sales.dbml`;
@@ -553,7 +553,7 @@ describe('contributions', () => {
   });
 
   it('put Add to Open Diagram, then Add to Diagram…, on a Table Library table\'s right-click menu', () => {
-    // Gerhard: the right-click add goes to the open diagram; Add to Diagram… still asks, for any other diagram.
+    // the reporter: the right-click add goes to the open diagram; Add to Diagram… still asks, for any other diagram.
     expect(menus['view/item/context']).toContainEqual({ command: 'erdStudio.addToOpenDiagram', when: 'view == erdStudio.modelLibrary && viewItem == logicalModel', group: 'navigation@2' });
     expect(menus['view/item/context']).toContainEqual({ command: 'erdStudio.addToDiagram', when: 'view == erdStudio.modelLibrary && viewItem == logicalModel', group: 'navigation@3' });
   });

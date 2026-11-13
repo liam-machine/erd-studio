@@ -44,7 +44,7 @@ class VSCodeDataTransfer {
  * under each declared drag type — then the drag controller's own items,
  * serialised. `fileUri` is a Windows file, as VS Code writes one.
  */
-function vscodeLibraryDrop(names = '["dim_location"]', fileUri = 'file:///c%3A/Users/gerhard/proj/.erd-studio/silver/tables/silver/dim_location.dbml'): VSCodeDataTransfer {
+function vscodeLibraryDrop(names = '["dim_location"]', fileUri = 'file:///c%3A/Users/reporter/proj/.erd-studio/silver/tables/silver/dim_location.dbml'): VSCodeDataTransfer {
   return new VSCodeDataTransfer([
     [TABLE_LIBRARY_DRAG_MIME, new vscode.DataTransferItem('{"id":"erdStudio.modelLibrary","itemHandles":["1/erdStudio.modelLibrary.folder:silver/tables/silver/0:dim_location"]}')],
     [TABLE_LIBRARY_NAMES_MIME, new vscode.DataTransferItem('')],
@@ -630,7 +630,7 @@ describe('SubjectAreaTreeProvider', () => {
         expect([...provider.dropMimeTypes]).toEqual([...DIAGRAMS_DROP_MIME_TYPES]);
       });
 
-      // The 2.0.4 bug (Gerhard: "neither dropping on the diagram view … nor
+      // The 2.0.4 bug (the reporter: "neither dropping on the diagram view … nor
       // dropping on the diagram tree view in the sidebar"): the names were read
       // from the first item of the tree type, which is VS Code's own source info.
       it('a drop as VS Code really hands it over (native items first) adds the dragged table', async () => {
@@ -641,7 +641,7 @@ describe('SubjectAreaTreeProvider', () => {
         expect(added).toEqual([[
           '/p/.erd-studio/gold/diagrams/finance.dbml',
           ['dim_location'],
-          ['file:///c%3A/Users/gerhard/proj/.erd-studio/silver/tables/silver/dim_location.dbml'],
+          ['file:///c%3A/Users/reporter/proj/.erd-studio/silver/tables/silver/dim_location.dbml'],
         ]]);
         expect(info).not.toHaveBeenCalled();
         info.mockRestore();

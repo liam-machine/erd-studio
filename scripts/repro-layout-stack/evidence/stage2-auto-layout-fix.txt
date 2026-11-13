@@ -1,5 +1,5 @@
-# Stage 2: Auto Layout stack overflow (Gerhard, 2026-11-12), after the fix
-# 2026-11-12T08:46Z, branch fix/gerhard-feedback-3, node v26.3.1
+# Stage 2: Auto Layout stack overflow (the reporter, 2026-11-12), after the fix
+# 2026-11-12T08:46Z, branch fix/reporter-feedback-3, node v26.3.1
 
 ## 1. Seed sweeps through the real runElkLayout (Auto grouping); stage 1 had 5/200, 3/30, 1/30 and 3/30 failing
 twoway 15t/28r auto: 0/200 failed (6288ms)
@@ -8,15 +8,15 @@ random 40t/80r auto: 0/30 failed (7170ms)
 twoway 130t/160r auto: 0/30 failed (62388ms)
 twoway 15t/28r depth: 0/100 failed (2965ms)
 
-## 2. Gerhard's mechanism (8 tables / 14 relationships) and his reported size, every grouping, default stack
+## 2. the reporter's mechanism (8 tables / 14 relationships) and his reported size, every grouping, default stack
 twoway       8t     14r  auto ->depth bound=3 bands=5/0/0/0/3  OK   rung=1 step=default bandsUsed=partitioned placed=8 358ms
 twoway       8t     14r  role ->role  bound=5 bands=-  OK   rung=1 step=default bandsUsed=off placed=8 13ms
 twoway       8t     14r  depth->depth bound=5 bands=5/0/0/0/3  OK   rung=1 step=default bandsUsed=partitioned placed=8 11ms
 twoway       8t     14r  none ->none  bound=5 bands=-  OK   rung=1 step=default bandsUsed=off placed=8 9ms
-gerhard    130t     80r  auto ->depth bound=10 bands=109/11/6/2/2  OK   rung=1 step=default bandsUsed=partitioned placed=130 414ms
-gerhard    130t     80r  role ->role  bound=5 bands=-  OK   rung=1 step=default bandsUsed=off placed=130 701ms
-gerhard    130t     80r  depth->depth bound=5 bands=109/11/6/2/2  OK   rung=1 step=default bandsUsed=partitioned placed=130 549ms
-gerhard    130t     80r  none ->none  bound=5 bands=-  OK   rung=1 step=default bandsUsed=off placed=130 259ms
+reporter    130t     80r  auto ->depth bound=10 bands=109/11/6/2/2  OK   rung=1 step=default bandsUsed=partitioned placed=130 414ms
+reporter    130t     80r  role ->role  bound=5 bands=-  OK   rung=1 step=default bandsUsed=off placed=130 701ms
+reporter    130t     80r  depth->depth bound=5 bands=109/11/6/2/2  OK   rung=1 step=default bandsUsed=partitioned placed=130 549ms
+reporter    130t     80r  none ->none  bound=5 bands=-  OK   rung=1 step=default bandsUsed=off placed=130 259ms
 twoway     130t     80r  auto ->depth bound=10 bands=81/31/12/2/4  OK   rung=1 step=default bandsUsed=partitioned placed=130 131ms
 twoway     130t     80r  role ->role  bound=5 bands=-  OK   rung=1 step=default bandsUsed=off placed=130 119ms
 twoway     130t     80r  depth->depth bound=5 bands=81/31/12/2/4  OK   rung=1 step=default bandsUsed=partitioned placed=130 85ms
@@ -53,8 +53,8 @@ twoway       8t     14r  auto ->depth bound=3 bands=4/0/3/0/1  OK   rung=1 step=
 twoway       8t     14r  none ->none  bound=5 bands=-  OK   rung=1 step=default bandsUsed=off placed=8 53ms
 twoway     130t    160r  auto ->depth bound=10 bands=82/22/21/3/2  OK   rung=2 step=brandesKoepf bandsUsed=partitioned placed=130 654ms
 twoway     130t    160r  none ->none  bound=5 bands=-  OK   rung=2 step=brandesKoepf bandsUsed=off placed=130 321ms
-gerhard    130t     80r  auto ->depth bound=10 bands=109/11/6/2/2  OK   rung=2 step=brandesKoepf bandsUsed=partitioned placed=130 193ms
-gerhard    130t     80r  none ->none  bound=5 bands=-  OK   rung=1 step=default bandsUsed=off placed=130 331ms
+reporter    130t     80r  auto ->depth bound=10 bands=109/11/6/2/2  OK   rung=2 step=brandesKoepf bandsUsed=partitioned placed=130 193ms
+reporter    130t     80r  none ->none  bound=5 bands=-  OK   rung=1 step=default bandsUsed=off placed=130 331ms
 chain     5000t   5000r  auto ->depth bound=10 bands=1382/1034/1033/1034/517  OK   rung=3 step=grid bandsUsed=direction placed=5000 13ms
 chain     5000t   5000r  none ->none  bound=5 bands=-  OK   rung=3 step=grid bandsUsed=off placed=5000 7ms
 twoway   50000t 100000r  auto ->depth bound=10 bands=26140/3229/158/20010/463  OK   rung=3 step=grid bandsUsed=direction placed=50000 226ms
@@ -62,7 +62,7 @@ twoway   50000t 100000r  none ->none  bound=5 bands=-  OK   rung=3 step=grid ban
 
 ## 5. A real Chromium dedicated Web Worker (blob URL, as the canvas builds it), the graphs from planElkLayout, the full ladder and the 30 s guard
 ## (stage 1, same three diagrams: Auto and Join depth FAILED on every rung)
-$ node scripts/repro-layout-stack/browser.cjs twoway:8:14:192 twoway:40:80:13 twoway:130:160:26 gerhard:130:80:1
+$ node scripts/repro-layout-stack/browser.cjs twoway:8:14:192 twoway:40:80:13 twoway:130:160:26 reporter:130:80:1
 chromium 157.0.8103.52: trivial recursion depth main=8776 worker=5489
 twoway       8t     14r auto ->depth/partitioned   OK  default:ok71ms
 twoway       8t     14r role ->role/off            OK  default:ok67ms
@@ -76,10 +76,10 @@ twoway     130t    160r auto ->depth/partitioned   OK via brandesKoepf  default:
 twoway     130t    160r role ->role/off            OK  default:ok1319ms
 twoway     130t    160r depth->depth/partitioned   OK  default:ok3007ms
 twoway     130t    160r none ->none/off            OK  default:ok1291ms
-gerhard    130t     80r auto ->depth/partitioned   OK  default:ok311ms
-gerhard    130t     80r role ->role/off            OK  default:ok287ms
-gerhard    130t     80r depth->depth/partitioned   OK  default:ok452ms
-gerhard    130t     80r none ->none/off            OK  default:ok284ms
+reporter    130t     80r auto ->depth/partitioned   OK  default:ok311ms
+reporter    130t     80r role ->role/off            OK  default:ok287ms
+reporter    130t     80r depth->depth/partitioned   OK  default:ok452ms
+reporter    130t     80r none ->none/off            OK  default:ok284ms
 
 ## 6. Larger diagrams in the Chromium worker, one browser per diagram (see note in the PR: several 1,000-table layouts back to back in one headless page once closed the page)
 random     150t    200r auto ->depth/direction     OK  default:ok241ms
@@ -122,7 +122,7 @@ With the fix: 13 passed (about 17 s, including a child process on node --stack-s
 
 ## 8. The filming projects (make-project.cjs), loaded through the real pipeline: @erd-studio/core loadDisplaySubjectArea (DBML reader) -> renderer transformSubjectArea -> runElkLayout
 ## before fix = webview/lib/elkLayout.ts at 3aea1343~1, after fix = this commit; real ELK in-process
-$ node scripts/repro-layout-stack/make-project.cjs <scratch>/proj8                     # gerhard8: 8 tables, 14 relationships
+$ node scripts/repro-layout-stack/make-project.cjs <scratch>/proj8                     # reporter8: 8 tables, 14 relationships
 8 tables, 14 relationships; ids t0,t1,t2...
 before fix auto  FAIL Maximum call stack size exceeded
 before fix depth FAIL Maximum call stack size exceeded

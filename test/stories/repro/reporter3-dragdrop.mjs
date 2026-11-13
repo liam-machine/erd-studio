@@ -1,4 +1,4 @@
-// REPRO (gerhard-feedback-3, stage 1 diagnosis): Table Library drag and drop.
+// REPRO (reporter-feedback-3, stage 1 diagnosis): Table Library drag and drop.
 //
 // Drives a real, isolated VS Code (fresh profile under /tmp, --use-mock-keychain,
 // a COPY of test/fixtures/dbt-project-dbml in /tmp) over CDP and records what
@@ -22,15 +22,15 @@
 // workbench (see the stage-1 report).
 //
 // FINDING (VS Code 1.145.2, macOS): A reproduces (no write, no message, on
-// v2.0.4 and develop; gerhard3-control-layer.mjs shows the same mechanism
+// v2.0.4 and develop; reporter3-control-layer.mjs shows the same mechanism
 // does deliver a tree drop). B–F are NOT a valid test of the canvas: a
 // dispatched drag event never reaches the out-of-process webview frame even
 // with its pointer-events back on (neither the webview page nor the workbench
 // sees it), so they only show VS Code's gating state (pointer-events, drop
-// overlay). gerhard3-canvas-direct.mjs covers what happens once a drop does
-// reach the canvas; gerhard3-realdrag.mjs posts real OS drags for the timing.
+// overlay). reporter3-canvas-direct.mjs covers what happens once a drop does
+// reach the canvas; reporter3-realdrag.mjs posts real OS drags for the timing.
 //
-//   node test/stories/repro/gerhard3-dragdrop.mjs [--out <dir>] [--keep] [--ext <extension dir>]
+//   node test/stories/repro/reporter3-dragdrop.mjs [--out <dir>] [--keep] [--ext <extension dir>]
 //
 // --ext defaults to this checkout (dist/ must be built). Screenshots and a JSON
 // log land in --out (default: a new /tmp/g3dd-* folder).
