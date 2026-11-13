@@ -867,6 +867,7 @@ const FEATURES = [
   'activationSlowServices',
   'startLookLateSuggestion',
   'dbtSearchSkipped',
+  'activationSlowWalk',
 ];
 
 /** The only keys `errors` may carry; anything else is dropped. */

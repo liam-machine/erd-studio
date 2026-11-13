@@ -1606,14 +1606,15 @@ no key. The search's own stretch is the time spent *waiting* on it; with its
 extension's start, or our own synchronous work), so its timer ran late too.
 
 - `activationSlowDbtSearch` — the longest stretch of a start over 10 s was the wait on the host's search for a dbt_project.yml: the extension host thread was busy.
-- `activationSlowDiscovery` — the longest stretch was the rest of finding the project: the folder walk (up to 5,000 folders, synchronous) or the globalState writes before it.
+- `activationSlowDiscovery` — the longest stretch was the rest of finding the project, without the folder walk (`activationSlowWalk`) and without the wait on the search: the globalState writes before the search and, after an update with a diagram open, the save-and-reload prompt (it waits for the user, so a slow answer counts here).
 - `activationSlowServices` — the longest stretch was creating the services, up to the project read (reading a large ERD folder).
 
 What the start screen's first timeout cost, and the search activation no
 longer waits for:
 
-- `startLookLateSuggestion` — the start screen's look at the folder ran out of time, the blank-diagram suggestion was shown, and a later look (the retry, with twice the time) found something to import, so the suggestion changed to an import. Read beside `startLookTimeout` (the installs whose first look ran out of time) and `startLookGaveUp`.
+- `startLookLateSuggestion` — the start screen's look at the folder ran out of time, the blank-diagram suggestion was shown, and the retry (the next look that answered, with twice the time) found something to import, so the suggestion changed to an import. Decided on that one look only: a later look that finds a file added after it does not count. The retry runs at the next refresh, so a file saved between the timeout and the retry can still count; that should be rare. Read beside `startLookTimeout` (the installs whose first look ran out of time) and `startLookGaveUp`.
 - `dbtSearchSkipped` — activation did not wait for the host's search for a dbt_project.yml: no `erdStudio.projectPath`, no picked project, and the first dbt workspace folder already holds ERD data, so nothing the search could find changes the project that opens (`hostSearchCannotChangeRoot`). The search still runs, off activation's path, to count the workspace's dbt projects for **Select dbt Project**; if it fails, `dbtSearchFailed` is still recorded, but a timeout is not.
+- `activationSlowWalk` — the longest stretch of a start over 10 s was the synchronous walk of the workspace folders that finds the dbt project (up to 5,000 folders; `resolveWorkspaceProject`, timed on its own). `activationSlowDiscovery` is then the rest of Discovery, without the walk.
 
 ```bash
 # What held starts over 10 s, per OS (installs, last 28 days)

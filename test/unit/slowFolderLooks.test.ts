@@ -3,9 +3,9 @@
  * activation, the start screen's look) and what a slow folder costs.
  *
  * A slow activation names the stretch that held it (the wait on the host's
- * dbt search, the rest of Discovery, or Services: the only stretches before
- * the measurement), a retry that turns the blank start suggestion into an
- * import is counted, and activation does not wait for the host's search when
+ * dbt search, the folder walk, the rest of Discovery, or Services: the only
+ * stretches before the measurement), the retry after a timeout that turns the
+ * blank start suggestion into an import is counted (that retry only), and activation does not wait for the host's search when
  * nothing it could find can change the project that opens. The last block
  * pins facts the rule has to keep in mind.
  */
@@ -15,21 +15,21 @@ import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 
-import { activate, ACTIVATION_DBT_SEARCH_MS, findHostDbtProjects, _resetFirstRunGuardForTests } from '../../src/extension';
+import { activate, ACTIVATION_DBT_SEARCH_MS, findHostDbtProjects, SELECTED_PROJECT_KEY, _resetFirstRunGuardForTests } from '../../src/extension';
 import { telemetry } from '../../src/services/telemetryService';
 import { ownWrites } from '../../src/services/ownWriteTracker';
 import { FEATURES } from '../../src/services/telemetryPayload';
 import { ACTIVATION_SLOW, SLOW_ACTIVATION_MS, slowActivationFeature } from '../../src/services/runtimeTelemetry';
 import { hostSearchCannotChangeRoot, resolveDbtProject, withHostCandidates } from '../../src/services/projectDiscovery';
-import { StartIntentTracker, START_LOOK_TIMEOUT_MS } from '../../src/commands/startIntent';
-import type { DetectedImportSource } from '../../src/types/startActions';
+import { StartIntentTracker, START_LOOK_FRESH_MS, START_LOOK_TIMEOUT_MS } from '../../src/commands/startIntent';
+import { isDirectImport, START_ACTIONS, START_INTENTS, type DetectedImportSource } from '../../src/types/startActions';
 
 const REPO_ROOT = path.resolve(__dirname, '../..');
 const FIXTURE_ROOT = path.join(REPO_ROOT, 'test', 'fixtures', 'dbt-project');
 const packageJson = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'package.json'), 'utf-8')) as { version: string };
 type Context = import('vscode').ExtensionContext;
 
-function makeContext(root: string, onGlobalUpdate?: () => void): Context {
+function makeContext(root: string, onGlobalUpdate?: () => void, onWorkspaceGet?: (key: string) => void): Context {
   const globalState = new Map<string, unknown>([['erdStudio.gettingStartedShown', true]]);
   const workspaceState = new Map<string, unknown>([
     ['erdStudio.harnessInstallPrompted', true],
@@ -42,7 +42,7 @@ function makeContext(root: string, onGlobalUpdate?: () => void): Context {
     extensionUri: vscode.Uri.file(REPO_ROOT),
     globalStorageUri: vscode.Uri.file(path.join(root, '.global-storage')),
     globalState: { get: (k: string) => globalState.get(k), update: async (k: string, v: unknown) => { onGlobalUpdate?.(); globalState.set(k, v); } },
-    workspaceState: { get: (k: string) => workspaceState.get(k), update: async (k: string, v: unknown) => { workspaceState.set(k, v); } },
+    workspaceState: { get: (k: string) => { onWorkspaceGet?.(k); return workspaceState.get(k); }, update: async (k: string, v: unknown) => { workspaceState.set(k, v); } },
     secrets: vscode.createMockSecretStorage(),
   } as unknown as Context;
 }
@@ -113,15 +113,17 @@ describe('#295: which stretch held a slow activation', () => {
     }
   });
 
-  it('names the longest stretch, only past SLOW_ACTIVATION_MS; a tie goes to the search, then Discovery', () => {
-    const spans = { dbtSearch: 1000, discovery: 8000, services: 2000 };
-    expect(slowActivationFeature(spans, 11_000)).toBe('activationSlowDiscovery');
-    expect(slowActivationFeature({ ...spans, services: 9000 }, 18_000)).toBe('activationSlowServices');
-    expect(slowActivationFeature({ dbtSearch: 7000, discovery: 2000, services: 2000 }, 11_000)).toBe('activationSlowDbtSearch');
+  it('names the longest stretch, only past SLOW_ACTIVATION_MS; a tie goes to the search, then the walk, then Discovery', () => {
+    const spans = { dbtSearch: 1000, walk: 500, discovery: 8000, services: 2000 };
+    expect(slowActivationFeature(spans, 11_500)).toBe('activationSlowDiscovery');
+    expect(slowActivationFeature({ ...spans, services: 9000 }, 18_500)).toBe('activationSlowServices');
+    expect(slowActivationFeature({ ...spans, walk: 9000 }, 20_000)).toBe('activationSlowWalk');
+    expect(slowActivationFeature({ dbtSearch: 7000, walk: 0, discovery: 2000, services: 2000 }, 11_000)).toBe('activationSlowDbtSearch');
     expect(slowActivationFeature(spans, SLOW_ACTIVATION_MS)).toBeUndefined();
     expect(slowActivationFeature(spans, 9_000)).toBeUndefined();
-    expect(slowActivationFeature({ dbtSearch: 5500, discovery: 5500, services: 5500 }, 16_500)).toBe('activationSlowDbtSearch');
-    expect(slowActivationFeature({ dbtSearch: 0, discovery: 5500, services: 5500 }, 11_000)).toBe('activationSlowDiscovery');
+    expect(slowActivationFeature({ dbtSearch: 5500, walk: 5500, discovery: 5500, services: 5500 }, 22_000)).toBe('activationSlowDbtSearch');
+    expect(slowActivationFeature({ dbtSearch: 0, walk: 5500, discovery: 5500, services: 5500 }, 16_500)).toBe('activationSlowWalk');
+    expect(slowActivationFeature({ dbtSearch: 0, walk: 0, discovery: 5500, services: 5500 }, 11_000)).toBe('activationSlowDiscovery');
   });
 
   it('11 s waiting on the host search records activationOver10s and activationSlowDbtSearch', async () => {
@@ -136,7 +138,26 @@ describe('#295: which stretch held a slow activation', () => {
     expect(keys(once).filter((k) => k.startsWith('activationSlow'))).toEqual(['activationSlowDbtSearch']);
   });
 
-  it('11 s in the rest of Discovery (a globalState write) records activationSlowDiscovery', async () => {
+  it('11 s in the walk that finds the project records activationSlowWalk, not activationSlowDiscovery', async () => {
+    // A root dbt project without ERD data: activation waits for the search, then walks.
+    dbtAt('.');
+    openRoot();
+    const clock = skewableClock();
+    let searched = false;
+    let jumped = false;
+    // The walk reads the picked project (resolveWorkspaceProject); the clock jumps there, after the search.
+    context = makeContext(root, undefined, (key) => {
+      if (key === SELECTED_PROJECT_KEY && searched && !jumped) { jumped = true; clock.jump(11_000); }
+    });
+    vi.spyOn(vscode.workspace, 'findFiles').mockImplementation((async () => { searched = true; return []; }) as never);
+    const once = vi.spyOn(telemetry, 'featureOnce');
+    await activate(context);
+    expect(jumped).toBe(true);
+    expect(keys(once)).toContain('activationOver10s');
+    expect(keys(once).filter((k) => k.startsWith('activationSlow'))).toEqual(['activationSlowWalk']);
+  });
+
+  it('11 s in the rest of Discovery (a globalState write before the search) records activationSlowDiscovery', async () => {
     fs.cpSync(FIXTURE_ROOT, root, { recursive: true });
     openRoot();
     const clock = skewableClock();
@@ -228,6 +249,46 @@ describe('#295: the late start suggestion is counted', () => {
     expect(keys(feature)).toEqual(['startLookTimeout']);
   });
 
+  it('not when the retry finds nothing and a later look finds a file added since', async () => {
+    vi.useFakeTimers();
+    let clock = 0;
+    let added: DetectedImportSource[] = [];
+    let calls = 0;
+    const look = vi.fn((signal: AbortSignal) => {
+      calls++;
+      if (calls === 1) {
+        return new Promise<ReadonlySet<DetectedImportSource>>((_r, reject) => signal.addEventListener('abort', () => reject(new Error('aborted'))));
+      }
+      return Promise.resolve(new Set<DetectedImportSource>(added));
+    });
+    const published: string[] = [];
+    const feature = vi.fn();
+    const t = new StartIntentTracker({
+      context: () => ({ hasProject: true, hasDbt: false, storage: 'dbml', hasDiagrams: false }),
+      look,
+      publish: (i) => published.push(i),
+      feature,
+      now: () => clock,
+    });
+    const first = t.refresh();
+    await vi.advanceTimersByTimeAsync(START_LOOK_TIMEOUT_MS + 1);
+    expect(await first).toBe('blank');
+    // The retry answers in time and finds nothing: the first timeout cost nothing.
+    expect(await t.refresh()).toBe('blank');
+    // Later the user saves a .dbml file, and a refresh past the fresh window looks again.
+    added = ['dbml'];
+    clock += START_LOOK_FRESH_MS + 1;
+    expect(await t.refresh()).toBe('importDbmlFile');
+    expect(look).toHaveBeenCalledTimes(3);
+    expect(published).toEqual(['blank', 'importDbmlFile']);
+    expect(keys(feature)).toEqual(['startLookTimeout']);
+  });
+
+  it('the direct imports are the suggestions that count, from the one list startActions keeps', () => {
+    expect(START_INTENTS.filter(isDirectImport)).toEqual(['importSemanticModel', 'importSqlDdl', 'importDbmlFile']);
+    expect(START_ACTIONS.filter(isDirectImport)).toEqual(['importSemanticModel', 'importSqlDdl', 'importDbmlFile']);
+  });
+
   it('not when the blank came from an unreadable folder state rather than a timeout', async () => {
     let unreadable = true;
     const published: string[] = [];
@@ -306,12 +367,15 @@ describe('#295: the host search is not waited for when it cannot change the proj
     // The host search never answers (a cold ripgrep on Windows).
     const findFiles = vi.spyOn(vscode.workspace, 'findFiles').mockImplementation((() => new Promise(() => {})) as never);
     const feature = vi.spyOn(telemetry, 'feature');
+    const quiet = vi.spyOn(telemetry, 'featureQuiet');
     const exec = vi.spyOn(vscode.commands, 'executeCommand');
     const started = performance.now();
     await activate(context);
     const ms = performance.now() - started;
     expect(keys(feature)).not.toContain('dbtSearchTimedOut');
-    expect(keys(feature)).toContain('dbtSearchSkipped');
+    // Counted off the onboarding trail: it describes what activation found.
+    expect(keys(quiet)).toContain('dbtSearchSkipped');
+    expect(keys(feature)).not.toContain('dbtSearchSkipped');
     expect(ms).toBeLessThan(ACTIVATION_DBT_SEARCH_MS);
     // It still runs, off activation's path, to count the workspace's projects.
     expect(findFiles.mock.calls.filter((c) => c[0] === '**/dbt_project.yml')).toHaveLength(1);
@@ -350,10 +414,11 @@ describe('#295: the host search is not waited for when it cannot change the proj
     openRoot();
     const findFiles = vi.spyOn(vscode.workspace, 'findFiles').mockImplementation((() => new Promise(() => {})) as never);
     const feature = vi.spyOn(telemetry, 'feature');
+    const quiet = vi.spyOn(telemetry, 'featureQuiet');
     await activate(context);
     expect(findFiles.mock.calls.filter((c) => c[0] === '**/dbt_project.yml')).toHaveLength(1);
     expect(keys(feature)).toContain('dbtSearchTimedOut');
-    expect(keys(feature)).not.toContain('dbtSearchSkipped');
+    expect(keys(quiet)).not.toContain('dbtSearchSkipped');
   });
 });
 

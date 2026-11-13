@@ -1616,7 +1616,8 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
   let hostDbtSearch: DbtSearchResult | undefined;
   let lateHostDbtSearch: Promise<string[] | undefined> | undefined;
   if (hostSearchCannotChangeRoot(workspaceFolderPaths(), workspaceProjectChoice(context))) {
-    telemetry.feature('dbtSearchSkipped');
+    // What activation found, not something the user did: off the onboarding trail.
+    telemetry.featureQuiet('dbtSearchSkipped');
     lateHostDbtSearch = findHostDbtProjects(60_000).then((late) => {
       if (late.outcome === 'error') {
         for (const code of dbtSearchFailureCodes(late.reason)) telemetry.error(code);
@@ -1634,7 +1635,9 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
   const hostDbtProjects = hostDbtSearch?.paths;
   // Activation's stretches, for a slow one (slowActivationFeature, below).
   const dbtSearchMs = elapsedMs(dbtSearchStart);
+  const walkStart = Date.now();
   const projectResolution = resolveWorkspaceProject(context, hostDbtProjects);
+  const walkMs = elapsedMs(walkStart);
   // The search failed and the walk alone still found a dbt project (#304):
   // a failure without this is one that may have cost the user their project.
   // `autoRoot` is what the walk resolves (a projectPath setting or a pick does
@@ -2212,7 +2215,8 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
   // Which stretch held a slow one (#295): the later phases start after this point.
   const slowStretch = slowActivationFeature({
     dbtSearch: dbtSearchMs,
-    discovery: servicesStartMs - dbtSearchMs,
+    walk: walkMs,
+    discovery: servicesStartMs - dbtSearchMs - walkMs,
     services: projectReadMs - servicesStartMs,
   }, projectReadMs);
   if (slowStretch) telemetry.featureOnce(slowStretch);

@@ -51,13 +51,17 @@ export const SLOW_ACTIVATION_MS = 10_000;
  * `activationOver10s` measurement), in milliseconds: `dbtSearch`, the wait
  * on the host's dbt_project.yml search (bounded by
  * `ACTIVATION_DBT_SEARCH_MS`, so a long one means the shared extension host
- * thread was busy, not that the search was slow); `discovery`, the rest of
- * the Discovery phase (the globalState writes, the folder walk); `services`,
- * from the Services phase to the project read. The later phases (Watchers,
- * Views, Commands, Prompts) start after the measurement, so they have no key.
+ * thread was busy, not that the search was slow); `walk`, the synchronous
+ * folder walk that finds the project (`resolveWorkspaceProject`, timed on
+ * its own); `discovery`, the rest of the Discovery phase (the globalState
+ * writes before the search and, after an update, the save-and-reload
+ * prompt, which waits for the user); `services`, from the Services phase to
+ * the project read. The later phases (Watchers, Views, Commands, Prompts)
+ * start after the measurement, so they have no key.
  */
 export interface ActivationSpans {
   dbtSearch: number;
+  walk: number;
   discovery: number;
   services: number;
 }
@@ -65,6 +69,7 @@ export interface ActivationSpans {
 /** Each stretch's key, in tie order (the first listed wins a tie). */
 export const ACTIVATION_SLOW: Record<keyof ActivationSpans, TelemetryFeature> = {
   dbtSearch: 'activationSlowDbtSearch',
+  walk: 'activationSlowWalk',
   discovery: 'activationSlowDiscovery',
   services: 'activationSlowServices',
 };

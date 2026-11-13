@@ -756,6 +756,10 @@ export const FEATURES = [
   'activationSlowServices',
   'startLookLateSuggestion',
   'dbtSearchSkipped',
+  // Also #295: the synchronous folder walk that finds the project held the
+  // longest share of a slow activation (activationSlowDiscovery is then the
+  // rest of Discovery, without the walk).
+  'activationSlowWalk',
 ] as const;
 export type TelemetryFeature = (typeof FEATURES)[number];
 
