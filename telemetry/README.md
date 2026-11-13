@@ -1032,7 +1032,7 @@ a message or a count of tables. A sum over `features` excludes
 - `activationFailedCommands` (error) — activation threw while registering the commands.
 - `activationFailedPrompts` (error) — activation threw while running the start prompts.
 - `activationPromptFailed` (error) — the start suggestion or the automatic draft failed after activation.
-- `dbtSearchFailed` (error) — the host search for a dbt_project.yml threw (an error, not a feature: only layoutFailed may end in Failed among the features).
+- `dbtSearchFailed` (error) — the host search for a dbt_project.yml failed: it was refused or threw, not a timeout (the total; from the release after 2.0.4 one reason beside it, under Keys added after 2.0.0; an error, not a feature: only layoutFailed may end in Failed among the features).
 
 A day whose activation threw before it recorded its outcome is still sent (it would otherwise be lost); its `activation` field then reads `no_project`, the fallback. Leave out rows whose `errors` hold `activationFailed` when counting the no-project funnel.
 
@@ -1448,8 +1448,8 @@ Appended to `FEATURES` after the 2.0.0 list above (in
 the same terms: fixed keys, never a name, a path, a message or a count of
 tables (a failed layout's size is one of four fixed ranges, below). Deploy the
 Worker before the extension release that records them, or their counts are
-dropped. The failed-layout codes at the end of this section are appended to
-`ERROR_CODES` in the same way.
+dropped. The failed-layout codes and the dbt search failure reasons in this
+section are appended to `ERROR_CODES` in the same way.
 
 **The import guide's Microsoft Fabric card.** A Warehouse or a Lakehouse's SQL
 analytics endpoint is read as SQL Server, so without these a Fabric import
@@ -1554,6 +1554,43 @@ that already take both).
 # Failed layouts by class, size and how far the fallbacks got (installs and failures, last 28 days)
 npx wrangler d1 execute erd-studio-telemetry --remote --command \
   "SELECT h.os, j.key AS code, COUNT(DISTINCT h.install_id) AS installs, SUM(j.value) AS failures FROM heartbeats h, json_each(h.errors) j WHERE h.day >= date('now','-28 days') AND h.day < date('now') AND COALESCE(h.dev, 0) = 0 AND (j.key LIKE 'layoutFailed%' OR j.key IN ('firstLayoutFailed', 'draftLayoutFailed')) GROUP BY h.os, j.key ORDER BY h.os, installs DESC"
+```
+
+**Why the host's dbt project search failed** (#304; added after 2.0.4). Every
+window, activation asks VS Code's own search (`workspace.findFiles`) for a
+`dbt_project.yml` at any depth, and gives it 1 s before the bounded folder walk
+alone decides (`findHostDbtProjects` in `src/extension.ts`). A search that
+failed (not one that timed out, `dbtSearchTimedOut`) was counted only as
+`dbtSearchFailed`. It now also says which step failed, decided on the device
+from where the failure was caught, never from the error's text. Exactly one
+reason is counted beside each `dbtSearchFailed`, so the three sum to the total
+on every version that has them; an older version sends the total alone.
+
+- `dbtSearchFailedRejected` (error) — VS Code's search refused it (`findFiles` rejected): a host or folder without file search, or an exclude pattern it would not take.
+- `dbtSearchFailedSort` (error) — the search answered, and reading or sorting the folders it returned threw (`sortDbtCandidates`, or a result that is not a list of file URIs): ours.
+- `dbtSearchFailedThrew` (error) — `findFiles` threw before it returned a promise.
+
+And one feature, recorded at activation only:
+
+- `dbtSearchFailedWalkFound` — the search failed and the bounded walk still found a dbt project (it alone would have opened one), so nothing was lost. A project chosen by `erdStudio.projectPath` or **Select dbt Project…** does not count: only what the walk found.
+
+Where `dbtSearchFailed` is counted: at activation; once more when activation's
+search timed out and the late retry (a window that opened without dbt lets the
+search finish, for up to 60 s, to point out a deeper project) then failed — a
+window whose activation search already failed retries but never counts twice
+(versions up to 2.0.4 counted it twice: such a window without dbt recorded
+`dbtSearchFailed` at activation and again when the late retry failed, so
+compare the total per install across that release with care); and each time **Select dbt Project…** runs its own search (no key tells that
+command's failures apart). So `dbtSearchFailed` above
+`dbtSearchFailedWalkFound` means "may have cost the user their project" only
+roughly: the excess also holds a picker's failures, and a late failure belongs
+to a window without dbt, where the walk had found nothing (exactly the window
+in which a project deeper than the walk would be missed).
+
+```bash
+# Why the dbt project search failed, and whether the walk saved the day (installs and counts, last 14 days)
+npx wrangler d1 execute erd-studio-telemetry --remote --command \
+  "SELECT 'errors' AS kind, e.key, COUNT(DISTINCT h.install_id) AS installs, SUM(e.value) AS total FROM heartbeats h, json_each(h.errors) e WHERE COALESCE(h.dev, 0) = 0 AND e.key LIKE 'dbtSearchFailed%' AND h.day >= date('now','-14 days') GROUP BY e.key UNION ALL SELECT 'features', f.key, COUNT(DISTINCT h.install_id), SUM(f.value) FROM heartbeats h, json_each(h.features) f WHERE COALESCE(h.dev, 0) = 0 AND f.key = 'dbtSearchFailedWalkFound' AND h.day >= date('now','-14 days') GROUP BY f.key"
 ```
 
 ## The local archive

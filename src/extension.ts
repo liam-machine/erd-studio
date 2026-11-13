@@ -83,10 +83,11 @@ import {
   REFRESH_FAILED,
   SLOW_ACTIVATION_MS,
   activationFailureCodes,
+  dbtSearchFailureCodes,
   harnessFailureKeys,
   loggedErrorCodes,
   type ActivationPhase,
-  type DbtSearchOutcome,
+  type DbtSearchResult,
   type RefreshKind,
 } from './services/runtimeTelemetry';
 import { setErrorHook } from './services/logger';
@@ -431,9 +432,13 @@ const HOST_DBT_SEARCH_MAX = 50;
  * the `workspaceContains` activation event looks), skipping the folders the
  * walk skips (`DBT_SEARCH_EXCLUDE_GLOB`), shallowest first. No `paths` when
  * it does not answer within `timeoutMs` (`timeout`) or fails (`error`): the
- * walk alone decides. The outcome is for usage telemetry (B4).
+ * walk alone decides. The outcome is for usage telemetry (B4), and a failure
+ * says which step failed (#304): `rejected` (findFiles rejected), `sort`
+ * (reading or sorting what it returned threw) or `threw` (findFiles threw
+ * before returning a promise). Nothing is recorded here: a rejection that
+ * arrives after the timeout (the `finally` cancels the search) is ignored.
  */
-export async function findHostDbtProjects(timeoutMs: number): Promise<{ paths?: string[]; outcome: DbtSearchOutcome }> {
+export async function findHostDbtProjects(timeoutMs: number): Promise<DbtSearchResult> {
   const folders = workspaceFolderPaths();
   if (folders.length === 0) return { paths: [], outcome: 'ok' };
   const source = new vscode.CancellationTokenSource();
@@ -441,13 +446,19 @@ export async function findHostDbtProjects(timeoutMs: number): Promise<{ paths?: 
   try {
     const search = Promise.resolve(vscode.workspace.findFiles('**/dbt_project.yml', DBT_SEARCH_EXCLUDE_GLOB, HOST_DBT_SEARCH_MAX, source.token))
       .then(
-        (uris): { paths?: string[]; outcome: DbtSearchOutcome } => ({ paths: sortDbtCandidates((uris ?? []).map((u) => u.fsPath), folders), outcome: 'ok' }),
-        (): { outcome: DbtSearchOutcome } => ({ outcome: 'error' }),
+        (uris): DbtSearchResult => {
+          try {
+            return { paths: sortDbtCandidates((uris ?? []).map((u) => u.fsPath), folders), outcome: 'ok' };
+          } catch {
+            return { outcome: 'error', reason: 'sort' };
+          }
+        },
+        (): DbtSearchResult => ({ outcome: 'error', reason: 'rejected' }),
       );
-    const timedOut = new Promise<{ outcome: DbtSearchOutcome }>((resolve) => { timer = setTimeout(() => resolve({ outcome: 'timeout' }), timeoutMs); });
+    const timedOut = new Promise<DbtSearchResult>((resolve) => { timer = setTimeout(() => resolve({ outcome: 'timeout' }), timeoutMs); });
     return await Promise.race([search, timedOut]);
   } catch {
-    return { outcome: 'error' };
+    return { outcome: 'error', reason: 'threw' };
   } finally {
     if (timer) clearTimeout(timer);
     source.cancel();
@@ -510,7 +521,7 @@ async function selectDbtProject(
 ): Promise<void> {
   // The host's whole search, so a project deeper than the walk is listed too.
   const search = await findHostDbtProjects(5000);
-  if (search.outcome === 'error') telemetry.error('dbtSearchFailed');
+  if (search.outcome === 'error') for (const code of dbtSearchFailureCodes(search.reason)) telemetry.error(code);
   const resolution = resolveWorkspaceProject(context, search.paths);
   if (resolution.candidates.length === 0) {
     // A window always has a root here (the command is registered only then),
@@ -1594,8 +1605,13 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
   const hostDbtSearch = await findHostDbtProjects(ACTIVATION_DBT_SEARCH_MS);
   const hostDbtProjects = hostDbtSearch.paths;
   if (hostDbtSearch.outcome === 'timeout') telemetry.feature('dbtSearchTimedOut');
-  else if (hostDbtSearch.outcome === 'error') telemetry.error('dbtSearchFailed');
+  else if (hostDbtSearch.outcome === 'error') for (const code of dbtSearchFailureCodes(hostDbtSearch.reason)) telemetry.error(code);
   const projectResolution = resolveWorkspaceProject(context, hostDbtProjects);
+  // The search failed and the walk alone still found a dbt project (#304):
+  // a failure without this is one that may have cost the user their project.
+  // `autoRoot` is what the walk resolves (a projectPath setting or a pick does
+  // not make it), so a setting or a pick says nothing either way.
+  if (hostDbtSearch.outcome === 'error' && projectResolution.autoRoot !== undefined) telemetry.feature('dbtSearchFailedWalkFound');
   const workspaceRoot = projectResolution.root;
   // Logical-only mode: a root without dbt_project.yml (any folder now opens).
   // No Physical stage, no dbt services or watchers, nothing written unasked.
@@ -2255,10 +2271,14 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     if (unused) {
       noteUnusedDbtProject(workspaceRoot, unused, projectResolution.source === 'setting' ? 'setting' : 'discovery');
     } else if (hostDbtProjects === undefined) {
-      // The host's search was late: let it finish, off activation's path.
-      void findHostDbtProjects(60_000).then(({ paths: late, outcome }) => {
-        if (outcome === 'error') telemetry.error('dbtSearchFailed');
-        const found = late?.find((dir) => !samePath(dir, workspaceRoot));
+      // The host's search was late or failed: let it finish (or try once
+      // more), off activation's path. A failure is counted once per window
+      // (#304): only when activation's own search timed out and so counted none.
+      void findHostDbtProjects(60_000).then((late) => {
+        if (late.outcome === 'error' && hostDbtSearch.outcome === 'timeout') {
+          for (const code of dbtSearchFailureCodes(late.reason)) telemetry.error(code);
+        }
+        const found = late.paths?.find((dir) => !samePath(dir, workspaceRoot));
         if (found) noteUnusedDbtProject(workspaceRoot, found, 'search');
       });
     }

@@ -858,6 +858,8 @@ const FEATURES = [
   // Added after 2.0.4: the fallback that produced an auto layout whose default attempt failed.
   'layoutFallbackRung2',
   'layoutFallbackRung3',
+  // #304: the host's dbt_project.yml search failed and the walk alone still found a dbt project.
+  'dbtSearchFailedWalkFound',
 ];
 
 /** The only keys `errors` may carry; anything else is dropped. */
@@ -1115,6 +1117,10 @@ const ERROR_CODES = [
   'layoutFailedLastRungTimeout',
   'layoutFailedLastRungWorker',
   'layoutFailedLastRungMemory',
+  // #304: why the host's dbt_project.yml search failed, counted beside dbtSearchFailed.
+  'dbtSearchFailedRejected',
+  'dbtSearchFailedSort',
+  'dbtSearchFailedThrew',
 ];
 
 /** Every event the trail may carry: a marker, a feature key, or an error code written `!code`. */

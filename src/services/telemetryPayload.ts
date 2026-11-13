@@ -740,6 +740,10 @@ export const FEATURES = [
   // placement (rung 2), or that with post-compaction left out (rung 3).
   'layoutFallbackRung2',
   'layoutFallbackRung3',
+  // #304: the host's search for dbt_project.yml failed (dbtSearchFailed) and
+  // the bounded walk alone still found a dbt project. Not an error: the user
+  // lost nothing. Activation only, never Select dbt Project….
+  'dbtSearchFailedWalkFound',
 ] as const;
 export type TelemetryFeature = (typeof FEATURES)[number];
 
@@ -1039,6 +1043,12 @@ export const ERROR_CODES = [
   'layoutFailedLastRungTimeout',
   'layoutFailedLastRungWorker',
   'layoutFailedLastRungMemory',
+  // #304: why the host's search for dbt_project.yml failed, one beside each
+  // dbtSearchFailed (the total): findFiles rejected, reading or sorting what
+  // it returned threw, or findFiles threw before returning a promise.
+  'dbtSearchFailedRejected',
+  'dbtSearchFailedSort',
+  'dbtSearchFailedThrew',
 ] as const;
 export type TelemetryErrorCode = (typeof ERROR_CODES)[number];
 

@@ -46,8 +46,33 @@ export function activationFailureCodes(phase: ActivationPhase): TelemetryErrorCo
 /** Project read later than this into activation counts `activationOver10s`. */
 export const SLOW_ACTIVATION_MS = 10_000;
 
-/** How the host's own search for dbt_project.yml ended. */
-export type DbtSearchOutcome = 'ok' | 'timeout' | 'error';
+/**
+ * Why a search that ended in `error` failed (#304): `findFiles` rejected,
+ * the code that sorts what it returned threw, or `findFiles` threw before
+ * returning a promise.
+ */
+export type DbtSearchFailure = 'rejected' | 'sort' | 'threw';
+
+/**
+ * What `findHostDbtProjects` returns, by how the host's own search for
+ * dbt_project.yml ended: paths only when it answered (`ok`), a reason only
+ * when it failed (`error`).
+ */
+export type DbtSearchResult =
+  | { paths: string[]; outcome: 'ok' }
+  | { paths?: undefined; outcome: 'timeout' }
+  | { paths?: undefined; outcome: 'error'; reason: DbtSearchFailure };
+
+export const DBT_SEARCH_FAILED: Record<DbtSearchFailure, TelemetryErrorCode> = {
+  rejected: 'dbtSearchFailedRejected',
+  sort: 'dbtSearchFailedSort',
+  threw: 'dbtSearchFailedThrew',
+};
+
+/** `dbtSearchFailed` (the total) and why, for a search that ended in `error`. */
+export function dbtSearchFailureCodes(reason: DbtSearchFailure): TelemetryErrorCode[] {
+  return ['dbtSearchFailed', DBT_SEARCH_FAILED[reason]];
+}
 
 // ---------------------------------------------------------------------------
 // B10 and B16: a write the environment refused
