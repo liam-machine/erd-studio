@@ -210,6 +210,70 @@ describe('#305: Turn On for This Folder still brings it back (guards the fix)', 
   });
 });
 
+describe('#305: Undo takes the off back and nothing more', () => {
+  const ON_MESSAGE = /^Start suggestions are on for this folder/;
+  /** Answers the start suggestion with `suggestion` and the "off" line with Undo. */
+  const answering = (suggestion: string | undefined) => {
+    info.mockImplementation((async (message: string) => {
+      if (/^ERD Studio found/.test(String(message))) return suggestion;
+      if (String(message) === 'Start suggestions are off for this folder.') return 'Undo';
+      return undefined;
+    }) as never);
+  };
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
+
+  it('upgrader: Turn Off then Undo in folder B (held back by the machine limit) leaves B not asked', async () => {
+    const machine = upgrader();
+    await windowOn('repo-a', machine);
+    const b = await windowOn('repo-b', machine);
+    expect(b.shown).toBe(0);
+    answering(undefined);
+    await vscode.commands.executeCommand('erdStudio.turnOffStartSuggestions');
+    await settle();
+    expect(b.workspaceState.get(STATE_KEY)).toEqual({ shown: 0 });
+    // No promise of a suggestion the next time: the machine limit still holds B back.
+    expect(info.mock.calls.some((c) => ON_MESSAGE.test(String(c[0])))).toBe(false);
+    const feature = vi.spyOn(telemetry, 'feature');
+    expect((await windowOn('repo-b', machine, b.workspaceState)).shown).toBe(0);
+    expect(feature.mock.calls.map((c) => c[0])).not.toContain('suggestPromptShownAgain');
+  });
+
+  it("upgrader: Don't Ask Again then Undo on its one showing does not ask again or count a repeat", async () => {
+    const machine = upgrader();
+    answering("Don't Ask Again for This Folder");
+    const a = await windowOn('repo-a', machine);
+    expect(a.shown).toBe(1);
+    await settle();
+    expect(a.workspaceState.get(STATE_KEY)).toEqual({ shown: 0 });
+    answering(undefined);
+    const feature = vi.spyOn(telemetry, 'feature');
+    expect((await windowOn('repo-a', machine, a.workspaceState)).shown).toBe(0);
+    expect(feature.mock.calls.map((c) => c[0])).not.toContain('suggestPromptShownAgain');
+  });
+
+  it("new install: Don't Ask Again then Undo still brings it back in that folder, as before (guard)", async () => {
+    const machine = new Map<string, unknown>();
+    answering("Don't Ask Again for This Folder");
+    const a = await windowOn('repo-a', machine);
+    await settle();
+    expect(info.mock.calls.some((c) => ON_MESSAGE.test(String(c[0])))).toBe(true);
+    answering(undefined);
+    expect((await windowOn('repo-a', machine, a.workspaceState)).shown).toBe(1);
+  });
+
+  it('upgrader: the palette\'s Turn On, then Turn Off and Undo, keeps the folder\'s Turn On', async () => {
+    const machine = upgrader();
+    await windowOn('repo-a', machine);
+    const b = await windowOn('repo-b', machine);
+    await vscode.commands.executeCommand('erdStudio.turnOnStartSuggestions');
+    answering(undefined);
+    await vscode.commands.executeCommand('erdStudio.turnOffStartSuggestions');
+    await settle();
+    expect(b.workspaceState.get(STATE_KEY)).toEqual({ shown: 0, on: true });
+    expect((await windowOn('repo-b', machine, b.workspaceState)).shown).toBe(1);
+  });
+});
+
 describe('#305: the rule never depends on telemetry', () => {
   it('telemetry off in VS Code: an upgrader is still asked once per machine', async () => {
     (vscode.env as { isTelemetryEnabled?: boolean }).isTelemetryEnabled = false;

@@ -658,8 +658,13 @@ Read the start suggestion on its own: `suggestPromptAccepted / suggestPromptShow
 is how often an obvious start was taken at once; a high `suggestPromptOff` or
 `quickImportChangeOptions` next to it says the folder look or the quick
 defaults guess wrong. `suggestPromptShownAgain / suggestPromptShown` is the
-share of showings that were repeats on one machine: split by `firstRun`
-installs and upgraders, it should be near 0 for upgraders from #305 on.
+share of showings that were repeats on one machine, for new installs (split by
+`firstRun`, taken as each install's MAX over all its days: it is sent only on
+the first day). For upgraders it is near 0 **by construction** (#305 lets the
+machine's count reach 1 and no further, and the first repeat after the update
+is not marked), so a 0 there is not evidence that the change worked: read the
+upgraders' repeat cost from D1 instead, as `suggestPromptShown` summed per
+install across days (installs with more than one showing).
 
 Read the draft on its own: `draftKept / draftShown` is how often a draft became a
 diagram, and `draftShownAuto` against `draftKept`, `draftDiscarded` and

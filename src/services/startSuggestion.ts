@@ -93,10 +93,21 @@ export const START_SUGGESTION_ALREADY_KEPT_MESSAGE =
 /**
  * What "Don't Ask Again" (and Turn Off) answers with: one short line, and
  * {@link UNDO_BUTTON}, which runs Turn On Start Suggestions for This Folder
- * (also in the palette).
+ * (also in the palette) with {@link START_SUGGESTIONS_UNDO_ARG}.
  */
 export const START_SUGGESTIONS_OFF_MESSAGE = 'Start suggestions are off for this folder.';
 export const UNDO_BUTTON = 'Undo';
+/**
+ * The argument Undo passes to Turn On (#305): it takes the off back and
+ * nothing more, so it never sets the folder's `on` and never lifts an
+ * upgrader's once-per-machine limit in a folder that limit held back. Only
+ * the palette's Turn On (no argument) asks for the suggestion here.
+ */
+export const START_SUGGESTIONS_UNDO_ARG = { undo: true } as const;
+/** Whether Turn On was run by an Undo ({@link START_SUGGESTIONS_UNDO_ARG}), not from the palette. */
+export function isStartSuggestionsUndo(arg: unknown): boolean {
+  return typeof arg === 'object' && arg !== null && (arg as { undo?: unknown }).undo === true;
+}
 export const START_SUGGESTIONS_ON_MESSAGE =
   'Start suggestions are on for this folder: ERD Studio suggests a start the next time it opens this folder without a diagram.';
 /** Turn On while the setting is false: the folder's flag is cleared, but the setting still decides. */
@@ -121,7 +132,7 @@ export interface StartSuggestionState {
   answered?: boolean;
   /** The automatic draft (the ERD Studio icon) was shown in this folder: it is never shown automatically again. */
   draftShown?: boolean;
-  /** Turn On Start Suggestions for This Folder (or Undo after Don't Ask Again): asked for here, so an upgrader's machine-wide limit does not apply. */
+  /** Turn On Start Suggestions for This Folder, run from the palette (never by an Undo): asked for here, so an upgrader's machine-wide limit does not apply. */
   on?: boolean;
 }
 
@@ -332,7 +343,7 @@ export async function runStartSuggestion(deps: StartSuggestionDeps): Promise<Sta
         await deps.saveState({ ...latest, off: true });
         deps.setOffContext(true);
         const undo = await deps.info(START_SUGGESTIONS_OFF_MESSAGE, UNDO_BUTTON);
-        if (undo === UNDO_BUTTON) await deps.executeCommand(TURN_ON_START_SUGGESTIONS_COMMAND);
+        if (undo === UNDO_BUTTON) await deps.executeCommand(TURN_ON_START_SUGGESTIONS_COMMAND, START_SUGGESTIONS_UNDO_ARG);
       } else {
         deps.feature(START_SUGGESTION_FEATURES.dismissed);
       }

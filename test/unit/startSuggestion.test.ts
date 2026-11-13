@@ -25,6 +25,7 @@ import {
   SHOW_ME_BUTTON,
   START_SUGGESTIONS_OFF_MESSAGE,
   TURN_ON_START_SUGGESTIONS_TITLE,
+  isStartSuggestionsUndo,
   readStartSuggestionMachine,
   readStartSuggestionState,
   runStartSuggestion,
@@ -260,11 +261,15 @@ describe('runStartSuggestion', () => {
     expect('MORE_OPTIONS_BUTTON' in startSuggestion).toBe(false);
   });
 
-  it("Don't Ask Again's Undo turns suggestions back on with the palette's own command", async () => {
+  it("Don't Ask Again's Undo turns suggestions back on with the palette's own command, marked as an Undo (#305)", async () => {
     const h = harness({ intent: 'importSqlDdl', choice: DONT_ASK_AGAIN_FOLDER_BUTTON, undo: true });
     await (await runStartSuggestion(h.deps)).done;
     expect(h.calls.infoButtons).toEqual([['Undo']]);
-    expect(h.calls.commands).toEqual([['erdStudio.turnOnStartSuggestions']]);
+    expect(h.calls.commands).toEqual([['erdStudio.turnOnStartSuggestions', { undo: true }]]);
+    expect(isStartSuggestionsUndo(h.calls.commands[0][1])).toBe(true);
+    // The palette runs it with no argument (or anything else): that is a real Turn On.
+    expect(isStartSuggestionsUndo(undefined)).toBe(false);
+    expect(isStartSuggestionsUndo({ undo: 'true' })).toBe(false);
   });
 
   it("Don't Ask Again turns it off for this folder and says so in one line, with Undo", async () => {

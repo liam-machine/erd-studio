@@ -258,9 +258,11 @@ import {
   UNDO_BUTTON,
   START_SUGGESTION_MACHINE_KEY,
   START_SUGGESTION_STATE_KEY,
+  START_SUGGESTIONS_UNDO_ARG,
   TURN_OFF_START_SUGGESTIONS_COMMAND,
   TURN_ON_START_SUGGESTIONS_COMMAND,
   dbtProjectAboveOpenFolders,
+  isStartSuggestionsUndo,
   readStartSuggestionMachine,
   readStartSuggestionState,
   runStartSuggestion,
@@ -5227,14 +5229,20 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
       telemetry.feature('startSuggestionsOff');
       publishStartSuggestionsOff();
       void vscode.window.showInformationMessage(START_SUGGESTIONS_OFF_MESSAGE, UNDO_BUTTON).then((choice) => {
-        if (choice === UNDO_BUTTON) void vscode.commands.executeCommand(TURN_ON_START_SUGGESTIONS_COMMAND);
+        if (choice === UNDO_BUTTON) void vscode.commands.executeCommand(TURN_ON_START_SUGGESTIONS_COMMAND, START_SUGGESTIONS_UNDO_ARG);
       });
     }),
-    vscode.commands.registerCommand(TURN_ON_START_SUGGESTIONS_COMMAND, async () => {
-      // A fresh start: the count and an earlier answer are forgotten too. Asked for
-      // here, so an upgrader's once-per-machine limit does not hold this folder back:
-      // the message below promises a suggestion the next time.
-      await saveStartSuggestionState({ shown: 0, on: true });
+    vscode.commands.registerCommand(TURN_ON_START_SUGGESTIONS_COMMAND, async (arg?: unknown) => {
+      // A fresh start: the count and an earlier answer are forgotten too. From the
+      // palette it is asked for here, so an upgrader's once-per-machine limit does not
+      // hold this folder back. An Undo (#305) only takes the off back: it keeps an
+      // earlier Turn On's `on` but never sets it, so Off then Undo cannot lift the
+      // machine limit in a folder it held back.
+      const undo = isStartSuggestionsUndo(arg);
+      const next: StartSuggestionState = undo
+        ? { shown: 0, ...(startSuggestionState().on === true ? { on: true } : {}) }
+        : { shown: 0, on: true };
+      await saveStartSuggestionState(next);
       publishStartSuggestionsOff();
       if (!startSuggestionsSettingOn()) {
         const choice = await vscode.window.showInformationMessage(START_SUGGESTIONS_SETTING_OFF_MESSAGE, OPEN_SETTINGS_BUTTON);
@@ -5243,7 +5251,11 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
         }
         return;
       }
-      void vscode.window.showInformationMessage(START_SUGGESTIONS_ON_MESSAGE);
+      // The message promises a suggestion next time: an Undo the machine limit still
+      // holds back (an upgrader already asked elsewhere) says nothing rather than promise it.
+      if (startSuggestionDue({ settingOn: true, state: next, machine: startSuggestionMachine(), hasDiagrams: false })) {
+        void vscode.window.showInformationMessage(START_SUGGESTIONS_ON_MESSAGE);
+      }
     }),
   );
   activationPhase = 'Prompts';
