@@ -10,10 +10,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   ACTIVATION_FAILED,
+  DBT_SEARCH_FAILED,
   HANDLER_GROUP,
   LOGGED_ERROR_AREAS,
   REFRESH_FAILED,
   activationFailureCodes,
+  dbtSearchFailureCodes,
   handlerFailureKeys,
   handlerGroupOf,
   harnessFailureKeys,
@@ -47,6 +49,19 @@ describe('B4: activation', () => {
       expect(activationFailureCodes(phase as keyof typeof ACTIVATION_FAILED)).toEqual(['activationFailed', code]);
     }
     expect(new Set(Object.values(ACTIVATION_FAILED)).size).toBe(6);
+  });
+
+  it('#304: a failed dbt search records the total and why, one error code each', () => {
+    expect(dbtSearchFailureCodes('rejected')).toEqual(['dbtSearchFailed', 'dbtSearchFailedRejected']);
+    expect(dbtSearchFailureCodes('sort')).toEqual(['dbtSearchFailed', 'dbtSearchFailedSort']);
+    expect(dbtSearchFailureCodes('threw')).toEqual(['dbtSearchFailed', 'dbtSearchFailedThrew']);
+    for (const code of Object.values(DBT_SEARCH_FAILED)) {
+      expect(isTelemetryErrorCode(code), code).toBe(true);
+      expect(FEATURES as readonly string[], code).not.toContain(code);
+    }
+    // The walk saving the day is a feature, not an error: nothing failed for the user.
+    expect(FEATURES).toContain('dbtSearchFailedWalkFound');
+    expect(ERROR_CODES as readonly string[]).not.toContain('dbtSearchFailedWalkFound');
   });
 
   it('a day whose activation threw before recording an outcome is still due', () => {
