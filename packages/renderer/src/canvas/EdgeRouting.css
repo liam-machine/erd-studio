@@ -23,7 +23,7 @@
 
 .edge-overlay__tunnel {
   color: var(--stage-logical);
-  transition: opacity 0.15s ease;
+  transition: opacity var(--duration-fast) var(--ease-standard);
 }
 
 /* The same colour key as the line (FkEdge's `fk-edge--{key}`). */
@@ -39,32 +39,34 @@
      stage blue on a white card all but vanished at fit zoom in light themes,
      and the text colour is the one that contrasts with the card in any theme. */
   stroke: color-mix(in srgb, currentColor 70%, var(--editor-fg));
-  stroke-width: 1.5;
+  stroke-width: 1.25;
   /* Short dashes: the drafting convention for a hidden edge. (Dots read as
      the dot leaders between a column's name and its type.) */
   stroke-dasharray: 4 4;
   stroke-linecap: butt;
-  opacity: 0.55;
-  transition: opacity 0.15s ease, stroke-width 0.15s ease;
+  opacity: 0.5;
+  transition:
+    opacity var(--duration-fast) var(--ease-standard),
+    stroke-width var(--duration-fast) var(--ease-standard);
 }
 
 .edge-overlay__portal {
   stroke: currentColor;
-  stroke-width: 1.75;
+  stroke-width: 1.5;
   stroke-linecap: round;
   /* The portal is the message at rest ("this line goes under here"): it
      must read at fit zoom on a border of the same colour. */
   opacity: 0.9;
   /* A via: the canvas colour cuts the card's border where the line dives under. */
   fill: var(--editor-bg);
-  transition: opacity 0.15s ease;
+  transition: opacity var(--duration-fast) var(--ease-standard);
 }
 
 
 /* The hovered or selected table's lines, or the selected line. */
 .edge-overlay__tunnel--lit .edge-overlay__tunnel-line {
   opacity: 0.95;
-  stroke-width: 2;
+  stroke-width: 1.75;
 }
 
 .edge-overlay__tunnel--lit .edge-overlay__portal {
@@ -94,11 +96,14 @@
 
 /* ---- Halo casing under a line (crossings = halo) ---- */
 
+/* The casing is the canvas colour, a little wider than the (now finer) line
+   on each side, so a crossing reads as one line passing over another. */
 .fk-edge__halo {
   fill: none;
   stroke: var(--editor-bg);
-  stroke-width: 7;
+  stroke-width: 6;
   stroke-linecap: butt;
+  stroke-linejoin: round;
 }
 
 /* ---- Colour on hover (logical-only canvas) ----
@@ -119,4 +124,38 @@
 
 .editor-canvas--neutral .edge-overlay__tunnel--logical.edge-overlay__tunnel--lit {
   color: var(--diagram-layer-color, var(--canvas-neutral-line));
+}
+
+/* ---- Quiet lines (dbt canvas, Compare off) ----
+   The editor adds `.editor-canvas--quiet-lines` on a dbt project's canvas
+   while Compare with dbt is off (webview/App.tsx). Lines, their end labels
+   and tunnels rest in the neutral line colour on both stages, and the lines
+   you are looking at light up in the diagram's layer colour, as on a
+   logical-only canvas. The stage blue / green comes back with Compare, where
+   telling the stages apart is the point. Set on the line elements only, so
+   table cards and the editor's controls keep their stage colours. The viewer
+   (ErdCanvas) never sets the class. */
+
+.editor-canvas--quiet-lines .fk-edge--logical,
+.editor-canvas--quiet-lines .fk-edge--physical,
+.editor-canvas--quiet-lines .fk-edge__label--logical,
+.editor-canvas--quiet-lines .fk-edge__label--physical,
+.editor-canvas--quiet-lines .edge-overlay__tunnel,
+.editor-canvas--quiet-lines .legend__edge--logical,
+.editor-canvas--quiet-lines .legend__cardinality-label {
+  --stage-logical: var(--canvas-neutral-line);
+  --stage-physical: var(--canvas-neutral-line);
+}
+
+.editor-canvas--quiet-lines .fk-edge--logical.fk-edge--lit,
+.editor-canvas--quiet-lines .fk-edge--physical.fk-edge--lit,
+.editor-canvas--quiet-lines .fk-edge--logical.fk-edge--flowing,
+.editor-canvas--quiet-lines .fk-edge--physical.fk-edge--flowing,
+.editor-canvas--quiet-lines .fk-edge__flow--logical,
+.editor-canvas--quiet-lines .fk-edge__flow--physical,
+.editor-canvas--quiet-lines .fk-edge__adornment--lit,
+.editor-canvas--quiet-lines .fk-edge__adornment--lit [class*='fk-edge__label--'],
+.editor-canvas--quiet-lines .edge-overlay__tunnel.edge-overlay__tunnel--lit {
+  --stage-logical: var(--diagram-layer-color, var(--canvas-neutral-line));
+  --stage-physical: var(--diagram-layer-color, var(--canvas-neutral-line));
 }

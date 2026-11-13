@@ -102,14 +102,14 @@ Changing it answers `scope`; the page shows **Drawing…** until the flow asks w
 
 | Trigger (`DraftTrigger`) | When | Gate |
 |---|---|---|
-| `sidebar` — **the only automatic one** | The empty Diagrams view is drawn in this window (the tree's `onLoadingChange(false)`: the ERD Studio icon), after the tracker's bounded look, when `autoDraftDue` holds (§3.2) | Claims kind `draft`, only once activation's own prompt is decided (`activationPromptsSettled`); never when another prompt showed this window |
+| `sidebar` — **the only automatic one** | The empty Diagrams view is drawn in this window (the tree's `onLoadingChange(false)` from a native listing: the ERD Studio icon; a glass sidebar listing counts only once its Diagrams card is drawn open in a visible view, `GlassSidebarProvider.sectionShown`), after the tracker's bounded look, when `autoDraftDue` holds (§3.2) | Claims kind `draft`, only once activation's own prompt is decided (`activationPromptsSettled`); never when another prompt showed this window |
 | `prompt` | The start suggestion's **Show Me** | Already holds the gate (`startSuggestion`) |
 | `start` | A start surface's primary import or Import from dbt (walkthrough, empty Diagrams view, start quick pick) | Explicit: never checks the gate; claims `draft` if free, so nothing pops over it |
 | `palette` | Import DBML… / Import SQL DDL… / Import Semantic Model… run step by step | Explicit, as above |
 | `changeOptions` | The step-by-step flow a draft's Change options… ran | Explicit |
 | `example` | **Open an Example…**, a draft's **Open an Example…** | Explicit |
 
-The `sidebar` draft opens with `preserveFocus` (the Diagrams view keeps the focus) and a progress bar on the Diagrams view (`withProgress({ location: { viewId } })`) while it builds; it is **quiet**: any question or error the quick path would raise before the draft (several dialects, no CREATE TABLE after all, no layer, an unreadable file) ends it silently (logged, `draftUnavailable`), leaving the sidebar's starts; the explicit starts keep today's questions and messages.
+The `sidebar` draft opens with `preserveFocus` (the Diagrams view keeps the focus) and a progress bar on the Diagrams view (`withProgress({ location: { viewId } })`, through `GlassSidebarProvider.withSectionProgress`, which also draws it on the glass Diagrams section's header) while it builds; it is **quiet**: any question or error the quick path would raise before the draft (several dialects, no CREATE TABLE after all, no layer, an unreadable file) ends it silently (logged, `draftUnavailable`), leaving the sidebar's starts; the explicit starts keep today's questions and messages.
 
 ### 3.2 `autoDraftDue` (pure, P1)
 
@@ -122,7 +122,7 @@ An automatic draft is due when all hold: `erdStudio.startSuggestions` is on; the
 
 ### 3.3 The start suggestion (the one popup)
 
-Still the window's activation prompt (`startSuggestion`, after `diagramsNudge`), once per folder (Simplify: it was three times), shown only after the bounded look. New text and buttons:
+Still the window's activation prompt (`startSuggestion`, after `diagramsNudge`), once per folder (Simplify: it was three times), shown only after the bounded look. From #305 an install that upgraded (no fresh-install record in the globalState `erdStudio.startSuggestion.machine`, written once by `activate()`'s fresh-install branch, never from telemetry) is asked **once per machine** in all; a new install keeps once per folder. The palette's **Turn On Start Suggestions for This Folder** sets the folder's `on`, which lifts that limit there; Undo after an off never sets it (`docs/dev/onboarding-and-cli.md` → The start suggestion). New text and buttons:
 
 - `ERD Studio found CREATE TABLE scripts in this folder (24 tables). Show them as a diagram? Nothing is saved until you keep it.` (no count: `…in this folder. Show them as a diagram? …`)
 - `ERD Studio found a Power BI or Fabric semantic model in this folder. Show it as a diagram? Nothing is saved until you keep it.`
@@ -132,7 +132,7 @@ Still the window's activation prompt (`startSuggestion`, after `diagramsNudge`),
 
 Buttons: **Show Me** (Convert: **Convert to DBML…**) and **Don't Ask Again for This Folder**. **More Options…** is gone (the draft's More ways to start replaces it). Show Me answers it for good and opens the draft (`prompt`); Don't Ask Again turns suggestions off for the folder (same message as today) and the folder then gets **no** automatic draft and **no** walkthrough.
 
-A **late Show Me** (clicked after a diagram was kept from the draft or elsewhere) re-checks `hasDiagrams()`: when a diagram exists it focuses `erdStudio.domainTree.focus` and says `START_SUGGESTION_ALREADY_KEPT_MESSAGE` instead of opening a second draft, because VS Code 1.85 cannot dismiss a notification once shown.
+A **late Show Me** (clicked after a diagram was kept from the draft or elsewhere) re-checks `hasDiagrams()`: when a diagram exists it shows the Diagrams view (`showDiagramsView` → `GlassSidebarProvider.focusView('diagrams')`: the glass Diagrams section while the glass sidebar is on, else `erdStudio.domainTree.focus`) and says `START_SUGGESTION_ALREADY_KEPT_MESSAGE` instead of opening a second draft, because VS Code 1.85 cannot dismiss a notification once shown.
 
 The **nothing-found notification** (`runNothingFoundPrompt`) is removed: a folder with nothing found gets the example draft on the ERD Studio icon, once per machine, and otherwise only the sidebar.
 

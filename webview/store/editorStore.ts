@@ -29,6 +29,7 @@ import type {
   FeedbackDiagnosticsView,
   FeedbackKind,
 } from '../../src/types/feedback';
+import type { ToastAction } from '../lib/elkLayout';
 
 export type {
   EdgeContextMenu,
@@ -40,6 +41,12 @@ export type {
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
+
+/**
+ * A button a store toast can offer. Declared with the layout notices that
+ * raise it (`webview/lib/elkLayout.ts`), so that lib stays free of the store.
+ */
+export type { ToastAction };
 
 /** Prefill data for FK dialog when opened via drag-to-connect. */
 export interface FkDialogPrefill {
@@ -167,6 +174,12 @@ export interface EditorState extends CanvasState {
   /** Transient toast message raised from anywhere in the webview (null = none). */
   toastMessage: string | null;
   /**
+   * The buttons the toast above offers (#294: an Auto Layout failure's Try
+   * Again and Send Feedback), or null for none. A toast with buttons stays
+   * until it is dismissed, so they cannot vanish under the pointer.
+   */
+  toastActions: ToastAction[] | null;
+  /**
    * A relationship the host asked to show (`revealRelationship`, the sidebar's
    * Open in Diagram). `useRevealRelationship` selects and centres its line
    * once the diagram has settled, then clears it. Not persisted.
@@ -178,6 +191,27 @@ export interface EditorState extends CanvasState {
    * it once the diagram has settled, then clears it. Not persisted.
    */
   pendingTableReveal: string | null;
+  /**
+   * The table reveal waiting is gentle (`RevealTableMessage.gentle`, a
+   * sidebar row's click): selected at the zoom the user has, panned only into
+   * view, no detail panel. Set with {@link pendingTableReveal}.
+   */
+  pendingTableRevealGentle: boolean;
+  /**
+   * The canvas is on screen (`canvasVisibility`: its tab is in front). A
+   * webview behind another tab keeps running but is laid out at a stand-in
+   * size (300 × 150), so a gentle reveal waits for this before it measures
+   * what is in sight. True until the host says otherwise (an older host
+   * never does). Not persisted.
+   */
+  canvasOnScreen: boolean;
+  /**
+   * Tables the host asked to select after a drop on the canvas
+   * (`selectTables`): `useSelectTables` marks them selected once the canvas
+   * draws them, without moving the view or opening the detail panel, then
+   * clears it. Not persisted.
+   */
+  pendingTableSelection: string[] | null;
   /**
    * Whether the "no compiled dbt artifacts" strip has been dismissed.
    *
@@ -222,6 +256,13 @@ export interface EditorState extends CanvasState {
    * takes it back.
    */
   filesNotShown: FileNote[];
+  /**
+   * The host said this project can still be converted to DBML
+   * (`convertOffer`): the toolbar shows its information button on the
+   * logical stage. Posted after every logical-stage load and whenever the
+   * answer changes, so it is deliberately NOT touched by `setDomain`.
+   */
+  convertOffer: boolean;
 }
 
 export interface EditorActions extends CanvasActions {
@@ -248,6 +289,8 @@ export interface EditorActions extends CanvasActions {
   setEmbeddedTables: (embedded: boolean) => void;
   /** Replace the "not shown" notes with the host's latest list. */
   setFilesNotShown: (items: FileNote[]) => void;
+  /** Store the host's `convertOffer` answer (the Convert information button). */
+  setConvertOffer: (show: boolean) => void;
   /** Hide the logical "Run dbt parse" hint at once (the host persists it). */
   dismissManifestHint: () => void;
   /**
@@ -327,12 +370,16 @@ export interface EditorActions extends CanvasActions {
   setSyncPlanGenerated: (info: { filePath: string; totalActions: number } | null) => void;
   /** Set the canvas interaction mode. */
   setCanvasMode: (mode: 'pan' | 'select') => void;
-  /** Show (or clear with null) a transient toast notification. */
-  setToastMessage: (message: string | null) => void;
+  /** Show (or clear with null) a transient toast notification, with any buttons it offers. */
+  setToastMessage: (message: string | null, actions?: ToastAction[]) => void;
   /** Set / clear the relationship to show (see `pendingReveal`). */
   setPendingReveal: (target: RevealRelationshipMessage['payload'] | null) => void;
+  /** Set / clear the tables to select (see `pendingTableSelection`). */
+  setPendingTableSelection: (modelNames: string[] | null) => void;
   /** Set / clear the table to show (see `pendingTableReveal`). */
-  setPendingTableReveal: (modelName: string | null) => void;
+  setPendingTableReveal: (modelName: string | null, gentle?: boolean) => void;
+  /** Set whether the canvas is on screen (see `canvasOnScreen`). */
+  setCanvasOnScreen: (onScreen: boolean) => void;
 }
 
 /**
@@ -402,8 +449,12 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   syncPlanGenerated: null,
   canvasMode: 'pan',
   toastMessage: null,
+  toastActions: null,
   pendingReveal: null,
   pendingTableReveal: null,
+  pendingTableRevealGentle: false,
+  canvasOnScreen: true,
+  pendingTableSelection: null,
   physicalSourceNoticeDismissed: false,
   manifestMissing: false,
   manifestHintDismissed: false,
@@ -411,6 +462,7 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   logicalOnly: false,
   embeddedTables: false,
   filesNotShown: [],
+  convertOffer: false,
 
   // Actions
   setViewport: (viewport) => set({ viewport }),
@@ -429,6 +481,7 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   setManifestMissing: (missing) => set({ manifestMissing: missing }),
   setEmbeddedTables: (embedded) => set({ embeddedTables: embedded }),
   setFilesNotShown: (items) => set({ filesNotShown: items }),
+  setConvertOffer: (show) => set({ convertOffer: show }),
   dismissManifestHint: () => set({ manifestHintDismissed: true }),
   setLogicalOnly: (logicalOnly) => set(
     logicalOnly
@@ -568,9 +621,14 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   setSyncPlanGenerated: (info) => set({ syncPlanGenerated: info }),
 
   setCanvasMode: (mode) => set({ canvasMode: mode }),
-  setToastMessage: (message) => set({ toastMessage: message }),
+  setToastMessage: (message, actions) => set({
+    toastMessage: message,
+    toastActions: message !== null && actions && actions.length > 0 ? actions : null,
+  }),
   setPendingReveal: (target) => set({ pendingReveal: target }),
-  setPendingTableReveal: (modelName) => set({ pendingTableReveal: modelName }),
+  setPendingTableReveal: (modelName, gentle = false) => set({ pendingTableReveal: modelName, pendingTableRevealGentle: modelName !== null && gentle }),
+  setCanvasOnScreen: (onScreen) => set({ canvasOnScreen: onScreen }),
+  setPendingTableSelection: (modelNames) => set({ pendingTableSelection: modelNames }),
 
   // Full editor reset on a new domain payload. Overrides the canvas slice's
   // setDomain (which only clears the column selection) and must stay last.
@@ -601,6 +659,10 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
           // Reset canvas mode to pan on stage switch; select mode is short-lived UI intent
           // and shouldn't persist across a stage change (physical is read-only).
           canvasMode: 'pan' as const,
+          // An Auto Layout failure's toast (#294) waits for its close, so it
+          // would otherwise outlive the stage it was about: its Try Again
+          // would lay out the new stage.
+          ...(state.toastActions ? { toastMessage: null, toastActions: null } : {}),
         }
       : {}),
   })),

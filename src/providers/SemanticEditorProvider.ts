@@ -161,7 +161,7 @@ import type { YmlData } from '../types/ymlData';
 import type { DiscrepancyReport } from '../types/discrepancy';
 import type { DisplaySubjectArea, DisplayRelationship } from '../types/display';
 import type { Rationale, Cardinality, ColumnDef, DesignTable, Meta, Stage } from '../types/semantic';
-import type { CanvasNoticeMessage, DropTablesMessage, LibraryDragEndedMessage, LibraryDragStartedMessage, RevealRelationshipMessage, RevealTableMessage, UpdateColumnPayloadColumn, UpdateMetaMessage } from '../types/messages';
+import type { CanvasFrame, CanvasNoticeMessage, CanvasVisibilityMessage, DropTablesMessage, LibraryDragEndedMessage, LibraryDragRelease, LibraryDragReleasedMessage, LibraryDragStartedMessage, RevealRelationshipMessage, RevealTableMessage, SelectTablesMessage, UpdateColumnPayloadColumn, UpdateMetaMessage } from '../types/messages';
 import { GO_TO_TABLE_COMMAND, REVEAL_IN_TABLE_LIBRARY_COMMAND, projectRelativePath } from '../commands/goToTable';
 import { MOVE_TABLE_COMMAND } from '../commands/moveDbml';
 import type { GroundTruth } from '../types/syncPlan';
@@ -277,12 +277,14 @@ import { withRelationshipHomes } from '../services/diagramRelationshipHomes';
 import { normaliseName } from '../services/nameUtils';
 import { yieldToEventLoop } from '../services/libraryWarmUp';
 import { createLogger, elapsedMs, log, phaseTimer, plural } from '../services/logger';
+import { DropTimer, dropTimingFeatures, dropTimingLogLine, type DropRoute, type DropSummary } from '../services/dropTiming';
 import { SHOW_LOGS_BUTTON, SHOW_LOGS_COMMAND } from '../services/showLogs';
 import type { SessionPromptKind } from '../services/activationPrompts';
 import { parseGuideAction, type CanvasGuideStart, type GuideActionPayload } from '../types/onboardingGuide';
 
 /** The canvas's lines in the ERD Studio log: opening a diagram, position saves. */
 const canvasLog = createLogger('Canvas');
+const dropLog = createLogger('Drop timing');
 
 /**
  * Backoff between re-reads of a domain file that read as empty or truncated.
@@ -437,6 +439,8 @@ interface TableAction {
   reveal: string;
   add?: string[];
   files?: string[];
+  /** A reveal only: select gently (no zoom, no detail panel; `RevealTableMessage.gentle`). */
+  gentle?: boolean;
 }
 
 /** Why a chosen dbt model was left out of a batch add, in words. */
@@ -637,6 +641,9 @@ import {
   validateAddModelsFromDbtPayload,
   validateAddExistingModelsPayload,
   validateDropTablesPayload,
+  validateCanvasFramePayload,
+  validateDragReleasePayload,
+  validateDropShownPayload,
   validateOpenModelFilePayload,
   validateGoToTablePayload,
   validateTableActionPayload,
@@ -656,6 +663,7 @@ import {
   validateAddRelationshipsImportsPayload,
   validateReloadFromDiskPayload,
   validateExportDiagramPayload,
+  validateConvertProjectToDbmlPayload,
   validateGuidePayload,
   validateAnnotationUpdate,
   validateTableNameSafety,
@@ -1017,6 +1025,23 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   /** Per panel: the pending flush after VS Code's own undo/redo (see scheduleNativeUndoFlush). */
   private readonly nativeUndoTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
+  /**
+   * Times each table drop from the moment the host learns of it to the
+   * canvas painting the table (`src/services/dropTiming.ts`): one line in the
+   * ERD Studio log per drop, and fixed usage-telemetry keys.
+   */
+  private readonly dropTimer = new DropTimer({
+    now: () => performance.now(),
+    samePath: (a, b) => samePath(a, b),
+    report: (summary) => this.reportDrop(summary),
+    setTimeout: (fn, ms) => {
+      const handle = setTimeout(fn, ms);
+      (handle as { unref?: () => void }).unref?.();
+      return handle;
+    },
+    clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
+  });
+
   /** The background read of the table library (extension.ts), told about foreground work so it steps aside. */
   private libraryWarmUp: { noteForegroundWork(): void } | undefined;
   /** Delay before a canvas open's relationship survey; tests set 0. */
@@ -1247,6 +1272,15 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     /** The canvases on screen when the drag started: only one of these may say the drag ended over it (`afterDrag`). */
     onScreen?: ReadonlySet<string>;
   } | undefined;
+
+  /**
+   * The last {@link CanvasFrame} a canvas in each editor group reported
+   * (`canvasFrame`), by view column: passed with `libraryDragReleased`, so a
+   * canvas that has not seen the pointer since it opened (a diagram opened
+   * from the sidebar) can still place a glass sidebar drop, when its own
+   * measurements all match.
+   */
+  private readonly canvasFrames = new Map<number, CanvasFrame>();
 
   /**
    * Webviews whose panel has been disposed. Refresh paths iterate a snapshot
@@ -2495,6 +2529,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           'guide',
           // Usage telemetry only (2.0 B13): a crash's kind and area.
           'webviewError',
+          // Timing only: a timed drop's tables are on the canvas.
+          'dropShown',
           // The crash screen's Reload / Send Feedback: reloads the page or opens Send Feedback; writes nothing.
           'crashFallback',
           // The toolbar's Curved / Hops switch: a view preference (a user setting), not a schema
@@ -2502,6 +2538,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           'setLineStyle',
           // The "not shown" strip: open a file it names, or read every file again. Neither writes.
           'openNotedFile', 'reloadFromDisk',
+          // Where the canvas sits on screen (numbers, kept in memory): writes nothing.
+          'canvasFrame',
         ]);
         if (panel?.activeStage === 'physical' && !NON_MUTATION_TYPES.has(message.type)) {
           telemetry.error('physicalEditDropped');
@@ -2512,7 +2550,10 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
         // Usage telemetry: one edit request of this kind (EDIT_FEATURES).
         const editFeature = EDIT_FEATURES[message.type];
-        if (editFeature) telemetry.feature(editFeature);
+        if (editFeature) {
+          telemetry.feature(editFeature);
+          telemetry.diagramUsed(document.uri.toString(), 'edit');
+        }
 
         // Mutations always target the logical stage (physical is already guarded above)
         const activeStage = 'logical' as const;
@@ -2605,6 +2646,26 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             await vscode.commands.executeCommand(IMPORT_DBML_COMMAND, document.uri);
             break;
           }
+          case 'convertProjectToDbml': {
+            // The canvas's information button: the same hook as the Convert
+            // offer's Convert…, whose panel lists every change before anything
+            // is written. Logical only: not in NON_MUTATION_TYPES.
+            const payloadError = validateConvertProjectToDbmlPayload((message as { payload?: unknown }).payload);
+            if (payloadError) {
+              this.post(webviewPanel.webview, { type: 'error', payload: { message: payloadError } });
+              break;
+            }
+            // Not wired: the button never showed (convertInfoShows), so there is nothing to run.
+            const hooks = this.dbmlConversion;
+            if (!hooks) break;
+            telemetry.feature('convertToDbmlFromCanvasInfo');
+            // The user has seen the offer in full: no modal on a later canvas this session.
+            this.dbmlConversionOffered = true;
+            await hooks.run();
+            // Converted, refused or cancelled: every canvas's button follows.
+            this.refreshConvertOffer();
+            break;
+          }
           case 'openNotedFile': {
             // A "not shown" note's file link. Writes nothing, so it is on the physical allowlist.
             const payload = (message as { payload?: unknown }).payload;
@@ -2672,6 +2733,12 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             // No payload to validate. Writes nothing, so it is on the physical allowlist.
             await vscode.commands.executeCommand('erdStudio.showGettingStarted');
             break;
+          case 'dropShown': {
+            // Timing only: a timed drop's tables are on the canvas (the log and fixed telemetry keys). Writes nothing.
+            const payload = (message as { payload?: unknown }).payload;
+            if (validateDropShownPayload(payload)) this.dropTimer.shown(payload.trace, payload.renderMs);
+            break;
+          }
           case 'showLogs':
             // No payload to validate. Opens the ERD Studio output channel; on the physical allowlist.
             await vscode.commands.executeCommand(SHOW_LOGS_COMMAND);
@@ -2895,6 +2962,14 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
               break;
             }
             await this.handleDropTables(document, webviewPanel.webview, panelKey, payload as DropTablesMessage['payload']);
+            break;
+          }
+          case 'canvasFrame': {
+            // Numbers only, kept per editor group for a glass sidebar drag's release (libraryDragReleased).
+            const payload = (message as { payload?: unknown }).payload;
+            if (validateCanvasFramePayload(payload)) break;
+            const column = webviewPanel.viewColumn;
+            if (column !== undefined) this.canvasFrames.set(column, { ...(payload as CanvasFrame) });
             break;
           }
           case 'addModelsFromDbt': {
@@ -3498,6 +3573,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     const viewStateSubscription = webviewPanel.onDidChangeViewState((e) => {
       telemetry.canvasVisible(panelKey, e.webviewPanel.visible);
       readyWatch.visibility(e.webviewPanel.visible);
+      // A gentle reveal waits for the canvas to be on screen before it measures what is in sight.
+      this.post(webviewPanel.webview, { type: 'canvasVisibility', payload: { visible: e.webviewPanel.visible } } satisfies CanvasVisibilityMessage);
       if (e.webviewPanel.active && this.openPanels.get(panelKey)?.webview === webviewPanel.webview) {
         this.lastActivePanelKey = panelKey;
         // The safety net under the watchers: a canvas that gets the focus checks it still shows its files.
@@ -3509,6 +3586,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     // The line style is the reader's setting: every open canvas follows a change, wherever it was made.
     const lineStyleSubscription = vscode.workspace.onDidChangeConfiguration((e) => {
       if (affectsLineStyle(e)) this.postLineStyle(webviewPanel.webview);
+      // erdStudio.dbml.offerConvert turned on or off: the Convert information button follows.
+      if (e.affectsConfiguration(`erdStudio.${DBML_OFFER_CONVERT_SETTING}`)) void this.sendConvertOffer(panelKey);
     });
     webviewPanel.onDidDispose(() => {
       messageSubscription.dispose();
@@ -4135,6 +4214,66 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   }
 
   /**
+   * Whether the canvas's information button about converting shows
+   * (`convertOffer`): exactly the Convert offer's checks
+   * (`convertOfferApplies`): YAML or mixed, not declined with Don't Ask Again
+   * here, `erdStudio.dbml.offerConvert` on, something to convert, no layer
+   * called `tables`, and not a run that was refused or left only files to fix
+   * with nothing changed since (its button would only lead to the same
+   * refusal; the sidebar row still offers it, and the button comes back once a
+   * file changes). Never the once-a-session flag or the window's one prompt:
+   * the button is not a prompt. False when Convert is not wired, or on a
+   * failure (the canvas works without it).
+   */
+  private convertInfoShows(): boolean {
+    const hooks = this.dbmlConversion;
+    if (!hooks) return false;
+    try {
+      return convertOfferApplies({
+        storage: this.tableLibraryService.projectStorage(),
+        declined: this.context.workspaceState?.get<boolean>(DBML_CONVERSION_DECLINED_KEY) === true,
+        offerSetting: getErdStudioSetting<boolean>(DBML_OFFER_CONVERT_SETTING, true) !== false,
+        candidates: hooks.candidates,
+        goesNowhere: () => hooks.goesNowhere?.() === true,
+      });
+    } catch (err) {
+      log.warn(`[SemanticEditorProvider] The Convert information button skipped: ${err instanceof Error ? err.message : String(err)}`);
+      return false;
+    }
+  }
+
+  /** Post `convertOffer` to one canvas on the logical stage (never the physical one). */
+  private postConvertOffer(panelKey: string, show: boolean): void {
+    const entry = this.openPanels.get(panelKey);
+    if (!entry || entry.activeStage !== 'logical' || this.disposedWebviews.has(entry.webview)) return;
+    this.post(entry.webview, { type: 'convertOffer', payload: { show } });
+  }
+
+  /**
+   * After a logical-stage diagram has gone out: tell the canvas whether to
+   * show the Convert information button, off the paint's path (the answer
+   * may list the project's files). Nothing when Convert is not wired.
+   */
+  private async sendConvertOffer(panelKey: string): Promise<void> {
+    if (!this.dbmlConversion) return;
+    await yieldToEventLoop();
+    this.postConvertOffer(panelKey, this.convertInfoShows());
+  }
+
+  /**
+   * Work the Convert information button's answer out again and post it to
+   * every open canvas on the logical stage: after a Convert run (from the
+   * canvas, the sidebar or the palette), after Don't Ask Again, and when
+   * `erdStudio.dbml.offerConvert` changes. Reads only; writes nothing.
+   */
+  refreshConvertOffer(): void {
+    if (!this.dbmlConversion || this.openPanels.size === 0) return;
+    const show = this.convertInfoShows();
+    // A canvas still loading gets its answer after its diagram, as every canvas does.
+    for (const [panelKey, entry] of this.openPanels) if (entry.loaded) this.postConvertOffer(panelKey, show);
+  }
+
+  /**
    * Offer, once a session, to convert a YAML or mixed project to DBML
    * (§6.4), in a modal dialog. Nothing is written without the user's choice:
    * Convert… runs the command, whose panel lists the whole plan. It decides
@@ -4179,9 +4318,13 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       );
       if (choice === DBML_CONVERSION_OFFER_CONVERT) {
         await hooks.run();
+        // Converted, refused or cancelled: the information button follows.
+        this.refreshConvertOffer();
       } else if (choice === DBML_CONVERSION_OFFER_DECLINE) {
         telemetry.feature('convertToDbmlDeclined');
         await this.context.workspaceState?.update(DBML_CONVERSION_DECLINED_KEY, true);
+        // Don't Ask Again takes the canvas's information button away too.
+        this.refreshConvertOffer();
       } else {
         telemetry.feature('convertToDbmlNotNow');
       }
@@ -4974,6 +5117,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       if (written) options.onLayoutOnly?.();
       return written;
     }
+    // A timed drop: what to add is worked out; the edit is planned next.
+    this.dropTimer.mark('prepared', document.uri.fsPath);
     // A DBML diagram, or a project whose library holds DBML (native DBML
     // storage, §5.3): planned against the library and applied by
     // applyFileWrites. A YAML/JSON project keeps the path below unchanged.
@@ -5013,6 +5158,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     const expected = [document.uri.fsPath, ...created, ...deleted, ...modelDocs.map((d) => d.uri.fsPath), ...otherDomainDocs.map((d) => d.uri.fsPath)];
     const expectation = this.ownWriteTracker.expectWrite(expected);
     this.pendingUpdates.set(panelKey, true);
+    this.dropTimer.mark('planned', document.uri.fsPath);
     try {
       const success = await vscode.workspace.applyEdit(edit);
       if (!success) {
@@ -5023,6 +5169,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         return false;
       }
       options.onApplied?.();
+      this.dropTimer.mark('applied', document.uri.fsPath);
       // A save that fails is reported, never ignored: the edit is applied in
       // memory, so without a word the file would sit open and unsaved (#126).
       const unsaved: string[] = [];
@@ -5069,6 +5216,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       if (ourPaths.size > 0) {
         this.editedTablePaths.set(panelKey, ourPaths);
       }
+      this.dropTimer.mark('saved', document.uri.fsPath);
       // The table files this edit wrote, created or deleted: their parses, and
       // the library index when one appeared or went (the redraw below reads both).
       this.tableLibraryService.invalidatePaths([...created, ...deleted, ...modelDocs.map((d) => d.uri.fsPath)]);
@@ -5078,6 +5226,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       // panel that shows a model we just wrote.
       if (refreshWebview && webview) {
         await this.sendSubjectAreaData(document, webview);
+        this.postDropTrace(document, webview);
       }
     } finally {
       this.ownWriteTracker.settleWrites(expectation);
@@ -5338,6 +5487,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     }
 
     this.pendingUpdates.set(panelKey, true);
+    this.dropTimer.mark('planned', fsPath);
     let applied: AppliedFileWrites;
     try {
       const result = await this.applyAndSaveWrites(document, primaryText, writes, options);
@@ -5352,6 +5502,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       this.tableLibraryService.primeRelationshipsFiles(written);
       if (refreshWebview && webview) {
         await this.sendSubjectAreaData(document, webview);
+        this.postDropTrace(document, webview);
       }
     } finally {
       this.pendingUpdates.delete(panelKey);
@@ -5424,6 +5575,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         return null;
       }
       options.onApplied?.();
+      this.dropTimer.mark('applied', fsPath);
       const unsaved: string[] = [];
       const saveFailures = new Set<SaveFailure>();
       const onSaveFailure = (reason: SaveFailure) => saveFailures.add(reason);
@@ -5453,6 +5605,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       }
       for (const filePath of applied.created) ourPaths.add(filePath);
       if (ourPaths.size > 0) this.editedTablePaths.set(panelKey, ourPaths);
+      this.dropTimer.mark('saved', fsPath);
       if (unsaved.length > 0) {
         for (const code of saveFailureCodes(saveFailures, { modelFile: modelFileUnsaved })) telemetry.error(code);
         options.onUnsaved?.();
@@ -6272,7 +6425,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       // ELK auto layout instead, which persists through `updatePositions` (one
       // edit, one undo step). The simple placement below still goes out in the
       // payload so the first paint is never at (0,0), but it is not written:
-      // should the ELK run fail, the next open simply asks again.
+      // a layout ELK cannot finish falls back to the webview's grid, which is
+      // saved the same way, and only if even that fails does the next open
+      // ask again.
       // A DBML diagram's positions live in its Project's `erd_layout`,
       // written the same way.
       const autoLayout = activeStage === 'logical' && isFreshLayout(unifiedDomain);
@@ -6330,6 +6485,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         // What the files hold that this picture does not show ("not shown" notes), worked out after it has gone out.
         this.noteDrawn(key, displayDomain.models.map((m) => m.name));
         void this.sendFilesNotShown(webview, key, document, displayDomain.models.map((m) => m.name));
+        // Whether this project can still be converted to DBML: the information button.
+        void this.sendConvertOffer(key);
         if (subjectAreaStorageOf(document.uri.fsPath) === 'dbml' && this.holdsOwnTables(document)) {
           // A single-file DBML dropped into a layer folder (§2.5): offer Import.
           this.post(webview, { type: 'dbmlEmbeddedTables' });
@@ -6431,6 +6588,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       }
     }
     telemetry.canvasOpened(stage, format, modelCount);
+    telemetry.diagramUsed(document.uri.toString(), 'open');
     // Without dbt the manifest service is disabled and reports neither missing
     // nor stale: recording that as 'ok' would count a plain folder as a fresh
     // manifest. The day's manifest state stays 'unknown' instead.
@@ -6864,7 +7022,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
   /**
    * Select and centre one relationship on the canvas of `uri` (the
-   * Relationships view's Open in Diagram). A canvas that has loaded its
+   * Relationships view's Open in Diagram), or with `target.gentle` (a row's
+   * click) select it at the zoom the user has, panning only to bring it into
+   * view. A canvas that has loaded its
    * diagram gets it at once, switched to the logical stage first (the line is
    * a design relationship); one still opening gets it from the `ready`
    * handler, so the caller may ask before or after opening the editor.
@@ -6885,12 +7045,27 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
   /**
    * Select and centre one table, with its detail panel open, on the canvas of
-   * `uri` (Open in Diagram / Go to Table on a table). As
+   * `uri` (Go to Table on a table, the canvas's Show on Other Diagrams…), or,
+   * `gentle` (a sidebar row's click), select it at the zoom the user has,
+   * panning only to bring it into view, with no panel. As
    * {@link revealRelationship}: posted at once to a loaded canvas (switched
    * to the logical stage first), else held until its `ready` has its diagram.
    */
-  async revealTable(uri: vscode.Uri, modelName: string): Promise<void> {
-    await this.runTableAction(uri, { reveal: modelName });
+  async revealTable(uri: vscode.Uri, modelName: string, options: { gentle?: boolean } = {}): Promise<void> {
+    await this.runTableAction(uri, { reveal: modelName, ...(options.gentle ? { gentle: true } : {}) });
+  }
+
+  /**
+   * The diagram of the canvas last active, while it is still open and on
+   * screen (a sidebar row's click highlights a table there when the active
+   * editor is not a diagram); undefined otherwise.
+   */
+  lastActiveVisibleDiagramPath(): string | undefined {
+    const key = this.lastActivePanelKey;
+    if (!key || !this.panelOnScreen(key)) return undefined;
+    const entry = this.openPanels.get(key);
+    if (!entry || this.disposedWebviews.has(entry.webview)) return undefined;
+    return entry.document.uri.fsPath;
   }
 
   /**
@@ -6915,11 +7090,44 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     files?: readonly string[],
   ): Promise<string[] | undefined> {
     if (modelNames.length === 0) return [];
-    return this.runTableAction(uri, {
+    const added = await this.runTableAction(uri, {
       reveal: modelNames[0],
       add: [...modelNames],
       ...(files !== undefined && files.length === modelNames.length ? { files: [...files] } : {}),
     });
+    // A timed drop whose add wrote nothing is finished; one held for the canvas's `ready` settles when it runs.
+    if (added !== undefined) this.dropTimer.settle(uri.fsPath);
+    return added;
+  }
+
+  /**
+   * A drop on the diagram at `filePath` that did not reach its canvas: one on
+   * its row in the Diagrams view, or one the editor group took (it opened the
+   * table's file, `missedCanvasDrop.ts`). Starts timing it.
+   */
+  noteDropSeen(route: Extract<DropRoute, 'missedDrop' | 'diagramsRow'>, filePath: string): void {
+    this.dropTimer.dropSeen(route, filePath);
+  }
+
+  /** The diagram a timed drop is going to was brought forward (Add to Diagram's route). */
+  noteDropDiagramOpened(filePath: string): void {
+    this.dropTimer.mark('opened', filePath);
+  }
+
+  /** A finished drop: its line in the ERD Studio log, and its fixed telemetry keys. */
+  private reportDrop(summary: DropSummary): void {
+    try {
+      dropLog.info(dropTimingLogLine(summary, path.basename(summary.target)));
+      for (const key of dropTimingFeatures(summary)) telemetry.featureQuiet(key);
+    } catch {
+      // Timing must never break a drop.
+    }
+  }
+
+  /** After a diagram is redrawn on its canvas: when a drop on it is timed, ask the canvas to say once it has painted. */
+  private postDropTrace(document: vscode.TextDocument, webview: vscode.Webview): void {
+    const trace = this.dropTimer.posted(document.uri.fsPath);
+    if (trace !== undefined && !this.disposedWebviews.has(webview)) this.post(webview, { type: 'dropTrace', payload: { trace } });
   }
 
   /**
@@ -6934,6 +7142,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     files?: readonly string[],
   ): void {
     if (tables.length === 0) return;
+    this.dropTimer.dragStarted(tables.length);
     const onScreen = new Set(Array.from(this.openPanels.keys()).filter((key) => this.panelOnScreen(key)));
     this.pendingLibraryDrag = {
       tables: [...tables],
@@ -6942,10 +7151,42 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       onScreen,
     };
     const message: LibraryDragStartedMessage = { type: 'libraryDragStarted', payload: { tables: [...tables] } };
+    let told = 0;
     for (const [panelKey, panel] of Array.from(this.openPanels.entries())) {
       if (!panel.loaded || panel.activeStage !== 'logical' || this.disposedWebviews.has(panel.webview) || this.forgetIfGone(panelKey)) continue;
       this.post(panel.webview, message);
+      told++;
     }
+    log.info(`[SemanticEditorProvider] Table Library drag started: ${plural(tables.length, 'table')}, ${plural(told, 'canvas', 'canvases')} told`);
+  }
+
+  /**
+   * A Table Library drag that started in the glass sidebar was let go outside
+   * the sidebar, at `at` (the page's `dragend`, a few
+   * milliseconds after the button came up). Tell each loaded logical canvas
+   * that was on screen when the drag started and still is
+   * (`libraryDragReleased`, with the last frame its editor group reported):
+   * the one that finds the point on its diagram posts its `afterDrag` drop at
+   * once, rather than at the pointer's next move. Nothing is added here; the
+   * drop still goes through {@link handleDropTables} and uses the drag up
+   * once ({@link afterDragLands}, {@link takeLibraryDrag}).
+   */
+  libraryDragReleased(at: LibraryDragRelease): void {
+    const pending = this.pendingLibraryDrag;
+    if (!pending || validateDragReleasePayload(at) !== null) return;
+    const now = Date.now();
+    if (now < pending.at || now - pending.at > PENDING_LIBRARY_DRAG_MS) return;
+    let told = 0;
+    for (const [panelKey, panel] of Array.from(this.openPanels.entries())) {
+      if (!panel.loaded || panel.activeStage !== 'logical' || this.disposedWebviews.has(panel.webview)) continue;
+      if (pending.onScreen?.has(panelKey) !== true || !this.panelOnScreen(panelKey)) continue;
+      const column = panel.panel?.viewColumn;
+      const frame = column !== undefined ? this.canvasFrames.get(column) : undefined;
+      const message: LibraryDragReleasedMessage = { type: 'libraryDragReleased', payload: { ...at, ...(frame ? { frame: { ...frame } } : {}) } };
+      this.post(panel.webview, message);
+      told++;
+    }
+    log.info(`[SemanticEditorProvider] Table Library drag let go outside the sidebar ${now - pending.at} ms after it started: ${plural(told, 'canvas', 'canvases')} told`);
   }
 
   /** The remembered Table Library drag's tables (and their files, when it knew them), if it is still fresh; forgotten either way. */
@@ -6991,7 +7232,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * among the dropped URIs, else that remembered drag. Tables already on
    * the diagram are selected and named; the rest are added through the Add
    * Existing Tables edit with their positions at the drop point (one edit,
-   * one undo step), and the first of them is selected.
+   * one undo step), and they are selected (`selectTables`): the view is left
+   * as the user had it, no pan, no zoom, no detail panel.
    */
   private async handleDropTables(
     document: vscode.TextDocument,
@@ -7000,6 +7242,13 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     given: DropTablesMessage['payload'],
   ): Promise<void> {
     let payload = given;
+    const received = Date.now();
+    const dragStartedAt = this.pendingLibraryDrag?.at;
+    // One line per drop that adds or selects (counts and milliseconds only): a slow drop can be read from the log.
+    const timing = (outcome: string): void => {
+      const since = dragStartedAt !== undefined ? `${received - dragStartedAt} ms after the drag started, ` : '';
+      log.info(`[SemanticEditorProvider] Table drop (${given.afterDrag === true ? 'afterDrag' : 'drop'}) received ${since}${outcome} in ${elapsedMs(received)} ms`);
+    };
     if (given.afterDrag === true) {
       // No drop reached the canvas; the webview saw the drag end over it. Only
       // the drag still waiting, started while this canvas was on screen, and
@@ -7008,6 +7257,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       if (!afterDragLands(this.pendingLibraryDrag, panelKey, this.panelOnScreen(panelKey), Date.now())) return;
       payload = { position: given.position, uris: [], fromLibrary: true };
     }
+    this.dropTimer.dropSeen(given.afterDrag === true ? 'afterDrag' : 'canvas', document.uri.fsPath);
     try {
       const dropped = tablesOfDroppedUris(payload.uris, this.tableLibraryService.listTableFiles());
       // The drop uses the library drag up, whichever way its tables came.
@@ -7026,7 +7276,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         telemetry.feature('addModel');
         await this.queueEdit(panelKey, async () => {
           const added = await this.addTableFiles(document, webview, byFile.files, { dropAt: payload.position, alreadyAsNotice: true });
-          if (added.length > 0) this.post(webview, { type: 'revealTable', payload: { modelName: added[0] } } satisfies RevealTableMessage);
+          // Selected where they landed: the view stays as the user had it (no pan, no zoom, no panel).
+          if (added.length > 0) this.post(webview, { type: 'selectTables', payload: { modelNames: [...added] } } satisfies SelectTablesMessage);
+          timing(`added ${added.length} of ${plural(byFile.files.length, 'table')}`);
         });
         return;
       }
@@ -7044,8 +7296,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       const members = membersOf();
       const fresh = names.filter((name) => !members.has(normaliseName(name)));
       if (fresh.length === 0) {
-        this.post(webview, { type: 'revealTable', payload: { modelName: names[0] } } satisfies RevealTableMessage);
+        this.post(webview, { type: 'selectTables', payload: { modelNames: [...names] } } satisfies SelectTablesMessage);
         this.postCanvasNotice(webview, alreadyOnDiagramMessage(names));
+        timing(`selected ${plural(names.length, 'table')} already on the diagram`);
         return;
       }
       telemetry.feature('addModel');
@@ -7053,15 +7306,19 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       await this.queueEdit(panelKey, () => this.handleAddExistingModels(document, webview, names, { dropAt: payload.position }));
       // Selected only once it is on the diagram: a refused add has said why.
       const after = membersOf();
-      const added = fresh.find((name) => after.has(normaliseName(name)));
-      if (added !== undefined) {
-        this.post(webview, { type: 'revealTable', payload: { modelName: added } } satisfies RevealTableMessage);
+      const added = fresh.filter((name) => after.has(normaliseName(name)));
+      if (added.length > 0) {
+        // Selected where they landed: the view stays as the user had it (no pan, no zoom, no panel).
+        this.post(webview, { type: 'selectTables', payload: { modelNames: added } } satisfies SelectTablesMessage);
       }
+      timing(`added ${added.length} of ${plural(names.length, 'table')}`);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       logHandlerFailure(`[SemanticEditorProvider] Dropping tables failed: ${message}`, err);
       recordHandlerFailure('model', err);
       this.post(webview, { type: 'error', payload: { message: `Failed to add the dropped tables: ${message}` } });
+    } finally {
+      this.dropTimer.settle(document.uri.fsPath);
     }
   }
 
@@ -7113,7 +7370,10 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         reveal = addedNames[0];
       }
     }
-    this.post(panel.webview, { type: 'revealTable', payload: { modelName: reveal } } satisfies RevealTableMessage);
+    this.post(panel.webview, {
+      type: 'revealTable',
+      payload: { modelName: reveal, ...(action.gentle && !action.add ? { gentle: true } : {}) },
+    } satisfies RevealTableMessage);
     return addedNames;
   }
 
@@ -7164,7 +7424,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         const { at: _at, ...action } = pending;
         void this.applyTableAction(panelKey, action).catch((err: unknown) => {
           log.error(`[SemanticEditorProvider] Table action failed: ${err instanceof Error ? err.message : String(err)}`);
-        });
+        }).finally(() => this.dropTimer.settle(fsPath));
       }
     }
   }
@@ -9200,6 +9460,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
      */
     options: { dropAt?: NodePosition; alreadyAsNotice?: boolean } = {},
   ): Promise<string[]> {
+    this.dropTimer.mark('started', document.uri.fsPath);
     const members = this.parseSubjectAreaFile(document).members;
     if (!members) return [];
     const firstOfFile = (f: TableFileEntry, i: number): boolean => files.findIndex((g) => samePath(g.filePath, f.filePath)) === i;
@@ -9212,7 +9473,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       const first = files[0];
       const shown = first?.id ? members.memberOf(first.id)?.ref ?? first.name : first?.name ?? '';
       if (options.alreadyAsNotice && present.length > 0) {
-        this.post(webview, { type: 'revealTable', payload: { modelName: present[0] } } satisfies RevealTableMessage);
+        // A drop on the canvas: selected where they are, the view left as it was.
+        this.post(webview, { type: 'selectTables', payload: { modelNames: [...present] } } satisfies SelectTablesMessage);
         this.postCanvasNotice(webview, alreadyOnDiagramMessage(present));
         return [];
       }
@@ -9561,6 +9823,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
      */
     options: { dropAt?: NodePosition; sourcePaths?: readonly string[] } = {},
   ): Promise<void> {
+    this.dropTimer.mark('started', document.uri.fsPath);
     try {
       // Rows the dialog listed from Table Library files, added by their files where a name alone cannot say which table;
       // the other rows (dbt models the library does not have) by name, in the same edit.
@@ -10164,6 +10427,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         void this.sendCanvasContext(webview, displayDomain.models.map((m) => m.name), unifiedDomain.layer, document);
         this.noteDrawn(panelKey, displayDomain.models.map((m) => m.name));
         void this.sendFilesNotShown(webview, panelKey, document, displayDomain.models.map((m) => m.name));
+        void this.sendConvertOffer(panelKey);
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

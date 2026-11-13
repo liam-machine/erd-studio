@@ -121,9 +121,9 @@ describe('B4: the host search for dbt_project.yml', () => {
     expect(await findHostDbtProjects(5)).toEqual({ outcome: 'timeout' });
   });
 
-  it('error when it rejects', async () => {
+  it('error when it rejects, and says so (#304)', async () => {
     vi.spyOn(vscode.workspace, 'findFiles').mockRejectedValue(new Error('search broke') as never);
-    expect(await findHostDbtProjects(1000)).toEqual({ outcome: 'error' });
+    expect(await findHostDbtProjects(1000)).toEqual({ outcome: 'error', reason: 'rejected' });
   });
 });
 

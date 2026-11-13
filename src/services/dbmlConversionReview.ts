@@ -2,7 +2,8 @@
  * The "Convert to DBML" panel's pure half (native DBML storage §6.2, after
  * pre-release 1.9.0): the plan as a scrollable, sectioned list, the panel's
  * own small message protocol and its validation, and the self-contained HTML
- * (nonce-only CSP, no remote resources, colours only from `--vscode-*`).
+ * (nonce-only CSP, no remote resources; the glass look of `glassPageStyle.ts`,
+ * so colours only from its tokens and `--vscode-*`).
  *
  * The panel is not the canvas, so its messages are not part of
  * `src/types/messages.ts`. vscode-free: the host half is
@@ -14,6 +15,7 @@
 import { classifySemanticFile } from '@erd-studio/core';
 
 import { dbmlLeftAsIsTitle, isDbmlSelfCheckRefusal, type DbmlConversionPlan } from './dbmlConversion';
+import { GLASS_PAGE_STYLE } from '../types/glassPageStyle';
 
 export const CONVERT_PANEL_VIEW_TYPE = 'erdStudio.convertToDbml';
 export const CONVERT_PANEL_TITLE = 'Convert to DBML';
@@ -360,71 +362,100 @@ export function escapeHtml(value: string): string {
     .replace(/'/g, '&#39;');
 }
 
-/** The review pages' stylesheet (this panel and the import review, `importReview.ts`): `--vscode-*` colours only. */
-export const REVIEW_PANEL_STYLE = `
-:root { color-scheme: light dark; }
-* { box-sizing: border-box; }
-html, body { height: 100%; margin: 0; padding: 0; }
-body {
-  color: var(--vscode-foreground);
-  background: var(--vscode-editor-background);
-  font-family: var(--vscode-font-family);
-  font-size: var(--vscode-font-size);
+/**
+ * The Convert to DBML page's own CSS, after {@link GLASS_PAGE_STYLE} (the
+ * glass tokens and the `gp-` kit the markup uses beside these `cdb` classes):
+ * the full-height layout (header, the one scrolling list, the sticky button
+ * bar) and the review's own pieces. Colours from the glass tokens only.
+ */
+export const REVIEW_PANEL_STYLE = String.raw`
+html, body { height: 100%; }
+.cdb {
+  display: flex; flex-direction: column; height: 100vh;
+  max-width: calc(880px + 2 * var(--space-8)); margin: 0 auto;
 }
-.cdb { display: flex; flex-direction: column; height: 100vh; max-width: 960px; margin: 0 auto; }
-.cdb__header { flex: none; padding: 20px 24px 8px; }
-.cdb__heading { margin: 0 0 8px; font-size: 1.4em; font-weight: 600; }
-.cdb__summary { margin: 0 0 8px; line-height: 1.45; font-weight: 600; }
-.cdb__intro { margin: 0 0 6px; line-height: 1.45; color: var(--vscode-descriptionForeground); }
-.cdb__counts { display: flex; flex-wrap: wrap; gap: 6px 18px; margin: 10px 0 0; padding: 0; list-style: none; }
-.cdb__count-value { font-weight: 600; color: var(--vscode-foreground); }
-.cdb__count { color: var(--vscode-descriptionForeground); }
+.cdb__header { flex: none; padding: var(--space-8) var(--space-8) var(--space-5); }
+.cdb__heading { margin: 0 0 var(--space-4); }
+.cdb__summary { margin: 0 0 var(--space-3); font-weight: var(--weight-semibold); line-height: var(--leading-normal); }
+.cdb__intro { margin: 0 0 var(--space-2); color: var(--text-secondary); line-height: var(--leading-normal); }
+.cdb__counts { display: flex; flex-wrap: wrap; gap: var(--space-3); margin: var(--space-5) 0 0; padding: 0; list-style: none; }
+.cdb__count-value { color: var(--text-primary); font-weight: var(--weight-semibold); font-variant-numeric: tabular-nums; }
+
+/* The one scrolling region: the sections as glass cards. Keyboard users
+   reach it with Tab and scroll it with the arrow keys. */
 .cdb__list {
-  flex: 1 1 auto; min-height: 8em; overflow-y: auto; margin: 8px 24px 0; padding: 0 4px 12px 0;
-  border-top: 1px solid var(--vscode-panel-border, var(--vscode-widget-border));
+  flex: 1 1 auto; min-height: 8em; overflow-y: auto;
+  margin: 0; padding: var(--space-2) var(--space-8) var(--space-6);
+  border-radius: var(--radius-lg);
 }
-.cdb__list:focus { outline: 1px solid var(--vscode-focusBorder); outline-offset: 2px; }
-.cdb-section { padding: 6px 0; border-bottom: 1px solid var(--vscode-panel-border, var(--vscode-widget-border)); }
-.cdb-section__title { cursor: pointer; padding: 6px 2px; font-weight: 600; }
-.cdb-section__title:focus { outline: 1px solid var(--vscode-focusBorder); }
-.cdb-section__count {
-  margin-left: 6px; padding: 0 6px; border-radius: 8px; font-weight: 400;
-  color: var(--vscode-badge-foreground); background: var(--vscode-badge-background);
+.cdb__list:focus { outline: none; }
+.cdb__list:focus-visible { outline: var(--focus-outline); outline-offset: -2px; }
+.cdb-section { margin: 0 0 var(--space-5); padding: var(--space-2) var(--space-5) var(--space-3); }
+.cdb-section[data-section='problems'] { border-color: var(--glass-tint-error-edge); }
+.cdb-section[data-section='left'] { border-color: var(--glass-tint-warning-edge); }
+body.vscode-high-contrast .cdb-section[data-section='problems'],
+body.vscode-high-contrast-light .cdb-section[data-section='problems'] { border-color: var(--error-fg); }
+body.vscode-high-contrast .cdb-section[data-section='left'],
+body.vscode-high-contrast-light .cdb-section[data-section='left'] { border-color: var(--warning-fg); }
+
+/* A section's title: a disclosure row (chevron, title, count badge). */
+.cdb-section__title {
+  display: flex; align-items: center; gap: var(--space-4);
+  min-height: var(--control-height-lg); margin: 0 calc(-1 * var(--space-3)); padding: 0 var(--space-3);
+  border-radius: var(--radius-md);
+  color: var(--text-primary); font-size: var(--text-md); font-weight: var(--weight-semibold);
+  list-style: none; cursor: pointer; user-select: none; -webkit-user-select: none;
+  transition: background-color var(--duration-fast) var(--ease-standard);
 }
-.cdb-section__items { margin: 2px 0 6px; padding: 0 0 0 18px; list-style: none; }
-.cdb-section__hint { margin: 0 0 6px; padding: 0 0 0 18px; color: var(--vscode-descriptionForeground); }
-.cdb-item { padding: 3px 0; line-height: 1.4; overflow-wrap: anywhere; }
-.cdb-item__path { font-family: var(--vscode-editor-font-family); font-size: var(--vscode-editor-font-size); }
-.cdb-item__tag { margin-left: 8px; font-size: 0.85em; color: var(--vscode-descriptionForeground); }
-.cdb-item__text { display: block; color: var(--vscode-foreground); }
+.cdb-section__title::-webkit-details-marker { display: none; }
+.cdb-section__title::before {
+  content: ''; flex: none; width: 6px; height: 6px; margin: 0 var(--space-1) 0 var(--space-1);
+  border-right: 1.5px solid var(--text-tertiary); border-bottom: 1.5px solid var(--text-tertiary);
+  transform: rotate(-45deg);
+  transition: transform var(--duration-base) var(--ease-standard);
+}
+.cdb-section[open] > .cdb-section__title::before { transform: rotate(45deg); }
+.cdb-section__title:hover { background: var(--control-fill-hover); }
+.cdb-section__title:focus-visible { outline: var(--focus-outline); outline-offset: 0; }
+body.vscode-high-contrast .cdb-section__title:hover,
+body.vscode-high-contrast-light .cdb-section__title:hover { outline: 1px dashed var(--control-border-hover); outline-offset: -1px; }
+.cdb-section__count { font-weight: var(--weight-semibold); }
+
+.cdb-section__items { margin: var(--space-1) 0 var(--space-2); padding: 0; list-style: none; }
+.cdb-section__hint { margin: 0 0 var(--space-3); line-height: var(--leading-normal); }
+.cdb-item { padding: var(--space-3) 0; line-height: var(--leading-normal); overflow-wrap: anywhere; }
+.cdb-item + .cdb-item { border-top: 1px solid var(--glass-divider); }
+.cdb-item__path { font-family: var(--font-mono); font-size: var(--text-sm); color: var(--text-primary); }
+.cdb-item__tag { margin-left: var(--space-4); padding-top: 0; padding-bottom: 0; vertical-align: 1px; }
+.cdb-item__text { display: block; margin-top: var(--space-1); color: var(--text-secondary); }
+.cdb-item__text:first-child { margin-top: 0; color: var(--text-primary); }
 .cdb-item__paths { display: block; }
-.cdb-item--problem { padding: 6px 0; }
-.cdb-item--problem .cdb-item__path { color: var(--vscode-errorForeground); }
-.cdb-item__open {
-  margin-left: 8px; padding: 0; border: none; background: none; cursor: pointer;
-  font: inherit; color: var(--vscode-textLink-foreground);
-}
-.cdb-item__open:hover { color: var(--vscode-textLink-activeForeground); text-decoration: underline; }
-.cdb-item__open:focus { outline: 1px solid var(--vscode-focusBorder); }
-.cdb__status { order: 1; flex: 1; align-self: center; margin: 0; color: var(--vscode-descriptionForeground); }
-.cdb__status:empty { display: none; }
+.cdb-item--problem { padding: var(--space-4) 0; }
+.cdb-item--problem .cdb-item__path { color: var(--error-fg); }
+.cdb-item--problem .cdb-item__text { color: var(--text-primary); }
+.cdb-item__open { margin-left: var(--space-4); font-weight: var(--weight-medium); }
+
 /* The buttons sit bottom-left, the status after them: VS Code's notifications
    stack at the bottom right of the window, over a right-aligned Convert
    (onboarding story 08 pressed a toast's button instead). */
 .cdb__actions {
-  position: sticky; bottom: 0; flex: none; display: flex; gap: 8px; justify-content: flex-start;
-  padding: 12px 24px; background: var(--vscode-editor-background);
-  border-top: 1px solid var(--vscode-panel-border, var(--vscode-widget-border));
+  position: sticky; bottom: 0; flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-4); justify-content: flex-start;
+  padding: var(--space-5) var(--space-8);
+  border-top: 1px solid var(--glass-divider);
+  background: var(--glass-surface-1);
+  -webkit-backdrop-filter: var(--glass-backdrop);
+  backdrop-filter: var(--glass-backdrop);
 }
-.cdb__button {
-  padding: 6px 14px; border: 1px solid var(--vscode-button-border, transparent); border-radius: 2px; cursor: pointer;
-  font: inherit; color: var(--vscode-button-foreground); background: var(--vscode-button-background);
+.cdb__status { order: 1; flex: 1; align-self: center; min-width: 12em; margin: 0 0 0 var(--space-2); color: var(--text-secondary); font-size: var(--text-sm); }
+.cdb__status:empty { display: none; }
+/* Every button is disabled only while Convert or Check Again runs, and the
+   pressed one then carries what it is doing: keep that one readable. */
+.cdb__button:disabled { cursor: progress; }
+.cdb__button.gp-button--primary:disabled { opacity: 0.75; }
+
+@media (prefers-reduced-motion: reduce) {
+  .cdb-section__title, .cdb-section__title::before { transition: none; }
 }
-.cdb__button:hover:not(:disabled) { background: var(--vscode-button-hoverBackground); }
-.cdb__button:focus { outline: 1px solid var(--vscode-focusBorder); outline-offset: 2px; }
-.cdb__button--secondary { color: var(--vscode-button-secondaryForeground); background: var(--vscode-button-secondaryBackground); }
-.cdb__button--secondary:hover:not(:disabled) { background: var(--vscode-button-secondaryHoverBackground); }
-.cdb__button:disabled { opacity: 0.5; cursor: default; }
 `;
 
 const SCRIPT = `
@@ -464,14 +495,22 @@ const SCRIPT = `
 })();
 `;
 
+/** A row tag's tint (the kit's `gp-pill--*`): what happens to the file, at a glance. Any other tag stays neutral. */
+const TAG_TINTS: Readonly<Record<string, string>> = Object.assign(Object.create(null) as Record<string, string>, {
+  new: 'ok',
+  updated: 'accent',
+  removed: 'error',
+  [UNSAVED_TAG]: 'warning',
+});
+
 /** One row of a review section (shared with the import review). */
 export function renderReviewItem(item: ConvertReviewItem, problem: boolean): string {
   const where = item.path !== undefined
     ? `<code class="cdb-item__path">${escapeHtml(item.path)}${item.line !== undefined ? `:${item.line}` : ''}</code>`
     : '';
-  const tag = item.tag ? `<span class="cdb-item__tag">${escapeHtml(item.tag)}</span>` : '';
+  const tag = item.tag ? `<span class="cdb-item__tag gp-pill${TAG_TINTS[item.tag] ? ` gp-pill--${TAG_TINTS[item.tag]}` : ''}">${escapeHtml(item.tag)}</span>` : '';
   const open = item.open !== undefined
-    ? `<button type="button" class="cdb-item__open" data-action="open" data-index="${item.open}">Open</button>`
+    ? `<button type="button" class="cdb-item__open gp-link" data-action="open" data-index="${item.open}">Open</button>`
     : '';
   const text = item.text !== undefined ? `<span class="cdb-item__text">${escapeHtml(item.text)}</span>` : '';
   const paths = item.paths && item.paths.length > 0
@@ -484,19 +523,21 @@ export function renderReviewItem(item: ConvertReviewItem, problem: boolean): str
 export function buildConvertPanelHtml(view: ConvertReviewView, nonce: string): string {
   const n = escapeHtml(nonce);
   const sections = view.sections.map((section) => `
-    <details class="cdb-section" data-section="${escapeHtml(section.id)}" open>
-      <summary class="cdb-section__title">${escapeHtml(section.title)}<span class="cdb-section__count">${thousands(section.count ?? section.items.length)}</span></summary>
+    <details class="cdb-section gp-card" data-section="${escapeHtml(section.id)}" open>
+      <summary class="cdb-section__title">${escapeHtml(section.title)}<span class="cdb-section__count gp-badge">${thousands(section.count ?? section.items.length)}</span></summary>
       <ul class="cdb-section__items">${section.items.map((item) => renderReviewItem(item, section.id === 'problems' || (section.id === 'left' && item.path !== undefined))).join('')}</ul>${section.hint !== undefined ? `
-      <p class="cdb-section__hint">${escapeHtml(section.hint)}</p>` : ''}
+      <p class="cdb-section__hint gp-hint">${escapeHtml(section.hint)}</p>` : ''}
     </details>`).join('');
+  const secondary = 'cdb__button cdb__button--secondary gp-button gp-button--lg';
+  const primary = 'cdb__button gp-button gp-button--lg gp-button--primary';
   const actions = view.mode === 'review'
-    ? '<button type="button" class="cdb__button cdb__button--secondary" data-action="cancel">Cancel</button>' +
-      (view.checkAgain ? '<button type="button" class="cdb__button cdb__button--secondary" data-action="checkAgain">Check Again</button>' : '') +
-      '<button type="button" class="cdb__button" data-action="convert">Convert</button>'
-    : '<button type="button" class="cdb__button cdb__button--secondary" data-action="cancel">Close</button>' +
-      '<button type="button" class="cdb__button cdb__button--secondary" data-action="showLogs">Show Logs</button>' +
-      (view.reportable ? '<button type="button" class="cdb__button cdb__button--secondary" data-action="sendFeedback">Send Feedback</button>' : '') +
-      '<button type="button" class="cdb__button" data-action="checkAgain">Check Again</button>';
+    ? `<button type="button" class="${secondary}" data-action="cancel">Cancel</button>` +
+      (view.checkAgain ? `<button type="button" class="${secondary}" data-action="checkAgain">Check Again</button>` : '') +
+      `<button type="button" class="${primary}" data-action="convert">Convert</button>`
+    : `<button type="button" class="${secondary}" data-action="cancel">Close</button>` +
+      `<button type="button" class="${secondary}" data-action="showLogs">Show Logs</button>` +
+      (view.reportable ? `<button type="button" class="${secondary}" data-action="sendFeedback">Send Feedback</button>` : '') +
+      `<button type="button" class="${primary}" data-action="checkAgain">Check Again</button>`;
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -504,15 +545,15 @@ export function buildConvertPanelHtml(view: ConvertReviewView, nonce: string): s
 <meta http-equiv="Content-Security-Policy" content="${escapeHtml(buildConvertPanelCsp(nonce))}">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>${escapeHtml(CONVERT_PANEL_TITLE)}</title>
-<style nonce="${n}">${REVIEW_PANEL_STYLE}</style>
+<style nonce="${n}">${GLASS_PAGE_STYLE}${REVIEW_PANEL_STYLE}</style>
 </head>
 <body>
 <main class="cdb" data-mode="${view.mode}">
   <header class="cdb__header">
-    <h1 class="cdb__heading">${escapeHtml(view.heading)}</h1>
+    <h1 class="cdb__heading gp-title">${escapeHtml(view.heading)}</h1>
     ${view.summary ? `<p class="cdb__summary">${escapeHtml(view.summary)}</p>` : ''}
     ${view.intro.map((line) => `<p class="cdb__intro">${escapeHtml(line)}</p>`).join('\n    ')}
-    <ul class="cdb__counts">${view.counts.map((c) => `<li class="cdb__count"><span class="cdb__count-value">${thousands(c.value)}</span> ${escapeHtml(c.label)}</li>`).join('')}</ul>
+    <ul class="cdb__counts">${view.counts.map((c) => `<li class="cdb__count gp-pill"><span class="cdb__count-value">${thousands(c.value)}</span> ${escapeHtml(c.label)}</li>`).join('')}</ul>
   </header>
   <section class="cdb__list" tabindex="0" aria-label="${view.mode === 'review' ? 'Changes' : 'Problems'}">${sections}
   </section>

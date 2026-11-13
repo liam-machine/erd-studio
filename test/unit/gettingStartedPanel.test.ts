@@ -536,7 +536,7 @@ describe('panel script', () => {
   it('the only start button is the no-folder page\'s example, rendered up front (no HTML from host data)', () => {
     const html = buildGettingStartedHtml({ ...HTML_INPUT, mode: 'logical' });
     const buttons = html.match(/<button[^>]*data-action="start"[^>]*>/g) ?? [];
-    expect(buttons).toEqual(['<button class="gs-btn" type="button" data-action="start" data-start="example">']);
+    expect(buttons).toEqual(['<button class="gs-btn gp-button" type="button" data-action="start" data-start="example">']);
     const { dom, send, visible, doc } = runPanelScript(html);
     try {
       // A status listing every start (or nonsense) shows no start on a project page (the no-folder card is hidden by its CSS there).
@@ -2206,7 +2206,7 @@ describe('Show Me Around, and the suggested start (Draft-first: no clip, no star
       expect(html, label).toContain(`<section class="gs-around" aria-label="${SHOW_ME_AROUND_SECTION_TITLE}">`);
       expect(html, label).toContain(`<h2 class="gs-section-title">${SHOW_ME_AROUND_SECTION_TITLE}</h2>`);
       expect(html, label).toContain(`<p class="gs-section-intro">${SHOW_ME_AROUND_SECTION_INTRO}</p>`);
-      expect(html, label).toContain(`<button class="gs-btn" type="button" data-action="showMeAround">${SHOW_ME_AROUND_LABEL}</button>`);
+      expect(html, label).toContain(`<button class="gs-btn gp-button" type="button" data-action="showMeAround">${SHOW_ME_AROUND_LABEL}</button>`);
       expect(html.indexOf('class="gs-around"'), label).toBeGreaterThan(html.indexOf('data-step="start"'));
       // The per-start clips are gone: no section, no clip, no second <video>.
       expect(html, label).not.toMatch(/gs-howto|data-clip|Ways to start, in short videos|onboarding\/stories/);

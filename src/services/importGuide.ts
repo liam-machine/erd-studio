@@ -29,7 +29,9 @@
  * Every command, argument and snippet is a fixed constant here: the page
  * posts only an action id, a snippet id or `openFolder` (validated by
  * {@link isImportGuideToHost}); nothing it sends is ever run or copied as
- * given. Nonce-only CSP, no remote resource, `--vscode-*` colours only. The
+ * given. Nonce-only CSP, no remote resource; styled with the shared glass page
+ * kit (`glassPageStyle.ts`, tokens over the `--vscode-*` theme) first, then
+ * {@link IMPORT_GUIDE_STYLE}, so colours come from tokens only. The
  * page writes nothing; each import asks its own questions and shows its dry
  * run before it writes.
  *
@@ -37,6 +39,7 @@
  */
 
 import { escapeHtml } from './dbmlConversionReview';
+import { GLASS_PAGE_STYLE } from '../types/glassPageStyle';
 import { IMPORT_GUIDE_LOGOS } from './importGuideLogos';
 import type { ImportGuideSource } from './importOutcomeTelemetry';
 import type { SqlDialect } from './sqlDdlImport';
@@ -815,85 +818,226 @@ export function buildImportGuideCsp(nonce: string): string {
 
 /** `code` in backticks becomes `<code>`; everything else is escaped text. */
 function inline(text: string): string {
-  return escapeHtml(text).replace(/`([^`]+)`/g, '<code class="ig-code">$1</code>');
+  return escapeHtml(text).replace(/`([^`]+)`/g, '<code class="ig-code gp-code-inline">$1</code>');
 }
 
 export const IMPORT_GUIDE_STYLE = `
-:root { color-scheme: light dark; }
-* { box-sizing: border-box; }
-body {
-  margin: 0; padding: 0;
-  color: var(--vscode-foreground);
-  background: var(--vscode-editor-background);
-  font-family: var(--vscode-font-family);
-  font-size: var(--vscode-font-size);
-}
-.ig { max-width: 880px; margin: 0 auto; padding: 24px 24px 48px; }
-.ig__heading { margin: 0 0 8px; font-size: 1.5em; font-weight: 600; }
-.ig__intro { margin: 0 0 6px; line-height: 1.5; max-width: 72ch; }
-.ig__note { margin: 0 0 6px; line-height: 1.5; color: var(--vscode-descriptionForeground); }
+/*
+ * The guide's own layer over GLASS_PAGE_STYLE (glassPageStyle.ts), which comes
+ * first in the page's style element: tokens only, never a colour literal, so light,
+ * high contrast, reduced transparency and reduced motion come from the tokens.
+ */
+
+/* --- The page head --------------------------------------------------------- */
+
+.ig__header { display: grid; gap: var(--space-3); margin: 0 0 var(--space-7); }
+.ig__heading { margin: 0 0 var(--space-1); }
+.ig__intro { margin: 0; max-width: 72ch; color: var(--text-primary); }
+.ig__note { margin: 0; max-width: 72ch; color: var(--text-secondary); font-size: var(--text-sm); }
 .ig__nofolder {
-  display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin: 14px 0 0; padding: 10px 14px;
-  border: 1px solid var(--vscode-panel-border, var(--vscode-widget-border)); border-radius: 4px;
+  flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-4) var(--space-6);
+  margin: var(--space-4) 0 0; padding: var(--space-4) var(--space-4) var(--space-4) var(--space-6);
 }
-.ig__nofolder-text { margin: 0; }
-.ig__cards { display: grid; gap: 8px; margin: 20px 0 0; padding: 0; list-style: none; }
+.ig__nofolder-text { flex: 1 1 32ch; margin: 0; }
+
+/* --- The cards ------------------------------------------------------------- */
+
+.ig__cards { display: grid; gap: var(--space-4); margin: 0; padding: 0; list-style: none; }
 .ig-card {
   /* A grid item: without min-width 0 a long snippet line widens the card (and the page) past the view. */
   min-width: 0;
-  padding: 10px 14px; border-radius: 4px;
-  border: 1px solid var(--vscode-panel-border, var(--vscode-widget-border));
-  background: var(--vscode-sideBar-background, var(--vscode-editor-background));
+  padding: 0;
+  transition:
+    border-color var(--duration-fast) var(--ease-standard),
+    box-shadow var(--duration-base) var(--ease-standard),
+    background-color var(--duration-base) var(--ease-standard);
 }
-.ig-card--lead { border-color: var(--vscode-focusBorder); }
-/* Every source is one line until it is opened, so the whole list is in view at once; only the folder's own suggestion starts open. */
-.ig-card__summary { cursor: pointer; }
-.ig-card__logo { display: inline-block; width: 18px; height: 18px; margin: 0 8px 0 4px; vertical-align: -3px; object-fit: contain; }
-.ig-card__summary:focus { outline: 1px solid var(--vscode-focusBorder); outline-offset: 2px; }
-.ig-card__fold[open] > .ig-card__summary { margin-bottom: 6px; }
-.ig-card--plain > .ig-card__title { display: block; margin-bottom: 6px; }
-.ig-card__title { display: inline; margin: 0; font-size: 1.1em; font-weight: 600; }
-.ig-card__what { margin: 0 0 10px; line-height: 1.5; color: var(--vscode-descriptionForeground); }
-.ig-section { margin: 0 0 10px; }
-.ig-section:last-child { margin-bottom: 0; }
-.ig-section__heading { margin: 0 0 6px; font-weight: 600; }
-/* Two parts of a card: a rule between them. The other way to the same import is one line until it is opened. */
-.ig-section + .ig-section { padding-top: 10px; border-top: 1px solid var(--vscode-panel-border, var(--vscode-widget-border)); }
-.ig-alt__summary { cursor: pointer; color: var(--vscode-textLink-foreground); }
-.ig-alt__summary:focus { outline: 1px solid var(--vscode-focusBorder); outline-offset: 2px; }
-.ig-alt[open] > .ig-alt__summary { margin-bottom: 8px; }
-.ig-steps { margin: 0 0 10px; padding: 0 0 0 20px; }
-.ig-step { margin: 0 0 8px; line-height: 1.5; }
-.ig-step--only { margin: 0 0 10px; }
-.ig-step--import .ig-btn { margin-left: 6px; }
-.ig-btn + .ig-note { margin-top: 10px; }
+.ig-card:hover { border-color: var(--glass-border-strong); }
+/* An opened card rises a step above the folded list. */
+.ig-card:has(> .ig-card__fold[open]) { background: var(--glass-surface-3); box-shadow: var(--glass-elevation-2); }
+/* The folder's own suggestion: an accent edge and a faint accent sheen. */
+.ig-card--lead,
+.ig-card--lead:hover { border-color: var(--control-border-selected); }
+.ig-card--lead:has(> .ig-card__fold[open]) {
+  background: linear-gradient(180deg, var(--glass-tint-accent), transparent 96px), var(--glass-surface-3);
+}
 
-.ig-note { margin: 0 0 10px; line-height: 1.5; font-size: 0.95em; color: var(--vscode-descriptionForeground); }
-.ig-code {
-  font-family: var(--vscode-editor-font-family); font-size: var(--vscode-editor-font-size);
-  padding: 0 3px; border-radius: 3px; background: var(--vscode-textCodeBlock-background);
+/* Every source is one line until it is opened, so the whole list is in view at once; only the folder's own suggestion starts open. */
+.ig-card__summary {
+  display: flex; align-items: center; gap: var(--space-5);
+  min-height: 48px; padding: var(--space-3) var(--space-6);
+  border-radius: calc(var(--radius-lg) - 1px);
+  list-style: none; cursor: pointer;
+  transition: background-color var(--duration-fast) var(--ease-standard);
 }
-.ig-snippet { display: flex; align-items: flex-start; gap: 8px; margin: 6px 0 0; }
+.ig-card__summary::-webkit-details-marker { display: none; }
+.ig-card__summary:hover { background: var(--control-fill); }
+.ig-card__summary:focus-visible { outline: var(--focus-outline); outline-offset: -2px; }
+.ig-card__fold[open] > .ig-card__summary {
+  margin-bottom: var(--space-6);
+  border-bottom: 1px solid var(--glass-divider);
+  border-bottom-left-radius: 0; border-bottom-right-radius: 0;
+}
+/* The fold's chevron, drawn with borders (the page has no inline SVG): right when shut, down when open. */
+.ig-card__summary::after {
+  content: ''; flex: none; width: 7px; height: 7px; margin: 0 var(--space-1) 0 auto;
+  border-right: 1.5px solid var(--text-tertiary); border-bottom: 1.5px solid var(--text-tertiary);
+  transform: rotate(-45deg);
+  transition: transform var(--duration-base) var(--ease-out), border-color var(--duration-fast) var(--ease-standard);
+}
+.ig-card__summary:hover::after { border-color: var(--text-primary); }
+.ig-card__fold[open] > .ig-card__summary::after { transform: translateY(-2px) rotate(45deg); }
+
+/* The source's mark, on a small glass tile; a card with no mark keeps the tile (a plain table glyph), so the names line up. */
+.ig-card__logo {
+  display: inline-flex; align-items: center; justify-content: center; flex: none;
+  width: 30px; height: 30px; margin: 0; padding: 6px;
+  border: 1px solid var(--glass-border); border-radius: var(--radius-md);
+  background: var(--control-fill); box-shadow: var(--glass-highlight);
+  object-fit: contain;
+}
+span.ig-card__logo::before {
+  content: ''; width: 14px; height: 12px;
+  border: 1.5px solid var(--text-tertiary); border-top-width: 4px; border-radius: 2px;
+}
+.ig-card__title {
+  flex: 0 1 auto; min-width: 0; margin: 0;
+  color: var(--text-primary); font-size: var(--text-md); font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-tight); line-height: var(--leading-tight);
+}
+.ig-card__what { margin: 0 0 var(--space-6); max-width: 72ch; color: var(--text-secondary); }
+
+/* "Not yet": a short closing note, always in view: a quiet dashed well, not a source to open. */
+.ig-card--plain,
+.ig-card--plain:hover {
+  padding: var(--space-6);
+  border-style: dashed; border-color: var(--glass-border);
+  background: var(--glass-well); box-shadow: none;
+  -webkit-backdrop-filter: none; backdrop-filter: none;
+}
+.ig-card--plain > .ig-card__title { display: block; margin-bottom: var(--space-2); }
+.ig-card--plain > .ig-card__what { margin-bottom: var(--space-5); }
+
+/* --- A card's ways in ------------------------------------------------------ */
+
+.ig-section { margin: 0 0 var(--space-6); }
+.ig-section:last-child { margin-bottom: 0; }
+.ig-section__heading {
+  margin: 0 0 var(--space-4);
+  color: var(--text-primary); font-size: var(--text-sm); font-weight: var(--weight-semibold); line-height: var(--leading-tight);
+}
+/* Two parts of a card: a rule between them. The other way to the same import is one line until it is opened. */
+.ig-section + .ig-section { padding-top: var(--space-5); border-top: 1px solid var(--glass-divider); }
+.ig-alt__summary {
+  display: flex; align-items: center; gap: var(--space-4);
+  width: fit-content; max-width: 100%; margin: 0 0 0 calc(-1 * var(--space-3)); padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  color: var(--vscode-textLink-foreground, var(--accent)); font-size: var(--text-sm);
+  list-style: none; cursor: pointer;
+  transition: background-color var(--duration-fast) var(--ease-standard);
+}
+.ig-alt__summary::-webkit-details-marker { display: none; }
+.ig-alt__summary:hover { background: var(--control-fill); color: var(--vscode-textLink-activeForeground, var(--vscode-textLink-foreground)); }
+.ig-alt__summary:focus-visible { outline: var(--focus-outline); outline-offset: 0; }
+.ig-alt[open] > .ig-alt__summary { margin-bottom: var(--space-5); }
+
+/* The small chevron of the inner folds (the other way, a long query): currentColor, right when shut, down when open. */
+.ig-alt__summary::before,
+.ig-snippet__summary::before {
+  content: ''; flex: none; width: 5px; height: 5px; margin: 0 var(--space-1);
+  border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor;
+  transform: rotate(-45deg);
+  transition: transform var(--duration-base) var(--ease-out);
+}
+.ig-alt[open] > .ig-alt__summary::before,
+.ig-snippet__fold[open] > .ig-snippet__summary::before { transform: translateY(-1px) rotate(45deg); }
+
+/* --- Steps ----------------------------------------------------------------- */
+
+/* Numbered steps: a numbered dot each, threaded by a hairline, so the list reads as one job ending in the import. */
+.ig-steps { display: grid; gap: var(--space-5); margin: 0 0 var(--space-5); padding: 0; list-style: none; counter-reset: ig-step; }
+.ig-steps > .ig-step { position: relative; min-width: 0; margin: 0; padding-left: 34px; counter-increment: ig-step; }
+.ig-steps > .ig-step::before {
+  content: counter(ig-step);
+  position: absolute; left: 0; top: -1px;
+  display: flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px;
+  border: 1px solid var(--glass-border); border-radius: var(--radius-pill);
+  background: var(--control-fill); color: var(--text-secondary);
+  font-size: var(--text-xs); font-weight: var(--weight-semibold); font-variant-numeric: tabular-nums; line-height: 1;
+}
+.ig-steps > .ig-step:not(:last-child)::after {
+  content: ''; position: absolute; left: 11px; top: 25px; bottom: calc(-1 * var(--space-5) + 3px);
+  width: 1px; background: var(--glass-divider);
+}
+/* The last number is the import: its dot takes the accent, and the button sits on the line. */
+.ig-steps > .ig-step--import {
+  display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3) var(--space-5); min-height: var(--control-height);
+}
+.ig-steps > .ig-step--import::before {
+  top: calc((var(--control-height) - 22px) / 2);
+  border-color: var(--control-border-selected); background: var(--glass-tint-accent); color: var(--text-primary);
+}
+.ig-step--only { margin: 0 0 var(--space-5); }
+.ig-btn + .ig-note { margin-top: var(--space-5); }
+
+/* What does not come in, or a fallback: a quiet aside after the action. */
+.ig-note {
+  margin: 0 0 var(--space-4); max-width: 80ch; padding: var(--space-1) 0 var(--space-1) var(--space-5);
+  border-left: 2px solid var(--glass-divider);
+  color: var(--text-secondary); font-size: var(--text-sm);
+}
+.ig-note:last-child { margin-bottom: 0; }
+
+/* --- Snippets -------------------------------------------------------------- */
+
+/* One sunken well per command: the code (or its fold) and Copy side by side. */
+.ig-snippet {
+  display: flex; align-items: flex-start; gap: var(--space-2);
+  margin: var(--space-4) 0 0; padding: var(--space-1);
+  border: 1px solid var(--glass-divider); border-radius: var(--radius-md);
+  background: var(--glass-well);
+}
 .ig-snippet__code {
   /* A flex item: min-width 0 lets it shrink, so a long line scrolls inside it and Copy stays in view. */
-  flex: 1 1 auto; min-width: 0; margin: 0; padding: 8px 10px; overflow-x: auto; white-space: pre;
-  font-family: var(--vscode-editor-font-family); font-size: var(--vscode-editor-font-size);
-  border-radius: 3px; background: var(--vscode-textCodeBlock-background);
+  flex: 1 1 auto; min-width: 0; margin: 0; padding: var(--space-3) var(--space-4); overflow-x: auto; white-space: pre;
+  color: var(--text-primary); font-family: var(--font-mono); font-size: var(--text-sm); line-height: var(--leading-normal); tab-size: 2;
 }
 /* A folded snippet takes the code's place in the row: the same shrink rule, so Copy stays in view open or shut. */
-.ig-snippet__fold { flex: 1 1 auto; min-width: 0; border-radius: 3px; background: var(--vscode-textCodeBlock-background); }
-.ig-snippet__summary { padding: 6px 10px; cursor: pointer; color: var(--vscode-textLink-foreground); }
-.ig-snippet__summary:focus { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
-.ig-snippet__fold .ig-snippet__code { max-height: 22em; overflow-y: auto; background: none; }
-.ig-btn {
-  padding: 5px 12px; border: 1px solid var(--vscode-button-border, transparent); border-radius: 2px; cursor: pointer;
-  font: inherit; color: var(--vscode-button-foreground); background: var(--vscode-button-background);
+.ig-snippet__fold { flex: 1 1 auto; min-width: 0; }
+.ig-snippet__summary {
+  display: flex; align-items: center; gap: var(--space-3);
+  width: fit-content; min-height: var(--control-height-sm); padding: 0 var(--space-4) 0 var(--space-3);
+  border-radius: var(--radius-sm);
+  color: var(--vscode-textLink-foreground, var(--accent)); font-size: var(--text-sm);
+  list-style: none; cursor: pointer;
+  transition: background-color var(--duration-fast) var(--ease-standard);
 }
-.ig-btn:hover { background: var(--vscode-button-hoverBackground); }
-.ig-btn:focus { outline: 1px solid var(--vscode-focusBorder); outline-offset: 2px; }
-.ig-btn--secondary { color: var(--vscode-button-secondaryForeground); background: var(--vscode-button-secondaryBackground); }
-.ig-btn--secondary:hover { background: var(--vscode-button-secondaryHoverBackground); }
-.ig-btn--copy { flex: none; }
+.ig-snippet__summary::-webkit-details-marker { display: none; }
+.ig-snippet__summary:hover { background: var(--control-fill-hover); color: var(--vscode-textLink-activeForeground, var(--vscode-textLink-foreground)); }
+.ig-snippet__summary:focus-visible { outline: var(--focus-outline); outline-offset: -2px; }
+.ig-snippet__fold .ig-snippet__code { max-height: 22em; overflow-y: auto; margin-top: var(--space-1); border-top: 1px solid var(--glass-divider); }
+.ig-btn--copy { flex: none; min-height: var(--control-height-sm); padding: 0 var(--space-4); font-size: var(--text-xs); }
+.ig-btn--copied,
+.ig-btn--copied:hover { border-color: color-mix(in srgb, var(--ok-fg) 45%, transparent); background: var(--glass-tint-ok); }
+
+/* --- Inside an opened card: one inset for everything under the summary. --- */
+
+.ig-card__fold > :not(.ig-card__summary) { margin-left: var(--space-6); margin-right: var(--space-6); }
+.ig-card__fold > :last-child:not(.ig-card__summary) { margin-bottom: var(--space-6); }
+
+/* --- High contrast: hover shows as a dashed border, as VS Code does. ------- */
+
+body.vscode-high-contrast .ig-card:not(.ig-card--plain):hover,
+body.vscode-high-contrast-light .ig-card:not(.ig-card--plain):hover { border-style: dashed; }
+body.vscode-high-contrast .ig-card--lead,
+body.vscode-high-contrast-light .ig-card--lead { border-style: solid; }
+body.vscode-high-contrast .ig-alt__summary:hover,
+body.vscode-high-contrast .ig-snippet__summary:hover,
+body.vscode-high-contrast-light .ig-alt__summary:hover,
+body.vscode-high-contrast-light .ig-snippet__summary:hover { text-decoration: underline; }
+body.vscode-high-contrast .ig-btn--copied,
+body.vscode-high-contrast-light .ig-btn--copied { border-color: var(--ok-fg); }
 `;
 
 const SCRIPT = `
@@ -909,7 +1053,8 @@ const SCRIPT = `
       vscode.postMessage({ type: 'copy', snippet: el.getAttribute('data-snippet') });
       var before = el.textContent;
       el.textContent = 'Copied';
-      setTimeout(function () { el.textContent = before; }, 1600);
+      el.classList.add('ig-btn--copied');
+      setTimeout(function () { el.textContent = before; el.classList.remove('ig-btn--copied'); }, 1600);
     } else if (action === 'openFolder') {
       vscode.postMessage({ type: 'openFolder' });
     }
@@ -935,7 +1080,7 @@ function renderSnippet(step: ImportGuideStep): string {
     ? `<details class="ig-snippet__fold"><summary class="ig-snippet__summary">Show all ${lines} lines</summary>${code}</details>`
     : code;
   return `<div class="ig-snippet">${body}` +
-    `<button class="ig-btn ig-btn--secondary ig-btn--copy" type="button" data-action="copy" data-snippet="${step.snippet}">Copy</button></div>`;
+    `<button class="ig-btn ig-btn--secondary ig-btn--copy gp-button" type="button" data-action="copy" data-snippet="${step.snippet}">Copy</button></div>`;
 }
 
 /** The last numbered step of a way with several: the import itself, so the button is where the reading ends. */
@@ -980,7 +1125,7 @@ function renderCard(card: ImportGuideCard, lead: boolean, intent: StartIntent | 
   // "Not yet" is not a source to open: it is a short closing note, always in view, and its button is a quiet one.
   const folds = card.id !== 'notYet';
   const sections = card.sections.map((section) => {
-    const button = `<button class="ig-btn${section.useWhen || !folds ? ' ig-btn--secondary' : ''}" type="button" data-action="run" data-guide-action="${section.action}">${escapeHtml(section.label ?? importGuideActionLabel(section.action, intent))}</button>`;
+    const button = `<button class="ig-btn${section.useWhen || !folds ? ' ig-btn--secondary gp-button' : ' gp-button gp-button--primary'}" type="button" data-action="run" data-guide-action="${section.action}">${escapeHtml(section.label ?? importGuideActionLabel(section.action, intent))}</button>`;
     const body = renderSteps(section, button);
     if (section.useWhen) {
       return `
@@ -997,13 +1142,13 @@ function renderCard(card: ImportGuideCard, lead: boolean, intent: StartIntent | 
   }).join('');
   if (!folds) {
     return `
-    <li class="ig-card ig-card--plain" data-card="${card.id}">
+    <li class="ig-card ig-card--plain gp-card" data-card="${card.id}">
       <h2 class="ig-card__title">${escapeHtml(card.title)}</h2>
       <p class="ig-card__what">${inline(card.what)}</p>${sections}
     </li>`;
   }
   return `
-    <li class="ig-card${lead ? ' ig-card--lead' : ''}" data-card="${card.id}">
+    <li class="ig-card gp-card${lead ? ' ig-card--lead' : ''}" data-card="${card.id}">
       <details class="ig-card__fold"${lead ? ' open' : ''}>
         <summary class="ig-card__summary">${renderLogo(card.id)}<h2 class="ig-card__title">${escapeHtml(card.title)}</h2></summary>${hasRecommended ? '' : `
         <p class="ig-card__what">${inline(card.what)}</p>`}${sections}
@@ -1027,10 +1172,10 @@ export function buildImportGuideHtml(ctx: ImportGuideContext, nonce: string): st
     .map((card, i) => renderCard(card, suggested && i === 0, ctx.intent))
     .join('');
   const noFolder = ctx.hasProject ? '' : `
-  <div class="ig__nofolder">
-    <p class="ig__nofolder-text">${escapeHtml(IMPORT_GUIDE_NO_FOLDER)}</p>
-    <button class="ig-btn" type="button" data-action="openFolder">Open Folder&hellip;</button>
-  </div>`;
+    <div class="ig__nofolder gp-notice gp-notice--info">
+      <p class="ig__nofolder-text">${escapeHtml(IMPORT_GUIDE_NO_FOLDER)}</p>
+      <button class="ig-btn gp-button gp-button--primary" type="button" data-action="openFolder">Open Folder&hellip;</button>
+    </div>`;
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1038,13 +1183,15 @@ export function buildImportGuideHtml(ctx: ImportGuideContext, nonce: string): st
 <meta http-equiv="Content-Security-Policy" content="${escapeHtml(buildImportGuideCsp(nonce))}">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>${escapeHtml(IMPORT_GUIDE_TITLE)}</title>
-<style nonce="${n}">${IMPORT_GUIDE_STYLE}</style>
+<style nonce="${n}">${GLASS_PAGE_STYLE}${IMPORT_GUIDE_STYLE}</style>
 </head>
 <body>
-<main class="ig" data-project="${ctx.hasProject}">
-  <h1 class="ig__heading">${escapeHtml(IMPORT_GUIDE_TITLE)}</h1>
-  <p class="ig__intro">${escapeHtml(IMPORT_GUIDE_INTRO)}</p>
-  <p class="ig__note">${escapeHtml(IMPORT_GUIDE_INTRO_DRY_RUN)}</p>${noFolder}
+<main class="ig gp-page" data-project="${ctx.hasProject}">
+  <header class="ig__header">
+    <h1 class="ig__heading gp-title">${escapeHtml(IMPORT_GUIDE_TITLE)}</h1>
+    <p class="ig__intro">${escapeHtml(IMPORT_GUIDE_INTRO)}</p>
+    <p class="ig__note">${escapeHtml(IMPORT_GUIDE_INTRO_DRY_RUN)}</p>${noFolder}
+  </header>
   <ol class="ig__cards">${cards}
   </ol>
 </main>

@@ -146,7 +146,7 @@ describe('the commands are contributed', () => {
     expect(contributed('erdStudio.moveDiagram')?.title).toBe('Move Diagram to Layer…');
     expect(NO_LEGACY_ALIAS.has('erdStudio.moveTable')).toBe(true);
     expect(NO_LEGACY_ALIAS.has('erdStudio.moveDiagram')).toBe(true);
-    expect(menu('view/item/context', 'erdStudio.moveTable')).toEqual(['view == erdStudio.modelLibrary && viewItem == logicalModel && erdStudio.storage =~ /^(dbml|mixed)$/']);
+    expect(menu('view/item/context', 'erdStudio.moveTable')).toEqual(['view == erdStudio.modelLibrary && viewItem =~ /^logicalModel(OnSeveral|Broken)?$/ && erdStudio.storage =~ /^(dbml|mixed)$/']);
     expect(menu('view/item/context', 'erdStudio.moveDiagram')).toEqual(['view == erdStudio.domainTree && viewItem == domain && erdStudio.storage =~ /^(dbml|mixed)$/']);
     expect(menu('explorer/context', 'erdStudio.moveTable')).toEqual(['resourceLangId == dbml-table && erdStudio.storage =~ /^(dbml|mixed)$/']);
     expect(menu('explorer/context', 'erdStudio.moveDiagram')).toEqual(['resourceLangId == dbml-diagram && erdStudio.storage =~ /^(dbml|mixed)$/']);

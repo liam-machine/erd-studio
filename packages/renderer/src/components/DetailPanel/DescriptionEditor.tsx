@@ -2,15 +2,16 @@
  * DescriptionEditor — displays and edits the description for a model.
  *
  * Three states:
- * 1. Empty — dashed "Add Description" button when no content exists
- * 2. Read — shows description text with pencil edit button on hover
- * 3. Edit — textarea with Save/Cancel buttons
+ * 1. Empty — a quiet "Add a description" row when no content exists
+ * 2. Read — the text in an inset card; its pencil shows on hover or focus
+ * 3. Edit — textarea with Cancel / Save (Escape cancels, Cmd/Ctrl+Enter saves)
  *
  * Follows the same add / read / edit pattern as the text fields in FieldsSection.tsx.
  */
 
 import { useCallback, useEffect, useState } from 'react';
 import { useCanvasHost } from '../../host/canvasEnvironment';
+import { IconPencil, IconPlus } from './panelIcons';
 
 interface DescriptionEditorProps {
   modelName: string;
@@ -56,8 +57,12 @@ export function DescriptionEditor({ modelName, description }: DescriptionEditorP
         e.preventDefault();
         handleCancel();
       }
+      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        handleSave();
+      }
     },
-    [handleCancel],
+    [handleCancel, handleSave],
   );
 
   // --- Empty state ---
@@ -65,11 +70,12 @@ export function DescriptionEditor({ modelName, description }: DescriptionEditorP
     return (
       <div className="detail-panel__description-section">
         <button
-          className="detail-panel__rationale-add-btn"
+          className="detail-panel__rationale-add-btn detail-panel__description-add"
           onClick={() => setEditing(true)}
           title="Add table description"
         >
-          + Add Description
+          <IconPlus size={12} />
+          Add a description
         </button>
       </div>
     );
@@ -80,7 +86,7 @@ export function DescriptionEditor({ modelName, description }: DescriptionEditorP
     return (
       <div className="detail-panel__description-section">
         <div className="detail-panel__rationale-header">
-          <h4 className="detail-panel__section-title" style={{ margin: 0 }}>
+          <h4 className="detail-panel__section-title">
             Description
           </h4>
         </div>
@@ -90,15 +96,16 @@ export function DescriptionEditor({ modelName, description }: DescriptionEditorP
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder="Describe this table..."
+          aria-label="Table description"
           rows={3}
           autoFocus
         />
         <div className="detail-panel__rationale-actions">
-          <button className="detail-panel__button" onClick={handleSave}>
-            Save
-          </button>
           <button className="detail-panel__button" onClick={handleCancel}>
             Cancel
+          </button>
+          <button className="detail-panel__button detail-panel__button--primary" onClick={handleSave}>
+            Save
           </button>
         </div>
       </div>
@@ -109,7 +116,7 @@ export function DescriptionEditor({ modelName, description }: DescriptionEditorP
   return (
     <div className="detail-panel__description-section">
       <div className="detail-panel__rationale-header">
-        <h4 className="detail-panel__section-title" style={{ margin: 0 }}>
+        <h4 className="detail-panel__section-title">
           Description
         </h4>
         <button
@@ -118,12 +125,13 @@ export function DescriptionEditor({ modelName, description }: DescriptionEditorP
           title="Edit description"
           aria-label="Edit description"
         >
-          ✎
+          <IconPencil size={12} />
         </button>
       </div>
       <div
-        className="detail-panel__rationale-field"
+        className="detail-panel__rationale-field detail-panel__description-card"
         onDoubleClick={() => setEditing(true)}
+        title="Double-click to edit"
       >
         <p className="detail-panel__rationale-text">{description}</p>
       </div>

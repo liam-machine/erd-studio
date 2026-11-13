@@ -7,7 +7,7 @@
  * editor store.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ReactFlow,
   ReactFlowProvider,
@@ -43,6 +43,7 @@ import {
   type AnnotationFlowEdge,
 } from '@erd-studio/renderer/editor';
 import { isStaleStageReply } from './lib/stageRequest';
+import { answerDropTrace, noteDomainLoaded } from './lib/dropTrace';
 import { useEditorStore, editorStoreApi } from './store/editorStore';
 import { vscodeCanvasHost } from './host/vscodeCanvasHost';
 import { DragLine } from './components/Graph/DragLine';
@@ -50,7 +51,7 @@ import { Toolbar } from './components/Toolbar/Toolbar';
 import { NewTableDialog } from './components/NewModelDialog/NewModelDialog';
 import { NewFkDialog } from './components/NewFkDialog/NewFkDialog';
 import { AddExistingTableDialog } from './components/AddExistingModelDialog/AddExistingModelDialog';
-import { Toast } from './components/Toast/Toast';
+import { Toast, type ToastActionButton } from './components/Toast/Toast';
 import { ContextMenu } from './components/ContextMenu/ContextMenu';
 import { PhysicalSourceNotice } from './components/Canvas/PhysicalSourceNotice';
 import { ManifestHint } from './components/Canvas/ManifestHint';
@@ -65,6 +66,8 @@ import { ReconnectOverlay } from './components/ReconnectOverlay/ReconnectOverlay
 import { LOADING_STALL_MS, RECONNECT_GRACE_MS, useReconnectWatchdog } from './hooks/useReconnectWatchdog';
 import { useCanvasShortcuts } from './hooks/useCanvasShortcuts';
 import { useLibraryDrop } from './hooks/useLibraryDrop';
+import { useSelectTables } from './hooks/useSelectTables';
+import { ADD_EXISTING_TABLES_LIMIT } from '../src/types/messages';
 import { LibraryDropOverlay } from './components/Canvas/LibraryDropOverlay';
 import { CanvasGuide } from './components/Guide/CanvasGuide';
 import { AreaErrorBoundary } from './components/ErrorBoundary/AreaErrorBoundary';
@@ -192,12 +195,34 @@ function EditorCanvas() {
     }
   }, [invalidSelectedNode]);
 
-  // Memoized callback for toast dismissal (prevents timer re-creation)
+  // Memoized callback for toast dismissal (prevents timer re-creation).
+  // A store toast with buttons (#294) waits for its own close: a local toast
+  // drawn over it dismisses only itself, so the buttons come back under it.
+  const localToastRef = useRef(toastMessage);
+  localToastRef.current = toastMessage;
   const dismissToast = useCallback(() => {
+    const coveredActions = localToastRef.current !== null && useEditorStore.getState().toastActions !== null;
     setToastMessage(null);
-    setStoreToastMessage(null);
+    if (!coveredActions) setStoreToastMessage(null);
   }, [setStoreToastMessage]);
   const activeToastMessage = toastMessage ?? storeToastMessage;
+  // The store toast's buttons (#294: an Auto Layout failure's Try Again and
+  // Send Feedback), only while the store toast is the one on screen.
+  const storeToastActions = useEditorStore((s) => s.toastActions);
+  const triggerAutoLayout = useEditorStore((s) => s.triggerAutoLayout);
+  const activeToastActions = useMemo<ToastActionButton[] | undefined>(() => {
+    if (toastMessage !== null || !storeToastMessage || !storeToastActions) return undefined;
+    return storeToastActions.map((action) => action === 'retryLayout'
+      ? { label: 'Try Again', onClick: triggerAutoLayout }
+      : {
+        label: 'Send Feedback',
+        onClick: () => setFeedbackDialogOpen(true, {
+          kind: 'bug',
+          title: "Auto Layout couldn't arrange a diagram",
+          description: `The canvas showed: "${storeToastMessage}"`,
+        }),
+      });
+  }, [toastMessage, storeToastMessage, storeToastActions, triggerAutoLayout, setFeedbackDialogOpen]);
 
   // The table detail level on a first-ever domain load.
   // This effect runs AFTER useStatePersistence's restore effect (React guarantees
@@ -240,7 +265,9 @@ function EditorCanvas() {
   // Drops of tables on the canvas (a Shift-drag from the Table Library or the
   // Explorer): the drop handlers, the highlight and the "Hold Shift" hint.
   // A drop that adds nothing (the physical stage) says why, as a notice.
-  const { dropHandlers, dropActive, hintTables, libraryDragStarted, libraryDragEnded } = useLibraryDrop(setNotice);
+  const { dropHandlers, dropActive, hintTables, libraryDragStarted, libraryDragEnded, libraryDragReleased, dropPosted } = useLibraryDrop(setNotice);
+  // A drop's tables, selected where they landed (the view does not move).
+  useSelectTables();
 
   const onMessage = useCallback(
     (msg: ExtensionMessage) => {
@@ -253,6 +280,7 @@ function EditorCanvas() {
           useEditorStore.getState().setExistingModels(msg.payload.existingModels);
           break;
         case 'domainLoaded':
+          noteDomainLoaded();
           setHostLoading(null);
           applySubjectAreaPayload(msg.payload);
           // Set on a fresh domain (no stored positions), cleared by every other
@@ -321,13 +349,27 @@ function EditorCanvas() {
           // What the files hold that the canvas is not drawing: the whole list each time (empty clears the strip).
           useEditorStore.getState().setFilesNotShown(Array.isArray(msg.payload?.items) ? msg.payload.items.filter(isFileNote) : []);
           break;
-        case 'revealRelationship':
+        case 'revealRelationship': {
           // Shown once the diagram has settled (useRevealRelationship, in the Toolbar).
-          useEditorStore.getState().setPendingReveal(msg.payload);
+          // `gentle` (a sidebar row's click) is taken only as a real true.
+          const { gentle, ...target } = msg.payload;
+          useEditorStore.getState().setPendingReveal(gentle === true ? { ...target, gentle: true } : target);
           break;
+        }
         case 'revealTable':
-          // Shown once the diagram has settled (useRevealTable, in the Toolbar).
-          useEditorStore.getState().setPendingTableReveal(msg.payload.modelName);
+          // Shown once the diagram has settled (useRevealTable, in the Toolbar); gently for a sidebar row's click.
+          useEditorStore.getState().setPendingTableReveal(msg.payload.modelName, msg.payload.gentle === true);
+          break;
+        case 'canvasVisibility':
+          // The tab went behind another or came back: a gentle reveal waits for it to be on screen.
+          if (typeof msg.payload?.visible === 'boolean') useEditorStore.getState().setCanvasOnScreen(msg.payload.visible);
+          break;
+        case 'selectTables':
+          // After a drop on the canvas: select these, no pan, no zoom, no panel (useSelectTables).
+          if (Array.isArray(msg.payload?.modelNames)) {
+            const names = msg.payload.modelNames.filter((n): n is string => typeof n === 'string' && n.length > 0 && n.length <= 512).slice(0, ADD_EXISTING_TABLES_LIMIT);
+            if (names.length > 0) useEditorStore.getState().setPendingTableSelection(names);
+          }
           break;
         case 'libraryDragStarted':
           // "Hold Shift and drop to add …": an editable logical diagram only (useLibraryDrop).
@@ -337,10 +379,18 @@ function EditorCanvas() {
           // The drag was used up (dropped somewhere, or missed the canvas): the hint goes.
           libraryDragEnded();
           break;
+        case 'libraryDragReleased':
+          // A glass sidebar drag was let go at a screen point: dropped here at once if it is on this diagram.
+          libraryDragReleased(msg.payload, msg.payload?.frame);
+          break;
         case 'feedbackContext':
           useEditorStore
             .getState()
             .setFeedbackContext(msg.payload.diagnostics, msg.payload.capabilities);
+          break;
+        case 'convertOffer':
+          // Whether this project can still be converted to DBML: the toolbar's information button.
+          useEditorStore.getState().setConvertOffer(msg.payload?.show === true);
           break;
         case 'lineStyle':
           // The reader's erdStudio.canvas.lineStyle, on ready and whenever it changes.
@@ -353,9 +403,13 @@ function EditorCanvas() {
           // Something the host did by itself (it added a relationships import after a save): said briefly.
           if (typeof msg.payload?.message === 'string' && msg.payload.message !== '') setNotice(msg.payload.message);
           break;
+        case 'dropTrace':
+          // A timed drop: say when the redrawn diagram is on screen (timing only).
+          answerDropTrace(msg.payload?.trace, (message) => vscode.postMessage(message));
+          break;
       }
     },
-    [setError, setDiscrepancyReport, setManifestStale, setSyncPlanGenerated, libraryDragStarted, libraryDragEnded],
+    [setError, setDiscrepancyReport, setManifestStale, setSyncPlanGenerated, libraryDragStarted, libraryDragEnded, libraryDragReleased, vscode],
   );
 
   useMessageBus(onMessage, /* sendReadyOnMount */ true);
@@ -747,7 +801,7 @@ function EditorCanvas() {
             <p className="editor-message__detail editor-message__detail--dim">{error}</p>
           </>
         ) : (
-          <p style={{ color: 'var(--error-fg)' }}>Error: {error}</p>
+          <p className="editor-message__detail editor-message__detail--error">Error: {error}</p>
         )}
         {canRetry && (
           <button
@@ -802,23 +856,29 @@ function EditorCanvas() {
   const selectModeActive = canvasMode === 'select' && !domain.readOnly;
   return (
     <div
-      className={`editor-canvas${selectModeActive ? ' editor-canvas--select-mode' : ''}${logicalOnly ? ' editor-canvas--neutral' : ''}`}
-      // Column flex so the physical-source notice is a strip ABOVE the flow
-      // area rather than an overlay on top of the nodes. With the notice
-      // hidden this is a one-child flex container — i.e. unchanged.
+      className={`editor-canvas${selectModeActive ? ' editor-canvas--select-mode' : ''}${logicalOnly ? ' editor-canvas--neutral' : ''}${!logicalOnly && !discrepancyVisible ? ' editor-canvas--quiet-lines' : ''}`}
+      // Column flex so the notice tray is ABOVE the flow area rather than an
+      // overlay on top of the nodes. With no notice the tray collapses and
+      // the flow area runs full-bleed; the chrome floats over it as glass
+      // layers (theme.css, "Floating shell").
       style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}
       // On the physical stage or a read-only diagram a drop adds nothing and says why.
       {...dropHandlers}
     >
-      {/* "dbt has not been compiled" strip. Renders nothing on the logical
-          stage or when any dbt artifact was found. */}
-      <PhysicalSourceNotice />
-      {/* Logical-stage "Run dbt parse" hint (#113) — no manifest.json yet. */}
-      <ManifestHint />
-      {/* A single-file DBML dropped into a layer folder (§2.5): offer Import DBML. */}
-      <EmbeddedTablesBanner />
-      {/* What the files hold that the canvas is not drawing, each with its file and line. */}
-      <FilesNotShownBanner />
+      {/* The notice tray: the strips above the flow area, stacked as inset
+          glass cards on the canvas wash. In flow (it never covers a node);
+          collapses to nothing when every notice renders nothing (App.css). */}
+      <div className="editor-notices">
+        {/* "dbt has not been compiled" strip. Renders nothing on the logical
+            stage or when any dbt artifact was found. */}
+        <PhysicalSourceNotice />
+        {/* Logical-stage "Run dbt parse" hint (#113) — no manifest.json yet. */}
+        <ManifestHint />
+        {/* A single-file DBML dropped into a layer folder (§2.5): offer Import DBML. */}
+        <EmbeddedTablesBanner />
+        {/* What the files hold that the canvas is not drawing, each with its file and line. */}
+        <FilesNotShownBanner />
+      </div>
 
       <ReactFlow
         className={flowClassName}
@@ -839,7 +899,9 @@ function EditorCanvas() {
         onMoveEnd={onMoveEnd}
         onEdgeContextMenu={onEdgeContextMenu}
         {...hoverHandlers}
-        fitView={!shouldSkipFitView}
+        // Off once this canvas has posted a drop: a diagram that opened empty still has its first-open fit
+        // queued, and it would fire on the dropped tables (the view must stay as the user had it).
+        fitView={!shouldSkipFitView && !dropPosted}
         // Leave room for the floating toolbar above the top row of cards.
         fitViewOptions={initialFitRef.current ?? INITIAL_FIT_VIEW_OPTIONS}
         minZoom={0.05}
@@ -878,8 +940,16 @@ function EditorCanvas() {
         </AreaErrorBoundary>
       </ReactFlow>
 
-      {activeToastMessage && (
-        <Toast message={activeToastMessage} variant="warning" onDismiss={dismissToast} />
+      {/* A sticky layout-failure toast (#294) steps aside while a host error,
+          drawn in the same corner, is up; it comes back when that closes. */}
+      {activeToastMessage && !(activeToastActions && error) && (
+        <Toast
+          message={activeToastMessage}
+          variant="warning"
+          actions={activeToastActions}
+          autoDismissMs={activeToastActions ? null : undefined}
+          onDismiss={dismissToast}
+        />
       )}
 
       {/* The host's brief note (canvasNotice), under any other toast: they share the corner. */}

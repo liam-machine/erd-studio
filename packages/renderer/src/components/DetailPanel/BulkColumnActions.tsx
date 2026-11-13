@@ -1,13 +1,16 @@
 /**
  * BulkColumnActions — toolbar for multi-select column operations.
  *
- * Shown when multiple columns are selected in the ColumnEditor.
+ * Shown when multiple columns are selected in the ColumnEditor: a floating
+ * glass action bar that sticks to the foot of the detail panel while the
+ * column list scrolls (the count and Clear on top, the actions below).
  * Supports bulk delete, key type toggling, and data type setting.
  */
 
 import { useCallback, useState } from 'react';
 
 import { DataTypeSelect } from '../common/DataTypeSelect';
+import { IconClose } from './panelIcons';
 import { useSend } from '../../host/canvasEnvironment';
 import type { DisplayColumn } from '@erd-studio/core';
 import type { ColumnKeyType } from '@erd-studio/core';
@@ -103,68 +106,75 @@ export function BulkColumnActions({
   );
 
   return (
-    <div className="bulk-column-actions">
-      <span className="bulk-column-actions__count">{selectedColumns.length} selected</span>
-
-      <button
-        className="bulk-column-actions__btn bulk-column-actions__btn--danger"
-        onClick={handleBulkDelete}
-        title={`Delete ${selectedColumns.length} columns`}
-      >
-        Delete ({selectedColumns.length})
-      </button>
-
-      <div className="bulk-column-actions__divider" />
-
-      <button
-        className={`bulk-column-actions__key-btn ${majorityPK ? 'bulk-column-actions__key-btn--active' : ''}`}
-        onClick={() => handleBulkToggleKey('PK', majorityPK)}
-        title={majorityPK ? 'Remove PK from selected' : 'Set PK on selected'}
-      >
-        PK
-      </button>
-      <button
-        className={`bulk-column-actions__key-btn ${majorityFK ? 'bulk-column-actions__key-btn--active' : ''}`}
-        onClick={() => handleBulkToggleKey('FK', majorityFK)}
-        title={majorityFK ? 'Remove FK from selected' : 'Set FK on selected'}
-      >
-        FK
-      </button>
-      <button
-        className={`bulk-column-actions__key-btn ${majorityNK ? 'bulk-column-actions__key-btn--active' : ''}`}
-        onClick={() => handleBulkToggleKey('NK', majorityNK)}
-        title={majorityNK ? 'Remove NK from selected' : 'Set NK on selected'}
-      >
-        NK
-      </button>
-
-      <div className="bulk-column-actions__divider" />
-
-      {showTypeSelect ? (
-        <DataTypeSelect
-          value=""
-          onChange={handleBulkSetType}
-          onBlur={() => setShowTypeSelect(false)}
-          className="bulk-column-actions__type-select"
-          autoOpen={true}
-        />
-      ) : (
+    <div className="bulk-column-actions" role="toolbar" aria-label={`${selectedColumns.length} columns selected`}>
+      <div className="bulk-column-actions__top">
+        <span className="bulk-column-actions__count">{selectedColumns.length} selected</span>
         <button
-          className="bulk-column-actions__btn"
-          onClick={() => setShowTypeSelect(true)}
-          title="Set data type for all selected columns"
+          className="bulk-column-actions__btn bulk-column-actions__btn--clear"
+          onClick={onClearSelection}
+          title="Clear selection"
+          aria-label="Clear selection"
         >
-          Set Type
+          <IconClose size={12} />
         </button>
-      )}
+      </div>
 
-      <button
-        className="bulk-column-actions__btn bulk-column-actions__btn--clear"
-        onClick={onClearSelection}
-        title="Clear selection"
-      >
-        ×
-      </button>
+      <div className="bulk-column-actions__row">
+        <div className="bulk-column-actions__keys" role="group" aria-label="Keys">
+          <button
+            className={`bulk-column-actions__key-btn ${majorityPK ? 'bulk-column-actions__key-btn--active' : ''}`}
+            onClick={() => handleBulkToggleKey('PK', majorityPK)}
+            title={majorityPK ? 'Remove PK from selected' : 'Set PK on selected'}
+            aria-pressed={majorityPK}
+          >
+            PK
+          </button>
+          <button
+            className={`bulk-column-actions__key-btn ${majorityFK ? 'bulk-column-actions__key-btn--active' : ''}`}
+            onClick={() => handleBulkToggleKey('FK', majorityFK)}
+            title={majorityFK ? 'Remove FK from selected' : 'Set FK on selected'}
+            aria-pressed={majorityFK}
+          >
+            FK
+          </button>
+          <button
+            className={`bulk-column-actions__key-btn ${majorityNK ? 'bulk-column-actions__key-btn--active' : ''}`}
+            onClick={() => handleBulkToggleKey('NK', majorityNK)}
+            title={majorityNK ? 'Remove NK from selected' : 'Set NK on selected'}
+            aria-pressed={majorityNK}
+          >
+            NK
+          </button>
+        </div>
+
+        <div className="bulk-column-actions__divider" />
+
+        {showTypeSelect ? (
+          <DataTypeSelect
+            value=""
+            onChange={handleBulkSetType}
+            onBlur={() => setShowTypeSelect(false)}
+            className="bulk-column-actions__type-select"
+            autoOpen={true}
+          />
+        ) : (
+          <button
+            className="bulk-column-actions__btn"
+            onClick={() => setShowTypeSelect(true)}
+            title="Set data type for all selected columns"
+          >
+            Set Type
+          </button>
+        )}
+
+        <button
+          className="bulk-column-actions__btn bulk-column-actions__btn--danger"
+          onClick={handleBulkDelete}
+          title={`Delete ${selectedColumns.length} columns`}
+        >
+          Delete ({selectedColumns.length})
+        </button>
+      </div>
     </div>
   );
 }

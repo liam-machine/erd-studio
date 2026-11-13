@@ -444,6 +444,19 @@ export interface DbtVersionRun {
 
 /** cmd.exe cannot quote these inside `"…"`: `%VAR%` and `!VAR!` (delayed expansion) still expand, and `"` / line breaks end the quoting. */
 const CMD_UNQUOTABLE = /["%!\r\n]/;
+/**
+ * The characters in `text` that make a shim refuse it ({@link dbtSpawnCommand}),
+ * once each, as a person reads them: `"`, `%`, `!` or "a line break".
+ */
+export function cmdUnquotableChars(text: string): string[] {
+  const found: string[] = [];
+  for (const ch of text) {
+    if (!CMD_UNQUOTABLE.test(ch)) continue;
+    const shown = ch === '\r' || ch === '\n' ? 'a line break' : ch;
+    if (!found.includes(shown)) found.push(shown);
+  }
+  return found;
+}
 /** An argument cmd.exe would split or act on unless it is double-quoted. */
 const CMD_NEEDS_QUOTES = /[\s&|<>^(),;=]/;
 

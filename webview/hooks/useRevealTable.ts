@@ -12,11 +12,21 @@
  *
  * The name is matched ignoring case, as a diagram's table names are unique that way
  * (`findRevealNode`: a diagram's name for the table first).
+ *
+ * A gentle reveal (`RevealTableMessage.gentle`: a sidebar row's click) only
+ * selects the table: no detail panel is opened (one already open stays as
+ * it is), the zoom is kept, and the view pans only when the table is not
+ * wholly in sight, as little as brings it in (`revealGently`). It waits
+ * while the canvas is behind another tab (`canvasOnScreen`, and
+ * `isBehindAnotherTab` for the moment before the host says so): the first
+ * click of a double-click asks for it just as the second opens the file over
+ * the canvas, whose stand-in size would read the table as out of sight.
  */
-import { useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNodesInitialized, useReactFlow } from '@xyflow/react';
 import { useEditorStore } from '../store/editorStore';
 import { REVEAL_SETTLE_MS } from './useRevealRelationship';
+import { isBehindAnotherTab, revealGently, type GentleFlow } from '../lib/gentleReveal';
 import type { DisplaySubjectArea } from '../../src/types/display';
 
 /** How long a reveal waits for a settled diagram to show its table before saying it does not. */
@@ -48,11 +58,19 @@ function hasNodeForEveryTable(domain: DisplaySubjectArea, nodes: readonly { id: 
 
 export function useRevealTable(isLayouting: boolean): void {
   const pending = useEditorStore((s) => s.pendingTableReveal);
+  const gentle = useEditorStore((s) => s.pendingTableRevealGentle);
+  const onScreen = useEditorStore((s) => s.canvasOnScreen);
   const domain = useEditorStore((s) => s.domain);
   const nodes = useEditorStore((s) => s.nodes);
   const pendingAutoLayout = useEditorStore((s) => s.pendingAutoLayout);
   const nodesInitialized = useNodesInitialized();
-  const { fitView } = useReactFlow();
+  const flow = useReactFlow();
+  const { fitView } = flow;
+  // The instance at the time the reveal runs (a ref: a new object each render must not restart the wait).
+  const flowRef = useRef(flow);
+  flowRef.current = flow;
+  // Bumped to look again while a gentle reveal waits for its tab to come back (`isBehindAnotherTab`).
+  const [retry, setRetry] = useState(0);
 
   // Only looked at while a reveal waits: the common case costs nothing.
   const settled = !!pending
@@ -61,23 +79,42 @@ export function useRevealTable(isLayouting: boolean): void {
     && !pendingAutoLayout
     && !isLayouting
     && nodesInitialized
-    && hasNodeForEveryTable(domain, nodes);
+    && hasNodeForEveryTable(domain, nodes)
+    // A gentle reveal measures what is in sight: never while the tab is behind another (a stand-in size).
+    && (!gentle || onScreen);
   const nodeId = pending && settled ? findRevealNode(nodes, pending) : undefined;
 
   useEffect(() => {
     if (!pending || !settled || !nodeId) return;
     const timer = setTimeout(() => {
+      // Behind another tab before the host could say so: kept, and looked at again shortly.
+      if (gentle && isBehindAnotherTab()) {
+        setRetry((n) => n + 1);
+        return;
+      }
       const state = useEditorStore.getState();
       state.setPendingTableReveal(null);
       // As a click on the table does (useCanvasGraph's onNodeClick).
       state.selectNode(nodeId);
-      state.setDetailPanelOpen(true);
       state.setHighlightedColumns(new Set());
       state.setSelectedEdge(null);
+      if (gentle) {
+        // Selected where it is: no panel opened, the zoom kept, panned only into sight.
+        // With no panel, the table's own selection outline is what shows the user which
+        // one it is (as a click on it marks it): exactly this node, any earlier selection
+        // (a drop's tables, a rubber band) cleared.
+        state.setNodes(state.nodes.map((n) => {
+          const want = n.id === nodeId;
+          return !!n.selected === want ? n : { ...n, selected: want };
+        }));
+        revealGently(flowRef.current as unknown as GentleFlow, [nodeId], 'start');
+        return;
+      }
+      state.setDetailPanelOpen(true);
       void fitView({ nodes: [{ id: nodeId }], duration: 300, padding: 0.3 });
     }, REVEAL_SETTLE_MS);
     return () => clearTimeout(timer);
-  }, [pending, settled, nodeId, fitView]);
+  }, [pending, gentle, settled, nodeId, fitView, retry]);
 
   useEffect(() => {
     if (!pending || !settled || nodeId) return;

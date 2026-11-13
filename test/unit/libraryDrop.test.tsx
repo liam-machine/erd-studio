@@ -39,6 +39,12 @@ import {
   droppedUris,
   isLibraryDrag,
   libraryDragHintText,
+  FRAME_SAMPLE_MIN_PX,
+  frameOfPointers,
+  pageMetrics,
+  releaseInPage,
+  sameFrame,
+  snapScale,
   useLibraryDrop,
 } from '../../webview/hooks/useLibraryDrop';
 import { DROP_TABLES_URI_LIMIT, DROP_TABLES_URI_MAX_LENGTH } from '../../src/types/messages';
@@ -436,5 +442,185 @@ describe('dropEffectFor', () => {
     expect(dropEffectFor('move')).toBe('move');
     expect(dropEffectFor('linkMove')).toBe('move');
     expect(dropEffectFor('link')).toBe('link');
+  });
+});
+
+describe('placing a glass sidebar release on the canvas (frameOfPointers, releaseInPage)', () => {
+  const metrics = { windowX: 40, windowY: 40, width: 1000, height: 700, pixelRatio: 2 };
+  /** A pointer event at page point (x, y) of a page whose corner is at (ox, oy) on screen, at `scale` screen px per page px. */
+  const at = (x: number, y: number, ox: number, oy: number, scale = 1) => ({ clientX: x, clientY: y, screenX: ox + x * scale, screenY: oy + y * scale });
+
+  it('measures the page\'s scale and place on screen from two pointer events far enough apart (VS Code\'s zoom included)', () => {
+    expect(frameOfPointers(at(100, 100, 433, 170), at(130, 104, 433, 170), metrics)).toEqual({ originX: 433, originY: 170, scale: 1, ...metrics });
+    // Zoom level 1: screen px are 1.2 page px (measured in VS Code 1.145: screenX - clientX grows with clientX).
+    const zoomed = frameOfPointers(at(168.5, 125.5, 294.5, 22.5, 1.2), at(252.7, 188.2, 294.5, 22.5, 1.2), metrics)!;
+    expect(zoomed.scale).toBe(snapScale(1.2));
+    expect(zoomed.originX).toBeCloseTo(294.5, 6);
+    expect(zoomed.originY).toBeCloseTo(22.5, 6);
+    // Too close together, or the axes disagree: nothing.
+    expect(frameOfPointers(at(100, 100, 0, 0), at(100 + FRAME_SAMPLE_MIN_PX - 1, 102, 0, 0), metrics)).toBeNull();
+    expect(frameOfPointers({ ...at(100, 100, 0, 0), screenY: 100 }, { ...at(150, 150, 0, 0), screenY: 200 }, metrics)).toBeNull();
+    expect(frameOfPointers(at(100, 100, 0, 0), { ...at(150, 100, 0, 0), screenX: Number.NaN }, metrics)).toBeNull();
+    expect(snapScale(1.2004)).toBe(1.2 ** 1);
+    expect(snapScale(1.1)).toBe(1.1);
+    const f = frameOfPointers(at(100, 100, 433, 170), at(130, 104, 433, 170), metrics)!;
+    expect(sameFrame(f, { ...f, originX: f.originX + 0.2 })).toBe(true);
+    expect(sameFrame(f, { ...f, originX: f.originX + 1 })).toBe(false);
+    expect(sameFrame(null, null)).toBe(true);
+  });
+
+  // The glass page at (48, 68) on screen saw its last pointer at page (30, 40); the drag was let go at its page point (x, y).
+  const release = (x: number, y: number, scale = 1, extra: Record<string, number> = {}) =>
+    ({ x, y, refX: 30, refY: 40, refScreenX: 48 + 30 * scale, refScreenY: 68 + 40 * scale, windowX: 40, windowY: 40, ...extra });
+
+  it('maps the release through the page\'s own frame, else the given one, only while every measure still matches', () => {
+    // The canvas page sits at (433, 170) on screen: a release at glass page (520, 449) is canvas page (135, 347).
+    const own = { originX: 433, originY: 170, scale: 1, ...metrics };
+    expect(releaseInPage(release(520, 449), metrics, own)).toEqual({ x: 135, y: 347 });
+    const given = { ...own, originX: 413 };
+    expect(releaseInPage(release(520, 449), metrics, null, given)).toEqual({ x: 155, y: 347 });
+    expect(releaseInPage(release(520, 449), metrics, own, given)).toEqual({ x: 135, y: 347 });
+    // Zoomed: both pages at 1.2 screen px per page px.
+    const zoomed = { ...own, scale: 1.2 };
+    const p = releaseInPage(release(520, 449, 1.2), metrics, zoomed)!;
+    expect(p.x).toBeCloseTo((48 + 520 * 1.2 - 433) / 1.2, 6);
+    expect(p.y).toBeCloseTo((68 + 449 * 1.2 - 170) / 1.2, 6);
+    // A window move, a resize, a zoom since: unknown. A release from another window: never.
+    for (const changed of [{ windowX: 41 }, { windowY: 0 }, { width: 999 }, { height: 701 }, { pixelRatio: 1 }]) {
+      expect(releaseInPage(release(520, 449, 1, changed.windowX !== undefined || changed.windowY !== undefined ? changed : {}), { ...metrics, ...changed }, own, given)).toBeNull();
+    }
+    expect(releaseInPage(release(520, 449, 1, { windowX: 900 }), metrics, own)).toBeNull();
+    expect(releaseInPage(release(520, 449), metrics, null)).toBeNull();
+    expect(releaseInPage(release(520, 449), metrics, null, { originX: 1 })).toBeNull();
+    expect(releaseInPage({ ...release(520, 449), x: Number.NaN }, metrics, own)).toBeNull();
+    expect(releaseInPage({ x: 1, y: 2 }, metrics, own)).toBeNull();
+  });
+});
+
+describe('a glass sidebar drag let go over the canvas (libraryDragReleased): the drop lands without a pointer move', () => {
+  /** A pointer move over `target` at page point `client`, with the screen point a real one carries (the page at (1000, 500) on screen). */
+  function pointerAt2(target: Element, client: { x: number; y: number }, origin = { x: 1000, y: 500 }) {
+    act(() => { target.dispatchEvent(new MouseEvent('pointermove', { bubbles: true, clientX: client.x, clientY: client.y, screenX: origin.x + client.x, screenY: origin.y + client.y })); });
+  }
+  const frames = () => sent().filter((m) => m.type === 'canvasFrame');
+  /** The release of a glass page whose last pointer event was at screen (sx, sy), let go at screen point (x, y). */
+  const releaseAtScreen = (x: number, y: number, frame?: unknown) => ({
+    x: 20 + (x - 100), y: 30 + (y - 100), refX: 20, refY: 30, refScreenX: 100, refScreenY: 100,
+    windowX: window.screenX, windowY: window.screenY, ...(frame ? { frame } : {}),
+  });
+  let restore: (() => void) | undefined;
+  /** What is under a page point: the pane, unless `under` says otherwise. */
+  function underPoint(under: (x: number, y: number) => Element | null) {
+    restore?.();
+    const had = Object.getOwnPropertyDescriptor(document, 'elementFromPoint');
+    Object.defineProperty(document, 'elementFromPoint', { value: under, configurable: true });
+    restore = () => { if (had) Object.defineProperty(document, 'elementFromPoint', had); else delete (document as { elementFromPoint?: unknown }).elementFromPoint; };
+  }
+  afterEach(() => { restore?.(); restore = undefined; });
+
+  function setUpCanvas(stage: 'logical' | 'physical' = 'logical') {
+    const view = render(<App />);
+    postFromHost({ type: 'domainLoaded', payload: subjectArea(stage) });
+    const pane = (view.container.querySelector('.react-flow__pane') ?? view.container.querySelector('.react-flow'))!;
+    underPoint(() => pane);
+    return { ...view, pane };
+  }
+
+  it('learns where it sits from two of its pointer events (reported once per change), and drops at the release point at once', () => {
+    const { pane } = setUpCanvas();
+    pointerAt2(pane, { x: 300, y: 200 });
+    expect(frames()).toEqual([]);
+    pointerAt2(pane, { x: 302, y: 201 });
+    pointerAt2(pane, { x: 320, y: 205 });
+    pointerAt2(pane, { x: 340, y: 215 });
+    expect(frames()).toEqual([{ type: 'canvasFrame', payload: { originX: 1000, originY: 500, scale: 1, ...pageMetrics() } }]);
+    postFromHost({ type: 'libraryDragStarted', payload: { tables: ['dim_customer'] } });
+    postFromHost({ type: 'libraryDragReleased', payload: releaseAtScreen(1400, 800) });
+    expect(drops()).toEqual([{ type: 'dropTables', payload: { position: { x: 400, y: 300 }, uris: [], fromLibrary: true, afterDrag: true } }]);
+    expect(screen.queryByText(HINT)).toBeNull();
+    // Done: the pointer's next move, or another release, posts nothing more.
+    pointerAt2(pane, { x: 402, y: 301 });
+    postFromHost({ type: 'libraryDragReleased', payload: releaseAtScreen(1400, 800) });
+    expect(drops()).toHaveLength(1);
+  });
+
+  it('with no frame of its own, uses the one its editor group reported (the host passes it) while every measure matches', () => {
+    setUpCanvas();
+    postFromHost({ type: 'libraryDragStarted', payload: { tables: ['dim_customer'] } });
+    const frame = { originX: 1000, originY: 500, scale: 1, ...pageMetrics() };
+    postFromHost({ type: 'libraryDragReleased', payload: releaseAtScreen(1400, 800, { ...frame, width: 1 }) });
+    expect(drops()).toEqual([]);
+    postFromHost({ type: 'libraryDragReleased', payload: releaseAtScreen(1400, 800, frame) });
+    expect(drops()).toEqual([{ type: 'dropTables', payload: { position: { x: 400, y: 300 }, uris: [], fromLibrary: true, afterDrag: true } }]);
+  });
+
+  it('ignores a release it cannot place or that is not on its diagram, and the pointer path still finishes the drag', () => {
+    const { pane, container } = setUpCanvas();
+    postFromHost({ type: 'libraryDragStarted', payload: { tables: ['dim_customer'] } });
+    // No frame yet.
+    postFromHost({ type: 'libraryDragReleased', payload: releaseAtScreen(1400, 800) });
+    expect(drops()).toEqual([]);
+    expect(screen.getByText(HINT)).toBeTruthy();
+    pointerAt2(pane, { x: 400, y: 300 });
+    // That first pointer move finished it the old way.
+    expect(drops()).toHaveLength(1);
+    pointerAt2(pane, { x: 450, y: 320 });
+
+    mockVsCode.postMessage.mockClear();
+    postFromHost({ type: 'libraryDragStarted', payload: { tables: ['dim_customer'] } });
+    // Near the edge (the tab bar, the sidebar beside it), outside the page, from another window, or over a toolbar: not here.
+    postFromHost({ type: 'libraryDragReleased', payload: releaseAtScreen(1005, 800) });
+    postFromHost({ type: 'libraryDragReleased', payload: releaseAtScreen(900, 450) });
+    postFromHost({ type: 'libraryDragReleased', payload: { ...releaseAtScreen(1400, 800), windowX: window.screenX + 500 } });
+    underPoint(() => container.querySelector('.editor-canvas')?.parentElement ?? document.body);
+    postFromHost({ type: 'libraryDragReleased', payload: releaseAtScreen(1400, 800) });
+    expect(drops()).toEqual([]);
+    expect(screen.getByText(HINT)).toBeTruthy();
+  });
+
+  it('a release with no drag announced, or after the drag was used up, does nothing', () => {
+    const { pane } = setUpCanvas();
+    pointerAt2(pane, { x: 300, y: 200 });
+    pointerAt2(pane, { x: 340, y: 215 });
+    postFromHost({ type: 'libraryDragReleased', payload: releaseAtScreen(1400, 800) });
+    postFromHost({ type: 'libraryDragStarted', payload: { tables: ['dim_customer'] } });
+    postFromHost({ type: 'libraryDragEnded' });
+    postFromHost({ type: 'libraryDragReleased', payload: releaseAtScreen(1400, 800) });
+    expect(drops()).toEqual([]);
+  });
+
+  it('on the physical stage it says why instead of posting', () => {
+    const { pane } = setUpCanvas('physical');
+    pointerAt2(pane, { x: 300, y: 200 });
+    pointerAt2(pane, { x: 340, y: 215 });
+    postFromHost({ type: 'libraryDragStarted', payload: { tables: ['dim_customer'] } });
+    postFromHost({ type: 'libraryDragReleased', payload: releaseAtScreen(1400, 800) });
+    expect(drops()).toEqual([]);
+    expect(screen.getByText(DROP_REFUSED_READ_ONLY)).toBeTruthy();
+  });
+});
+
+describe('after a drop on the canvas the view stays as it was', () => {
+  it('the hook says it posted a drop, so the canvas turns React Flow\'s first-open fit off (a diagram that opened empty still has it queued)', () => {
+    useEditorStore.setState({ domain: subjectArea('logical') });
+    const wrapper = ({ children }: { children: React.ReactNode }) => <ReactFlowProvider>{children}</ReactFlowProvider>;
+    const { result } = renderHook(() => useLibraryDrop(), { wrapper });
+    expect(result.current.dropPosted).toBe(false);
+    act(() => result.current.libraryDragStarted(['dim_customer']));
+    act(() => result.current.dropHandlers!.onDrop({ dataTransfer: transfer({}), clientX: 10, clientY: 20, preventDefault: () => undefined } as unknown as React.DragEvent));
+    expect(drops()).toHaveLength(1);
+    expect(result.current.dropPosted).toBe(true);
+  });
+
+  it('the host\'s selectTables is taken as names to select (useSelectTables), never as a reveal; junk is ignored', () => {
+    render(<App />);
+    postFromHost({ type: 'domainLoaded', payload: subjectArea('logical') });
+    postFromHost({ type: 'selectTables', payload: { modelNames: ['dim_customer', 42, '', 'dim_region'] } });
+    expect(useEditorStore.getState().pendingTableSelection).toEqual(['dim_customer', 'dim_region']);
+    expect(useEditorStore.getState().pendingTableReveal).toBeNull();
+    act(() => useEditorStore.getState().setPendingTableSelection(null));
+    postFromHost({ type: 'selectTables', payload: { modelNames: 'dim_customer' } });
+    postFromHost({ type: 'selectTables' });
+    expect(useEditorStore.getState().pendingTableSelection).toBeNull();
   });
 });

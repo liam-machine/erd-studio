@@ -68,6 +68,9 @@ describe('RelationshipsTreeProvider', () => {
     expect(provider.getTreeItem(problems[0]).description).toBe('no table dim_store');
     // A problem is fixed in the file, so its row opens the file.
     expect(provider.getTreeItem(problems[0]).command).toMatchObject({ command: 'erdStudio.openRelationshipSource' });
+    // Its row value says so (its button and menu: Open in Diagram…), and it has no double-click of its own.
+    expect(provider.getTreeItem(problems[0]).contextValue).toBe('relationshipInFile');
+    expect(provider.secondaryCommand(problems[0])).toBeUndefined();
   });
 
   it('shows a relationship from each side: → at the FK table, ← at the table it points at', async () => {
@@ -89,8 +92,12 @@ describe('RelationshipsTreeProvider', () => {
     expect(inc.description).toBe('customer_sk · 1:N');
     expect((inc.iconPath as vscode.ThemeIcon).id).toBe('arrow-left');
     // A click shows it on a diagram, falling back to its file when none shows it.
-    expect(inc.command).toMatchObject({ command: 'erdStudio.openInDiagram', arguments: [expect.anything(), { fallBackToFile: true }] });
+    expect(inc.command).toMatchObject({ command: 'erdStudio.openInDiagram', arguments: [expect.anything(), { fallBackToFile: true, rowClick: true }] });
     expect(inc.contextValue).toBe('relationship');
+    expect(String((inc.tooltip as vscode.MarkdownString).value)).toContain('double-click to open it in its file');
+    // The glass sidebar's double-click: where it is written.
+    const incNode = (await provider.getChildren(dim))[0];
+    expect(provider.secondaryCommand(incNode)).toEqual({ command: 'erdStudio.openRelationshipSource', title: 'Open in File', arguments: [incNode, { doubleClick: true }] });
   });
 
   it('names both columns when they differ, with the arrow read from the row\'s table', async () => {
@@ -395,7 +402,10 @@ describe('RelationshipsTreeProvider: grouped by relationships file', () => {
     // Grouped by file, a click opens the file at the Ref's line (grouped by table, a diagram).
     expect(refs[0].command).toMatchObject({ command: 'erdStudio.openRelationshipSource', arguments: [expect.anything()] });
     expect(String((refs[0].tooltip as vscode.MarkdownString).value)).toContain('Click to open it in its file');
-    expect(refs[0].contextValue).toBe('relationship');
+    // Its row value says the click opens the file: its button and menu are Open in Diagram….
+    expect(refs[0].contextValue).toBe('relationshipInFile');
+    // No double-click of its own: the click opened the file.
+    expect(provider.secondaryCommand((await provider.getChildren(files[0]))[0])).toBeUndefined();
   });
 
   it('marks a relationship to another layer first in its row', async () => {

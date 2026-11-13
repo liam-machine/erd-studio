@@ -47,6 +47,9 @@ import { parseSubjectAreaDbml } from '@erd-studio/core/dbml';
 import { answerDraft, closeDraft, flush, nextDraft } from './helpers/draftDriver';
 import { DraftPreviewPanel } from '../../src/providers/DraftPreviewPanel';
 import { DRAFT_SCOPE_EMPTY_NOTICE } from '../../src/services/draftModel';
+import { SHOW_RELATIONSHIPS_BUTTON } from '../../src/commands/goToTable';
+import { START_SUGGESTION_ALREADY_KEPT_MESSAGE } from '../../src/services/startSuggestion';
+import { GlassSidebarProvider } from '../../src/providers/glassSidebar/GlassSidebarProvider';
 
 /** The message of the last "Found dbt project" line in the ERD Studio log (it no longer goes to console.log). */
 const lastFoundProjectLine = (): string | undefined =>
@@ -98,6 +101,43 @@ function makeContext(
     },
     secrets: vscode.createMockSecretStorage(),
   } as unknown as Context;
+}
+
+/** What the glass sidebar's page was sent (`state`, `reveal`, `showSection`, …). */
+type GlassPosted = { type: string; sections?: Array<{ key: string; busy?: boolean; found?: { shown: number; total: number }; nodes: Array<{ label: string }> }>; searchSeq?: number; search?: string; section?: string; id?: string; focus?: boolean; open?: string[] };
+
+/**
+ * A glass sidebar webview the test drives, resolved on the provider activation
+ * registered (`registerWebviewViewProvider` spied before activate): its page's
+ * messages in, what it was sent out, and its visibility.
+ */
+function glassView(register: ReturnType<typeof vi.spyOn>) {
+  const provider = register.mock.calls.find((c) => c[0] === 'erdStudio.glassSidebar')![1] as { resolveWebviewView(v: unknown): void };
+  let receive: (m: unknown) => void = () => {};
+  let visibility: () => void = () => {};
+  const posted: GlassPosted[] = [];
+  const view = {
+    visible: true,
+    show: () => {},
+    onDidChangeVisibility: (fn: () => void) => { visibility = fn; return { dispose() {} }; },
+    onDidDispose: () => ({ dispose() {} }),
+    webview: {
+      options: {}, html: '', cspSource: 'https://webview.test',
+      asWebviewUri: (u: { path: string }) => ({ toString: () => `https://webview.test${u.path}` }),
+      postMessage: async (m: GlassPosted) => { posted.push(JSON.parse(JSON.stringify(m)) as GlassPosted); return true; },
+      onDidReceiveMessage: (fn: (m: unknown) => void) => { receive = fn; return { dispose() {} }; },
+    },
+  };
+  provider.resolveWebviewView(view);
+  const states = () => posted.filter((m) => m.type === 'state');
+  return {
+    send: (m: unknown) => receive(m),
+    setVisible: (on: boolean) => { view.visible = on; visibility(); },
+    posted,
+    states,
+    /** A section of the last state sent. */
+    section: (key: string) => states().at(-1)!.sections!.find((s) => s.key === key)!,
+  };
 }
 
 const registered = () => vscode._registeredCommands.map((c) => c.command);
@@ -684,6 +724,65 @@ describe('activate() in a folder without dbt_project.yml (logical-only)', () => 
     expect(warn).not.toHaveBeenCalledWith(expect.stringContaining('Open a folder first'), expect.anything(), expect.anything());
   });
 
+  describe('the empty Diagrams view is counted as seen only when it is on screen (sidebarStartShown)', () => {
+    const counted = (spy: ReturnType<typeof vi.spyOn>) => spy.mock.calls.filter((c) => c[0] === 'sidebarStartShown').length;
+
+    it('with the glass sidebar on: not when its page lists the trees, nor while the Diagrams card is folded or the view hidden; once it is drawn open', async () => {
+      const featureOnce = vi.spyOn(telemetry, 'featureOnce');
+      const register = vi.spyOn(vscode.window, 'registerWebviewViewProvider');
+      await activate(context);
+      const call = register.mock.calls.find((c) => c[0] === 'erdStudio.glassSidebar')!;
+      expect(call[2]).toEqual({ webviewOptions: { retainContextWhenHidden: true } });
+      const page = glassView(register);
+      page.send({ type: 'ready' });
+      await vi.advanceTimersByTimeAsync(50);
+      // Listed, and empty: the bridge lists every section at once. Not on screen yet.
+      expect(counted(featureOnce)).toBe(0);
+      page.send({ type: 'sectionsShown', open: ['tables', 'help'] });
+      expect(counted(featureOnce)).toBe(0);
+      page.setVisible(false);
+      page.send({ type: 'sectionsShown', open: ['diagrams'] });
+      expect(counted(featureOnce)).toBe(0);
+      page.setVisible(true);
+      expect(counted(featureOnce)).toBe(1);
+      // Once per listing that found it empty: folding and unfolding again counts nothing more.
+      page.send({ type: 'sectionsShown', open: [] });
+      page.send({ type: 'sectionsShown', open: ['diagrams'] });
+      expect(counted(featureOnce)).toBe(1);
+    });
+
+    it('turned off while that listing waits (the Diagrams card folded): the standard Diagrams view draws it now, so it counts then', async () => {
+      const featureOnce = vi.spyOn(telemetry, 'featureOnce');
+      const register = vi.spyOn(vscode.window, 'registerWebviewViewProvider');
+      await activate(context);
+      const page = glassView(register);
+      page.send({ type: 'ready' });
+      await vi.advanceTimersByTimeAsync(50);
+      page.send({ type: 'sectionsShown', open: ['tables'] });
+      expect(counted(featureOnce)).toBe(0);
+      // The native view's provider lists nothing again (its loading state did not change): the toggle itself says so.
+      await vscode.commands.executeCommand('erdStudio.toggleGlassSidebar');
+      expect(context.globalState.get('erdStudio.glassSidebar.enabled')).toBe(false);
+      expect(counted(featureOnce)).toBe(1);
+    });
+
+    it('with it off: the native view\'s listing, as before (VS Code lists a view only to draw it)', async () => {
+      context = makeContext(root, { globalState: new Map<string, unknown>([['erdStudio.gettingStartedShown', true], ['erdStudio.glassSidebar.enabled', false]]) });
+      const featureOnce = vi.spyOn(telemetry, 'featureOnce');
+      const createTreeView = vi.spyOn(vscode.window, 'createTreeView');
+      await activate(context);
+      const tree = (createTreeView.mock.calls.find((c) => c[0] === 'erdStudio.domainTree')![1] as {
+        treeDataProvider: { getChildren(element?: unknown): unknown[] | undefined };
+      }).treeDataProvider;
+      // VS Code's first request gets the placeholder; a turn later the real listing, empty.
+      expect(tree.getChildren()).toEqual([]);
+      expect(counted(featureOnce)).toBe(0);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(tree.getChildren()).toEqual([]);
+      expect(counted(featureOnce)).toBe(1);
+    });
+  });
+
   it('writes nothing, shows no QuickPick and no toast — even on a first workspace visit and after an upgrade', async () => {
     // No harness offer recorded for this workspace, and an upgrader who has
     // not seen the getting-started notice: both would prompt in a dbt project.
@@ -1000,6 +1099,117 @@ describe('activate() in a native DBML project (S4)', () => {
     const loaded = panel._postedMessages.find((m) => (m as { type: string }).type === 'domainLoaded') as { payload: { schemaVersion: number } };
     expect(loaded.payload.schemaVersion).toBe(7);
     expect(listTree(ws)).toEqual(before);
+  });
+
+  describe('the glass sidebar, wired to the real trees (its search, progress and reveals)', () => {
+    /** Activation with the glass sidebar on (the default), its page loaded and showing every section. */
+    /**
+     * Activation with the glass sidebar on (the default), its page loaded and
+     * showing every section. `settleMs`: how long activation's background work
+     * runs first (0: the table files are still unread when the page asks).
+     */
+    async function activateWithGlass(settleMs = 5_000) {
+      const register = vi.spyOn(vscode.window, 'registerWebviewViewProvider');
+      const createTreeView = vi.spyOn(vscode.window, 'createTreeView');
+      await activate(context);
+      await vi.advanceTimersByTimeAsync(settleMs);
+      const page = glassView(register);
+      page.send({ type: 'ready' });
+      page.send({ type: 'sectionsShown', open: ['diagrams', 'tables', 'relationships', 'help'] });
+      if (settleMs > 0) await vi.advanceTimersByTimeAsync(1_000);
+      const treeOf = (id: string) => (createTreeView.mock.calls.find((c) => c[0] === id)![1] as { treeDataProvider: { getFilter(): string } }).treeDataProvider;
+      return { page, library: treeOf('erdStudio.modelLibrary'), relationships: treeOf('erdStudio.relationships') };
+    }
+
+    it('the search field filters the real trees through their own filters, and says what each found', async () => {
+      const { page, library, relationships } = await activateWithGlass();
+      expect(page.section('tables').nodes.length).toBeGreaterThan(0);
+      page.send({ type: 'search', text: 'fct_order', seq: 1 });
+      await vi.advanceTimersByTimeAsync(1_000);
+      // The text reached each native view's filter (sidebarFilter.ts), so the native views are filtered too.
+      expect([library.getFilter(), relationships.getFilter()]).toEqual(['fct_order', 'fct_order']);
+      const answer = page.states().at(-1)!;
+      expect(answer).toMatchObject({ search: 'fct_order', searchSeq: 1 });
+      expect(page.section('tables').found).toMatchObject({ shown: 1 });
+      expect(page.section('diagrams').found).toBeDefined();
+      expect(page.section('relationships').found).toBeDefined();
+      // Cleared from the field: every filter goes.
+      page.send({ type: 'search', text: '', seq: 2 });
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect([library.getFilter(), relationships.getFilter()]).toEqual(['', '']);
+      expect(page.states().at(-1)).toMatchObject({ search: '', searchSeq: 2 });
+      expect(['diagrams', 'tables', 'relationships'].map((k) => page.section(k).found)).toEqual([undefined, undefined, undefined]);
+    });
+
+    it('the Table Library\'s reading progress (a col: filter) shows on the native view and as a bar on the glass section', async () => {
+      const progress = vi.spyOn(vscode.window, 'withProgress');
+      const { page, library } = await activateWithGlass();
+      // The read a col: filter starts when table files are still unread (here every file was read at
+      // activation): run the provider's own progress hook, as its readForFilter does, with a read
+      // that waits until the test lets it go, so the bar can be seen while it runs.
+      let release: () => void = () => {};
+      const run = (library as unknown as { progress<T>(task: () => Promise<T>): Thenable<T> }).progress(() => new Promise<string>((resolve) => { release = () => resolve('read'); }));
+      await vi.advanceTimersByTimeAsync(200);
+      expect(progress).toHaveBeenCalledWith({ location: { viewId: 'erdStudio.modelLibrary' } }, expect.any(Function));
+      expect(page.section('tables').busy).toBe(true);
+      expect(page.section('diagrams').busy).toBeUndefined();
+      release();
+      await expect(run).resolves.toBe('read');
+      await vi.advanceTimersByTimeAsync(200);
+      expect(page.section('tables').busy).toBeUndefined();
+    });
+
+    it('Reveal in Table Library under a field search that hides the table clears the field, then reveals and focuses its row', async () => {
+      const { page, library } = await activateWithGlass();
+      page.send({ type: 'search', text: 'zz_nothing', seq: 1 });
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(library.getFilter()).toBe('zz_nothing');
+      await vscode.commands.executeCommand('erdStudio.revealInTableLibrary', 'dim_region');
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(library.getFilter()).toBe('');
+      expect(page.states().at(-1)!.search).toBe('');
+      const reveal = page.posted.filter((m) => m.type === 'reveal').at(-1)!;
+      expect(reveal).toMatchObject({ section: 'tables', focus: true });
+      expect(reveal.id).toContain('dim_region');
+    });
+
+    it('Go to Table → Show Relationships reveals the table\'s row in the glass Relationships section, opened on its relationships, clearing a field search that hid it', async () => {
+      const { page, relationships, library } = await activateWithGlass();
+      page.send({ type: 'search', text: 'zz_nothing', seq: 1 });
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(relationships.getFilter()).toBe('zz_nothing');
+      // The Go to Table picker, driven as the user would: the row's Show Relationships button.
+      const listeners: Record<string, (e?: unknown) => void> = {};
+      const qp = {
+        items: [] as Array<{ table: string; filePath: string }>, selectedItems: [], activeItems: [], value: '', title: '', placeholder: '',
+        matchOnDescription: false, matchOnDetail: false, keepScrollFocus: false, busy: false,
+        show() {}, hide() { listeners.hide?.(); }, dispose() {},
+        onDidAccept(fn: () => void) { listeners.accept = fn; return { dispose() {} }; },
+        onDidTriggerItemButton(fn: (e: unknown) => void) { listeners.button = fn; return { dispose() {} }; },
+        onDidHide(fn: () => void) { listeners.hide = fn; return { dispose() {} }; },
+        onDidChangeValue() { return { dispose() {} }; },
+      };
+      const window = vscode.window as unknown as { createQuickPick?: () => unknown };
+      const had = window.createQuickPick;
+      window.createQuickPick = () => qp;
+      try {
+        void vscode.commands.executeCommand('erdStudio.goToTable');
+        await vi.advanceTimersByTimeAsync(100);
+        const item = qp.items.find((i) => i.table === 'fct_order')!;
+        listeners.button!({ item, button: SHOW_RELATIONSHIPS_BUTTON });
+        await vi.advanceTimersByTimeAsync(1_000);
+        qp.hide();
+      } finally {
+        window.createQuickPick = had;
+      }
+      // The filter was the search field's: the field is cleared (every section's filter), not the Relationships one alone.
+      expect([relationships.getFilter(), library.getFilter()]).toEqual(['', '']);
+      expect(page.states().at(-1)!.search).toBe('');
+      const reveal = page.posted.filter((m) => m.type === 'reveal').at(-1)!;
+      expect(reveal).toMatchObject({ section: 'relationships', focus: true });
+      // Opened on its relationships (the native reveal's `expand`): the row itself is in `open`.
+      expect(reveal.open?.[0]).toBe(reveal.id);
+    });
   });
 
   /** The watcher over the semantic dir's diagrams and layouts. */
@@ -2158,7 +2368,7 @@ describe('Welcome panel: commands', () => {
       new Set([
         'erdStudio.reportBug', 'erdStudio.showGettingStarted', 'erdStudio.trySampleProject', 'erdStudio.showLogs', 'erdStudio.start',
         'erdStudio.openExampleProject', 'erdStudio.openExampleDiagram', 'erdStudio.showImportGuide',
-        'erdStudio.showMeAround',
+        'erdStudio.showMeAround', 'erdStudio.toggleGlassSidebar', 'erdStudio.focusGlassSidebarSearch',
       ]),
     );
     // setupAiHelper needs a project: it gets the standard no-project stub instead.
@@ -3928,6 +4138,31 @@ describe('the start suggestion (a folder with no diagram whose start is obvious)
     expect(fs.existsSync(path.join(ws, '.erd-studio'))).toBe(false);
   });
 
+  it('Show Me pressed once a diagram was kept meanwhile shows the Diagrams view: the glass sidebar\'s section while it is on, never a second draft', async () => {
+    folderWith({ 'db/schema.sql': SQL });
+    context = makeContext(root, { globalState: new Map<string, unknown>(), workspaceState: new Map<string, unknown>() });
+    // The notification stays up until the test presses Show Me.
+    let press: (choice: string) => void = () => {};
+    info.mockImplementation(((message: string) => (/^ERD Studio found/.test(message)
+      ? new Promise<string>((resolve) => { press = resolve; })
+      : Promise.resolve(undefined))) as never);
+    const register = vi.spyOn(vscode.window, 'registerWebviewViewProvider');
+    const exec = passThroughExec();
+    await activateAndLook();
+    expect(shown()).toHaveLength(1);
+    const page = glassView(register);
+    page.send({ type: 'ready' });
+    await settle();
+    // A diagram kept from elsewhere while the notification was up.
+    fs.cpSync(path.join(REPO_ROOT, 'test', 'fixtures', 'dbml-native', '.erd-studio'), path.join(ws, '.erd-studio'), { recursive: true });
+    press('Show Me');
+    await settle();
+    expect(page.posted.filter((m) => m.type === 'showSection')).toEqual([{ type: 'showSection', section: 'diagrams', focus: true }]);
+    expect(exec).not.toHaveBeenCalledWith('erdStudio.domainTree.focus');
+    expect(exec).not.toHaveBeenCalledWith('erdStudio.importSqlDdl', expect.anything());
+    expect(info).toHaveBeenCalledWith(START_SUGGESTION_ALREADY_KEPT_MESSAGE);
+  });
+
   it("Don't Ask Again: off for this folder (workspace state only), says how to turn it back on; Turn On brings it back", async () => {
     folderWith({ 'schema.sql': SQL });
     const workspaceState = new Map<string, unknown>([['erdStudio.harnessInstallPrompted', true]]);
@@ -3950,10 +4185,11 @@ describe('the start suggestion (a folder with no diagram whose start is obvious)
     await activateAndLook();
     expect(shown()).toEqual([]);
 
-    // Turn On…: the count and the answer forgotten, the key cleared; the next window asks again.
+    // Turn On…: the count and the answer forgotten, the key cleared; the next window asks again
+    // (`on`: asked for here, so an upgrader's once-per-machine limit does not hold it back, #305).
     exec.mockClear();
     await vscode.commands.executeCommand('erdStudio.turnOnStartSuggestions');
-    expect(workspaceState.get(STATE_KEY)).toEqual({ shown: 0 });
+    expect(workspaceState.get(STATE_KEY)).toEqual({ shown: 0, on: true });
     expect(exec).toHaveBeenCalledWith('setContext', 'erdStudio.startSuggestionsOff', false);
     tearDownActivation();
     info.mockClear();
@@ -4200,6 +4436,28 @@ describe('draft-first (docs/dev/draft-first.md)', () => {
     await activate(context);
     await openDiagramsView();
     expect(draftPanels()).toEqual([]);
+  });
+
+  it('the automatic draft\'s progress shows on the glass Diagrams section too, until the draft is up', async () => {
+    folderWith({ 'notes.md': '# notes\n' });
+    context = makeContext(root, { globalState: new Map<string, unknown>([['erdStudio.gettingStartedShown', true]]), workspaceState: new Map<string, unknown>([['erdStudio.harnessInstallPrompted', true]]) });
+    const register = vi.spyOn(vscode.window, 'registerWebviewViewProvider');
+    // The bar on the section comes and goes within one state debounce here (the draft builds at once): watch the call.
+    const sectionProgress = vi.spyOn(GlassSidebarProvider.prototype, 'withSectionProgress');
+    const progress = vi.spyOn(vscode.window, 'withProgress');
+    await activate(context);
+    await settle();
+    const page = glassView(register);
+    page.send({ type: 'ready' });
+    await settle();
+    // The glass Diagrams card drawn open (the native view is hidden while the glass sidebar is on).
+    page.send({ type: 'sectionsShown', open: ['diagrams'] });
+    await settle();
+    expect(draftPanels()).toHaveLength(1);
+    expect(sectionProgress).toHaveBeenCalledWith('diagrams', expect.any(Function));
+    expect(progress).toHaveBeenCalledWith({ location: { viewId: 'erdStudio.domainTree' } }, expect.any(Function));
+    // Done once the draft is up: the section is not left busy.
+    expect(page.section('diagrams').busy).toBeUndefined();
   });
 
   it('a folder with a DBML file: the icon opens its draft (once per folder, state written first); Keep writes the same files as the quick import\'s Import, byte for byte, and marks the folder as started', async () => {

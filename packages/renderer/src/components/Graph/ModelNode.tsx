@@ -496,7 +496,8 @@ function ColumnRow({ column, modelName, readOnly, existingColumnNames, discrepan
       ) : (
         <span
           className={`model-node__col-type${!readOnly ? ' model-node__col-type--editable' : ''}`}
-          style={{ color: getDataTypeColor(column.dataType) }}
+          // The type's colour as a hint the stylesheet blends into the quiet text tier.
+          style={{ '--model-node-type-color': getDataTypeColor(column.dataType) } as CSSProperties}
           onDoubleClick={!readOnly ? handleDoubleClickType : undefined}
         >
           {column.dataType}
@@ -761,10 +762,8 @@ function TableNodeComponent({ id, data, selected }: NodeProps<TableFlowNode>) {
         {showBadge && (
           <span
             className="model-node__badge"
-            style={badgeConfig?.color ? {
-              backgroundColor: `${badgeConfig.color}33`,
-              color: badgeConfig.color,
-            } : undefined}
+            // The layer's colour; the stylesheet derives the capsule's fill, edge and text from it.
+            style={badgeConfig?.color ? ({ '--model-node-badge-color': badgeConfig.color } as CSSProperties) : undefined}
             {...badgeTip.anchorProps}
           >
             {badgeText}
@@ -865,7 +864,7 @@ function TableNodeComponent({ id, data, selected }: NodeProps<TableFlowNode>) {
                 title={`${cd.name} is in ${discrepancyTargetStage ?? 'the compared stage'} but not in ${discrepancySourceStage ?? 'this stage'}`}
               >
                 <span className="model-node__col-name">{cd.name}</span>
-                <span className="model-node__col-type" style={{ color: cd.targetDataType ? getDataTypeColor(cd.targetDataType) : undefined }}>{cd.targetDataType ?? ''}</span>
+                <span className="model-node__col-type" style={cd.targetDataType ? ({ '--model-node-type-color': getDataTypeColor(cd.targetDataType) } as CSSProperties) : undefined}>{cd.targetDataType ?? ''}</span>
                 <span className="model-node__col-disc-badge model-node__col-disc-badge--missing">{discrepancyTargetStage ?? 'target'} only</span>
               </div>
             ))}

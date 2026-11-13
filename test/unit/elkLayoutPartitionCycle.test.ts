@@ -46,10 +46,15 @@ import {
   tableTypeBandCount,
   layoutLeftTablesInPlace,
   layoutUnchangedNotice,
+  GRID_LAYOUT_MIN_TABLES,
+  LAYOUT_TIMEOUT_MS,
   type LayoutOutcome,
   type PartitionStrategy,
 } from '../../webview/lib/elkLayout';
-import { buildLayoutOptions } from '../../webview/lib/firstOpenLayout';
+import { buildLayoutOptions, firstOpenLayoutOptions } from '../../webview/lib/firstOpenLayout';
+
+/** The first-open layout's time bound for a large diagram with no relationships (#294). */
+const FIRST_OPEN_BOUND_MS = LAYOUT_TIMEOUT_MS / 3;
 
 beforeAll(() => {
   (globalThis as Record<string, unknown>).__ELK_WORKER_CODE__ = '';
@@ -216,6 +221,25 @@ describe('layout at scale (real engine)', () => {
     // Before: over a minute on this size (ELK's band joins), past the 30 s guard.
     expect(Date.now() - started).toBeLessThan(20_000);
   }, 30_000);
+
+  // #294: a large import with no relationships, laid out with the first-open
+  // layout's own options. Measured at about 0.2 s; the bound is a third of the
+  // 30 s guard, so a slower machine or worker still finishes well inside it.
+  // One table more and it is the grid's, without ELK.
+  it(`${GRID_LAYOUT_MIN_TABLES - 1} tables with no relationships lay out in ELK, with the first-open options, inside ${FIRST_OPEN_BOUND_MS / 1000} s`, async () => {
+    const nodes = Array.from({ length: GRID_LAYOUT_MIN_TABLES - 1 }, (_, i) => table(`t${i}`));
+    const outcomes: LayoutOutcome[] = [];
+    const started = Date.now();
+    const positions = await runElkLayout(nodes, [], firstOpenLayoutOptions(nodes.length), 'auto', { onOutcome: (o) => outcomes.push(o) });
+    expect(Date.now() - started).toBeLessThan(FIRST_OPEN_BOUND_MS);
+    expect(placedEverywhere(positions, nodes.length)).toBe(true);
+    expect(outcomes).toEqual([expect.objectContaining({ step: 'default' })]);
+
+    const more = [...nodes, table(`t${nodes.length}`)];
+    outcomes.length = 0;
+    await runElkLayout(more, [], firstOpenLayoutOptions(more.length), 'auto', { onOutcome: (o) => outcomes.push(o) });
+    expect(outcomes).toEqual([expect.objectContaining({ step: 'grid', reason: 'size' })]);
+  }, LAYOUT_TIMEOUT_MS);
 
   it.each(['auto', 'role', 'depth', 'none'] as const)('5,000 tables / 10,000 relationships (%s) are placed by the grid in well under a second', async (strategy) => {
     const { nodes, edges } = twoWay(5000, 10_000, 5);

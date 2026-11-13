@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { TreeItemCollapsibleState, ThemeIcon, ThemeColor, MarkdownString, Uri as vscodeUri } from 'vscode';
 import { dbmlFileIcon, type DbmlFileIconResolver } from '../../src/providers/dbmlFileKinds';
 import type { TableLibraryFolderNode, TableLibraryLayerNode, TableLibraryTableNode } from '../../src/providers/ModelLibraryTreeProvider';
-import { COLLAPSE_LAYERS_OVER, TableLibraryTreeProvider, type TableLibraryNode } from '../../src/providers/ModelLibraryTreeProvider';
+import { COLLAPSE_LAYERS_OVER, TABLE_CLICK_TOOLTIP, TableLibraryTreeProvider, tableRowContext, type TableLibraryNode } from '../../src/providers/ModelLibraryTreeProvider';
 import type { TableLibraryService, TableFileEntry } from '../../src/services/logicalModelService';
 import type { LayerConfig } from '../../src/types/layer';
 import type { SubjectAreaService } from '../../src/services/domainService';
@@ -278,7 +278,7 @@ describe('TableLibraryTreeProvider', () => {
       expect(item.description).toBe('on 1 diagram');
     });
 
-    it('sets click command to open the .yml file', () => {
+    it('a click shows the table on a diagram (the file when none shows it), and a double-click opens the .yml file', () => {
       const node: TableLibraryNode = {
         type: 'model',
         name: 'dim_customer',
@@ -287,8 +287,16 @@ describe('TableLibraryTreeProvider', () => {
       };
 
       const item = provider.getTreeItem(node);
-      expect(item.command?.command).toBe('vscode.open');
-      expect(item.command?.arguments?.[0]?.fsPath).toContain('dim_customer.yml');
+      expect(item.command).toMatchObject({ command: 'erdStudio.openInDiagram', arguments: [node, { fallBackToFile: true, rowClick: true }] });
+      expect(item.resourceUri?.fsPath).toContain('dim_customer.yml');
+      expect(String((item.tooltip as MarkdownString).value)).toContain(TABLE_CLICK_TOOLTIP);
+      // The glass sidebar's double-click: the file, the code.
+      expect(provider.secondaryCommand(node)).toEqual({ command: 'erdStudio.openTableFile', title: 'Open File', arguments: [node, { doubleClick: true }] });
+      expect(item.contextValue).toBe('logicalModel');
+      // Two diagrams show it: its menu offers Show on Another Diagram… (row value).
+      expect(provider.getTreeItem({ ...node, referencingDomains: ['a', 'b'] }).contextValue).toBe('logicalModelOnSeveral');
+      expect(tableRowContext({ referencingDomains: ['a'] })).toBe('logicalModel');
+      expect(tableRowContext({ referencingDomains: ['a', 'b'], fileError: { kind: 'yamlScalar' } })).toBe('logicalModelBroken');
     });
   });
 
@@ -524,7 +532,10 @@ describe('TableLibraryTreeProvider', () => {
       const top = (p.getChildren()!).find(c => c.type === 'model' && c.name === 'dim_customer') as TableLibraryTableNode;
       expect(top.shadowedBy).toBeUndefined();
       expect(top.referencingDomains).toEqual(['customer-360', 'reporting']);
-      expect(p.getTreeItem(top).contextValue).toBe('logicalModel');
+      // On two diagrams: the row value that offers Show on Another Diagram….
+      expect(p.getTreeItem(top).contextValue).toBe('logicalModelOnSeveral');
+      // A duplicate's click opens its file already: no double-click of its own.
+      expect(p.secondaryCommand(dupe)).toBeUndefined();
     });
 
     it('a duplicate\'s tooltip names dbt only in a dbt project', () => {
@@ -580,9 +591,13 @@ describe('TableLibraryTreeProvider: a model file that needs fixing (#164)', () =
     expect((item.iconPath as ThemeIcon).id).toBe('warning');
     expect(item.description).toBe('("description" written twice — line 14)');
     expect(String(item.tooltip)).toContain('uses the last one');
-    expect(item.contextValue).toBe('logicalModel');
+    // Its click opens the file at the line (where the fix is), so its menu has Open in Diagram…, not Open File.
+    expect(item.contextValue).toBe('logicalModelBroken');
+    expect(item.command?.command).toBe('vscode.open');
     const [, options] = item.command!.arguments as [unknown, { selection: { start: { line: number } } }];
     expect(options.selection.start.line).toBe(13);
+    const node = (provider.getChildren() as TableLibraryTableNode[]).find((n) => n.name === 'dim_customer')!;
+    expect(provider.secondaryCommand(node)).toBeUndefined();
   });
 
   it('marks a file that cannot be read with an error icon', () => {
@@ -647,11 +662,14 @@ describe('TableLibraryTreeProvider: native DBML storage, the layer-first tree (�
     return allTables(provider.getChildren() as TableLibraryNode[]);
   }
 
-  it('opens a .dbml table with plain vscode.open (the canvas selector never matches a table)', () => {
+  it('a .dbml table\'s click goes to the diagram; its double-click and Open File open the file (plain vscode.open: the canvas selector never matches a table)', () => {
     const provider = providerFor([dbmlEntry('fct_order')], 'dbml');
-    const item = provider.getTreeItem(tableNodes(provider).find((n) => n.name === 'fct_order')!);
-    expect(item.command?.command).toBe('vscode.open');
-    expect(item.command?.arguments?.[0].fsPath).toBe(`${SEMANTIC}/gold/tables/gold/fct_order.dbml`);
+    const node = tableNodes(provider).find((n) => n.name === 'fct_order')!;
+    const item = provider.getTreeItem(node);
+    expect(item.command?.command).toBe('erdStudio.openInDiagram');
+    expect(item.resourceUri?.fsPath).toBe(`${SEMANTIC}/gold/tables/gold/fct_order.dbml`);
+    expect(provider.secondaryCommand(node)?.command).toBe('erdStudio.openTableFile');
+    expect(String((item.tooltip as MarkdownString).value)).toContain('Double-click to open its file.');
   });
 
   it('counts a DBML diagram\'s use lines as usage', () => {
@@ -667,7 +685,7 @@ describe('TableLibraryTreeProvider: native DBML storage, the layer-first tree (�
     const items = tableNodes(mixed).map((n) => mixed.getTreeItem(n));
     expect(items.find((i) => i.label === 'fct_order')?.description).toBe('on 1 diagram · DBML');
     expect(items.find((i) => i.label === 'dim_old')?.description).toBe('on no diagram · YAML');
-    expect(items.find((i) => i.label === 'dim_old')?.command?.command).toBe('vscode.open');
+    expect(items.find((i) => i.label === 'dim_old')?.command?.command).toBe('erdStudio.openInDiagram');
 
     const dbml = providerFor([dbmlEntry('fct_order')], 'dbml');
     expect(dbml.getTreeItem(tableNodes(dbml)[0]).description).toBe('on 1 diagram');

@@ -125,6 +125,46 @@ describe('revealTable', () => {
   });
 });
 
+describe('a sidebar row\'s click: the gentle reveal and the diagram in front', () => {
+  it('posts gentle to a loaded canvas, and holds it with the reveal for one still opening', async () => {
+    const provider = buildProvider(root);
+    const { panel } = await open(provider);
+    await provider.revealTable(vscode.Uri.file(at(SALES)), 'dim_customer', { gentle: true });
+    await panel._simulateMessage({ type: 'ready' });
+    await vi.waitFor(() => expect(reveals(panel)).toEqual([{ type: 'revealTable', payload: { modelName: 'dim_customer', gentle: true } }]));
+    await provider.revealTable(vscode.Uri.file(at(SALES)), 'fct_order', { gentle: true });
+    expect(reveals(panel).at(-1)).toEqual({ type: 'revealTable', payload: { modelName: 'fct_order', gentle: true } });
+    // Add to Diagram… never reveals gently (its tables were just added; the panel shows them).
+    await provider.addTablesToDiagram(vscode.Uri.file(at(SALES)), ['fct_order']);
+    expect((reveals(panel).at(-1) as { payload: { gentle?: boolean } }).payload.gentle).toBeUndefined();
+  });
+
+  it('tells the canvas when its tab goes behind another and comes back (a gentle reveal waits for it)', async () => {
+    const provider = buildProvider(root);
+    const { panel } = await open(provider);
+    const visibility = () => panel._postedMessages.filter((m) => (m as { type: string }).type === 'canvasVisibility');
+    panel._simulateViewStateChange(false);
+    panel._simulateViewStateChange(true);
+    expect(visibility()).toEqual([
+      { type: 'canvasVisibility', payload: { visible: false } },
+      { type: 'canvasVisibility', payload: { visible: true } },
+    ]);
+  });
+
+  it('the diagram last active, while it is still open and on screen, is the one in front', async () => {
+    const provider = buildProvider(root);
+    expect(provider.lastActiveVisibleDiagramPath()).toBeUndefined();
+    const { panel } = await open(provider);
+    expect(provider.lastActiveVisibleDiagramPath()).toBe(at(SALES));
+    // Behind another tab: not on screen, so not in front.
+    (panel as unknown as { visible: boolean }).visible = false;
+    expect(provider.lastActiveVisibleDiagramPath()).toBeUndefined();
+    (panel as unknown as { visible: boolean }).visible = true;
+    panel._simulateDispose();
+    expect(provider.lastActiveVisibleDiagramPath()).toBeUndefined();
+  });
+});
+
 describe('addTablesToDiagram (Add to Diagram…)', () => {
   it('adds the tables in one edit, then selects the first', async () => {
     const provider = buildProvider(root);

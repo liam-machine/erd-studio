@@ -1,19 +1,25 @@
 /* ---------------------------------------------------------------------------
    Fields (context fields): a table's or a column's fields in the Detail panel.
    Theme tokens only (styles/theme.css): no colour literals.
+
+   The editor lists a table's fields as one grouped card: a row per field,
+   its label (sentence case) above its value, a choice field's picker beside
+   its label. The read-only list (viewer, physical stage) is a card of
+   label / value rows. A column's section (compact) stays light: it sits
+   inside the column's expanded row.
    --------------------------------------------------------------------------- */
 
 .fields-section {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--space-3);
 }
 
 .fields-section__head {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: var(--space-4);
 }
 
 .fields-section__title {
@@ -26,87 +32,114 @@
 
 .fields-section__customise {
   flex-shrink: 0;
-  padding: 0;
-  border: none;
+  height: 22px;
+  padding: 0 var(--space-4);
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-pill);
   background: transparent;
-  color: var(--dim-fg);
-  font-size: 10px;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: var(--text-xs);
   cursor: pointer;
-  text-decoration: underline;
-  text-decoration-style: dotted;
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard);
 }
 
 .fields-section__customise:hover,
 .fields-section__customise:focus-visible {
-  color: var(--editor-fg);
+  background: var(--control-fill-hover);
+  border-color: var(--control-border-hover);
+  color: var(--text-primary);
 }
 
 .fields-section__customise:focus-visible {
-  outline: 1px solid var(--focus-border);
-  outline-offset: 2px;
+  outline: var(--focus-outline);
+  outline-offset: var(--focus-offset);
 }
 
+/* The compact section's heading ("Fields" inside a column's row). */
 .fields-section__label {
-  font-size: 10px;
+  color: var(--text-tertiary);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-caps);
   text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--dim-fg);
 }
 
 .fields-section__list {
   margin: 0;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-}
-
-/* Read-only rows (viewer, physical stage): label above value. */
-.fields-section__row {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.fields-section__row .fields-section__name {
-  margin: 0;
+  gap: var(--space-4);
 }
 
 .fields-section__list[hidden] {
   display: none;
 }
 
+/* The editor's table list: one grouped card, a hairline between rows. */
+.fields-section:not(.fields-section--compact):not(.fields-section--read-only) > .fields-section__list,
+.fields-section:not(.fields-section--compact) > .fields-section__group > .fields-section__list {
+  gap: 0;
+  padding: 0 var(--space-5);
+  border: 1px solid var(--glass-divider);
+  border-radius: var(--radius-lg);
+  background: var(--glass-well);
+}
+
+.fields-section:not(.fields-section--compact):not(.fields-section--read-only) .fields-section__field,
+.fields-section:not(.fields-section--compact):not(.fields-section--read-only) .fields-section__row--dbml {
+  padding: var(--space-4) 0;
+}
+
+.fields-section:not(.fields-section--compact):not(.fields-section--read-only) .fields-section__list > * + * {
+  border-top: 1px solid var(--glass-divider);
+}
+
+/* Read-only rows (viewer, physical stage): label above value. */
+.fields-section__row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.fields-section__row .fields-section__name {
+  margin: 0;
+}
+
 /*
- * A table's read-only section (viewer, physical stage): two columns, the
- * muted label beside its value, which wraps; a hairline between rows.
+ * A table's read-only section (viewer, physical stage): a card of rows, the
+ * label beside its value, which wraps; a hairline between rows.
  */
 .fields-section--read-only:not(.fields-section--compact) .fields-section__list {
   gap: 0;
+  padding: 0 var(--space-5);
+  border: 1px solid var(--glass-divider);
+  border-radius: var(--radius-lg);
+  background: var(--glass-well);
 }
 
 .fields-section--read-only:not(.fields-section--compact) .fields-section__row {
   display: grid;
   grid-template-columns: minmax(64px, 34%) minmax(0, 1fr);
-  column-gap: 10px;
+  column-gap: var(--space-5);
   align-items: baseline;
-  padding: 5px 0;
-  border-top: 1px solid var(--panel-border);
+  padding: var(--space-4) 0;
+  border-top: 1px solid var(--glass-divider);
 }
 
 .fields-section--read-only:not(.fields-section--compact) .fields-section__row:first-child {
   border-top: none;
-  padding-top: 0;
 }
 
-.fields-section--read-only:not(.fields-section--compact) .fields-section__row:last-child {
-  padding-bottom: 0;
-}
-
-/* The labels read as the header's Schema / Warehouse name labels do (muted,
-   sentence case, weight 500), not as a second level of section headings. */
+/* The labels read as the Details card's labels do (secondary, sentence case),
+   not as a second level of section headings. */
 .fields-section--read-only:not(.fields-section--compact) .fields-section__name {
-  line-height: 1.6;
-  font-size: 11px;
-  font-weight: 500;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-regular);
+  line-height: var(--leading-normal);
   text-transform: none;
   letter-spacing: normal;
 }
@@ -121,17 +154,19 @@
 }
 
 .fields-section--collapsible.fields-section--open {
-  gap: 8px;
+  gap: var(--space-4);
 }
 
 .fields-section__toggle {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-3);
   width: 100%;
+  min-height: 24px;
   margin: 0;
   padding: 0;
   border: none;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: inherit;
   font: inherit;
@@ -139,93 +174,122 @@
   text-transform: inherit;
   text-align: left;
   cursor: pointer;
+  transition: color var(--duration-fast) var(--ease-standard);
 }
 
 .fields-section__toggle:hover {
-  color: var(--editor-fg);
+  color: var(--text-primary);
 }
 
 .fields-section__toggle:focus-visible {
-  outline: 1px solid var(--focus-border);
-  outline-offset: 2px;
-  border-radius: 2px;
+  outline: var(--focus-outline);
+  outline-offset: var(--focus-offset);
 }
 
 .fields-section__chevron {
-  width: 10px;
-  font-size: 11px;
-  text-align: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  color: var(--text-tertiary);
+  transition: transform var(--duration-base) var(--ease-spring);
+}
+
+.fields-section__toggle[aria-expanded='true'] .fields-section__chevron {
+  transform: rotate(90deg);
 }
 
 /* "(7)", as the Columns and Relationships headings give theirs. */
 .fields-section__count {
+  color: var(--text-tertiary);
+  font-weight: var(--weight-regular);
   font-variant-numeric: tabular-nums;
 }
 
 .fields-section__value {
   margin: 0;
   min-width: 0;
-  font-size: 11px;
-  line-height: 1.5;
-  color: var(--editor-fg);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 
 .fields-section__value--structured {
-  font-family: var(--vscode-editor-font-family);
-  color: var(--dim-fg);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
 }
 
 /* Editor rows */
 .fields-section__field {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: var(--space-2);
+}
+
+/* A choice (role, a yes / no, a list): the picker sits beside its label. */
+.fields-section__field:has(> .fields-section__select):not(:has(> .fields-section__hint)) {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, auto);
+  align-items: center;
+  column-gap: var(--space-4);
+}
+
+.fields-section__field:has(> .fields-section__select):not(:has(> .fields-section__hint)) .fields-section__select {
+  width: auto;
+  max-width: 100%;
 }
 
 .fields-section__field-head {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: var(--space-3);
   min-height: 20px;
+  min-width: 0;
 }
 
 .fields-section__name {
-  font-size: 10px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  color: var(--dim-fg);
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  letter-spacing: normal;
+  text-transform: none;
   overflow-wrap: anywhere;
 }
 
 .fields-section__badge {
-  padding: 0 5px;
-  border-radius: 8px;
-  font-size: 9px;
-  line-height: 15px;
+  display: inline-flex;
+  align-items: center;
+  height: 16px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--glass-divider);
+  border-radius: var(--radius-pill);
+  background: var(--control-fill);
+  color: var(--text-tertiary);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-medium);
+  line-height: 1;
   white-space: nowrap;
-  border: 1px solid var(--panel-border);
-  color: var(--dim-fg);
 }
 
 .fields-section__badge--retired {
-  border-color: var(--warning-fg);
-  background: var(--warning-bg);
+  border-color: var(--glass-tint-warning-edge);
+  background: var(--glass-tint-warning);
   color: var(--warning-fg);
 }
 
 .fields-section__badge--dbt {
-  border-color: var(--ai-fg);
-  background: var(--ai-bg);
+  border-color: color-mix(in srgb, var(--ai-fg) 40%, transparent);
+  background: var(--glass-tint-ai);
   color: var(--ai-fg);
 }
 
 .fields-section__actions {
   display: flex;
-  gap: 2px;
+  gap: var(--space-1);
   margin-left: auto;
   visibility: hidden;
 }
@@ -235,82 +299,153 @@
   visibility: visible;
 }
 
+@media (hover: none) {
+  .fields-section__actions {
+    visibility: visible;
+  }
+}
+
 .fields-section__icon-btn {
-  border: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-sm);
   background: transparent;
-  color: var(--dim-fg);
-  cursor: pointer;
-  font-size: 12px;
+  color: var(--text-tertiary);
   line-height: 1;
-  padding: 1px 3px;
+  cursor: pointer;
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard);
 }
 
 .fields-section__icon-btn:hover,
 .fields-section__icon-btn:focus-visible {
-  color: var(--editor-fg);
+  background: var(--control-fill-hover);
+  border-color: var(--control-border-hover);
+  color: var(--text-primary);
+}
+
+.fields-section__icon-btn:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: 1px;
 }
 
 .fields-section__text {
-  font-size: 11px;
-  line-height: 1.5;
-  color: var(--editor-fg);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 
 .fields-section__empty-value {
-  color: var(--dim-fg);
+  color: var(--text-secondary);
 }
 
+/* An empty text field: its guidance, as a quiet place to tap. */
 .fields-section__placeholder {
-  padding: 3px 6px;
-  border: 1px dashed var(--panel-border);
-  border-radius: 3px;
+  margin: 0 calc(-1 * var(--space-3));
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
   background: transparent;
-  color: var(--dim-fg);
-  font-size: 11px;
-  line-height: 1.4;
+  color: var(--text-tertiary);
+  font: inherit;
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
   text-align: left;
   cursor: text;
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard);
 }
 
 .fields-section__placeholder:hover,
 .fields-section__placeholder:focus-visible {
-  border-color: var(--ai-fg);
-  background: var(--ai-bg);
-  color: var(--editor-fg);
+  border-color: var(--control-border-hover);
+  background: var(--glass-tint-ai);
+  color: var(--text-secondary);
+}
+
+.fields-section__placeholder:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: 0;
 }
 
 .fields-section__edit {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--space-1);
+}
+
+.fields-section__edit .detail-panel__rationale-actions {
+  margin-top: var(--space-3);
 }
 
 .fields-section__input,
 .fields-section__select {
-  width: 100%;
   box-sizing: border-box;
-  padding: 3px 6px;
-  border: 1px solid var(--input-border, var(--panel-border));
-  border-radius: 3px;
-  background: var(--input-bg);
+  width: 100%;
+  min-height: var(--control-height-sm);
+  padding: 0 var(--space-4);
+  border: 1px solid var(--glass-input-border);
+  border-radius: var(--radius-md);
+  background: var(--glass-input-bg);
   color: var(--input-fg);
-  font-size: 12px;
+  font: inherit;
+  font-size: var(--text-sm);
+  transition:
+    border-color var(--duration-fast) var(--ease-standard),
+    box-shadow var(--duration-fast) var(--ease-standard);
 }
 
+/* A native select with a drawn chevron (the popup stays the platform's). */
 .fields-section__select {
+  --fields-section-caret: var(--text-tertiary);
+
+  -webkit-appearance: none;
+  appearance: none;
+  padding-right: var(--space-7);
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--fields-section-caret) 50%),
+    linear-gradient(135deg, var(--fields-section-caret) 50%, transparent 50%),
+    linear-gradient(var(--glass-input-bg), var(--glass-input-bg));
+  background-position: calc(100% - 13px) 55%, calc(100% - 9px) 55%, 0 0;
+  background-size: 4px 4px, 4px 4px, 100% 100%;
+  background-repeat: no-repeat;
+  text-overflow: ellipsis;
   cursor: pointer;
+}
+
+.fields-section__select option {
+  background-color: var(--input-bg);
+  color: var(--input-fg);
+}
+
+.fields-section__select:hover {
+  --fields-section-caret: var(--text-primary);
+  border-color: var(--glass-border-strong);
 }
 
 .fields-section__input:focus,
 .fields-section__select:focus {
-  outline: 1px solid var(--focus-border);
-  outline-offset: -1px;
+  outline: none;
+  border-color: var(--glass-input-border-focus);
+  box-shadow: var(--focus-halo);
+}
+
+.fields-section__input::placeholder {
+  color: var(--text-tertiary);
 }
 
 .fields-section__input--key {
-  font-family: var(--vscode-editor-font-family);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
 }
 
 .fields-section__option--outside {
@@ -318,62 +453,75 @@
 }
 
 .fields-section__hint {
-  font-size: 10px;
-  line-height: 1.4;
-  color: var(--dim-fg);
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
 }
 
 .fields-section__group {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding-top: 6px;
-  border-top: 1px dashed var(--panel-border);
+  gap: var(--space-3);
+  padding-top: var(--space-3);
 }
 
 .fields-section__group-title {
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  color: var(--dim-fg);
+  padding: 0 var(--space-1);
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
 }
 
+/* "+ Add field": a new key and value, in a small card. */
 .fields-section__new {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid var(--glass-divider);
+  border-radius: var(--radius-lg);
+  background: var(--glass-well);
 }
 
 .fields-section__new-actions {
   display: flex;
-  gap: 6px;
+  justify-content: flex-end;
+  gap: var(--space-3);
 }
 
 .fields-section__error {
-  font-size: 11px;
   color: var(--error-fg);
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
 }
 
 .fields-section__warning {
-  font-size: 11px;
   color: var(--warning-fg);
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
 }
 
 .fields-section__add-btn {
   align-self: flex-start;
+  min-height: var(--control-height-sm);
+  padding: 0 var(--space-4);
+  border-radius: var(--radius-pill);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
 }
 
 /* A column's section, at the foot of its expanded row. */
 .fields-section--compact {
-  margin-top: 6px;
-  gap: 4px;
+  margin-top: var(--space-3);
+  gap: var(--space-2);
 }
 
 .fields-section--compact .fields-section__list {
-  gap: 4px;
+  gap: var(--space-3);
 }
 
 .fields-section--compact .fields-section__add-btn {
-  padding: 3px 8px;
-  font-size: 10px;
+  min-height: 22px;
+  padding: 0 var(--space-4);
+  font-size: var(--text-2xs);
 }

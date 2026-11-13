@@ -32,6 +32,7 @@ import {
   validateAddRelationshipsImportsPayload,
   validateReloadFromDiskPayload,
   validateExportDiagramPayload,
+  validateConvertProjectToDbmlPayload,
   validateNoRelationshipsFile,
   validateRelationshipsFileChoice,
 } from '../../src/providers/payloadValidation';
@@ -359,6 +360,17 @@ describe('validateExportDiagramPayload', () => {
 
   it.each([null, 'dbml', 3, [], { format: 'dbml' }])('rejects %j', (value) => {
     expect(validateExportDiagramPayload(value)).toMatch(/takes no payload/);
+  });
+});
+
+describe('validateConvertProjectToDbmlPayload (the canvas information button, #305)', () => {
+  it('accepts no payload or an empty object', () => {
+    expect(validateConvertProjectToDbmlPayload(undefined)).toBeNull();
+    expect(validateConvertProjectToDbmlPayload({})).toBeNull();
+  });
+
+  it.each([null, 'convert', 3, [], { path: '/etc' }, { confirmed: true }])('rejects %j', (value) => {
+    expect(validateConvertProjectToDbmlPayload(value)).toBe('Converting the project to DBML takes no payload.');
   });
 });
 

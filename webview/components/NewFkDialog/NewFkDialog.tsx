@@ -649,179 +649,182 @@ export function NewFkDialog() {
 
       {/* Content */}
       <div className="new-fk-dialog__content">
-        {/* Source Model */}
-        <div className="new-fk-dialog__field">
-          <label className="new-fk-dialog__label" htmlFor="fromModel">
-            Source Table
-          </label>
-          <select
-            id="fromModel"
-            className={`new-fk-dialog__select ${touched.fromModel && errors.fromModel ? 'new-fk-dialog__select--error' : ''}`}
-            value={fromModel}
-            onChange={(e) => handleFromModelChange(e.target.value)}
-            onBlur={() => handleBlur('fromModel')}
-          >
-            <option value="">Select table...</option>
-            {modelNames.map((name) => (
-              <option key={name} value={name}>
-                {name}
-              </option>
-            ))}
-          </select>
-          {touched.fromModel && errors.fromModel && (
-            <span className="new-fk-dialog__error">{errors.fromModel}</span>
-          )}
-        </div>
-
-        {/* Source Column */}
-        <div className="new-fk-dialog__field">
-          <label className="new-fk-dialog__label" htmlFor="fromColumn">
-            Source Column (FK)
-          </label>
-          {sourceColumns.length > 0 ? (
+        {/* The link: source (left) → target (right), then any extra column pairs. One card. */}
+        <div className="new-fk-dialog__link">
+          {/* Source Model */}
+          <div className="new-fk-dialog__field">
+            <label className="new-fk-dialog__label" htmlFor="fromModel">
+              Source Table
+            </label>
             <select
-              id="fromColumn"
-              className={`new-fk-dialog__select ${touched.fromColumn && errors.fromColumn ? 'new-fk-dialog__select--error' : ''}`}
-              value={fromColumn}
-              onChange={(e) => setFromColumn(e.target.value)}
-              onBlur={() => handleBlur('fromColumn')}
+              id="fromModel"
+              className={`new-fk-dialog__select ${touched.fromModel && errors.fromModel ? 'new-fk-dialog__select--error' : ''}`}
+              value={fromModel}
+              onChange={(e) => handleFromModelChange(e.target.value)}
+              onBlur={() => handleBlur('fromModel')}
             >
-              <option value="">Select column...</option>
-              {sourceColumns.map((name) => (
+              <option value="">Select table...</option>
+              {modelNames.map((name) => (
                 <option key={name} value={name}>
                   {name}
                 </option>
               ))}
             </select>
-          ) : (
-            <input
-              id="fromColumn"
-              type="text"
-              className={`new-fk-dialog__input ${touched.fromColumn && errors.fromColumn ? 'new-fk-dialog__input--error' : ''}`}
-              value={fromColumn}
-              onChange={(e) => setFromColumn(e.target.value)}
-              onBlur={() => handleBlur('fromColumn')}
-              placeholder={fromModel ? 'Enter column name...' : 'Select source table first'}
-              disabled={!fromModel}
-            />
-          )}
-          {touched.fromColumn && errors.fromColumn && (
-            <span className="new-fk-dialog__error">{errors.fromColumn}</span>
-          )}
-        </div>
+            {touched.fromModel && errors.fromModel && (
+              <span className="new-fk-dialog__error">{errors.fromModel}</span>
+            )}
+          </div>
 
-        {/* Target Model */}
-        <div className="new-fk-dialog__field">
-          <label className="new-fk-dialog__label" htmlFor="toModel">
-            Target Table
-          </label>
-          <select
-            id="toModel"
-            className={`new-fk-dialog__select ${touched.toModel && errors.toModel ? 'new-fk-dialog__select--error' : ''}`}
-            value={toModel}
-            onChange={(e) => handleToModelChange(e.target.value)}
-            onBlur={() => handleBlur('toModel')}
-          >
-            <option value="">Select table...</option>
-            {modelNames.map((name) => (
-              <option key={name} value={name}>
-                {name}
-              </option>
-            ))}
-          </select>
-          {touched.toModel && errors.toModel && (
-            <span className="new-fk-dialog__error">{errors.toModel}</span>
-          )}
-        </div>
+          {/* Source Column */}
+          <div className="new-fk-dialog__field">
+            <label className="new-fk-dialog__label" htmlFor="fromColumn">
+              Source Column (FK)
+            </label>
+            {sourceColumns.length > 0 ? (
+              <select
+                id="fromColumn"
+                className={`new-fk-dialog__select ${touched.fromColumn && errors.fromColumn ? 'new-fk-dialog__select--error' : ''}`}
+                value={fromColumn}
+                onChange={(e) => setFromColumn(e.target.value)}
+                onBlur={() => handleBlur('fromColumn')}
+              >
+                <option value="">Select column...</option>
+                {sourceColumns.map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <input
+                id="fromColumn"
+                type="text"
+                className={`new-fk-dialog__input ${touched.fromColumn && errors.fromColumn ? 'new-fk-dialog__input--error' : ''}`}
+                value={fromColumn}
+                onChange={(e) => setFromColumn(e.target.value)}
+                onBlur={() => handleBlur('fromColumn')}
+                placeholder={fromModel ? 'Enter column name...' : 'Select source table first'}
+                disabled={!fromModel}
+              />
+            )}
+            {touched.fromColumn && errors.fromColumn && (
+              <span className="new-fk-dialog__error">{errors.fromColumn}</span>
+            )}
+          </div>
 
-        {/* Target Column */}
-        <div className="new-fk-dialog__field">
-          <label className="new-fk-dialog__label" htmlFor="toColumn">
-            Target Column (PK)
-          </label>
-          {targetColumns.length > 0 ? (
+          {/* Target Model */}
+          <div className="new-fk-dialog__field">
+            <label className="new-fk-dialog__label" htmlFor="toModel">
+              Target Table
+            </label>
             <select
-              id="toColumn"
-              className={`new-fk-dialog__select ${touched.toColumn && errors.toColumn ? 'new-fk-dialog__select--error' : ''}`}
-              value={toColumn}
-              onChange={(e) => handleToColumnChange(e.target.value)}
-              onBlur={() => handleBlur('toColumn')}
+              id="toModel"
+              className={`new-fk-dialog__select ${touched.toModel && errors.toModel ? 'new-fk-dialog__select--error' : ''}`}
+              value={toModel}
+              onChange={(e) => handleToModelChange(e.target.value)}
+              onBlur={() => handleBlur('toModel')}
             >
-              <option value="">Select column...</option>
-              {targetColumns.map((name) => (
+              <option value="">Select table...</option>
+              {modelNames.map((name) => (
                 <option key={name} value={name}>
                   {name}
                 </option>
               ))}
             </select>
-          ) : (
-            <input
-              id="toColumn"
-              type="text"
-              className={`new-fk-dialog__input ${touched.toColumn && errors.toColumn ? 'new-fk-dialog__input--error' : ''}`}
-              value={toColumn}
-              onChange={(e) => setToColumn(e.target.value)}
-              onBlur={() => handleBlur('toColumn')}
-              placeholder={toModel ? 'Enter column name...' : 'Select target table first'}
-              disabled={!toModel}
-            />
-          )}
-          {touched.toColumn && errors.toColumn && (
-            <span className="new-fk-dialog__error">{errors.toColumn}</span>
-          )}
-          {absorbed({ fromColumn, toColumn }) && <span className="new-fk-dialog__hint">{ABSORB_HINT}</span>}
-        </div>
+            {touched.toModel && errors.toModel && (
+              <span className="new-fk-dialog__error">{errors.toModel}</span>
+            )}
+          </div>
 
-        {/* The other column pairs of a composite foreign key (#133 L2) */}
-        {extraPairs.map((pair, i) => {
-          const columnPicker = (end: 'fromColumn' | 'toColumn', columns: string[], label: string) => (columns.length > 0 ? (
-            <select
-              className="new-fk-dialog__select new-fk-dialog__pair-column"
-              aria-label={`${label} ${i + 2}`}
-              value={pair[end]}
-              onChange={(e) => setPair(i, end, e.target.value)}
-            >
-              <option value="">Select column...</option>
-              {columns.map((name) => <option key={name} value={name}>{name}</option>)}
-            </select>
-          ) : (
-            <input
-              type="text"
-              className="new-fk-dialog__input new-fk-dialog__pair-column"
-              aria-label={`${label} ${i + 2}`}
-              value={pair[end]}
-              onChange={(e) => setPair(i, end, e.target.value)}
-              placeholder="Enter column name..."
-            />
-          ));
-          return (
-            <div key={i} className="new-fk-dialog__field new-fk-dialog__pair">
-              <div className="new-fk-dialog__pair-row">
-                {columnPicker('fromColumn', sourceColumns, 'Source column')}
-                <span className="new-fk-dialog__pair-arrow">→</span>
-                {columnPicker('toColumn', targetColumns, 'Target column')}
-                <button
-                  type="button"
-                  className="new-fk-dialog__pair-remove"
-                  onClick={() => removePair(i)}
-                  title="Remove this column pair"
-                  aria-label={`Remove column pair ${i + 2}`}
-                >
-                  ×
-                </button>
+          {/* Target Column */}
+          <div className="new-fk-dialog__field">
+            <label className="new-fk-dialog__label" htmlFor="toColumn">
+              Target Column (PK)
+            </label>
+            {targetColumns.length > 0 ? (
+              <select
+                id="toColumn"
+                className={`new-fk-dialog__select ${touched.toColumn && errors.toColumn ? 'new-fk-dialog__select--error' : ''}`}
+                value={toColumn}
+                onChange={(e) => handleToColumnChange(e.target.value)}
+                onBlur={() => handleBlur('toColumn')}
+              >
+                <option value="">Select column...</option>
+                {targetColumns.map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <input
+                id="toColumn"
+                type="text"
+                className={`new-fk-dialog__input ${touched.toColumn && errors.toColumn ? 'new-fk-dialog__input--error' : ''}`}
+                value={toColumn}
+                onChange={(e) => setToColumn(e.target.value)}
+                onBlur={() => handleBlur('toColumn')}
+                placeholder={toModel ? 'Enter column name...' : 'Select target table first'}
+                disabled={!toModel}
+              />
+            )}
+            {touched.toColumn && errors.toColumn && (
+              <span className="new-fk-dialog__error">{errors.toColumn}</span>
+            )}
+            {absorbed({ fromColumn, toColumn }) && <span className="new-fk-dialog__hint">{ABSORB_HINT}</span>}
+          </div>
+
+          {/* The other column pairs of a composite foreign key (#133 L2) */}
+          {extraPairs.map((pair, i) => {
+            const columnPicker = (end: 'fromColumn' | 'toColumn', columns: string[], label: string) => (columns.length > 0 ? (
+              <select
+                className="new-fk-dialog__select new-fk-dialog__pair-column"
+                aria-label={`${label} ${i + 2}`}
+                value={pair[end]}
+                onChange={(e) => setPair(i, end, e.target.value)}
+              >
+                <option value="">Select column...</option>
+                {columns.map((name) => <option key={name} value={name}>{name}</option>)}
+              </select>
+            ) : (
+              <input
+                type="text"
+                className="new-fk-dialog__input new-fk-dialog__pair-column"
+                aria-label={`${label} ${i + 2}`}
+                value={pair[end]}
+                onChange={(e) => setPair(i, end, e.target.value)}
+                placeholder="Enter column name..."
+              />
+            ));
+            return (
+              <div key={i} className="new-fk-dialog__field new-fk-dialog__pair">
+                <div className="new-fk-dialog__pair-row">
+                  {columnPicker('fromColumn', sourceColumns, 'Source column')}
+                  <span className="new-fk-dialog__pair-arrow">→</span>
+                  {columnPicker('toColumn', targetColumns, 'Target column')}
+                  <button
+                    type="button"
+                    className="new-fk-dialog__pair-remove"
+                    onClick={() => removePair(i)}
+                    title="Remove this column pair"
+                    aria-label={`Remove column pair ${i + 2}`}
+                  >
+                    ×
+                  </button>
+                </div>
+                {errors[`pairs.${i}`] && (
+                  <span className="new-fk-dialog__error">{errors[`pairs.${i}`]}</span>
+                )}
+                {!errors[`pairs.${i}`] && absorbed(pair) && <span className="new-fk-dialog__hint">{ABSORB_HINT}</span>}
               </div>
-              {errors[`pairs.${i}`] && (
-                <span className="new-fk-dialog__error">{errors[`pairs.${i}`]}</span>
-              )}
-              {!errors[`pairs.${i}`] && absorbed(pair) && <span className="new-fk-dialog__hint">{ABSORB_HINT}</span>}
-            </div>
-          );
-        })}
-        {fromModel && toModel && pairCount < MAX_COMPOSITE_PAIRS && (
-          <button type="button" className="new-fk-dialog__link-button new-fk-dialog__add-pair" onClick={addPair}>
-            {ADD_PAIR_LABEL}
-          </button>
-        )}
+            );
+          })}
+          {fromModel && toModel && pairCount < MAX_COMPOSITE_PAIRS && (
+            <button type="button" className="new-fk-dialog__link-button new-fk-dialog__add-pair" onClick={addPair}>
+              {ADD_PAIR_LABEL}
+            </button>
+          )}
+        </div>
 
         {/* Cardinality */}
         <div className="new-fk-dialog__field">
