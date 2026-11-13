@@ -6275,7 +6275,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       // ELK auto layout instead, which persists through `updatePositions` (one
       // edit, one undo step). The simple placement below still goes out in the
       // payload so the first paint is never at (0,0), but it is not written:
-      // should the ELK run fail, the next open simply asks again.
+      // a layout ELK cannot finish falls back to the webview's grid, which is
+      // saved the same way, and only if even that fails does the next open
+      // ask again.
       // A DBML diagram's positions live in its Project's `erd_layout`,
       // written the same way.
       const autoLayout = activeStage === 'logical' && isFreshLayout(unifiedDomain);

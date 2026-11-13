@@ -26,6 +26,7 @@ import {
   type LayoutFallbackRung,
 } from '../../src/types/webviewError';
 import { NODE_WIDTH, resolveNodeDimensions } from '@erd-studio/renderer/sizing';
+import type { ToastAction } from '../store/editorStore';
 
 // ---------------------------------------------------------------------------
 // Node size estimation — lives in @erd-studio/renderer (lib/nodeSizing.ts) so
@@ -692,6 +693,8 @@ export interface LayoutOutcome {
   bands: 'partitioned' | 'direction' | 'off';
   /** Why the default layout was not used: the diagram's size, or the first error's text (for the local log only). */
   reason?: 'size' | string;
+  /** The class of the default layout's failure, when it failed (what the user is told: {@link layoutFailureNotice}). */
+  failure?: LayoutFailure;
 }
 
 /** What a caller may hear about a layout as it runs (usage telemetry). */
@@ -1011,16 +1014,17 @@ export async function runElkLayout(
   // waited long enough, and another ELK run would fail the same way.
   const err = firstError;
   const reason = err instanceof Error ? (err.message || err.name) : String(err);
+  const failure = classifyLayoutFailure(err);
   if (isStackOverflow(err)) tell(() => hooks.onStackFallback?.());
 
   const steps = plan.fallbacks;
   let lastError: unknown = err;
-  if (!goStraightToGrid(classifyLayoutFailure(err))) {
+  if (!goStraightToGrid(failure)) {
     for (const step of steps) {
       try {
         const positions = elkPositions(await attempt(step.graph));
         tell(() => hooks.onFallbackRung?.(step.rung));
-        return finish(positions, { step: step.step, grouping: resolved, bands: step.step === 'ungrouped' ? 'off' : bands, reason });
+        return finish(positions, { step: step.step, grouping: resolved, bands: step.step === 'ungrouped' ? 'off' : bands, reason, failure });
       } catch (stepErr) {
         lastError = stepErr;
         if (goStraightToGrid(classifyLayoutFailure(stepErr))) break;
@@ -1032,7 +1036,7 @@ export async function runElkLayout(
     const positions = gridLayout(nodes, edges, plan.options, plan.gridBands);
     assertUsableLayout({ id: 'root', children: Object.entries(positions).map(([id, p]) => ({ id, ...p })) }, nodes.length);
     tell(() => hooks.onFallbackRung?.(3));
-    return finish(positions, { step: 'grid', grouping: resolved, bands: bands === 'off' ? 'off' : 'direction', reason });
+    return finish(positions, { step: 'grid', grouping: resolved, bands: bands === 'off' ? 'off' : 'direction', reason, failure });
   } catch (gridErr) {
     lastError = gridErr;
   }
@@ -1049,20 +1053,51 @@ export async function runElkLayout(
   throw err;
 }
 
+/** What the canvas tells the user about a layout: the toast's words and its buttons. */
+export interface LayoutNotice {
+  message: string;
+  actions: ToastAction[];
+}
+
+/**
+ * What the canvas says when the full layout failed (#294), by the failure's
+ * class: never the engine's name or the error's own text, whose problem it is,
+ * and what to do next. `arranged`: the tables were put in the grid's tidy
+ * columns; otherwise they stay where they were. A diagram too large to finish
+ * in time or memory is a limit, and trying again would only wait again, so it
+ * offers Send Feedback alone; anything else is a bug and offers Try Again too.
+ */
+export function layoutFailureNotice(failure: LayoutFailure, arranged: boolean): LayoutNotice {
+  if (failure === 'timeout' || failure === 'memory') {
+    const stopped = failure === 'timeout' ? `stopped after ${LAYOUT_TIMEOUT_MS / 1000} seconds` : 'ran out of memory';
+    const where = arranged ? 'in tidy columns in relationship order' : 'where they were';
+    return {
+      message: `This diagram is too large to arrange automatically (ERD Studio ${stopped}). Your tables are all here, ${where}. This is a limit in ERD Studio, not a problem with your files.`,
+      actions: ['layoutFeedback'],
+    };
+  }
+  return {
+    message: arranged
+      ? "ERD Studio couldn't arrange this diagram automatically, so your tables are in tidy columns in relationship order. This is a bug in ERD Studio, not a problem with your files."
+      : "ERD Studio couldn't arrange this diagram. Your tables are where they were. This is a bug in ERD Studio, not a problem with your files.",
+    actions: ['retryLayout', 'layoutFeedback'],
+  };
+}
+
 /**
  * What the canvas says about a layout that worked but not as asked (for the
  * user, as a notice), or `undefined` when it laid out as asked. The grouping
  * names are the layout popover's.
  */
-export function layoutOutcomeNotice(outcome: LayoutOutcome, tables: number): string | undefined {
+export function layoutOutcomeNotice(outcome: LayoutOutcome, tables: number): LayoutNotice | undefined {
   const grouping = outcome.grouping === 'role' ? 'Table type' : outcome.grouping === 'depth' ? 'Join depth' : 'None';
   if (outcome.step === 'grid') {
     return outcome.reason === 'size'
-      ? `This diagram (${tables} tables) is too large for the full auto layout, so the tables were arranged in tidy columns in relationship order.`
-      : `The full auto layout failed on this diagram, so the tables were arranged in tidy columns in relationship order. Details are in the ERD Studio output.`;
+      ? { message: `This diagram (${tables} tables) is too large for the full auto layout, so the tables were arranged in tidy columns in relationship order.`, actions: [] }
+      : layoutFailureNotice(outcome.failure ?? 'other', true);
   }
   if (outcome.step === 'ungrouped') {
-    return `Grouping by ${grouping} failed on this diagram, so it was laid out with no grouping. Details are in the ERD Studio output.`;
+    return { message: `Grouping by ${grouping} failed on this diagram, so it was laid out with no grouping. Details are in the ERD Studio output.`, actions: [] };
   }
   return undefined;
 }

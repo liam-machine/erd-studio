@@ -34,6 +34,8 @@ import {
   layoutFailureReport,
   layoutOutcomeLogMessage,
   layoutOutcomeNotice,
+  layoutFailureNotice,
+  classifyLayoutFailure,
   layoutLeftTablesInPlace,
   layoutUnchangedNotice,
   tableTypeBandCount,
@@ -644,8 +646,9 @@ export function Toolbar({ nodes, edges }: ToolbarProps) {
       vscode.postMessage(message);
       reportLayout(true);
       setLayoutDirty(false);
+      // A grid after a failure (a timeout among them, #294) says so in plain words, with its buttons.
       const notice = outcome ? layoutOutcomeNotice(outcome, modelNodes.length) : undefined;
-      if (notice) setToastMessage(notice);
+      if (notice) setToastMessage(notice.message, notice.actions);
       // A re-applied layout that moved nothing would look like it never ran.
       else if (!firstOpen && layoutLeftTablesInPlace(modelNodes, positions)) {
         setToastMessage(layoutUnchangedNotice(outcome, tableTypeBandCount(modelNodes)));
@@ -653,8 +656,11 @@ export function Toolbar({ nodes, edges }: ToolbarProps) {
     } catch (err) {
       reportLayout(false, err);
       console.error('[Toolbar] Auto layout failed:', err);
-      const detail = err instanceof Error ? err.message : String(err);
-      setToastMessage(`Auto layout failed: ${detail}`);
+      // Even the grid failed, so nothing is written and the tables stay where
+      // they were. Plain words by the failure's class, never the error's text
+      // (#294): that went to the ERD Studio log through `layoutFinished`.
+      const notice = layoutFailureNotice(classifyLayoutFailure(err), false);
+      setToastMessage(notice.message, notice.actions);
     } finally {
       setIsLayouting(false);
     }

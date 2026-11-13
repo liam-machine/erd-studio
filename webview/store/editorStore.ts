@@ -42,6 +42,12 @@ export type {
 // ---------------------------------------------------------------------------
 
 /** Prefill data for FK dialog when opened via drag-to-connect. */
+/**
+ * A button a store toast can offer: `retryLayout` runs Auto Layout again,
+ * `layoutFeedback` opens Send Feedback filled in with the toast's words.
+ */
+export type ToastAction = 'retryLayout' | 'layoutFeedback';
+
 export interface FkDialogPrefill {
   fromModel: string;
   fromColumn: string;
@@ -166,6 +172,12 @@ export interface EditorState extends CanvasState {
   canvasMode: 'pan' | 'select';
   /** Transient toast message raised from anywhere in the webview (null = none). */
   toastMessage: string | null;
+  /**
+   * The buttons the toast above offers (#294: an Auto Layout failure's Try
+   * Again and Send Feedback), or null for none. A toast with buttons stays
+   * until it is dismissed, so they cannot vanish under the pointer.
+   */
+  toastActions: ToastAction[] | null;
   /**
    * A relationship the host asked to show (`revealRelationship`, the sidebar's
    * Open in Diagram). `useRevealRelationship` selects and centres its line
@@ -327,8 +339,8 @@ export interface EditorActions extends CanvasActions {
   setSyncPlanGenerated: (info: { filePath: string; totalActions: number } | null) => void;
   /** Set the canvas interaction mode. */
   setCanvasMode: (mode: 'pan' | 'select') => void;
-  /** Show (or clear with null) a transient toast notification. */
-  setToastMessage: (message: string | null) => void;
+  /** Show (or clear with null) a transient toast notification, with any buttons it offers. */
+  setToastMessage: (message: string | null, actions?: ToastAction[]) => void;
   /** Set / clear the relationship to show (see `pendingReveal`). */
   setPendingReveal: (target: RevealRelationshipMessage['payload'] | null) => void;
   /** Set / clear the table to show (see `pendingTableReveal`). */
@@ -402,6 +414,7 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   syncPlanGenerated: null,
   canvasMode: 'pan',
   toastMessage: null,
+  toastActions: null,
   pendingReveal: null,
   pendingTableReveal: null,
   physicalSourceNoticeDismissed: false,
@@ -568,7 +581,10 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   setSyncPlanGenerated: (info) => set({ syncPlanGenerated: info }),
 
   setCanvasMode: (mode) => set({ canvasMode: mode }),
-  setToastMessage: (message) => set({ toastMessage: message }),
+  setToastMessage: (message, actions) => set({
+    toastMessage: message,
+    toastActions: message !== null && actions && actions.length > 0 ? actions : null,
+  }),
   setPendingReveal: (target) => set({ pendingReveal: target }),
   setPendingTableReveal: (modelName) => set({ pendingTableReveal: modelName }),
 
