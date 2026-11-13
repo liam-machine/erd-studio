@@ -5,9 +5,16 @@
  * filter there, a grouping toggle on one), and the glass sidebar has one
  * search field over all sections, so here:
  *
- * - the per-view finders (Go to Table…, Filter …) are left out. They stay in
- *   the Command Palette, and a filter set from there still shows its chip and
- *   its Clear button;
+ * - the per-view Filter… commands are left out: the search field drives the
+ *   same filters (all three at once). They stay in the Command Palette;
+ * - a section's Clear Filter shows (as an icon) only while that section has
+ *   a filter of its own, set from the Command Palette, that the field does
+ *   not show; a filter typed in the field is cleared from the field;
+ * - Go to Table… stays, at the top of the Table Library's `…` menu. It is
+ *   not a filter the field replaces but a jump to one table (a picker with
+ *   each table's details, opening it on a diagram), and it belongs to the
+ *   Table Library; the header rule leaves no room for a third icon, and every
+ *   other non-create title icon moves to the top of `…` the same way;
  * - the Table Library's New Table… / New Schema… become its `+`, as the
  *   Diagrams view's New… menu is;
  * - any other title-bar icon (the Relationships grouping toggle) moves to the
@@ -19,9 +26,8 @@
  */
 import type { MenuAction } from './contributions';
 
-/** Finders the one search field replaces. */
+/** The Filter… boxes the one search field replaces. */
 const HIDDEN_COMMANDS: ReadonlySet<string> = new Set([
-  'erdStudio.goToTable',
   'erdStudio.filterDiagrams',
   'erdStudio.filterTableLibrary',
   'erdStudio.filterRelationships',
@@ -42,10 +48,22 @@ export interface TitleActions {
   groups: MenuAction[][];
 }
 
+export interface TitleActionOptions {
+  /**
+   * The section's filter is the search field's (every section shares it):
+   * the field clears it, so the section offers no Clear Filter of its own.
+   */
+  filterInField?: boolean;
+}
+
 /**
  * @param commandOf the command a title action runs (undefined for a submenu).
  */
-export function consistentTitleActions(actions: TitleActions, commandOf: (action: MenuAction) => string | undefined): TitleActions {
+export function consistentTitleActions(
+  actions: TitleActions,
+  commandOf: (action: MenuAction) => string | undefined,
+  options: TitleActionOptions = {},
+): TitleActions {
   const keep = (a: MenuAction): boolean => { const c = commandOf(a); return !c || !HIDDEN_COMMANDS.has(c); };
   const isCreate = (a: MenuAction): boolean => { const c = commandOf(a); return !!c && CREATE_COMMANDS.has(c); };
 
@@ -55,7 +73,7 @@ export function consistentTitleActions(actions: TitleActions, commandOf: (action
   for (const a of actions.navigation.filter(keep)) {
     const command = commandOf(a);
     if (a.submenu) add.push(a);
-    else if (command && CLEAR_FILTER_COMMANDS.has(command)) clear.push(a);
+    else if (command && CLEAR_FILTER_COMMANDS.has(command)) { if (!options.filterInField) clear.push(a); }
     else moved.push(a);
   }
 

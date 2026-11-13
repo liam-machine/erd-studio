@@ -9,13 +9,23 @@
  * entry index; the host decides (and validates) what runs.
  */
 import { GLASS_ICON_FALLBACK, GLASS_ICONS } from './icons';
+import { GLASS_SEARCH_MAX_LENGTH, type GlassFilterGuide } from './protocol';
 
 export interface GlassSidebarHtmlOptions {
   cspSource: string;
   nonce: string;
   /** `dist/webview.css` as a webview URI (the glass tokens). */
   tokensCssUri: string;
+  /**
+   * The search field's filter keys and debounce (the host passes
+   * `glassFilterGuide()`, from sidebarFilter.ts). Without it the field has
+   * no keys list and sends after {@link DEFAULT_SEARCH_DEBOUNCE_MS}.
+   */
+  filterGuide?: GlassFilterGuide;
 }
+
+/** The search field's debounce when the host gives none (sidebarFilter's FILTER_DEBOUNCE_MS). */
+const DEFAULT_SEARCH_DEBOUNCE_MS = 150;
 
 export function buildGlassSidebarCsp(cspSource: string, nonce: string): string {
   return [
@@ -37,6 +47,7 @@ function inlineJson(value: unknown): string {
 
 export function buildGlassSidebarHtml(options: GlassSidebarHtmlOptions): string {
   const n = escapeAttr(options.nonce);
+  const guide: GlassFilterGuide = options.filterGuide ?? { keys: [], syntax: '', debounceMs: DEFAULT_SEARCH_DEBOUNCE_MS };
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -51,9 +62,11 @@ export function buildGlassSidebarHtml(options: GlassSidebarHtmlOptions): string 
 <div class="gs-app">
   <div class="gs-search" role="search">
     <span class="gs-search__icon" aria-hidden="true"></span>
-    <input class="gs-search__input" type="text" placeholder="Search" aria-label="Search diagrams, tables and relationships" aria-keyshortcuts="/ Control+F Meta+F" spellcheck="false" autocomplete="off">
+    <span class="gs-search__busy gs-spinner" aria-hidden="true"></span>
+    <input class="gs-search__input" type="text" placeholder="Search" maxlength="${GLASS_SEARCH_MAX_LENGTH}" aria-label="Search and filter diagrams, tables and relationships" aria-keyshortcuts="/ Control+F Meta+F" spellcheck="false" autocomplete="off">
     <kbd class="gs-search__kbd" aria-hidden="true">/</kbd>
     <button class="gs-search__clear" type="button" aria-label="Clear search" title="Clear search" hidden></button>
+    <button class="gs-search__keys" type="button" aria-label="Filter keys" title="Filter by layer, column, owner…" aria-haspopup="menu" aria-expanded="false"${guide.keys.length ? '' : ' hidden'}></button>
   </div>
   <main class="gs-sections" aria-busy="true"></main>
   <div class="gs-noresults" hidden></div>
@@ -61,6 +74,7 @@ export function buildGlassSidebarHtml(options: GlassSidebarHtmlOptions): string 
 <div class="gs-menu-layer"></div>
 <div class="gs-live" aria-live="polite"></div>
 <script type="application/json" id="gs-icons" nonce="${n}">${inlineJson({ icons: GLASS_ICONS, fallback: GLASS_ICON_FALLBACK })}</script>
+<script type="application/json" id="gs-config" nonce="${n}">${inlineJson({ filterGuide: guide })}</script>
 <script nonce="${n}">${GLASS_SIDEBAR_SCRIPT}</script>
 </body>
 </html>`;
@@ -213,7 +227,7 @@ svg.gs-icon {
   flex: 1;
   min-width: 0;
   height: 30px;
-  padding: 0 30px 0 30px;
+  padding: 0 52px 0 30px;
   border: 1px solid var(--glass-input-border);
   border-radius: var(--radius-pill);
   background: var(--glass-surface-2);
@@ -250,7 +264,7 @@ svg.gs-icon {
 .gs-search__clear {
   position: absolute;
   z-index: 1;
-  right: calc(var(--gs-gutter) + 5px);
+  right: calc(var(--gs-gutter) + 27px);
   top: 50%;
   margin-top: -9px;
   display: flex;
@@ -270,7 +284,7 @@ svg.gs-icon {
 .gs-search__kbd {
   position: absolute;
   z-index: 1;
-  right: calc(var(--gs-gutter) + 8px);
+  right: calc(var(--gs-gutter) + 30px);
   top: 50%;
   margin-top: -8px;
   min-width: 16px;
@@ -298,6 +312,56 @@ svg.gs-icon {
 .gs-search__clear:hover { background: var(--control-fill-active); color: var(--text-primary); }
 .gs-search__clear:focus-visible { outline: var(--focus-outline); outline-offset: 1px; }
 .gs-search__clear[hidden] { display: none; }
+
+/* The filter keys: a quiet funnel at the field's end, opening the list of keys. */
+.gs-search__keys {
+  position: absolute;
+  z-index: 1;
+  right: calc(var(--gs-gutter) + 5px);
+  top: 50%;
+  margin-top: -10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  transition: background-color var(--duration-fast) var(--ease-standard), color var(--duration-fast) var(--ease-standard);
+}
+
+.gs-search__keys svg.gs-icon { width: 13px; height: 13px; }
+.gs-search__keys:hover { background: var(--control-fill-hover); color: var(--text-primary); }
+.gs-search__keys[aria-expanded='true'] { background: var(--control-fill-active); color: var(--text-primary); }
+.gs-search__keys:focus-visible { outline: var(--focus-outline); outline-offset: 1px; }
+.gs-search__keys[hidden] { display: none; }
+
+body.vscode-high-contrast .gs-search__keys:hover,
+body.vscode-high-contrast-light .gs-search__keys:hover {
+  border-color: var(--vscode-contrastActiveBorder, var(--focus-border));
+}
+
+/* A slow answer (or table files still being read for col:): the glass turns a small ring in place of the magnifier.
+   Doubled class: wins over .gs-spinner's own size and margin, defined further down. */
+.gs-search .gs-search__busy {
+  position: absolute;
+  z-index: 1;
+  box-sizing: border-box;
+  left: calc(var(--gs-gutter) + 10px);
+  top: 50%;
+  width: 14px;
+  height: 14px;
+  margin: -6px 0 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.gs-search.is-busy .gs-search__busy { visibility: visible; }
+.gs-search.is-busy .gs-search__icon { visibility: hidden; }
 
 /* --- Section cards -------------------------------------------------------- */
 
@@ -460,6 +524,54 @@ body.vscode-light .gs-section__header.is-stuck {
 .gs-section__filter svg.gs-icon { width: 10px; height: 10px; }
 .gs-section__filter span { overflow: hidden; text-overflow: ellipsis; }
 
+/* Work under way for the section (the native view's progress): along the
+   header's foot, inset from its rounded corners, a short accent glint slides
+   across at an even pace, as VS Code's own view progress bar does (no track:
+   at rest the header has no line there). The header is sticky, so it is the
+   bar's box. */
+.gs-section__progress {
+  position: absolute;
+  left: var(--radius-lg);
+  right: var(--radius-lg);
+  bottom: 0;
+  height: 2px;
+  overflow: hidden;
+  border-radius: var(--radius-pill);
+  pointer-events: none;
+}
+
+.gs-section__progress::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 40%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, transparent, var(--accent) 35%, var(--accent) 65%, transparent);
+  animation: gs-progress 1.4s linear infinite;
+}
+
+@keyframes gs-progress {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(250%); }
+}
+
+/* Reduced motion: no glint travelling; the whole track glows and fades slowly instead. */
+@media (prefers-reduced-motion: reduce) {
+  .gs-section__progress::before {
+    width: 100%;
+    background: var(--accent);
+    animation: gs-breathe 1.6s ease-in-out infinite;
+  }
+}
+
+/* High contrast: a solid line in the theme's contrast colour, never a soft gradient. */
+body.vscode-high-contrast .gs-section__progress::before,
+body.vscode-high-contrast-light .gs-section__progress::before {
+  background: var(--vscode-contrastActiveBorder, var(--focus-border));
+}
+
 /* Title actions take no room until shown (the header hovered, keyboard
    focus in the header, or their menu open), so a narrow view keeps its
    titles whole: pointing at the card's rows leaves its title alone.
@@ -606,6 +718,19 @@ body.vscode-high-contrast-light .gs-row.is-selected {
   border-color: var(--control-border-selected);
 }
 
+/* Selected rows next to each other read as one block (a range, Select All). */
+.gs-row.is-selected:has(+ .gs-row.is-selected) {
+  border-bottom-color: transparent;
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.gs-row.is-selected + .gs-row.is-selected {
+  border-top-color: transparent;
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}
+
 .gs-row:focus { outline: none; }
 .gs-row:focus-visible {
   outline: var(--focus-outline);
@@ -681,6 +806,13 @@ body.gs-dragging .gs-section__header.is-drop-wait {
 }
 
 .gs-dragpill svg.gs-icon { width: 14px; height: 14px; flex: none; }
+
+/* Several rows: the pill is the top of a small stack. */
+.gs-dragpill--many {
+  box-shadow:
+    3px 3px 0 -1px var(--glass-surface-3),
+    3px 3px 0 0 var(--glass-border-strong);
+}
 
 /* Indent guides: a hairline under each ancestor's chevron, quiet until the tree is hovered. */
 .gs-guide {
@@ -787,7 +919,7 @@ body.vscode-high-contrast-light .gs-mark {
 
 .gs-row:hover > .gs-row__actions,
 .gs-row:focus-within > .gs-row__actions,
-.gs-tree:focus-within .gs-row.is-selected > .gs-row__actions,
+.gs-tree:not(.gs-tree--many):focus-within .gs-row.is-selected > .gs-row__actions,
 .gs-row.is-menu-open > .gs-row__actions {
   display: flex;
   animation: gs-fade-in var(--duration-fast) var(--ease-standard);
@@ -1051,6 +1183,47 @@ body.vscode-high-contrast-light .gs-welcome__glyph {
 
 .gs-noresults[hidden] { display: none; }
 
+.gs-noresults p { margin: 0; }
+
+.gs-noresults__lead {
+  color: var(--text-secondary);
+}
+
+.gs-noresults p.gs-noresults__why {
+  margin-top: var(--space-2);
+  font-size: var(--text-xs);
+}
+
+.gs-noresults__actions {
+  display: flex;
+  justify-content: center;
+  gap: var(--space-5);
+  margin-top: var(--space-4);
+}
+
+/* A section the search found nothing in: one quiet line where its rows would be. */
+.gs-section__none {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--space-2) var(--space-3) var(--space-1);
+  color: var(--text-tertiary);
+  font-size: var(--text-sm);
+}
+
+.gs-section__none-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.gs-section__none-head svg.gs-icon { width: 12px; height: 12px; flex: none; }
+
+.gs-section__none-why {
+  padding-left: 18px;
+  font-size: var(--text-xs);
+}
+
 /* --- Popover menu (matches the canvas context menu) ------------------------- */
 
 .gs-menu {
@@ -1141,6 +1314,38 @@ body.vscode-high-contrast-light .gs-welcome__glyph {
 }
 
 .gs-menu__item--danger { color: var(--error-fg); }
+
+/* Filter keys: the key as typed, then what it finds. */
+.gs-menu--keys { max-width: min(320px, calc(100vw - 12px)); }
+
+.gs-menu__item-label--code {
+  flex: none;
+  min-width: 72px;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+.gs-menu__item-hint {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gs-menu__item:hover .gs-menu__item-hint,
+.gs-menu__item:focus-visible .gs-menu__item-hint { color: var(--text-secondary); }
+
+.gs-menu__note {
+  margin: var(--space-2) var(--space-4) var(--space-1);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--glass-divider);
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+}
 .gs-menu__item--danger:hover, .gs-menu__item--danger:focus-visible { background: var(--glass-tint-error); }
 
 .gs-menu__sep {
@@ -1183,21 +1388,73 @@ export const GLASS_SIDEBAR_SCRIPT = String.raw`
   var iconData = JSON.parse(document.getElementById('gs-icons').textContent || '{}');
   var ICONS = iconData.icons || {};
   var FALLBACK = iconData.fallback || '';
+  var config = JSON.parse(document.getElementById('gs-config').textContent || '{}');
+  // The filter keys (sidebarFilter.ts) and the field's debounce.
+  var GUIDE = config.filterGuide || { keys: [], syntax: '', debounceMs: 150 };
 
   var saved = vscode.getState() || {};
+  // A page that has been here before in this view (reloaded, or the view moved or
+  // re-created): it comes back as it was, without the first visit's entrance.
+  var restoredSession = Object.keys(saved).length > 0;
+  // Where the list was scrolled to, put back once a state is drawn that is tall enough.
+  var pendingScroll = typeof saved.scrollY === 'number' && isFinite(saved.scrollY) && saved.scrollY > 0 ? Math.round(saved.scrollY) : 0;
+  var SCROLL_RESTORE_MS = 5000;
+  var loadedAt = Date.now();
   var ui = {
     expanded: saved.expanded || {},
     collapsedSections: saved.collapsedSections || {},
-    selected: saved.selected || null,
-    query: typeof saved.query === 'string' ? saved.query : '',
+    // The selection: rows of one section ({ section, ids, anchor }), or null.
+    // anchor: where a Shift range starts. Several ids only where the section is multiSelect.
+    sel: savedSelection(saved),
+    // The search field's text. Not restored from saved state: the host's filters
+    // (session only, as the native views') are the truth, and each state says
+    // what the field shows (msg.search).
+    query: '',
     searchOpen: {}
   };
+
+  // The search field drives the host's filters (sections marked filterable):
+  // its text is sent debounced (search.timer), each send numbered (seq), and
+  // a state that holds the answer says so (searchSeq -> ack).
+  var search = {
+    timer: 0,
+    sent: null,       // the text last sent (or adopted from the host)
+    seq: 0,
+    ack: 0,
+    busy: false,      // drawn: the answer is slow
+    busyTimer: 0,
+    focusFirst: false, // Enter or Down while the answer was on its way: focus the first row once it arrives
+    returnTo: null     // Escape cleared the field: where focus goes back to once the rows are back (a focusKeyOf shape)
+  };
+  var BUSY_DELAY_MS = 250;
+  // What the host says the field shows: a string, null when the sections' filters differ, undefined before any state.
+  var hostSearch;
+  // Where focus was before the search field took it (Cmd/Ctrl+F, "/"): Escape there returns it.
+  var searchReturn = null;
+  var renderQuiet = false;  // the next render follows a search: no entrance animations
+
+  /** The persisted selection; an older page saved one row as { section, id }. */
+  function savedSelection(s) {
+    var v = s.selection;
+    if (v && typeof v.section === 'string' && Array.isArray(v.ids)) {
+      var ids = v.ids.filter(function (x) { return typeof x === 'string'; });
+      return ids.length ? { section: v.section, ids: ids, anchor: typeof v.anchor === 'string' ? v.anchor : ids[0] } : null;
+    }
+    var old = s.selected;
+    if (old && typeof old.section === 'string' && typeof old.id === 'string') return { section: old.section, ids: [old.id], anchor: old.id };
+    return null;
+  }
+  // Cmd on macOS, Ctrl elsewhere: what adds a row to the selection (and Cmd/Ctrl+A, +Left), as in VS Code.
+  var IS_MAC = /Mac|iPhone|iPad/.test(navigator.platform || '') || /Mac OS X/.test(navigator.userAgent || '');
+  function modKey(ev) { return IS_MAC ? ev.metaKey : ev.ctrlKey; }
   var model = { sections: [] };
   var index = {};          // section key -> id -> { node, parent, depth }
   var lastFocus = null;    // { section, id }
   var pendingMenu = null;  // { section, id, anchor }
   var openMenuState = null;
   var pendingExpand = {};  // section/id -> true while the host lists children
+  var expandAsked = {};    // section/id -> true: asked for by the page itself (an open row restored unlisted); once per row
+  var lastShownSig = null; // the open sections last told to the host (sectionsShown)
   var renderCtx = null;    // per render: which rows the previous DOM showed (new ones enter)
   var rendered = false;
   var introActive = false; // the first render's cards rise in, staggered
@@ -1205,8 +1462,10 @@ export const GLASS_SIDEBAR_SCRIPT = String.raw`
 
   var sectionsEl = document.querySelector('.gs-sections');
   var noResultsEl = document.querySelector('.gs-noresults');
+  var searchEl = document.querySelector('.gs-search');
   var searchInput = document.querySelector('.gs-search__input');
   var searchClear = document.querySelector('.gs-search__clear');
+  var keysButton = document.querySelector('.gs-search__keys');
   var menuLayer = document.querySelector('.gs-menu-layer');
   var liveEl = document.querySelector('.gs-live');
 
@@ -1217,7 +1476,52 @@ export const GLASS_SIDEBAR_SCRIPT = String.raw`
     if (keys.length > 3000) {
       keys.slice(0, keys.length - 3000).forEach(function (k) { delete ui.expanded[k]; });
     }
-    vscode.setState({ expanded: ui.expanded, collapsedSections: ui.collapsedSections, selected: ui.selected, query: ui.query });
+    // While a restore is still waiting, its target stays the saved place (not the 0 the page starts at).
+    var y = pendingScroll || Math.max(0, Math.round(window.scrollY || 0));
+    vscode.setState({ expanded: ui.expanded, collapsedSections: ui.collapsedSections, selection: ui.sel, scrollY: y });
+  }
+
+  // Scrolling saves its place, at most a few times a second (setState crosses to VS Code).
+  var SCROLL_SAVE_MS = 250;
+  var scrollSaveTimer = 0;
+  function scheduleScrollSave() {
+    if (scrollSaveTimer) return;
+    scrollSaveTimer = setTimeout(function () { scrollSaveTimer = 0; persist(); }, SCROLL_SAVE_MS);
+  }
+
+  /** A section still shows its "Loading…" placeholder: the list has not reached its height yet. */
+  function stillLoading() {
+    return model.sections.some(function (s) {
+      var w = s.welcome || [];
+      return s.visible && !(s.nodes || []).length && w.length === 1 && w[0].paragraphs.length === 1
+        && w[0].paragraphs[0].parts.length === 1 && /^Loading/.test(w[0].paragraphs[0].parts[0].text || '');
+    });
+  }
+
+  /**
+   * Put the saved scroll place back once a state is drawn: as far as the list
+   * now reaches (it may have shrunk since). While a section is still loading
+   * and the list too short, it waits for the next state, a few seconds at
+   * most. Given up as soon as the user scrolls, types or clicks, or something
+   * is revealed or shown.
+   */
+  function restoreScroll() {
+    if (!pendingScroll) return;
+    var max = document.documentElement.scrollHeight - window.innerHeight;
+    if (max < pendingScroll && stillLoading() && Date.now() - loadedAt < SCROLL_RESTORE_MS) return;
+    var y = Math.max(0, Math.min(pendingScroll, max));
+    pendingScroll = 0;
+    if (y > 0) window.scrollTo(0, y);
+  }
+
+  function cancelScrollRestore() { pendingScroll = 0; }
+  ['wheel', 'touchstart', 'pointerdown', 'keydown'].forEach(function (t) {
+    window.addEventListener(t, cancelScrollRestore, { capture: true, passive: true });
+  });
+
+  /** Under reduced motion a scroll jumps; otherwise it glides. */
+  function scrollBehavior() {
+    return window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth';
   }
 
   function el(tag, cls, text) {
@@ -1270,6 +1574,7 @@ export const GLASS_SIDEBAR_SCRIPT = String.raw`
 
   document.querySelector('.gs-search__icon').appendChild(icon('search'));
   searchClear.appendChild(icon('close'));
+  keysButton.appendChild(icon('filter'));
 
   function isLightTheme() {
     var c = document.body.classList;
@@ -1328,6 +1633,28 @@ export const GLASS_SIDEBAR_SCRIPT = String.raw`
 
   function query() { return ui.query.trim().toLowerCase(); }
 
+  /** The host filters this section by the field's text: the page never hides its rows by its own match. */
+  function hostFiltered(section) { return !!(section && section.filterable); }
+
+  function anyFilterable() { return model.sections.some(hostFiltered); }
+
+  /** The field's text the page matches a section's rows against itself: Help & Feedback's, never a filterable section's. */
+  function localQuery(section) { return hostFiltered(section) ? '' : query(); }
+
+  /**
+   * While searching, a section shows its results open (its fold waits until the
+   * field is cleared). A host-filtered one only once the host has answered with
+   * what it found: until then a folded section stays folded, never flashing its
+   * unfiltered rows.
+   */
+  function heldOpen(section) {
+    if (!section || !query()) return false;
+    return hostFiltered(section) ? !!section.found : true;
+  }
+
+  /** The sections carry different filters (set one at a time from the Command Palette): the field cannot show them as one. */
+  function filtersDiffer() { return hostSearch === null && model.sections.some(function (s) { return !!s.filter; }); }
+
   function matches(n, q) {
     return n.label.toLowerCase().indexOf(q) >= 0 || (n.description || '').toLowerCase().indexOf(q) >= 0;
   }
@@ -1362,9 +1689,11 @@ export const GLASS_SIDEBAR_SCRIPT = String.raw`
 
   /** The rows a section shows now, flattened with their depth. */
   function visibleRows(section) {
-    var q = query();
+    var q = localQuery(section);
     var sets = q ? searchSets(section, q) : null;
     var rows = [];
+    // A host filter that found nothing lists one "No … match" row: the page says it in its own words instead.
+    var nodes = section.found ? (section.nodes || []).filter(function (n) { return n.contextValue !== 'filterNoMatch'; }) : section.nodes;
     (function walk(nodes, depth, parentShowsAll) {
       // Rows are a flat list, so each states its place among its shown siblings.
       var shown = (nodes || []).filter(function (n) { return !sets || parentShowsAll || sets.hit[n.id] || sets.keep[n.id]; });
@@ -1381,7 +1710,7 @@ export const GLASS_SIDEBAR_SCRIPT = String.raw`
           }
         }
       });
-    })(section.nodes, 0, false);
+    })(nodes, 0, false);
     return { rows: rows, sets: sets };
   }
 
@@ -1452,7 +1781,7 @@ export const GLASS_SIDEBAR_SCRIPT = String.raw`
     // turns the chevron through its CSS transition.
     if (n.collapsible) row.setAttribute('aria-expanded', r.open ? 'true' : 'false');
     if (renderCtx && renderCtx.animateNew && !renderCtx.ids[section.key + '\u0000' + n.id]) row.className += ' gs-row--enter';
-    var selected = ui.selected && ui.selected.section === section.key && ui.selected.id === n.id;
+    var selected = isSelected(section.key, n.id);
     row.setAttribute('aria-selected', selected ? 'true' : 'false');
     if (selected) row.className += ' is-selected';
     var owner = menuOwner();
@@ -1547,8 +1876,16 @@ export const GLASS_SIDEBAR_SCRIPT = String.raw`
     chev.appendChild(icon('chevron-right'));
     toggle.appendChild(chev);
     toggle.appendChild(el('span', 'gs-section__title', section.title));
-    // While searching, the pill counts this section's matches (accent); otherwise the view's total.
-    if (searching) {
+    // Filtered on the host: what it found, as the native view says it (4 of 52). Matched here
+    // (Help & Feedback): the matches. Otherwise the view's total.
+    var f = section.found;
+    if (f) {
+      // The accent only when it found something: "0 of 52" stays quiet.
+      var shown = el('span', 'gs-section__count' + (f.shown > 0 ? ' gs-section__count--hits' : ''), f.shown + ' of ' + f.total);
+      shown.title = f.text;
+      shown.setAttribute('aria-label', f.shown + ' of ' + f.total + ' ' + f.noun);
+      toggle.appendChild(shown);
+    } else if (searching && !hostFiltered(section)) {
       var found = el('span', 'gs-section__count gs-section__count--hits', String(hits));
       found.title = hits + (hits === 1 ? ' match' : ' matches');
       toggle.appendChild(found);
@@ -1560,10 +1897,11 @@ export const GLASS_SIDEBAR_SCRIPT = String.raw`
         toggle.appendChild(pill);
       }
     }
-    if (searching) toggle.setAttribute('aria-disabled', 'true');
+    if (heldOpen(section)) toggle.setAttribute('aria-disabled', 'true');
     header.appendChild(toggle);
 
-    if (section.filter) {
+    // The section's own filter, when the field cannot show it (the sections' filters differ).
+    if (section.filter && filtersDiffer()) {
       var chip = el('span', 'gs-section__filter');
       chip.title = 'Filtered: ' + section.filter;
       chip.appendChild(icon('filter-filled'));
@@ -1589,7 +1927,7 @@ export const GLASS_SIDEBAR_SCRIPT = String.raw`
       }
       actions.appendChild(b);
     });
-    if (section.actions.groups && section.actions.groups.length) {
+    if ((section.actions.groups && section.actions.groups.length) || section.collapseAll) {
       var more = el('button', 'gs-iconbtn');
       more.type = 'button';
       more.title = 'More Actions…';
@@ -1602,6 +1940,13 @@ export const GLASS_SIDEBAR_SCRIPT = String.raw`
       actions.appendChild(more);
     }
     header.appendChild(actions);
+    // Work under way for the section (the native view's progress bar): a thin bar along the header's foot.
+    if (section.busy) {
+      var bar = el('span', 'gs-section__progress');
+      bar.setAttribute('role', 'progressbar');
+      bar.setAttribute('aria-label', section.title + ': working…');
+      header.appendChild(bar);
+    }
     return header;
   }
 
@@ -1687,6 +2032,70 @@ export const GLASS_SIDEBAR_SCRIPT = String.raw`
       });
     });
     return wrap;
+  }
+
+  /** A host-filtered section that found nothing: one quiet line (and what the filter could not use). */
+  function renderNone(section) {
+    var f = section.found;
+    var wrap = el('div', 'gs-section__none');
+    wrap.setAttribute('role', 'status');
+    var head = el('span', 'gs-section__none-head');
+    head.appendChild(icon('filter'));
+    head.appendChild(el('span', '', f.reading ? 'Still reading table files…' : 'No ' + f.noun + ' match'));
+    wrap.appendChild(head);
+    if (f.warnings && f.warnings.length) wrap.appendChild(el('span', 'gs-section__none-why', f.warnings.join(' · ')));
+    return wrap;
+  }
+
+  /**
+   * Nothing anywhere: the one message, with Clear Search and the keys. Built
+   * only when what it says changes (it is outside the reconciled list).
+   */
+  var noResultsSig = null;
+  function renderNoResults(show) {
+    if (noResultsEl.hidden !== !show) noResultsEl.hidden = !show;
+    if (!show) { noResultsSig = null; return; }
+    // What the filter could not use in every section (an unknown key, say): the likely reason.
+    var lists = model.sections.filter(function (s) { return s.found; }).map(function (s) { return s.found.warnings || []; });
+    var common = lists.length ? lists[0].filter(function (w) { return lists.every(function (l) { return l.indexOf(w) !== -1; }); }) : [];
+    var lead = 'Nothing matches “' + ui.query.trim() + '”.';
+    var sig = JSON.stringify([lead, common, GUIDE.keys.length > 0]);
+    if (sig === noResultsSig) return;
+    noResultsSig = sig;
+    noResultsEl.textContent = '';
+    noResultsEl.appendChild(el('p', 'gs-noresults__lead', lead));
+    if (common.length) noResultsEl.appendChild(el('p', 'gs-noresults__why', common.join(' · ')));
+    var actions = el('p', 'gs-noresults__actions');
+    var clear = el('button', 'gs-link', 'Clear search');
+    clear.type = 'button';
+    clear.dataset.nr = 'clear';
+    actions.appendChild(clear);
+    if (GUIDE.keys.length) {
+      var keys = el('button', 'gs-link', 'Filter keys');
+      keys.type = 'button';
+      keys.dataset.nr = 'keys';
+      actions.appendChild(keys);
+    }
+    noResultsEl.appendChild(actions);
+  }
+
+  /** The search strip: Clear, the busy ring (a slow answer), the placeholder, from script state. */
+  function paintSearch() {
+    if (searchClear.hidden !== !ui.query) searchClear.hidden = !ui.query;
+    var waiting = search.seq > search.ack || model.sections.some(function (s) { return !!(s.found && s.found.reading); });
+    if (!waiting) {
+      clearTimeout(search.busyTimer);
+      search.busyTimer = 0;
+      search.busy = false;
+    } else if (!search.busy && !search.busyTimer) {
+      // Only a slow answer shows it: most come back before the ring would be seen.
+      search.busyTimer = setTimeout(function () { search.busyTimer = 0; search.busy = true; paintSearch(); }, BUSY_DELAY_MS);
+    }
+    if (searchEl.classList.contains('is-busy') !== search.busy) searchEl.classList.toggle('is-busy', search.busy);
+    var busyAttr = search.busy ? 'true' : 'false';
+    if (searchInput.getAttribute('aria-busy') !== busyAttr) searchInput.setAttribute('aria-busy', busyAttr);
+    var placeholder = filtersDiffer() && !ui.query ? 'Filters differ per section' : 'Search';
+    if (searchInput.placeholder !== placeholder) searchInput.placeholder = placeholder;
   }
 
   // Rendering builds the wanted DOM off-document, then reconciles the live
@@ -1777,8 +2186,10 @@ export const GLASS_SIDEBAR_SCRIPT = String.raw`
   }
 
   /** What has keyboard focus in the list, by identity (the element itself may be replaced). */
-  function captureFocus() {
-    var a = document.activeElement;
+  function captureFocus() { return focusKeyOf(document.activeElement); }
+
+  /** An element of the list, by identity (null for anything outside it). */
+  function focusKeyOf(a) {
     if (!a || a === document.body || !sectionsEl.contains(a)) return null;
     var card = a.closest('.gs-section');
     var row = a.closest('.gs-row[data-id]');
@@ -1798,7 +2209,7 @@ export const GLASS_SIDEBAR_SCRIPT = String.raw`
     var card = k.section && cardEl(k.section);
     if (!card) return null;
     if (k.id) {
-      var row = rowEl(k.section, k.id);
+      var row = sameRowEl(k.section, k.id);
       if (!row || k.onRow || !k.slot) return row;
       return row.querySelector('.gs-row__actions [data-slot="' + k.slot + '"]') || row;
     }
@@ -1828,46 +2239,66 @@ export const GLASS_SIDEBAR_SCRIPT = String.raw`
     for (var e = 0; e < existing.length; e++) {
       prevIds[existing[e].dataset.section + '\u0000' + existing[e].dataset.id] = true;
     }
-    renderCtx = { ids: prevIds, animateNew: rendered && existing.length > 0 && !query() };
-    var intro = !rendered;
+    // A search swaps the host's rows (new ids under each filter): none of them "enter".
+    renderCtx = { ids: prevIds, animateNew: rendered && existing.length > 0 && !query() && !renderQuiet && !searchPending() };
+    renderQuiet = false;
+    var first = !rendered;
+    // The cards rise in on a first visit only: a restored page is simply there.
+    var intro = first && !restoredSession;
     rendered = true;
     if (intro) introActive = true;
+    // Open rows whose children the host has not listed (restored from saved state past its budget).
+    var unlisted = [];
     var scrollY = window.scrollY;
     var focus = lastFocus;
     var focusKey = captureFocus();
     var q = query();
     var searching = !!q;
-    var anyVisible = false;
     var fresh = [];
+    // Each shown section and its rows. A section matched here (Help & Feedback) with
+    // no match is left out; a host-filtered one that found nothing says so in a line.
+    var shownSections = [];
     model.sections.forEach(function (section, i) {
       if (!section.visible) return;
       var vis = visibleRows(section);
-      if (searching && vis.rows.length === 0) return;
-      anyVisible = true;
-      var collapsed = !searching && (ui.collapsedSections[section.key] !== undefined ? ui.collapsedSections[section.key] : section.defaultCollapsed);
+      if (searching && !hostFiltered(section) && vis.rows.length === 0) return;
+      shownSections.push({ section: section, i: i, vis: vis, none: !!section.found && vis.rows.length === 0 });
+    });
+    // Searching, and not one row anywhere: one message for the whole sidebar instead of a card per section.
+    var nothing = searching && shownSections.every(function (x) { return x.vis.rows.length === 0; });
+    if (nothing) shownSections = [];
+    shownSections.forEach(function (x) {
+      var section = x.section, i = x.i, vis = x.vis;
+      var collapsed = !heldOpen(section) && (ui.collapsedSections[section.key] !== undefined ? ui.collapsedSections[section.key] : section.defaultCollapsed);
       var card = el('section', 'gs-section' + (collapsed ? ' gs-section--collapsed' : '') + (section.key === 'help' ? ' gs-section--help' : ''));
       card.dataset.key = section.key;
       if (introActive) card.style.animationDelay = (i * 40) + 'ms';
       card.setAttribute('aria-labelledby', 'gs-head-' + section.key);
+      if (section.busy) card.setAttribute('aria-busy', 'true');
+      vis.rows.forEach(function (r) { if (r.loading) unlisted.push([section.key, r.parent.id]); });
       card.appendChild(renderHeader(section, collapsed, searching, vis.sets ? Object.keys(vis.sets.hit).length : 0));
       var body = el('div', 'gs-section__body');
       body.id = 'gs-body-' + section.key;
       var inner = el('div', 'gs-section__inner');
       var content = el('div', 'gs-section__content');
-      if (vis.rows.length === 0) {
+      if (x.none) {
+        content.appendChild(renderNone(section));
+      } else if (vis.rows.length === 0) {
         content.appendChild(renderWelcome(section));
       } else {
-        var tree = el('div', 'gs-tree');
+        var tree = el('div', 'gs-tree' + treeSelectionClass(section.key));
         tree.setAttribute('role', 'tree');
         tree.setAttribute('aria-label', section.title);
+        if (section.multiSelect) tree.setAttribute('aria-multiselectable', 'true');
         tree.dataset.section = section.key;
         var flat = !vis.rows.some(function (r) { return r.node && r.node.collapsible; }) && vis.rows.every(function (r) { return r.depth === 0; });
         if (flat) tree.className += ' gs-tree--flat';
-        // The row that takes Tab: the last focused, else the selected, else the first.
+        // The row that takes Tab: the last focused, else the selection's anchor (or first selected), else the first.
         var ids = {}, firstId = null, pickId = null;
         vis.rows.forEach(function (r) { if (r.node) { ids[r.node.id] = true; if (firstId === null) firstId = r.node.id; } });
         if (focus && focus.section === section.key && ids[focus.id]) pickId = focus.id;
-        else if (ui.selected && ui.selected.section === section.key && ids[ui.selected.id]) pickId = ui.selected.id;
+        else if (ui.sel && ui.sel.section === section.key && ids[ui.sel.anchor]) pickId = ui.sel.anchor;
+        else if (ui.sel && ui.sel.section === section.key) pickId = ui.sel.ids.filter(function (s) { return ids[s]; })[0] || firstId;
         else pickId = firstId;
         vis.rows.forEach(function (r) { tree.appendChild(renderRow(section, r, vis.sets, pickId)); });
         content.appendChild(tree);
@@ -1890,21 +2321,58 @@ export const GLASS_SIDEBAR_SCRIPT = String.raw`
       }, 700);
     }
     renderCtx = null;
-    var showNone = searching && !anyVisible;
-    if (noResultsEl.hidden !== !showNone) noResultsEl.hidden = !showNone;
-    if (showNone) {
-      var none = 'Nothing matches “' + ui.query.trim() + '”.';
-      if (noResultsEl.textContent !== none) noResultsEl.textContent = none;
-    }
-    if (searchClear.hidden !== !ui.query) searchClear.hidden = !ui.query;
+    renderNoResults(nothing);
+    paintSearch();
     restoreFocus(focusKey);
     // Only when the rebuild moved it: an unconditional scrollTo would cut a smooth scroll short.
     if (window.scrollY !== scrollY) window.scrollTo(0, scrollY);
+    requestUnlisted(unlisted);
+    reportShown();
+    // The first draw marks the session: a reload of this page later comes back without the entrance.
+    if (first) persist();
+  }
+
+  /** Ask the host for each open row it has not listed, once (it lists any row asked for). */
+  function requestUnlisted(list) {
+    list.forEach(function (x) {
+      var key = x[0] + '\u0000' + x[1];
+      if (pendingExpand[key] || expandAsked[key]) return;
+      pendingExpand[key] = true;
+      expandAsked[key] = true;
+      post({ type: 'expand', section: x[0], id: x[1] });
+    });
+  }
+
+  /** Tell the host which sections are drawn open now, when that changed (it counts an empty Diagrams card as seen only then). */
+  function reportShown() {
+    var open = cards().filter(function (c) { return !c.classList.contains('gs-section--collapsed'); }).map(function (c) { return c.dataset.key; });
+    var sig = open.join(',');
+    if (sig === lastShownSig) return;
+    lastShownSig = sig;
+    post({ type: 'sectionsShown', open: open });
   }
 
   function rowEl(sectionKey, id) {
     var rows = document.querySelectorAll('.gs-tree[data-section="' + sectionKey + '"] .gs-row[data-id]');
     for (var i = 0; i < rows.length; i++) if (rows[i].dataset.id === id) return rows[i];
+    return null;
+  }
+
+  /**
+   * A row id without the host filter's mark. A container row listed under a
+   * filter gets a new id each time (the tree's own id plus "#filterN", so a
+   * native view opens it), and a child named after it carries the mark too:
+   * the same row, listed again under another filter or none.
+   */
+  function plainId(id) { return String(id).replace(/#filter[0-9]+(?=[\/#]|$)/g, ''); }
+
+  /** A row by id; else the same row listed under another filter (focus follows it across a search's answer). */
+  function sameRowEl(sectionKey, id) {
+    var exact = rowEl(sectionKey, id);
+    if (exact || !id) return exact;
+    var want = plainId(id);
+    var rows = document.querySelectorAll('.gs-tree[data-section="' + sectionKey + '"] .gs-row[data-id]');
+    for (var i = 0; i < rows.length; i++) if (plainId(rows[i].dataset.id) === want) return rows[i];
     return null;
   }
 
@@ -1916,12 +2384,15 @@ export const GLASS_SIDEBAR_SCRIPT = String.raw`
     var info = index[sectionKey] && index[sectionKey][id];
     if (!info || !info.node.collapsible) return;
     var key = sectionKey + '\u0000' + id;
-    if (query()) ui.searchOpen[key] = open;
+    // Rows matched here keep their own open state while searching; host-filtered rows are the tree's own.
+    if (localQuery(sectionByKey(sectionKey))) ui.searchOpen[key] = open;
     else ui.expanded[key] = open;
     if (open && info.node.childrenLoaded === false && !pendingExpand[key]) {
       pendingExpand[key] = true;
       post({ type: 'expand', section: sectionKey, id: id });
     }
+    // Rows folded away leave the selection, as in a native tree: an action never runs on rows out of sight.
+    if (!open) keepVisibleSelection(sectionKey);
     persist();
     render();
   }
@@ -1931,14 +2402,173 @@ export const GLASS_SIDEBAR_SCRIPT = String.raw`
     setExpanded(sectionKey, id, !(row && row.getAttribute('aria-expanded') === 'true'));
   }
 
-  function select(sectionKey, id) {
-    ui.selected = { section: sectionKey, id: id };
-    lastFocus = { section: sectionKey, id: id };
-    var prev = document.querySelectorAll('.gs-row.is-selected');
-    for (var i = 0; i < prev.length; i++) { prev[i].classList.remove('is-selected'); prev[i].setAttribute('aria-selected', 'false'); }
-    var row = rowEl(sectionKey, id);
-    if (row) { row.classList.add('is-selected'); row.setAttribute('aria-selected', 'true'); }
+  /**
+   * Collapse All (the native view's title action, and Cmd/Ctrl+Left): every
+   * row of the section folds; the card stays open. While searching, the
+   * results fold too (typing again opens them to the matches). A focused row
+   * folded away hands focus to its top-level row, as a native tree does.
+   */
+  function collapseAll(sectionKey) {
+    var map = index[sectionKey];
+    var section = sectionByKey(sectionKey);
+    if (!map || !section) return;
+    var searching = !!localQuery(section);
+    Object.keys(map).forEach(function (id) {
+      var n = map[id].node;
+      if (!n.collapsible) return;
+      var key = sectionKey + '\u0000' + id;
+      // Folded is the default of a collapsed row: forget it rather than store it (the state stays small).
+      if (n.collapsible === 2) ui.expanded[key] = false; else delete ui.expanded[key];
+      if (searching) ui.searchOpen[key] = false;
+    });
+    var active = document.activeElement;
+    var hadFocus = !!(active && active.closest && active.closest('.gs-tree[data-section="' + sectionKey + '"]'));
+    var top = null;
+    if (lastFocus && lastFocus.section === sectionKey && map[lastFocus.id]) {
+      top = map[lastFocus.id];
+      while (top.parent) top = map[top.parent.id];
+      lastFocus = { section: sectionKey, id: top.node.id };
+    }
+    keepVisibleSelection(sectionKey);
     persist();
+    render();
+    if (hadFocus && top) {
+      var row = rowEl(sectionKey, top.node.id);
+      if (row) focusRow(row);
+    }
+    announce(section.title + ': all rows collapsed');
+  }
+
+  // ------------------------------------------------------------- selection
+  //
+  // One selection for the whole sidebar, in one section at a time (ui.sel).
+  // render() draws it (is-selected, aria-selected, the tree's gs-tree--many);
+  // paintSelection() writes the same onto the live rows between renders.
+
+  function isMultiSection(key) { var s = sectionByKey(key); return !!(s && s.multiSelect); }
+
+  function isSelected(key, id) { return !!(ui.sel && ui.sel.section === key && ui.sel.ids.indexOf(id) !== -1); }
+
+  function selectedCount(key) { return ui.sel && ui.sel.section === key ? ui.sel.ids.length : 0; }
+
+  function treeSelectionClass(key) { return selectedCount(key) > 1 ? ' gs-tree--many' : ''; }
+
+  /** The ids of the rows a section shows now, in order. */
+  function visibleIds(key) {
+    var section = sectionByKey(key);
+    if (!section) return [];
+    return visibleRows(section).rows.filter(function (r) { return !!r.node; }).map(function (r) { return r.node.id; });
+  }
+
+  /** The selected ids in the order the tree shows them (rows out of sight after). */
+  function orderedSelection(key) {
+    if (!ui.sel || ui.sel.section !== key) return [];
+    var order = visibleIds(key);
+    var chosen = ui.sel.ids;
+    var shown = order.filter(function (id) { return chosen.indexOf(id) !== -1; });
+    return shown.concat(chosen.filter(function (id) { return shown.indexOf(id) === -1; }));
+  }
+
+  function paintSelection() {
+    var rows = sectionsEl.querySelectorAll('.gs-row[data-id]');
+    for (var i = 0; i < rows.length; i++) {
+      var want = isSelected(rows[i].dataset.section, rows[i].dataset.id);
+      if (rows[i].classList.contains('is-selected') !== want) rows[i].classList.toggle('is-selected', want);
+      if (rows[i].getAttribute('aria-selected') !== String(want)) rows[i].setAttribute('aria-selected', String(want));
+    }
+    var trees = sectionsEl.querySelectorAll('.gs-tree');
+    for (var t = 0; t < trees.length; t++) {
+      var many = selectedCount(trees[t].dataset.section) > 1;
+      if (trees[t].classList.contains('gs-tree--many') !== many) trees[t].classList.toggle('gs-tree--many', many);
+    }
+  }
+
+  function setSelection(key, ids, anchor) {
+    ui.sel = { section: key, ids: ids, anchor: anchor };
+    paintSelection();
+    persist();
+  }
+
+  /** The row alone (a plain click, a reveal). */
+  function select(sectionKey, id) {
+    lastFocus = { section: sectionKey, id: id };
+    setSelection(sectionKey, [id], id);
+  }
+
+  /** Cmd/Ctrl-click, Cmd/Ctrl+Space: the row in or out of the selection; it becomes the anchor. */
+  function toggleSelected(key, id) {
+    lastFocus = { section: key, id: id };
+    if (!isMultiSection(key) || !ui.sel || ui.sel.section !== key) { select(key, id); return; }
+    var ids = ui.sel.ids.slice();
+    var at = ids.indexOf(id);
+    if (at === -1) ids.push(id); else ids.splice(at, 1);
+    setSelection(key, ids, id);
+  }
+
+  /** Shift-click, Shift+arrows: the rows from the anchor to this one (added to the selection when additive). */
+  function selectRange(key, id, additive) {
+    if (!isMultiSection(key)) { select(key, id); return; }
+    var order = visibleIds(key);
+    var to = order.indexOf(id);
+    if (to === -1) return;
+    var anchor = ui.sel && ui.sel.section === key && order.indexOf(ui.sel.anchor) !== -1 ? ui.sel.anchor : id;
+    var from = order.indexOf(anchor);
+    var range = order.slice(Math.min(from, to), Math.max(from, to) + 1);
+    var ids = range;
+    if (additive && ui.sel && ui.sel.section === key) {
+      ids = ui.sel.ids.slice();
+      range.forEach(function (r) { if (ids.indexOf(r) === -1) ids.push(r); });
+    }
+    lastFocus = { section: key, id: id };
+    setSelection(key, ids, anchor);
+  }
+
+  /** Cmd/Ctrl+A: every row the section shows. */
+  function selectAll(key, focusedId) {
+    var order = visibleIds(key);
+    if (!order.length) return;
+    var anchor = ui.sel && ui.sel.section === key && order.indexOf(ui.sel.anchor) !== -1 ? ui.sel.anchor : (focusedId || order[0]);
+    setSelection(key, order, anchor);
+    announce(order.length === 1 ? '1 row selected' : order.length + ' rows selected');
+  }
+
+  /**
+   * After a new state: the selection keeps the rows that are still listed
+   * (by id), and one row where the section no longer selects many.
+   */
+  function keepListedSelection() {
+    if (!ui.sel) return;
+    var map = index[ui.sel.section];
+    var ids = map ? ui.sel.ids.filter(function (id) { return !!map[id]; }) : [];
+    var anchor = ids.indexOf(ui.sel.anchor) !== -1 ? ui.sel.anchor : ids[0];
+    if (ids.length > 1 && !isMultiSection(ui.sel.section)) ids = [anchor];
+    if (ids.length === ui.sel.ids.length && anchor === ui.sel.anchor) return;
+    ui.sel = ids.length ? { section: ui.sel.section, ids: ids, anchor: anchor } : null;
+    persist();
+  }
+
+  /** Drop the selected rows a fold has hidden. */
+  function keepVisibleSelection(key) {
+    if (!ui.sel || ui.sel.section !== key) return;
+    var order = visibleIds(key);
+    var ids = ui.sel.ids.filter(function (id) { return order.indexOf(id) !== -1; });
+    if (ids.length === ui.sel.ids.length) return;
+    ui.sel = ids.length ? { section: key, ids: ids, anchor: ids.indexOf(ui.sel.anchor) !== -1 ? ui.sel.anchor : ids[0] } : null;
+  }
+
+  /**
+   * Before a row action (hover button, its … menu, right-click), as a native
+   * tree: a row in the selection keeps the selection; any other row becomes it.
+   */
+  function selectForAction(key, id) {
+    if (!isSelected(key, id)) select(key, id);
+    else lastFocus = { section: key, id: id };
+  }
+
+  /** The ids a row action names besides its row: the selection, in a section that selects many. */
+  function actionSelection(key, id) {
+    if (!isMultiSection(key) || !isSelected(key, id)) return undefined;
+    return orderedSelection(key);
   }
 
   function activate(sectionKey, id) {
@@ -2000,39 +2630,74 @@ export const GLASS_SIDEBAR_SCRIPT = String.raw`
       }
     } else if (act === 'title-more') {
       if (swallowReopen(b)) return;
-      openMenu((section.actions.groups || []).map(function (g) { return flattenSub(g).map(titleItem(section)); }), buttonAnchor(b), { section: section.key, slot: 'more', title: section.title });
+      var groups = (section.actions.groups || []).map(function (g) { return flattenSub(g).map(titleItem(section)); });
+      // Collapse All: the view's own action, so it ends the menu, apart from the project's actions above it.
+      if (section.collapseAll) groups.push([{ title: 'Collapse All', icon: 'collapse-all', run: function () { collapseAll(section.key); } }]);
+      openMenu(groups, buttonAnchor(b), { section: section.key, slot: 'more', title: section.title });
     } else {
       var row = b.closest('.gs-row[data-id]');
       var info = row && index[section.key] && index[section.key][row.dataset.id];
       if (!info) return;
       if (act === 'inline') {
         var x = (info.node.inline || [])[i];
-        if (x) post({ type: 'invoke', section: section.key, id: info.node.id, menu: x.menu, index: x.index });
+        if (!x) return;
+        selectForAction(section.key, info.node.id);
+        postRowInvoke(section.key, info.node.id, x, actionSelection(section.key, info.node.id));
       } else if (act === 'row-more') {
         if (swallowReopen(b)) return;
-        select(section.key, info.node.id);
+        selectForAction(section.key, info.node.id);
         requestItemMenu(section.key, info.node.id, buttonAnchor(b), 'more');
       }
     }
   }
 
+  /** A row's menu entry, run with the row's id and (multi-select sections) the selected rows' ids. */
+  function postRowInvoke(sectionKey, id, entry, selection) {
+    var msg = { type: 'invoke', section: sectionKey, id: id, menu: entry.menu, index: entry.index };
+    if (selection) msg.selection = selection;
+    post(msg);
+  }
+
+  // Clicks, as a VS Code tree takes them. A double-click is two clicks (detail
+  // 1, then 2) and a dblclick: the first click does what one click does, the
+  // second does nothing again, and the dblclick folds or unfolds a row that
+  // has a command (whose click ran it). A row without one was already
+  // toggled by its first click, so the dblclick leaves it as it is.
   sectionsEl.addEventListener('click', function (ev) {
     var act = ev.target.closest && ev.target.closest('[data-act]');
-    if (act && sectionsEl.contains(act)) { runAct(act); return; }
+    if (act && sectionsEl.contains(act)) {
+      // A row's button runs once per double-click; section headers keep every click.
+      if (ev.detail > 1 && act.closest('.gs-row')) return;
+      runAct(act);
+      return;
+    }
     var row = ev.target.closest && ev.target.closest('.gs-row[data-id]');
     if (!row) return;
+    // Ctrl-click on macOS is a right-click: the contextmenu event has it.
+    if (IS_MAC && ev.ctrlKey && !ev.metaKey) return;
     var sectionKey = row.dataset.section, id = row.dataset.id;
+    var mod = modKey(ev);
     if (ev.target.closest('[data-role="twistie"]')) {
-      select(sectionKey, id);
+      if (ev.detail > 1) return;
+      if (!mod && !ev.shiftKey) select(sectionKey, id);
       toggle(sectionKey, id);
       return;
     }
+    if (mod || ev.shiftKey) {
+      // Selecting, never running: Shift adds the range from the anchor, Cmd/Ctrl one row.
+      if (ev.shiftKey) selectRange(sectionKey, id, mod);
+      else toggleSelected(sectionKey, id);
+      if (document.activeElement !== row) row.focus({ preventScroll: true });
+      return;
+    }
+    if (ev.detail > 1) return;
     activate(sectionKey, id);
   });
 
   sectionsEl.addEventListener('dblclick', function (ev) {
     var row = ev.target.closest && ev.target.closest('.gs-row[data-id]');
     if (!row || ev.target.closest('.gs-row__actions') || ev.target.closest('[data-role="twistie"]')) return;
+    if (ev.shiftKey || ev.metaKey || ev.ctrlKey || ev.altKey) return;
     var info = index[row.dataset.section] && index[row.dataset.section][row.dataset.id];
     if (info && info.node.collapsible && info.node.hasCommand) toggle(row.dataset.section, row.dataset.id);
   });
@@ -2041,7 +2706,7 @@ export const GLASS_SIDEBAR_SCRIPT = String.raw`
     var row = ev.target.closest && ev.target.closest('.gs-row[data-id]');
     ev.preventDefault();
     if (!row) return;
-    select(row.dataset.section, row.dataset.id);
+    selectForAction(row.dataset.section, row.dataset.id);
     // A pointer opens it at the pointer; the keyboard's ContextMenu key (no coordinates) under the row.
     var anchor = ev.button === 2 || ev.clientX || ev.clientY ? { x: ev.clientX + 2, y: ev.clientY + 2, top: ev.clientY - 2 } : rowAnchor(row);
     requestItemMenu(row.dataset.section, row.dataset.id, anchor);
@@ -2085,6 +2750,40 @@ export const GLASS_SIDEBAR_SCRIPT = String.raw`
     row.scrollIntoView({ block: 'nearest' });
   }
 
+  /** Rows per PageUp / PageDown: what fits under the search field, less one so a row stays in view. */
+  function pageSize(row) {
+    var h = row.offsetHeight || 28;
+    var search = document.querySelector('.gs-search');
+    var room = window.innerHeight - (search ? search.offsetHeight : 0);
+    return Math.max(1, Math.floor(room / h) - 1);
+  }
+
+  // Type-ahead: letters typed on a row move focus to the next row whose label
+  // starts with them (one letter again cycles through those rows).
+  var TYPEAHEAD_MS = 800;
+  var typed = { text: '', timer: 0 };
+
+  function typeAhead(sectionKey, rows, i, ch) {
+    clearTimeout(typed.timer);
+    typed.timer = setTimeout(function () { typed.text = ''; }, TYPEAHEAD_MS);
+    typed.text += ch;
+    var text = typed.text;
+    var labelOf = function (r) {
+      var inf = index[sectionKey] && index[sectionKey][r.dataset.id];
+      return inf ? inf.node.label.toLowerCase() : '';
+    };
+    var find = function (prefix, start) {
+      for (var k = 0; k < rows.length; k++) {
+        var r = rows[(start + k) % rows.length];
+        if (labelOf(r).indexOf(prefix) === 0) return r;
+      }
+      return null;
+    };
+    // A first letter looks past the focused row; a longer prefix may still be on it.
+    return find(text, text.length > 1 ? i : i + 1)
+      || (/^(.)\1+$/.test(text) ? find(text.charAt(0), i + 1) : null);
+  }
+
   sectionsEl.addEventListener('keydown', function (ev) {
     var row = ev.target.closest && ev.target.closest('.gs-row[data-id]');
     if (!row || ev.target !== row) return;
@@ -2092,21 +2791,33 @@ export const GLASS_SIDEBAR_SCRIPT = String.raw`
     var rows = rowsOf(tree);
     var i = rows.indexOf(row);
     var sectionKey = row.dataset.section, id = row.dataset.id;
-    var info = index[sectionKey][id];
+    var info = index[sectionKey] && index[sectionKey][id];
+    if (!info) return;
     var expanded = row.getAttribute('aria-expanded') === 'true';
+    var multi = isMultiSection(sectionKey);
+    var mod = modKey(ev);
+    // Shift with a move extends the selection from its anchor, where the section selects many.
+    var extend = multi && ev.shiftKey && !mod && !ev.altKey;
+    var moveTo = function (target) {
+      if (!target) return;
+      focusRow(target);
+      if (extend) selectRange(sectionKey, target.dataset.id, false);
+    };
     switch (ev.key) {
       case 'ArrowDown':
         ev.preventDefault();
-        if (i === rows.length - 1) focusSectionHead(nextSectionKey(sectionKey, 1));
-        else focusRow(rows[i + 1]);
+        if (i < rows.length - 1) moveTo(rows[i + 1]);
+        else if (!extend) focusSectionHead(nextSectionKey(sectionKey, 1));
         break;
       case 'ArrowUp':
         ev.preventDefault();
-        if (i === 0) focusSectionHead(sectionKey);
-        else focusRow(rows[i - 1]);
+        if (i > 0) moveTo(rows[i - 1]);
+        else if (!extend) focusSectionHead(sectionKey);
         break;
-      case 'Home': ev.preventDefault(); focusRow(rows[0]); break;
-      case 'End': ev.preventDefault(); focusRow(rows[rows.length - 1]); break;
+      case 'Home': ev.preventDefault(); moveTo(rows[0]); break;
+      case 'End': ev.preventDefault(); moveTo(rows[rows.length - 1]); break;
+      case 'PageDown': ev.preventDefault(); moveTo(rows[Math.min(rows.length - 1, i + pageSize(row))]); break;
+      case 'PageUp': ev.preventDefault(); moveTo(rows[Math.max(0, i - pageSize(row))]); break;
       case 'ArrowRight':
         ev.preventDefault();
         if (info.node.collapsible && !expanded) setExpanded(sectionKey, id, true);
@@ -2114,28 +2825,54 @@ export const GLASS_SIDEBAR_SCRIPT = String.raw`
         break;
       case 'ArrowLeft':
         ev.preventDefault();
+        // Cmd/Ctrl+Left: Collapse All (VS Code's list.collapseAll key).
+        if (mod) { if (sectionByKey(sectionKey) && sectionByKey(sectionKey).collapseAll) collapseAll(sectionKey); break; }
         if (expanded) setExpanded(sectionKey, id, false);
         else if (info.parent && rowEl(sectionKey, info.parent.id)) focusRow(rowEl(sectionKey, info.parent.id));
         else focusSectionHead(sectionKey);
         break;
       case 'Enter':
-      case ' ':
         ev.preventDefault();
         activate(sectionKey, id);
         break;
+      case ' ':
+        ev.preventDefault();
+        // Cmd/Ctrl+Space: the row in or out of the selection. Space: fold or unfold a row that folds, else activate it.
+        if (mod && multi) toggleSelected(sectionKey, id);
+        else if (info.node.collapsible) toggle(sectionKey, id);
+        else activate(sectionKey, id);
+        break;
+      case 'Escape':
+        // A menu takes Escape first, then the search; after those, a selection of several shrinks to this row.
+        if (multi && !openMenuState && !ui.query && !(selectedCount(sectionKey) === 1 && isSelected(sectionKey, id))) {
+          ev.preventDefault();
+          select(sectionKey, id);
+        }
+        break;
       case 'ContextMenu':
         ev.preventDefault();
-        select(sectionKey, id);
+        selectForAction(sectionKey, id);
         requestItemMenu(sectionKey, id, rowAnchor(row));
         break;
       case 'F10':
         if (ev.shiftKey) {
           ev.preventDefault();
-          select(sectionKey, id);
+          selectForAction(sectionKey, id);
           requestItemMenu(sectionKey, id, rowAnchor(row));
         }
         break;
-      default: break;
+      default:
+        if ((ev.key === 'a' || ev.key === 'A') && mod && !ev.altKey && !ev.shiftKey) {
+          ev.preventDefault();
+          if (multi) selectAll(sectionKey, id);
+          break;
+        }
+        // Type-ahead: printable keys only, never with Cmd/Ctrl/Alt, never "/" (the search field's key).
+        if (ev.key.length === 1 && ev.key !== '/' && /\S/.test(ev.key) && !ev.ctrlKey && !ev.metaKey && !ev.altKey) {
+          var hit = typeAhead(sectionKey, rows, i, ev.key.toLowerCase());
+          if (hit) { ev.preventDefault(); focusRow(hit); }
+        }
+        break;
     }
   });
 
@@ -2209,24 +2946,75 @@ export const GLASS_SIDEBAR_SCRIPT = String.raw`
     });
   }
 
-  /** Scrolls an open section whose header is parked back under that header. */
+  /**
+   * Scrolls a section's body to just under its header's parking place (under
+   * the search field when headers are not pinned): an open section whose
+   * header is parked comes back, and a section brought into view starts there.
+   */
   function bringSectionBack(card) {
     var head = card.querySelector('.gs-section__header');
     var body = card.querySelector('.gs-section__body');
-    var pinTop = parseFloat(card.style.getPropertyValue('--gs-pin-top')) || 0;
-    var y = body.getBoundingClientRect().top + window.scrollY - pinTop - head.offsetHeight;
-    window.scrollTo({ top: Math.max(0, y), behavior: 'smooth' });
+    if (!head || !body) return;
+    var pin = parseFloat(card.style.getPropertyValue('--gs-pin-top'));
+    var top = isNaN(pin) ? (searchEl ? searchEl.offsetHeight : 0) : pin;
+    var y = body.getBoundingClientRect().top + window.scrollY - top - head.offsetHeight;
+    window.scrollTo({ top: Math.max(0, y), behavior: scrollBehavior() });
   }
+
+  /**
+   * Show a section (the host's showSection: what focusing its native view
+   * does). A search that hides its whole card is cleared; the card unfolds,
+   * scrolls into place, and its header takes focus when asked.
+   */
+  function showSection(key, focus) {
+    var section = sectionByKey(key);
+    if (!section || !section.visible) return;
+    cancelScrollRestore();
+    closeMenu(false);
+    if (!cardEl(key) && ui.query) {
+      dropQuery();
+      if (anyFilterable()) sendSearch();
+    }
+    var wasFolded = !!(cardEl(key) && cardEl(key).classList.contains('gs-section--collapsed'));
+    ui.collapsedSections[key] = false;
+    persist();
+    render();
+    var card = cardEl(key);
+    if (!card) return;
+    bringSectionBack(card);
+    if (focus) {
+      var head = document.getElementById('gs-head-' + key);
+      if (head) head.focus({ preventScroll: true });
+    }
+    // Again once the body has opened (it unfolds over a moment, and the list
+    // could not scroll that far before), unless the user has moved since.
+    var mine = ++showSeq;
+    setTimeout(function () {
+      markParked();
+      if (wasFolded && mine === showSeq && !userMovedSince(mine)) {
+        var again = cardEl(key);
+        if (again) bringSectionBack(again);
+      }
+    }, 320);
+  }
+
+  // A showSection's second scroll gives way to the user: any wheel, key or press since.
+  var showSeq = 0, movedAt = 0;
+  ['wheel', 'touchstart', 'pointerdown', 'keydown'].forEach(function (t) {
+    window.addEventListener(t, function () { movedAt = showSeq; }, { capture: true, passive: true });
+  });
+  function userMovedSince(seq) { return movedAt >= seq; }
 
   function setSectionCollapsed(card, collapsed) {
     var key = card.dataset.key;
-    if (query()) return;
+    if (heldOpen(sectionByKey(key))) return;
     ui.collapsedSections[key] = collapsed;
     persist();
     card.classList.toggle('gs-section--collapsed', collapsed);
     var head = document.getElementById('gs-head-' + key);
     if (head) head.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
     markParked();
+    reportShown();
     // Again once the body has folded or opened: the headers below have moved.
     setTimeout(markParked, 320);
   }
@@ -2255,57 +3043,215 @@ export const GLASS_SIDEBAR_SCRIPT = String.raw`
   });
 
   // ------------------------------------------------------------------ search
+  //
+  // One field for every section. Diagrams, Table Library and Relationships are
+  // filtered by the host (the native views' own filter: keys such as layer:,
+  // col:, is:unused, rows not listed yet): the text is sent debounced and the
+  // filtered trees come back as the next state. Help & Feedback, which has no
+  // filter, is matched here. While the answer is on its way the rows shown are
+  // the last answer's: nothing flickers, and the field keeps focus and caret.
 
-  var persistTimer = null, announceTimer = null, searchFrame = 0;
-  searchInput.value = ui.query;
-  searchInput.addEventListener('input', function () {
-    ui.query = searchInput.value;
-    ui.searchOpen = {};
-    searchClear.hidden = !ui.query;
-    // One render per frame, however fast the typing.
-    if (!searchFrame) searchFrame = requestAnimationFrame(function () { searchFrame = 0; render(); });
-    clearTimeout(persistTimer);
-    persistTimer = setTimeout(persist, 250);
+  var announceTimer = null, searchFrame = 0;
+
+  /** Some time after the last keystroke, the field's text goes to the host (at once with flush). */
+  function scheduleSend() {
+    clearTimeout(search.timer);
+    search.timer = setTimeout(sendSearch, GUIDE.debounceMs);
+  }
+
+  /** Whether the host has yet to answer the field's text (unsent, or sent and not acknowledged). */
+  function searchPending() { return !!search.timer || search.seq > search.ack; }
+
+  function sendSearch() {
+    clearTimeout(search.timer);
+    search.timer = 0;
+    // Nothing filtered by the host (no project yet): the field matches Help & Feedback here only.
+    if (!anyFilterable()) { announceLocal(); return; }
+    var text = ui.query;
+    if (text === search.sent) return;
+    search.sent = text;
+    search.seq++;
+    post({ type: 'search', text: text, seq: search.seq });
+    paintSearch();
+  }
+
+  function announceLocal() {
     clearTimeout(announceTimer);
     announceTimer = setTimeout(function () {
       if (!query()) return;
       var n = document.querySelectorAll('.gs-row[data-id] .gs-mark').length;
       announce(n ? n + (n === 1 ? ' match' : ' matches') : 'No matches');
     }, 400);
-  });
+  }
+
+  /** What the host found, said once the answer is in: "4 of 52 tables, 1 of 10 diagrams". */
+  function announceFound() {
+    clearTimeout(announceTimer);
+    announceTimer = setTimeout(function () {
+      if (!query()) return;
+      var parts = model.sections.filter(function (s) { return s.visible && s.found && s.found.shown > 0; })
+        .map(function (s) { return s.found.shown + ' of ' + s.found.total + ' ' + s.found.noun; });
+      announce(parts.length ? parts.join(', ') : 'No matches');
+    }, 400);
+  }
+
+  /** The field's text changed (typing, a key picked from the list). */
+  function onSearchInput() {
+    ui.query = searchInput.value;
+    ui.searchOpen = {};
+    // Still typing: an Enter, Down or Escape before this no longer moves focus when its answer comes.
+    search.focusFirst = false;
+    search.returnTo = null;
+    // One render per frame, however fast the typing (Help & Feedback's matches, the Clear button).
+    if (!searchFrame) searchFrame = requestAnimationFrame(function () { searchFrame = 0; render(); });
+    paintSearch();
+    scheduleSend();
+  }
+
+  /** Put text in the field without sending it: what the host says it shows. */
+  function adoptSearch(text) {
+    search.sent = text;
+    if (ui.query === text && searchInput.value === text) return;
+    ui.query = text;
+    ui.searchOpen = {};
+    if (searchInput.value !== text) searchInput.value = text;
+  }
+
+  searchInput.addEventListener('input', onSearchInput);
+
   searchInput.addEventListener('keydown', function (ev) {
-    if (ev.key === 'Escape' && searchInput.value) {
-      ev.preventDefault();
-      clearSearch();
-    } else if (ev.key === 'ArrowDown' || ev.key === 'Enter') {
-      var first = document.querySelector('.gs-row[data-id]');
-      if (first) { ev.preventDefault(); focusRow(first); }
+    if (ev.key === 'Escape') {
+      // Clear, then go back to where focus was before the field took it.
+      var had = !!searchInput.value;
+      var back = searchReturn;
+      if (had || back) ev.preventDefault();
+      if (had) clearSearch(true);
+      if (back) {
+        // The rows the field's filter hid (and the filtered ids) come back with the host's
+        // answer to the cleared field: go back once it is in, not to what shows before it.
+        searchReturn = null;
+        if (searchPending()) search.returnTo = back;
+        else returnFromSearch(back);
+      }
+    } else if (ev.key === 'Enter' || ev.key === 'ArrowDown') {
+      // Now, not after the pause; the first row of this text's answer, once it is in
+      // (the rows shown meanwhile are the last answer's, about to be replaced).
+      if (search.timer) sendSearch();
+      if (search.seq > search.ack) { ev.preventDefault(); search.focusFirst = true; return; }
+      if (focusFirstRow() || ev.key === 'Enter') ev.preventDefault();
     }
   });
-  function clearSearch(keepFocus) {
+
+  function focusFirstRow() {
+    var first = document.querySelector('.gs-row[data-id]');
+    if (first) focusRow(first);
+    return !!first;
+  }
+
+  /** Focus back where it was before the field took it: the same row or button, else its section's header. */
+  function returnFromSearch(k) {
+    searchReturn = null;
+    var target = focusTarget(k) || (k.section ? document.getElementById('gs-head-' + k.section) : null);
+    if (!target) return;
+    if (target.classList.contains('gs-row')) focusRow(target);
+    else target.focus();
+  }
+
+  /**
+   * Empty the field and the page's own matching. The rows that come back
+   * were there before the search: the next draw plays no entrance for them.
+   */
+  function dropQuery() {
     searchInput.value = '';
     ui.query = '';
     ui.searchOpen = {};
-    persist();
+    search.focusFirst = false;
+    renderQuiet = true;
+  }
+
+  function clearSearch(keepFocus) {
+    dropQuery();
     render();
+    // A cleared field goes at once: no pause to wait out.
+    sendSearch();
     if (keepFocus !== true) searchInput.focus();
     announce('Search cleared');
   }
   searchClear.addEventListener('click', function () { clearSearch(); });
 
+  /** Cmd/Ctrl+F, "/" (or the host's focusSearch): the caret in the field, its text selected; Escape comes back. */
+  function focusSearchField() {
+    var k = captureFocus();
+    if (!k && lastFocus) k = { el: null, section: lastFocus.section, id: lastFocus.id, onRow: true };
+    if (k) searchReturn = k;
+    closeMenu(false);
+    searchInput.focus();
+    searchInput.select();
+  }
+
+  // Focus leaving the list for the field (a click on it, Tab): Escape there comes back.
+  sectionsEl.addEventListener('focusout', function (ev) {
+    if (ev.relatedTarget === searchInput) searchReturn = focusKeyOf(ev.target);
+  });
+
+  // Picking a key from the list puts it in the field, where the caret is.
+  function insertKey(text) {
+    var v = searchInput.value;
+    var start = typeof searchInput.selectionStart === 'number' ? searchInput.selectionStart : v.length;
+    var end = typeof searchInput.selectionEnd === 'number' ? searchInput.selectionEnd : v.length;
+    // The whole text selected ("/" and Cmd/Ctrl+F leave it so, for typing to replace it): a key
+    // picked from the list adds to the query, at its end, and never wipes it.
+    if (v && start === 0 && end === v.length) start = end = v.length;
+    var before = v.slice(0, start), after = v.slice(end);
+    var lead = before && !/\s$/.test(before) ? ' ' : '';
+    // A key that takes a value (layer:) waits for it; a complete one (is:unused) is followed by a space.
+    var trail = /:$/.test(text) || /^\s/.test(after) ? '' : ' ';
+    var head = before + lead + text + trail;
+    if (head.length + after.length > searchInput.maxLength && searchInput.maxLength > 0) return;
+    searchInput.value = head + after;
+    searchInput.focus();
+    try { searchInput.setSelectionRange(head.length, head.length); } catch (e) { /* not a text field */ }
+    onSearchInput();
+  }
+
+  function openKeysMenu() {
+    var items = GUIDE.keys.map(function (k) {
+      return { title: k.key, hint: k.meaning, tip: k.meaning + ' (filters ' + k.where + ')', code: true, run: function () { insertKey(k.key); } };
+    });
+    if (!items.length) return;
+    openMenu([items], buttonAnchor(keysButton), { searchKeys: true, title: 'Filter by' }, { cls: 'gs-menu--keys', note: GUIDE.syntax });
+  }
+
+  keysButton.addEventListener('click', function () {
+    if (swallowReopen(keysButton)) return;
+    openKeysMenu();
+  });
+
+  noResultsEl.addEventListener('click', function (ev) {
+    var b = ev.target.closest && ev.target.closest('[data-nr]');
+    if (!b) return;
+    if (b.dataset.nr === 'clear') clearSearch();
+    else if (b.dataset.nr === 'keys') openKeysMenu();
+  });
+
   document.addEventListener('keydown', function (ev) {
     var editing = ev.target === searchInput;
-    if (!editing && ((ev.key === 'f' && (ev.metaKey || ev.ctrlKey)) || (ev.key === '/' && !ev.metaKey && !ev.ctrlKey && !ev.altKey))) {
+    var find = (ev.key === 'f' || ev.key === 'F') && modKey(ev) && !ev.shiftKey && !ev.altKey;
+    // "/" types itself in a menu's type-ahead (which prevents it); everywhere else in the list it is the field's key.
+    var slash = ev.key === '/' && !ev.metaKey && !ev.ctrlKey && !ev.altKey && !ev.defaultPrevented;
+    if (!editing && (find || slash)) {
       ev.preventDefault();
-      searchInput.focus();
-      searchInput.select();
+      focusSearchField();
     } else if (ev.key === 'Escape' && !editing && !openMenuState && ui.query) {
       // Escape closes a menu first (its own handler); with none open, it clears the search.
       ev.preventDefault();
       var back = lastFocus;
       clearSearch(true);
-      var row = back && rowEl(back.section, back.id);
+      // The row now (it may be listed under the filter's id until the answer replaces it;
+      // focus then follows it to its unfiltered row: restoreFocus), and again once the rows are back.
+      var row = back && sameRowEl(back.section, back.id);
       if (row) focusRow(row);
+      if (back && searchPending()) search.returnTo = { el: null, section: back.section, id: back.id, onRow: true };
     }
   });
 
@@ -2318,6 +3264,7 @@ export const GLASS_SIDEBAR_SCRIPT = String.raw`
       scrolledFrame = 0;
       appEl.classList.toggle('is-scrolled', window.scrollY > 2);
       markParked();
+      if (!pendingScroll) scheduleScrollSave();
     });
   }, { passive: true });
 
@@ -2327,13 +3274,18 @@ export const GLASS_SIDEBAR_SCRIPT = String.raw`
    * groups: [[{ title, icon, run }]]; anchor: { x, y, alignRight };
    * owner: { section, id?, slot?, title }: what to mark open and refocus, as
    * identifiers (a row by section + id, a button by its data-slot), looked up
-   * again whenever needed, since a new state may replace the elements.
+   * again whenever needed, since a new state may replace the elements; or
+   * { searchKeys: true } for the search field's keys button.
+   * An entry may also carry hint (a second, quieter text), tip (its tooltip)
+   * and code (its title is something to type). opts: { cls, note } (a
+   * class for the menu, a closing line of plain text).
    */
-  function openMenu(groups, anchor, owner) {
+  function openMenu(groups, anchor, owner, opts) {
     closeMenu(false);
     groups = groups.filter(function (g) { return g.length > 0; });
     if (!groups.length) return;
-    var menu = el('div', 'gs-menu');
+    opts = opts || {};
+    var menu = el('div', 'gs-menu' + (opts.cls ? ' ' + opts.cls : ''));
     menu.setAttribute('role', 'menu');
     if (owner && owner.title) {
       menu.setAttribute('aria-label', owner.title);
@@ -2356,11 +3308,18 @@ export const GLASS_SIDEBAR_SCRIPT = String.raw`
           if (a.icon) ic.appendChild(icon(a.icon));
           item.appendChild(ic);
         }
-        item.appendChild(el('span', 'gs-menu__item-label', a.title));
+        item.appendChild(el('span', 'gs-menu__item-label' + (a.code ? ' gs-menu__item-label--code' : ''), a.title));
+        if (a.hint) item.appendChild(el('span', 'gs-menu__item-hint', a.hint));
+        if (a.tip) item.title = a.tip;
         item.addEventListener('click', function () { closeMenu(true); a.run(); });
         menu.appendChild(item);
       });
     });
+    if (opts.note) {
+      var note = el('div', 'gs-menu__note', opts.note);
+      note.setAttribute('role', 'note');
+      menu.appendChild(note);
+    }
     menuLayer.appendChild(menu);
     // Keep it inside the (narrow) view: shift left, flip above the anchor
     // when there is no room below, and as a last resort pin and scroll.
@@ -2403,6 +3362,7 @@ export const GLASS_SIDEBAR_SCRIPT = String.raw`
   /** The elements an owner names, as the DOM has them now. */
   function ownerEls(o) {
     var out = { row: null, button: null, actions: null };
+    if (o && o.searchKeys) { out.button = keysButton; return out; }
     if (!o || !o.section) return out;
     if (o.id) {
       out.row = rowEl(o.section, o.id);
@@ -2425,14 +3385,21 @@ export const GLASS_SIDEBAR_SCRIPT = String.raw`
   function closeMenu(refocus) {
     if (!openMenuState) return;
     var owner = openMenuState.owner;
-    openMenuState.el.remove();
+    var menuEl = openMenuState.el;
     openMenuState = null;
-    markOwner(owner, false);
     if (refocus) {
       var els = ownerEls(owner);
-      var target = els.row || els.button;
+      // The keys list belongs to the field: closing it goes back to typing. Otherwise the
+      // row, else the button that opened it, else (redrawn away) its section's header.
+      var target = owner.searchKeys ? searchInput
+        : els.row || els.button || (owner.section ? document.getElementById('gs-head-' + owner.section) : null);
+      // Focused while the owner is still marked open: a header's buttons are drawn only while
+      // it is hovered, holds focus or has its menu open, so a button focused after the mark
+      // is gone is not drawn, and focus would drop to the page.
       if (target) target.focus({ preventScroll: true });
     }
+    menuEl.remove();
+    markOwner(owner, false);
   }
 
   // A press outside closes the menu. A press on the button that opened it
@@ -2533,30 +3500,51 @@ export const GLASS_SIDEBAR_SCRIPT = String.raw`
     post({ type: 'dragEnd' });
   }
 
-  function dragPill(row, node) {
-    var pill = el('div', 'gs-dragpill');
+  /** The drag's picture: the row's icon and label, or for several rows their count, drawn as a small stack. */
+  function dragPill(row, node, count) {
+    var pill = el('div', 'gs-dragpill' + (count > 1 ? ' gs-dragpill--many' : ''));
     // Drawn afresh, not cloned: a cloned row icon carries a style attribute, which the CSP refuses.
     if (node.icon) pill.appendChild(rowIcon(node.icon, node));
-    pill.appendChild(el('span', 'gs-dragpill__label', node.label));
+    pill.appendChild(el('span', 'gs-dragpill__label', count > 1 ? count + ' rows' : node.label));
     document.body.appendChild(pill);
     setTimeout(function () { if (pill.parentNode) pill.parentNode.removeChild(pill); }, 0);
     return pill;
   }
+
+  // The most rows one drag names (the host's MAX_ROWS_SENT: it refuses more). A drag of more
+  // does not start: it never carries part of the selection.
+  var MAX_ROWS_SENT = 20000;
 
   sectionsEl.addEventListener('dragstart', function (ev) {
     var row = ev.target.closest && ev.target.closest('.gs-row[data-id]');
     var info = row && index[row.dataset.section] && index[row.dataset.section][row.dataset.id];
     if (!info || !info.node.drag || !ev.dataTransfer) { ev.preventDefault(); return; }
     closeMenu(false);
-    drag = { kind: info.node.drag, section: row.dataset.section, ids: [row.dataset.id], over: null };
+    var key = row.dataset.section, id = row.dataset.id;
+    // A selected row drags the selection (its rows of the same drag kind); any other row drags alone and becomes the selection.
+    var ids = [id];
+    if (isMultiSection(key) && isSelected(key, id)) {
+      ids = orderedSelection(key).filter(function (s) {
+        var x = index[key][s];
+        return x && x.node.drag === info.node.drag;
+      });
+      if (ids.length > MAX_ROWS_SENT) {
+        ev.preventDefault();
+        announce('Too many rows selected to drag: at most ' + MAX_ROWS_SENT);
+        return;
+      }
+      lastFocus = { section: key, id: id };
+    } else {
+      select(key, id);
+    }
+    drag = { kind: info.node.drag, section: key, ids: ids, over: null };
     try {
       ev.dataTransfer.effectAllowed = 'copyMove';
       ev.dataTransfer.setData(DRAG_MIME, drag.kind);
       if (drag.kind === 'tables') ev.dataTransfer.setData(LIBRARY_MIME, '[]');
-      ev.dataTransfer.setDragImage(dragPill(row, info.node), 14, 14);
+      ev.dataTransfer.setDragImage(dragPill(row, info.node, ids.length), 14, 14);
     } catch (e) { /* the drag still works with the browser's own picture */ }
-    select(row.dataset.section, row.dataset.id);
-    row.classList.add('is-dragging');
+    ids.forEach(function (d) { var r = rowEl(key, d); if (r) r.classList.add('is-dragging'); });
     document.body.classList.add('gs-dragging');
     post({ type: 'dragStart', section: drag.section, ids: drag.ids });
   });
@@ -2628,33 +3616,81 @@ export const GLASS_SIDEBAR_SCRIPT = String.raw`
     if (msg.type === 'state') {
       var sections = Array.isArray(msg.sections) ? msg.sections : [];
       pendingExpand = {};
+      // The answer to the field's newest search, once it is in.
+      var answered = typeof msg.searchSeq === 'number' && msg.searchSeq > search.ack;
+      if (answered) search.ack = Math.min(msg.searchSeq, search.seq);
+      // What the field shows, as the host says: a filter set from the Command
+      // Palette shows up in it (or empties it, when the sections' filters
+      // differ). Never while the user's own text is on its way: theirs wins.
+      var said = typeof msg.search === 'string' ? msg.search : null;
+      var hostChanged = said !== hostSearch;
+      hostSearch = said;
+      if (hostChanged && !searchPending()) adoptSearch(said === null ? '' : said);
       // The same state again (a refresh that changed nothing): nothing to draw.
-      var json = JSON.stringify(sections);
-      if (rendered && json === lastStateJson) return;
-      lastStateJson = json;
-      model = { sections: sections };
-      buildIndex();
-      if (ui.selected && !(index[ui.selected.section] && index[ui.selected.section][ui.selected.id])) ui.selected = null;
-      render();
+      var json = JSON.stringify([sections, hostSearch]);
+      if (rendered && json === lastStateJson) {
+        paintSearch();
+      } else {
+        lastStateJson = json;
+        model = { sections: sections };
+        buildIndex();
+        keepListedSelection();
+        // A row the page asked for and the host has now listed may be asked for again later.
+        Object.keys(expandAsked).forEach(function (k) {
+          var at = k.indexOf('\u0000');
+          var info = index[k.slice(0, at)] && index[k.slice(0, at)][k.slice(at + 1)];
+          if (!info || info.node.childrenLoaded !== false) delete expandAsked[k];
+        });
+        // The rows a search swapped in do not "enter" one by one.
+        if (answered || hostChanged) renderQuiet = true;
+        render();
+        restoreScroll();
+      }
+      if (answered && !searchPending()) {
+        announceFound();
+        if (search.focusFirst) { search.focusFirst = false; focusFirstRow(); }
+        if (search.returnTo) {
+          var ret = search.returnTo;
+          search.returnTo = null;
+          // Only while focus is where Escape left it (the field, the row it went back to, or
+          // nowhere): a click or Tab meanwhile was the user's, and stays.
+          var now = document.activeElement;
+          var nowRow = now && now.closest ? now.closest('.gs-row[data-id]') : null;
+          if (!now || now === document.body || now === searchInput || (nowRow && ret.id && plainId(nowRow.dataset.id) === plainId(ret.id))) returnFromSearch(ret);
+        }
+      }
     } else if (msg.type === 'itemMenu') {
       if (!pendingMenu || pendingMenu.section !== msg.section || pendingMenu.id !== msg.id) return;
       var p = pendingMenu;
       pendingMenu = null;
       var info = index[p.section] && index[p.section][p.id];
       var row = rowEl(p.section, p.id);
+      // The rows the menu acts on are the ones selected as it opens.
+      var selection = actionSelection(p.section, p.id);
       var groups = (msg.groups || []).map(function (g) {
         return g.map(function (a) {
-          return { title: a.title, icon: a.icon, run: function () { post({ type: 'invoke', section: p.section, id: p.id, menu: a.menu, index: a.index }); } };
+          return { title: a.title, icon: a.icon, run: function () { postRowInvoke(p.section, p.id, a, selection); } };
         });
       });
       if (!row) return;
       openMenu(groups, p.anchor, { section: p.section, id: p.id, slot: p.slot, title: info ? info.node.label : '' });
     } else if (msg.type === 'reveal') {
       var key = msg.section;
-      (msg.expand || []).forEach(function (id) { ui.expanded[key + '\u0000' + id] = true; });
+      // The revealed row decides where the list is: a saved scroll place waiting to come back gives way.
+      cancelScrollRestore();
+      // Its ancestors, then (the native expand option) the row itself and below.
+      (msg.expand || []).concat(Array.isArray(msg.open) ? msg.open : []).forEach(function (id) {
+        if (typeof id === 'string') ui.expanded[key + '\u0000' + id] = true;
+      });
       ui.collapsedSections[key] = false;
-      if (msg.id) ui.selected = { section: key, id: msg.id };
-      if (ui.query && msg.id) { ui.query = ''; searchInput.value = ''; }
+      if (msg.id) ui.sel = { section: key, ids: [msg.id], anchor: msg.id };
+      // A row the field's own match hides (Help & Feedback) needs the field cleared;
+      // a host-filtered section listed the row under its filter, so the field stays.
+      var revealed = sectionByKey(key);
+      if (ui.query && msg.id && !hostFiltered(revealed)) {
+        dropQuery();
+        if (anyFilterable()) sendSearch();
+      }
       persist();
       render();
       var target = msg.id && rowEl(key, msg.id);
@@ -2663,8 +3699,10 @@ export const GLASS_SIDEBAR_SCRIPT = String.raw`
         if (msg.focus) { lastFocus = { section: key, id: msg.id }; target.focus({ preventScroll: true }); }
       }
     } else if (msg.type === 'focusSearch') {
-      searchInput.focus();
-      searchInput.select();
+      // The page's own Cmd/Ctrl+F may have got there first (and the user may be typing): leave the field be.
+      if (document.activeElement !== searchInput) focusSearchField();
+    } else if (msg.type === 'showSection') {
+      if (typeof msg.section === 'string') showSection(msg.section, msg.focus === true);
     }
   });
 

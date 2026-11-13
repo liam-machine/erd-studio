@@ -23,6 +23,7 @@ export const GLASS_ICONS: Readonly<Record<string, string>> = {
   ellipsis: `<circle cx="3.6" cy="8" r="1.15" ${F}/><circle cx="8" cy="8" r="1.15" ${F}/><circle cx="12.4" cy="8" r="1.15" ${F}/>`,
   close: '<path d="M4.75 4.75l6.5 6.5M11.25 4.75l-6.5 6.5"/>',
   search: '<circle cx="7" cy="7" r="4.25"/><path d="M10.2 10.2l3.05 3.05"/>',
+  'collapse-all': '<rect x="5" y="5" width="8.5" height="8.5" rx="2"/><path d="M7.25 9.25h4M2.5 10.5V4.25A1.75 1.75 0 0 1 4.25 2.5h6.25"/>',
   // Rows
   add: '<path d="M8 3.5v9M3.5 8h9"/>',
   'diff-added': '<rect x="2.5" y="2.5" width="11" height="11" rx="2.75"/><path d="M8 5.5v5M5.5 8h5"/>',

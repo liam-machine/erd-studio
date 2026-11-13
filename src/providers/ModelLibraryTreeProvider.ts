@@ -277,6 +277,18 @@ export class TableLibraryTreeProvider implements vscode.TreeDataProvider<TableLi
     this.hasDbtProject = hasDbtProject;
   }
 
+  /**
+   * How a long read shows its progress: by default the view's own bar
+   * (`withProgress` on {@link TABLE_LIBRARY_VIEW_ID}). The extension passes
+   * one that also shows it on the glass sidebar's Table Library section.
+   */
+  private progress: <T>(task: () => Promise<T>) => Thenable<T> =
+    (task) => vscode.window.withProgress({ location: { viewId: TABLE_LIBRARY_VIEW_ID } }, task);
+
+  setProgress(run: <T>(task: () => Promise<T>) => Thenable<T>): void {
+    this.progress = run;
+  }
+
   refresh(): void {
     this._onDidChangeTreeData.fire(undefined);
   }
@@ -995,7 +1007,7 @@ export class TableLibraryTreeProvider implements vscode.TreeDataProvider<TableLi
         if (queue.length > 0) await new Promise((resolve) => setTimeout(resolve, 0));
       }
     };
-    const done: Promise<void> = Promise.resolve(vscode.window.withProgress({ location: { viewId: TABLE_LIBRARY_VIEW_ID } }, read))
+    const done: Promise<void> = Promise.resolve(this.progress(read))
       .catch((err: unknown) => treeLog.warn(`Reading table files for the filter failed: ${err instanceof Error ? err.message : String(err)}`))
       .finally(() => {
         if (this.filterRead === done) this.filterRead = undefined;

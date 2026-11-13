@@ -8,9 +8,12 @@
  * argument or a URL. It names a section, a row id the host gave it, and a
  * menu entry (`menu` + `index`) or a welcome link (`entry` + `link`) the
  * host gave it; the host looks each up again and re-checks its `when`. A drag
- * is the same: row ids only, and the host works out what they carry.
+ * is the same: row ids only, and the host works out what they carry. So is a
+ * selection of several rows (`invoke.selection`): ids the host listed, or dropped.
+ * The one free text it sends is the search field's (`search.text`): checked
+ * for type and length, and only ever handed to the sidebar filter as a query.
  *
- * Pure types (plus two constant lists): no `vscode` import.
+ * Pure types (plus a few constants): no `vscode` import.
  */
 
 // ---------------------------------------------------------------------------
@@ -110,6 +113,37 @@ export interface GlassWelcomeEntry {
   paragraphs: GlassWelcomeParagraph[];
 }
 
+/**
+ * What the sidebar filter found in a section (the native view's message:
+ * `Filtered: "cust" — 4 of 52 tables`). Present only while the section is
+ * filtered and its tree has listed under that filter.
+ */
+export interface GlassFilterFound {
+  /** Rows of the section's own kind that match (tables, diagrams, relationships). */
+  shown: number;
+  total: number;
+  /** What the section calls its rows, plural: `tables`. */
+  noun: string;
+  /** The native view's message for it, word for word (`describeFilterOutcome`). */
+  text: string;
+  /** What the view could not use (`"owner:" doesn't filter this view`). */
+  warnings?: string[];
+  /** Table files are still being read for a `col:` term: more may match. */
+  reading?: boolean;
+}
+
+/**
+ * The search field's list of filter keys, from sidebarFilter.ts (built into
+ * the page, not a message): picking one puts its text in the field.
+ */
+export interface GlassFilterGuide {
+  keys: Array<{ key: string; meaning: string; where: string }>;
+  /** How plain words, phrases and exclusions work. */
+  syntax: string;
+  /** How long typing pauses before the field's text is sent (the native Filter… box's own debounce). */
+  debounceMs: number;
+}
+
 export interface GlassSection {
   key: GlassSectionKey;
   /** The native view's name: `Diagrams`, `Table Library`, `Relationships`, `Help & Feedback`. */
@@ -122,8 +156,35 @@ export interface GlassSection {
   count?: string;
   /** The sidebar Filter… text in force (the native view is filtered by it). */
   filter?: string;
+  /**
+   * The search field filters this section on the host (the native view's
+   * own filter, through `search`): the page shows the rows the host sends
+   * and never hides any by its own label match. Absent (Help & Feedback):
+   * the page matches the field's text against the rows itself.
+   */
+  filterable?: boolean;
+  /** What the filter in force found (the count, `4 of 52 tables`). */
+  found?: GlassFilterFound;
   /** Title actions: `navigation` as icon buttons, `groups` under a `…` menu (separated by group). */
   actions: { navigation: GlassMenuEntry[]; groups: GlassMenuEntry[][] };
+  /**
+   * The native view selects many (`canSelectMany`): the page keeps a selection
+   * of several rows (Cmd/Ctrl-click, Shift-click, Shift+arrows, Cmd/Ctrl+A) and
+   * sends it with a row's `invoke` and `dragStart`. Absent: one row at a time.
+   */
+  multiSelect?: boolean;
+  /**
+   * The native view has Collapse All (`showCollapseAll`): the page offers it
+   * (last in the `…` menu, and Cmd/Ctrl+Left on a row). Page-local: it folds
+   * the section's rows and sends nothing.
+   */
+  collapseAll?: boolean;
+  /**
+   * Work for this section is under way: the native view's progress bar
+   * (the automatic draft building, table files read for a `col:` filter).
+   * The page draws a thin moving bar along the section's header. Absent: idle.
+   */
+  busy?: boolean;
   /** Shown when `nodes` is empty. A sole `Loading…` paragraph means the view is still listing. */
   welcome: GlassWelcomeEntry[];
   nodes: SerialisedNode[];
@@ -139,17 +200,41 @@ export type GlassHostMessage =
    * context key changes what it shows; never twice in a row with the same
    * content. Replaces the last one: the webview patches its DOM to it in place.
    */
-  | { type: 'state'; sections: GlassSection[] }
+  | {
+    type: 'state'; sections: GlassSection[];
+    /**
+     * What the search field shows: the filter every filterable section shares
+     * (`''` when none is filtered), exactly as last typed in the field when it
+     * is still the one in force. Absent when the sections carry different
+     * filters (set one at a time from the Command Palette): the field is then
+     * empty and each filtered section shows its own filter.
+     */
+    search?: string;
+    /** The newest `search` message (its `seq`) whose rows this state holds. */
+    searchSeq?: number;
+  }
   /** The answer to `itemMenu`: the row's context menu, in groups (separators between them). */
   | { type: 'itemMenu'; section: GlassSectionKey; id: string; groups: GlassMenuEntry[][] }
   /**
    * Select and scroll to a row (the native `TreeView.reveal`): expand each id
    * in `expand` (its ancestors, outermost first), open the section, clear the
    * search, and focus the row when `focus`. Sent after a `state` that has it.
+   * `open` (optional): rows to expand below its ancestors, the revealed row
+   * first (the native `reveal`'s `expand` option), already listed by the host.
    */
-  | { type: 'reveal'; section: GlassSectionKey; id: string; expand: string[]; focus: boolean }
-  /** Put the caret in the search field (reserved; not sent yet). */
-  | { type: 'focusSearch' };
+  | { type: 'reveal'; section: GlassSectionKey; id: string; expand: string[]; focus: boolean; open?: string[] }
+  /**
+   * Put the caret in the search field, its text selected (Cmd/Ctrl+F while
+   * the view has focus but the page did not get the key). A page whose field
+   * already has focus leaves it as it is.
+   */
+  | { type: 'focusSearch' }
+  /**
+   * Bring a section into view (what focusing the native view does): unfold
+   * its card, scroll its header to the top, and focus the header when
+   * `focus`. A search that hides the whole card is cleared first.
+   */
+  | { type: 'showSection'; section: GlassSectionKey; focus: boolean };
 
 // ---------------------------------------------------------------------------
 // Webview → host
@@ -167,8 +252,14 @@ export type GlassWebviewMessage =
   /**
    * Run a menu entry: with `id`, a row's (inline or context menu) entry, run
    * with that row's element as a native tree would; without, a title action.
+   * `selection` (optional, multi-select sections only): the selected rows'
+   * ids, when `id` is one of them. The host runs the command with
+   * (element, selected elements), as a native tree that selects many does;
+   * it keeps only ids it listed, refuses the whole message (with a warning)
+   * past MAX_ROWS_SENT ids rather than run on part of them, and ignores the
+   * field for a single-select section or a selection that does not hold `id`.
    */
-  | { type: 'invoke'; section: GlassSectionKey; id?: string; menu: string; index: number }
+  | { type: 'invoke'; section: GlassSectionKey; id?: string; menu: string; index: number; selection?: string[] }
   /** A link or button in an empty state: `entry` from GlassWelcomeEntry, `link` from its part. */
   | { type: 'welcomeLink'; section: GlassSectionKey; entry: number; link: number }
   /**
@@ -180,6 +271,25 @@ export type GlassWebviewMessage =
   /** The drag was let go on this row (its `drop` lists the drag's kind): the host runs that view's own `handleDrop`. */
   | { type: 'drop'; section: GlassSectionKey; id: string }
   /** The drag is over, wherever it ended (sent after any `drop`). */
-  | { type: 'dragEnd' };
+  | { type: 'dragEnd' }
+  /**
+   * The search field's text (debounced as typed; at once when cleared): the
+   * host filters every filterable section by it, through the same path the
+   * Filter… commands use, and answers with a `state` carrying `searchSeq`.
+   * Plain user text, data only: the host checks it is a string of at most
+   * {@link GLASS_SEARCH_MAX_LENGTH} characters and never runs it. `seq`
+   * (optional): a counter the page raises with each search.
+   */
+  | { type: 'search'; text: string; seq?: number }
+  /**
+   * The sections the page draws open now (a card drawn, not folded), sent
+   * after a render or a fold whenever the list changes. Section keys only.
+   * The host reads it as "on screen" (with the view visible): what VS Code
+   * means when it lists a native view to draw it.
+   */
+  | { type: 'sectionsShown'; open: GlassSectionKey[] };
 
-export const GLASS_WEBVIEW_MESSAGE_TYPES: ReadonlyArray<GlassWebviewMessage['type']> = ['ready', 'activate', 'expand', 'itemMenu', 'invoke', 'welcomeLink', 'dragStart', 'drop', 'dragEnd'];
+/** The longest search text the host takes (longer is refused). */
+export const GLASS_SEARCH_MAX_LENGTH = 512;
+
+export const GLASS_WEBVIEW_MESSAGE_TYPES: ReadonlyArray<GlassWebviewMessage['type']> = ['ready', 'activate', 'expand', 'itemMenu', 'invoke', 'welcomeLink', 'dragStart', 'drop', 'dragEnd', 'search', 'sectionsShown'];

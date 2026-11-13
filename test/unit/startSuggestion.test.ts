@@ -362,6 +362,16 @@ describe('a late Show Me on a stale start notification (cross/9a: qut Bug 6, har
     expect(h.stored().answered).toBe(true);
   });
 
+  it('after Keep, with a showDiagramsView given (the glass sidebar may stand in for the view): that, not the native focus command', async () => {
+    const { h, run } = lateClick('importDbmlFile', true);
+    const shown: string[] = [];
+    h.deps.showDiagramsView = async () => { shown.push('diagrams'); };
+    await run();
+    expect(shown).toEqual(['diagrams']);
+    expect(h.calls.commands).toEqual([]);
+    expect(h.calls.infos).toEqual([startSuggestion.START_SUGGESTION_ALREADY_KEPT_MESSAGE]);
+  });
+
   it('after Discard (or nothing kept): Show Me still opens the draft', async () => {
     const { h, run } = lateClick('importDbmlFile', false);
     await run();
