@@ -75,6 +75,8 @@ interface CompileFlow {
   readProjectFile: (root: string, file: string) => string;
   /** Pass `LOG_ARGS` (dbt Core 1.5+, found by stat: compile has no `--version` probe). */
   logFlags: boolean;
+  /** Run dbt compile again from the click (Try Again after dbt did not start). */
+  again: () => Promise<unknown>;
 }
 
 const NOT_STARTED: DbtParseStart = { started: false, settled: Promise.resolve() };
@@ -115,6 +117,7 @@ export async function runDbtCompile(root: string, deps: RunDbtCompileDeps = {}):
       platform,
       readProjectFile: deps.readProjectFile ?? ((r, f) => fs.readFileSync(path.join(r, f), 'utf8')),
       logFlags: isCore(picked.chosen.executable, platform),
+      again: () => runDbtCompile(root, deps),
     });
   } catch (err) {
     recordDbtRunFailure(err);
@@ -130,7 +133,7 @@ function launchCompile(flow: CompileFlow): DbtParseStart {
   });
   if ('refused' in plan) {
     telemetry.feature('dbtCompileNoStart');
-    showCouldNotStart(flow.chosen.executable, flow.root, 'refused');
+    showCouldNotStart(flow.chosen.executable, flow.root, 'refused', { kind: 'compile', retry: flow.again });
     return NOT_STARTED;
   }
   const start = flow.run(flow.root, 'compile', 'normal', plan);
@@ -150,7 +153,7 @@ function launchCompile(flow: CompileFlow): DbtParseStart {
 async function handleCompileResult(flow: CompileFlow, r: DbtProcessResult): Promise<void> {
   if (r.outcome === 'notStarted') {
     telemetry.feature('dbtCompileNoStart');
-    showCouldNotStart(flow.chosen.executable, flow.root, r.startError ?? 'unknown');
+    showCouldNotStart(flow.chosen.executable, flow.root, r.startError ?? 'unknown', { kind: 'compile', retry: flow.again });
     return;
   }
   if (r.outcome === 'stopped') {
@@ -187,7 +190,7 @@ async function handleCompileResult(flow: CompileFlow, r: DbtProcessResult): Prom
       if (isDbtRunActive(flow.root) || isDbtFlowStarting(flow.root)) { showDbtBusy(flow.root); return; }
       const deps = await runDbtDeps({
         root: flow.root, chosen: flow.chosen, mode: 'normal', run: flow.run, env: flow.env, platform: flow.platform, logFlags: flow.logFlags,
-        stoppedKey: 'dbtCompileStopped', noStartKey: 'dbtCompileNoStart', busyKey: 'dbtParseBusy',
+        stoppedKey: 'dbtCompileStopped', noStartKey: 'dbtCompileNoStart', busyKey: 'dbtParseBusy', retry: flow.again,
         then: async () => { await launchCompile(flow).settled; },
       });
       await deps.settled;
