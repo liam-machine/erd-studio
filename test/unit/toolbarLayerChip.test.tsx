@@ -97,3 +97,22 @@ describe('Toolbar layer chip', () => {
     expect(container.querySelector('.toolbar__layer-badge')).toBeNull();
   });
 });
+
+describe('the Convert information button (#305)', () => {
+  afterEach(() => { delete mockStoreState.convertOffer; });
+
+  it('ends the identity island, after the layer chip, while the host says the project can be converted', () => {
+    mockStoreState.convertOffer = true;
+    const { container } = renderToolbar({ layer: 'gold', layerConfig: GOLD, layerConfigs: [SILVER, GOLD] });
+    const domain = container.querySelector('.toolbar__island--identity .toolbar__domain')!;
+    expect(domain.lastElementChild!.classList.contains('convert-info')).toBe(true);
+    expect(domain.querySelector('.convert-info__button')!.getAttribute('aria-label')).toMatch(/older ERD Studio/);
+  });
+
+  it('is not there otherwise, or on the physical stage', () => {
+    expect(renderToolbar({ layer: 'gold' }).container.querySelector('.convert-info')).toBeNull();
+    cleanup();
+    mockStoreState.convertOffer = true;
+    expect(renderToolbar({ layer: 'gold', stage: 'physical', readOnly: true }).container.querySelector('.convert-info')).toBeNull();
+  });
+});

@@ -379,6 +379,10 @@ function EditorCanvas() {
             .getState()
             .setFeedbackContext(msg.payload.diagnostics, msg.payload.capabilities);
           break;
+        case 'convertOffer':
+          // Whether this project can still be converted to DBML: the toolbar's information button.
+          useEditorStore.getState().setConvertOffer(msg.payload?.show === true);
+          break;
         case 'lineStyle':
           // The reader's erdStudio.canvas.lineStyle, on ready and whenever it changes.
           if (isCanvasLineStyle(msg.payload?.lineStyle)) useEditorStore.getState().setLineStyle(msg.payload.lineStyle);

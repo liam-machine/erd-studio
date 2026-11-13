@@ -256,14 +256,19 @@ import {
   START_SUGGESTIONS_SETTING,
   START_SUGGESTIONS_SETTING_OFF_MESSAGE,
   UNDO_BUTTON,
+  START_SUGGESTION_MACHINE_KEY,
   START_SUGGESTION_STATE_KEY,
+  START_SUGGESTIONS_UNDO_ARG,
   TURN_OFF_START_SUGGESTIONS_COMMAND,
   TURN_ON_START_SUGGESTIONS_COMMAND,
   dbtProjectAboveOpenFolders,
+  isStartSuggestionsUndo,
+  readStartSuggestionMachine,
   readStartSuggestionState,
   runStartSuggestion,
   startSuggestionDue,
   startSuggestionsOff,
+  type StartSuggestionMachine,
   type StartSuggestionState,
 } from './services/startSuggestion';
 
@@ -1387,6 +1392,14 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
   const freshInstall = previousVersion === undefined && !context.globalState.get<boolean>(GETTING_STARTED_SHOWN_KEY);
   if (freshInstall) {
     await context.globalState.update(GETTING_STARTED_PENDING_KEY, true);
+    // The start suggestion's own record that this install was new here (#305): this
+    // activation is the only one that can tell, and telemetry (which may be off) is
+    // never asked. A later window's start suggestion keeps once per folder for it;
+    // every install without it is an upgrader, asked once per machine.
+    await context.globalState.update(START_SUGGESTION_MACHINE_KEY, {
+      ...readStartSuggestionMachine(context.globalState.get(START_SUGGESTION_MACHINE_KEY)),
+      newInstall: true,
+    } satisfies StartSuggestionMachine);
   }
   if (previousVersion && previousVersion !== currentVersion && hasOpenSubjectAreaCanvas()) {
     // If the user cancels the reload (unsaved files), keep activating so
@@ -4646,7 +4659,11 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
       if (await runMigrateToV5Command()) await migrateNaming();
     }),
     vscode.commands.registerCommand('erdStudio.migrateToTableNaming', async () => { await migrateNaming(); }),
-    vscode.commands.registerCommand('erdStudio.convertProjectToDbml', async () => { await convertToDbml(); }),
+    vscode.commands.registerCommand('erdStudio.convertProjectToDbml', async () => {
+      await convertToDbml();
+      // Converted, refused or cancelled: each canvas's Convert information button follows.
+      editorProvider.refreshConvertOffer();
+    }),
 
     // F408: Set up semantic directory for new projects
     vscode.commands.registerCommand(
@@ -5224,12 +5241,18 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
 
   // The start suggestion (src/services/startSuggestion.ts): a folder with no
   // diagram whose start is obvious gets one notification offering it. Its
-  // state is workspace state (machine-local: nothing goes into the repo);
+  // state is workspace state (machine-local: nothing goes into the repo), plus
+  // one global-state record for the machine (new install or upgrader, and the
+  // showings in every folder: an upgrader is asked once per machine);
   // erdStudio.startSuggestions can be committed to turn it off for a team.
   const startSuggestionState = (): StartSuggestionState =>
     readStartSuggestionState(context.workspaceState.get(START_SUGGESTION_STATE_KEY));
   const saveStartSuggestionState = (state: StartSuggestionState): Thenable<void> =>
     context.workspaceState.update(START_SUGGESTION_STATE_KEY, state);
+  const startSuggestionMachine = (): StartSuggestionMachine =>
+    readStartSuggestionMachine(context.globalState.get(START_SUGGESTION_MACHINE_KEY));
+  const saveStartSuggestionMachine = (machine: StartSuggestionMachine): Thenable<void> =>
+    context.globalState.update(START_SUGGESTION_MACHINE_KEY, machine);
   const startSuggestionsSettingOn = (): boolean => getErdStudioSetting<boolean>(START_SUGGESTIONS_SETTING, true) !== false;
   // The palette shows Turn Off… or Turn On… (package.json gates them on this key).
   const publishStartSuggestionsOff = (): void => {
@@ -5246,12 +5269,20 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
       telemetry.feature('startSuggestionsOff');
       publishStartSuggestionsOff();
       void vscode.window.showInformationMessage(START_SUGGESTIONS_OFF_MESSAGE, UNDO_BUTTON).then((choice) => {
-        if (choice === UNDO_BUTTON) void vscode.commands.executeCommand(TURN_ON_START_SUGGESTIONS_COMMAND);
+        if (choice === UNDO_BUTTON) void vscode.commands.executeCommand(TURN_ON_START_SUGGESTIONS_COMMAND, START_SUGGESTIONS_UNDO_ARG);
       });
     }),
-    vscode.commands.registerCommand(TURN_ON_START_SUGGESTIONS_COMMAND, async () => {
-      // A fresh start: the count and an earlier answer are forgotten too.
-      await saveStartSuggestionState({ shown: 0 });
+    vscode.commands.registerCommand(TURN_ON_START_SUGGESTIONS_COMMAND, async (arg?: unknown) => {
+      // A fresh start: the count and an earlier answer are forgotten too. From the
+      // palette it is asked for here, so an upgrader's once-per-machine limit does not
+      // hold this folder back. An Undo (#305) only takes the off back: it keeps an
+      // earlier Turn On's `on` but never sets it, so Off then Undo cannot lift the
+      // machine limit in a folder it held back.
+      const undo = isStartSuggestionsUndo(arg);
+      const next: StartSuggestionState = undo
+        ? { shown: 0, ...(startSuggestionState().on === true ? { on: true } : {}) }
+        : { shown: 0, on: true };
+      await saveStartSuggestionState(next);
       publishStartSuggestionsOff();
       if (!startSuggestionsSettingOn()) {
         const choice = await vscode.window.showInformationMessage(START_SUGGESTIONS_SETTING_OFF_MESSAGE, OPEN_SETTINGS_BUTTON);
@@ -5260,7 +5291,11 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
         }
         return;
       }
-      void vscode.window.showInformationMessage(START_SUGGESTIONS_ON_MESSAGE);
+      // The message promises a suggestion next time: an Undo the machine limit still
+      // holds back (an upgrader already asked elsewhere) says nothing rather than promise it.
+      if (startSuggestionDue({ settingOn: true, state: next, machine: startSuggestionMachine(), hasDiagrams: false })) {
+        void vscode.window.showInformationMessage(START_SUGGESTIONS_ON_MESSAGE);
+      }
     }),
   );
   activationPhase = 'Prompts';
@@ -5557,7 +5592,7 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
   // place, and the walkthrough stays owed.
   if (!afterOpenFolder && existingDiagrams.length === 0 && !hasOpenSubjectAreaCanvas()) {
     const settingOn = startSuggestionsSettingOn();
-    if (startSuggestionDue({ settingOn, state: startSuggestionState(), hasDiagrams: false })) {
+    if (startSuggestionDue({ settingOn, state: startSuggestionState(), machine: startSuggestionMachine(), hasDiagrams: false })) {
       const walkthroughOwed = (): boolean => activationPrompts.has('walkthrough');
       activationPrompts.set('startSuggestion', () => {
         setTimeout(() => {
@@ -5575,6 +5610,8 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
             }),
             state: startSuggestionState,
             saveState: saveStartSuggestionState,
+            machine: startSuggestionMachine,
+            saveMachine: saveStartSuggestionMachine,
             show: (message, ...buttons) => vscode.window.showInformationMessage(message, ...buttons),
             info: (message, ...buttons) => vscode.window.showInformationMessage(message, ...buttons),
             executeCommand: (command, ...args) => vscode.commands.executeCommand(command, ...args),

@@ -21,9 +21,12 @@ import {
   CONVERT_BUTTON,
   DONT_ASK_AGAIN_FOLDER_BUTTON,
   MAX_START_SUGGESTION_SHOWS,
+  MAX_UPGRADER_START_SUGGESTION_SHOWS,
   SHOW_ME_BUTTON,
   START_SUGGESTIONS_OFF_MESSAGE,
   TURN_ON_START_SUGGESTIONS_TITLE,
+  isStartSuggestionsUndo,
+  readStartSuggestionMachine,
   readStartSuggestionState,
   runStartSuggestion,
   startSuggestionDue,
@@ -31,6 +34,7 @@ import {
   startSuggestionMessage,
   startSuggestionsOff,
   type StartSuggestionDeps,
+  type StartSuggestionMachine,
   type StartSuggestionState,
 } from '../../src/services/startSuggestion';
 import { autoDraftDue } from '../../src/services/draftTriggers';
@@ -68,15 +72,17 @@ describe('the notification text', () => {
 
 describe('when it is due', () => {
   const state = (s: Partial<StartSuggestionState> = {}): StartSuggestionState => ({ shown: 0, ...s });
+  /** A new install that has been shown it in five other folders: the folder's own rule alone. */
+  const newInstall: StartSuggestionMachine = { shown: 5, newInstall: true };
   it('once per folder (no drip across windows), never with a diagram, once answered, turned off or with the setting off', () => {
     expect(MAX_START_SUGGESTION_SHOWS).toBe(1);
-    expect(startSuggestionDue({ settingOn: true, state: state(), hasDiagrams: false })).toBe(true);
-    expect(startSuggestionDue({ settingOn: true, state: state({ shown: 1 }), hasDiagrams: false })).toBe(false);
-    expect(startSuggestionDue({ settingOn: true, state: state({ shown: 3 }), hasDiagrams: false })).toBe(false);
-    expect(startSuggestionDue({ settingOn: true, state: state(), hasDiagrams: true })).toBe(false);
-    expect(startSuggestionDue({ settingOn: true, state: state({ answered: true }), hasDiagrams: false })).toBe(false);
-    expect(startSuggestionDue({ settingOn: true, state: state({ off: true }), hasDiagrams: false })).toBe(false);
-    expect(startSuggestionDue({ settingOn: false, state: state(), hasDiagrams: false })).toBe(false);
+    expect(startSuggestionDue({ settingOn: true, machine: newInstall, state: state(), hasDiagrams: false })).toBe(true);
+    expect(startSuggestionDue({ settingOn: true, machine: newInstall, state: state({ shown: 1 }), hasDiagrams: false })).toBe(false);
+    expect(startSuggestionDue({ settingOn: true, machine: newInstall, state: state({ shown: 3 }), hasDiagrams: false })).toBe(false);
+    expect(startSuggestionDue({ settingOn: true, machine: newInstall, state: state(), hasDiagrams: true })).toBe(false);
+    expect(startSuggestionDue({ settingOn: true, machine: newInstall, state: state({ answered: true }), hasDiagrams: false })).toBe(false);
+    expect(startSuggestionDue({ settingOn: true, machine: newInstall, state: state({ off: true }), hasDiagrams: false })).toBe(false);
+    expect(startSuggestionDue({ settingOn: false, machine: newInstall, state: state(), hasDiagrams: false })).toBe(false);
     expect(startSuggestionsOff(state({ off: true }), true)).toBe(true);
     expect(startSuggestionsOff(state(), false)).toBe(true);
     expect(startSuggestionsOff(state({ shown: 3 }), true)).toBe(false);
@@ -90,11 +96,86 @@ describe('when it is due', () => {
     // The automatic draft's flag; the nothing-found counts of an older release are dropped.
     expect(readStartSuggestionState({ shown: 1, draftShown: true })).toEqual({ shown: 1, draftShown: true });
     expect(readStartSuggestionState({ shown: 1, draftShown: 'yes', nothingShown: 2, nothingAnswered: true })).toEqual({ shown: 1 });
+    // Turn On's mark (#305).
+    expect(readStartSuggestionState({ shown: 0, on: true })).toEqual({ shown: 0, on: true });
+    expect(readStartSuggestionState({ shown: 0, on: 'yes' })).toEqual({ shown: 0 });
+  });
+
+  it('reads the machine\'s record defensively: anything unreadable is an upgrader shown nothing yet', () => {
+    expect(readStartSuggestionMachine(undefined)).toEqual({ shown: 0 });
+    expect(readStartSuggestionMachine([1])).toEqual({ shown: 0 });
+    expect(readStartSuggestionMachine({ shown: 'x', newInstall: 'yes' })).toEqual({ shown: 0 });
+    expect(readStartSuggestionMachine({ shown: 3.2, newInstall: true, extra: 1 })).toEqual({ shown: 3, newInstall: true });
   });
 });
 
-function harness(options: { intent?: StartIntent; choice?: string; state?: StartSuggestionState; convertApplies?: boolean; sqlTables?: number; undo?: boolean } = {}) {
+describe('#305: an upgrader is asked once per machine; a new install once per folder', () => {
+  const fresh: StartSuggestionState = { shown: 0 };
+  const due = (machine: StartSuggestionMachine, state: StartSuggestionState = fresh) =>
+    startSuggestionDue({ settingOn: true, state, machine, hasDiagrams: false });
+
+  it('an upgrader shown it in another folder is not asked in a clean one', () => {
+    expect(MAX_UPGRADER_START_SUGGESTION_SHOWS).toBe(1);
+    expect(due({ shown: 0 })).toBe(true);
+    expect(due({ shown: 1 })).toBe(false);
+  });
+
+  it('a new install keeps once per folder, however often it was shown elsewhere', () => {
+    expect(due({ shown: 5, newInstall: true })).toBe(true);
+    expect(due({ shown: 5, newInstall: true }, { shown: 1 })).toBe(false);
+  });
+
+  it('Turn On for this folder lifts the machine limit here, and the folder\'s own once still holds', () => {
+    expect(due({ shown: 1 }, { shown: 0, on: true })).toBe(true);
+    expect(due({ shown: 2 }, { shown: 1, on: true })).toBe(false);
+  });
+
+  it("Don't Ask Again for This Folder (off) wins for both kinds of install", () => {
+    expect(due({ shown: 0 }, { shown: 0, off: true })).toBe(false);
+    expect(due({ shown: 0, newInstall: true }, { shown: 0, off: true })).toBe(false);
+    expect(due({ shown: 0 }, { shown: 0, off: true, on: true })).toBe(false);
+  });
+
+  it('runStartSuggestion: folder B on an upgrader machine shown it in folder A shows nothing and counts nothing', async () => {
+    const a = harness({ intent: 'importSqlDdl' });
+    await (await runStartSuggestion(a.deps)).done;
+    expect(a.machine()).toEqual({ shown: 1 });
+    const b = harness({ intent: 'importSqlDdl', machine: a.machine() });
+    expect((await runStartSuggestion(b.deps)).shown).toBe(false);
+    expect(b.calls.shows).toEqual([]);
+    expect(b.calls.features).toEqual([]);
+    expect(b.stored()).toEqual({ shown: 0 });
+    expect(b.machine()).toEqual({ shown: 1 });
+  });
+
+  it('runStartSuggestion: a new install is asked in folder B too, and that second showing records suggestPromptShownAgain', async () => {
+    const a = harness({ intent: 'importSqlDdl', machine: { shown: 0, newInstall: true } });
+    await (await runStartSuggestion(a.deps)).done;
+    expect(a.calls.features).toEqual(['suggestPromptShown', 'suggestPromptDismissed']);
+    const b = harness({ intent: 'importSqlDdl', machine: a.machine() });
+    await (await runStartSuggestion(b.deps)).done;
+    expect(b.calls.features).toEqual(['suggestPromptShown', 'suggestPromptShownAgain', 'suggestPromptDismissed']);
+    // Both counts are saved before the notification shows.
+    expect(b.calls.machineBeforeShow).toEqual({ shown: 2, newInstall: true });
+  });
+
+  it('runStartSuggestion: an upgrader who turned it on in folder B is asked there, as a repeat', async () => {
+    const h = harness({ intent: 'drawFromDbt', state: { shown: 0, on: true }, machine: { shown: 1 } });
+    expect((await runStartSuggestion(h.deps)).shown).toBe(true);
+    expect(h.calls.features).toContain('suggestPromptShownAgain');
+    expect(h.machine()).toEqual({ shown: 2 });
+  });
+
+  it('runStartSuggestion: re-reads the machine after the look (another window may have shown it meanwhile)', async () => {
+    const h = harness({ intent: 'importSqlDdl' });
+    h.deps.intent = async () => { await h.deps.saveMachine({ shown: 1 }); return 'importSqlDdl'; };
+    expect((await runStartSuggestion(h.deps)).shown).toBe(false);
+  });
+});
+
+function harness(options: { intent?: StartIntent; choice?: string; state?: StartSuggestionState; machine?: StartSuggestionMachine; convertApplies?: boolean; sqlTables?: number; undo?: boolean } = {}) {
   let stored: StartSuggestionState = options.state ?? { shown: 0 };
+  let machine: StartSuggestionMachine = options.machine ?? { shown: 0 };
   const calls = {
     shows: [] as Array<{ message: string; buttons: string[] }>,
     commands: [] as unknown[][],
@@ -104,6 +185,7 @@ function harness(options: { intent?: StartIntent; choice?: string; state?: Start
     infoButtons: [] as string[][],
     offContext: [] as boolean[],
     savedBeforeShow: undefined as StartSuggestionState | undefined,
+    machineBeforeShow: undefined as StartSuggestionMachine | undefined,
   };
   const deps: StartSuggestionDeps = {
     intent: async () => options.intent,
@@ -113,14 +195,16 @@ function harness(options: { intent?: StartIntent; choice?: string; state?: Start
     convertApplies: () => options.convertApplies ?? true,
     state: () => stored,
     saveState: async (s) => { stored = s; },
-    show: async (message, ...buttons) => { calls.savedBeforeShow = stored; calls.shows.push({ message, buttons }); return options.choice; },
+    machine: () => machine,
+    saveMachine: async (m) => { machine = m; },
+    show: async (message, ...buttons) => { calls.savedBeforeShow = stored; calls.machineBeforeShow = machine; calls.shows.push({ message, buttons }); return options.choice; },
     info: async (m, ...buttons) => { calls.infos.push(m); calls.infoButtons.push(buttons); return options.undo ? buttons[0] : undefined; },
     executeCommand: async (...args) => { calls.commands.push(args); },
     recordSuggested: (i) => { calls.suggested.push(i); },
     feature: (k) => { calls.features.push(k); },
     setOffContext: (off) => { calls.offContext.push(off); },
   };
-  return { deps, calls, stored: () => stored };
+  return { deps, calls, stored: () => stored, machine: () => machine };
 }
 
 describe('runStartSuggestion', () => {
@@ -177,11 +261,15 @@ describe('runStartSuggestion', () => {
     expect('MORE_OPTIONS_BUTTON' in startSuggestion).toBe(false);
   });
 
-  it("Don't Ask Again's Undo turns suggestions back on with the palette's own command", async () => {
+  it("Don't Ask Again's Undo turns suggestions back on with the palette's own command, marked as an Undo (#305)", async () => {
     const h = harness({ intent: 'importSqlDdl', choice: DONT_ASK_AGAIN_FOLDER_BUTTON, undo: true });
     await (await runStartSuggestion(h.deps)).done;
     expect(h.calls.infoButtons).toEqual([['Undo']]);
-    expect(h.calls.commands).toEqual([['erdStudio.turnOnStartSuggestions']]);
+    expect(h.calls.commands).toEqual([['erdStudio.turnOnStartSuggestions', { undo: true }]]);
+    expect(isStartSuggestionsUndo(h.calls.commands[0][1])).toBe(true);
+    // The palette runs it with no argument (or anything else): that is a real Turn On.
+    expect(isStartSuggestionsUndo(undefined)).toBe(false);
+    expect(isStartSuggestionsUndo({ undo: 'true' })).toBe(false);
   });
 
   it("Don't Ask Again turns it off for this folder and says so in one line, with Undo", async () => {
@@ -318,6 +406,8 @@ describe('dbtProjectAboveOpenFolders', () => {
       convertApplies: () => false,
       state: () => ({ shown: 0 }),
       saveState: async () => undefined,
+      machine: () => ({ shown: 0 }),
+      saveMachine: async () => undefined,
       show,
       info: async () => undefined,
       executeCommand: async () => undefined,

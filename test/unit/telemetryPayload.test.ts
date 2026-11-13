@@ -680,7 +680,7 @@ describe('allowlists agree with the Worker', () => {
     // The automatic draft's time-limit drop is appended after them.
     expect(FEATURES.indexOf('draftDropTimeLimit')).toBe(FEATURES.indexOf('importCauseOther') + 1);
     // It closes the 2.0.0 list: what follows was appended later (the Fabric card's keys, then the
-    // major update notice's), never put before it.
+    // major update notice's, the layout fallbacks', then the start suggestion's repeat and the canvas's Convert button, #305), never put before it.
     expect(FEATURES.slice(FEATURES.indexOf('draftDropTimeLimit') + 1)).toEqual([
       'importGuideActionFabricCatalog', 'importGuideCopiedFabricCatalog',
       'importFabricOutcomeClean', 'importFabricOutcomeRepaired', 'importFabricOutcomePartial',
@@ -690,6 +690,8 @@ describe('allowlists agree with the Worker', () => {
       'dbtSearchFailedWalkFound',
       'activationSlowDbtSearch', 'activationSlowDiscovery', 'activationSlowServices',
       'startLookLateSuggestion', 'dbtSearchSkipped', 'activationSlowWalk',
+      'suggestPromptShownAgain',
+      'convertToDbmlFromCanvasInfo',
     ]);
     // #262's per-step load codes follow the logged-error ones and close the 2.0.0 error list;
     // what a failed layout was like (after 2.0.4) is appended after them.
@@ -740,6 +742,8 @@ describe('allowlists agree with the Worker', () => {
       'dbtSearchFailedWalkFound',
       'activationSlowDbtSearch', 'activationSlowDiscovery', 'activationSlowServices',
       'startLookLateSuggestion', 'dbtSearchSkipped', 'activationSlowWalk',
+      'suggestPromptShownAgain',
+      'convertToDbmlFromCanvasInfo',
     ]);
     for (const key of added) expect(section, key).toMatch(new RegExp(`^- \`${key}\` `, 'm'));
     // The error codes appended after the 2.0.0 list (a failed layout's class, size, duration and fallbacks;

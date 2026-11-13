@@ -242,6 +242,13 @@ export interface EditorState extends CanvasState {
    * takes it back.
    */
   filesNotShown: FileNote[];
+  /**
+   * The host said this project can still be converted to DBML
+   * (`convertOffer`): the toolbar shows its information button on the
+   * logical stage. Posted after every logical-stage load and whenever the
+   * answer changes, so it is deliberately NOT touched by `setDomain`.
+   */
+  convertOffer: boolean;
 }
 
 export interface EditorActions extends CanvasActions {
@@ -268,6 +275,8 @@ export interface EditorActions extends CanvasActions {
   setEmbeddedTables: (embedded: boolean) => void;
   /** Replace the "not shown" notes with the host's latest list. */
   setFilesNotShown: (items: FileNote[]) => void;
+  /** Store the host's `convertOffer` answer (the Convert information button). */
+  setConvertOffer: (show: boolean) => void;
   /** Hide the logical "Run dbt parse" hint at once (the host persists it). */
   dismissManifestHint: () => void;
   /**
@@ -435,6 +444,7 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   logicalOnly: false,
   embeddedTables: false,
   filesNotShown: [],
+  convertOffer: false,
 
   // Actions
   setViewport: (viewport) => set({ viewport }),
@@ -453,6 +463,7 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   setManifestMissing: (missing) => set({ manifestMissing: missing }),
   setEmbeddedTables: (embedded) => set({ embeddedTables: embedded }),
   setFilesNotShown: (items) => set({ filesNotShown: items }),
+  setConvertOffer: (show) => set({ convertOffer: show }),
   dismissManifestHint: () => set({ manifestHintDismissed: true }),
   setLogicalOnly: (logicalOnly) => set(
     logicalOnly
