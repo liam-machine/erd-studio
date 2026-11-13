@@ -189,17 +189,18 @@ describe('real package.json: title actions', () => {
   it('the New… submenu resolves its own groups from erdStudio.newMenu', () => {
     const newMenu = index.resolve('view/title', ctx(DIAGRAMS, undefined, PROJECT)).navigation[0];
     expect(newMenu.menu).toBe('view/title');
-    expect(groupTitles(newMenu.submenu ?? [])).toEqual([
-      ['New Diagram…', 'Import DBML…', 'Import SQL DDL…', 'Import Power BI or Fabric Semantic Model…'],
-      ['Bring In Your Data Model…'],
-      ['New Layer…'],
-    ]);
+    // One group of two: the one import entry (the guide to every source), then New Diagram….
+    expect(groupTitles(newMenu.submenu ?? [])).toEqual([['Import Your Data Model…', 'New Diagram…']]);
     expect(newMenu.submenu?.flat().every((a) => a.menu === 'erdStudio.newMenu')).toBe(true);
+    expect(newMenu.submenu?.flat().map((a) => a.icon)).toEqual(['cloud-download', 'add']);
 
+    // A dbt project's menu is the same: Import from dbt is the guide's first card there.
     const dbt = index.resolve('view/title', ctx(DIAGRAMS, undefined, { ...PROJECT, 'erdStudio.hasDbtProject': true })).navigation[0];
-    expect(titles(dbt.submenu?.[0] ?? [])).toEqual([
-      'New Diagram…', 'Import from dbt…', 'Import DBML…', 'Import SQL DDL…', 'Import Power BI or Fabric Semantic Model…',
-    ]);
+    expect(groupTitles(dbt.submenu ?? [])).toEqual(groupTitles(newMenu.submenu ?? []));
+
+    // Before the ERD folder exists the menu is the same.
+    const fresh = index.resolve('view/title', ctx(DIAGRAMS, undefined, { ...PROJECT, 'erdStudio.hasSemanticDir': false })).navigation[0];
+    expect(groupTitles(fresh.submenu ?? [])).toEqual(groupTitles(newMenu.submenu ?? []));
   });
 
   it('Diagrams with several dbt projects, filtered: Clear Filter as the icon, Filter… first in the … menu', () => {
@@ -276,7 +277,7 @@ describe('real package.json: running an action', () => {
     const t = index.resolve('view/title', diagramsCtx);
     const exportAll = t.groups.flat().find((a) => a.title === 'Export All Diagrams…') as MenuAction;
     expect(index.commandFor(exportAll.menu, exportAll.index, diagramsCtx, titleMenus)).toBe('erdStudio.exportAllDiagrams');
-    const newDiagram = t.navigation[0].submenu?.[0][0] as MenuAction;
+    const newDiagram = t.navigation[0].submenu?.[0][1] as MenuAction;
     expect(index.commandFor(newDiagram.menu, newDiagram.index, diagramsCtx, titleMenus)).toBe('erdStudio.createDomain');
   });
 
@@ -338,19 +339,46 @@ describe('real package.json: views and welcome content', () => {
 
   it('an empty DBML project: the entry its start intent names', () => {
     const base = { workspaceFolderCount: 1, 'erdStudio.hasProject': true, 'erdStudio.storage': 'dbml' };
-    expect(welcomeOf(DIAGRAMS, { ...base, 'erdStudio.startIntent': 'blank' })).toEqual(['No diagrams yet.']);
-    expect(welcomeOf(DIAGRAMS, { ...base, 'erdStudio.startIntent': 'importSqlDdl' })).toEqual(['No diagrams yet. This folder has CREATE TABLE scripts.']);
-    expect(welcomeOf(DIAGRAMS, { ...base, 'erdStudio.startIntent': 'importDbmlFile' })).toEqual(['No diagrams yet. This folder has a DBML file.']);
+    expect(welcomeOf(DIAGRAMS, { ...base, 'erdStudio.startIntent': 'blank' })).toEqual(['No diagrams or tables yet. Start from your data model: SQL scripts, DBML, Power BI and more.']);
+    expect(welcomeOf(DIAGRAMS, { ...base, 'erdStudio.startIntent': 'importSqlDdl' })).toEqual(['No diagrams or tables yet. This folder has CREATE TABLE scripts.']);
+    expect(welcomeOf(DIAGRAMS, { ...base, 'erdStudio.startIntent': 'importDbmlFile' })).toEqual(['No diagrams or tables yet. This folder has a DBML file.']);
     expect(welcomeOf(DIAGRAMS, { ...base, 'erdStudio.startIntent': 'importSemanticModel' })).toEqual([
-      'No diagrams yet. This folder has a Power BI or Fabric semantic model.',
+      'No diagrams or tables yet. This folder has a Power BI or Fabric semantic model.',
     ]);
   });
 
-  it('a dbt project: Import from dbt, plus Select dbt Project when there are several', () => {
+  it('an empty project leads with Import Your Data Model… as its one button, then New Diagram… as a link', () => {
+    const base = { workspaceFolderCount: 1, 'erdStudio.hasProject': true, 'erdStudio.storage': 'dbml' };
+    for (const keys of [
+      { ...base, 'erdStudio.startIntent': 'blank' },
+      { ...base, 'erdStudio.startIntent': 'importSqlDdl' },
+      { ...base, 'erdStudio.hasDbtProject': true },
+    ]) {
+      const [entry] = index.welcome(DIAGRAMS, ctx(undefined, undefined, keys));
+      const { paragraphs, links } = parseWelcomeContents(entry.contents);
+      // The glass page draws the first button paragraph as its primary button (html.ts renderWelcome).
+      expect(paragraphs.map((p) => p.button)).toEqual([false, true, false]);
+      expect(links.map((l) => l.label)).toEqual(['Import Your Data Model…', 'New Diagram…']);
+      expect(parseCommandLink(links[0].href)).toEqual({ command: 'erdStudio.showImportGuide', args: [{ from: 'sidebar' }] });
+      expect(parseCommandLink(links[1].href)).toEqual({ command: 'erdStudio.start', args: [{ action: 'blank', from: 'sidebar' }] });
+    }
+  });
+
+  it('a project with tables but no diagram: New Diagram… (the import is Help & Feedback\'s first row then)', () => {
+    const base = { workspaceFolderCount: 1, 'erdStudio.hasProject': true, 'erdStudio.storage': 'dbml', 'erdStudio.hasTables': true };
+    const expected = ['No diagrams yet. Start one, then drag your tables onto it from the Table Library.'];
+    expect(welcomeOf(DIAGRAMS, { ...base, 'erdStudio.startIntent': 'blank' })).toEqual(expected);
+    expect(welcomeOf(DIAGRAMS, { ...base, 'erdStudio.startIntent': 'importSqlDdl' })).toEqual(expected);
+    expect(welcomeOf(DIAGRAMS, { ...base, 'erdStudio.hasDbtProject': true })).toEqual(expected);
+    // Still Loading until a folder without dbt has its suggestion.
+    expect(welcomeOf(DIAGRAMS, base)).toEqual(['Loading diagrams…']);
+  });
+
+  it('a dbt project: says so above Import Your Data Model…, plus Select dbt Project when there are several', () => {
     const base = { workspaceFolderCount: 1, 'erdStudio.hasProject': true, 'erdStudio.hasDbtProject': true, 'erdStudio.storage': 'dbml' };
-    expect(welcomeOf(DIAGRAMS, base)).toEqual(['No diagrams yet. This folder is a dbt project.']);
+    expect(welcomeOf(DIAGRAMS, base)).toEqual(['No diagrams or tables yet. This folder is a dbt project.']);
     expect(welcomeOf(DIAGRAMS, { ...base, 'erdStudio.hasMultipleDbtProjects': true })).toEqual([
-      'No diagrams yet. This folder is a dbt project.',
+      'No diagrams or tables yet. This folder is a dbt project.',
       'This workspace has more than one dbt project.',
     ]);
   });
@@ -358,6 +386,13 @@ describe('real package.json: views and welcome content', () => {
   it('Table Library and Relationships', () => {
     expect(welcomeOf(TABLES, { 'erdStudio.tablesLoading': true })).toEqual(['Loading tables…']);
     expect(welcomeOf(TABLES, {})).toEqual(['No tables yet.']);
+    // The empty Table Library points the same way as the Diagrams view, as a quiet link (no second button).
+    const [library] = index.welcome(TABLES, ctx(undefined, undefined, {}));
+    const parsed = parseWelcomeContents(library.contents);
+    expect(parsed.paragraphs.some((p) => p.button)).toBe(false);
+    expect(parsed.links.map((l) => [l.label, parseCommandLink(l.href)])).toEqual([
+      ['Import Your Data Model…', { command: 'erdStudio.showImportGuide', args: [{ from: 'sidebar' }] }],
+    ]);
     expect(welcomeOf(RELATIONSHIPS, {})).toEqual(['No relationships yet.']);
     expect(welcomeOf(HELP, {})).toEqual([]);
   });

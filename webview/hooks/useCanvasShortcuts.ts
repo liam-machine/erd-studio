@@ -1,6 +1,7 @@
 /**
  * useCanvasShortcuts — the global keydown handler for the canvas
- * (Escape, Delete/Backspace, Ctrl+F, Ctrl+C/V for notes, F2, Shift+L,
+ * (Escape — dialogs, then column rows, then the two click-away steps of
+ * `applyClickAway` —, Delete/Backspace, Ctrl+F, Ctrl+C/V for notes, F2, Shift+L,
  * Shift+?, V/S mode toggle, Alt+1/2 stage switch).
  *
  * The listener is registered ONCE. Every piece of UI state it needs is read
@@ -24,7 +25,7 @@ import {
   altStageShortcut,
   resolveSingleDeleteTarget,
 } from '../lib/keyboardShortcuts';
-import { foldComposites, relationshipEdgeId } from '@erd-studio/renderer/editor';
+import { applyClickAway, foldComposites, relationshipEdgeId } from '@erd-studio/renderer/editor';
 import type { TableFlowNode, AnnotationFlowNode } from '@erd-studio/renderer/editor';
 import type { WebviewMessage, RelationshipKey } from '../../src/types/messages';
 import type { AnnotationColor } from '../../src/types/semantic';
@@ -173,14 +174,11 @@ export function useCanvasShortcuts(): void {
           return;
         }
 
-        // No dialogs open — deselect nodes, edges, and annotations
-        if (s.selectedNode || s.selectedEdges.length > 0 || s.selectedEdge || selectedAnnotation) {
-          s.selectNode(null);
-          s.selectAnnotation(null);
-          s.setDetailPanelOpen(false);
-          s.setSelectedEdges([]);
-          s.setSelectedEdge(null);
-          s.setHighlightedColumns(new Set());
+        // No dialogs open — the two click-away steps, as a click on the
+        // empty canvas takes them: an open detail panel closes (the table
+        // stays selected, its lines lit), then the selection clears.
+        if (applyClickAway(useEditorStore) !== 'none') {
+          s.setHoverFocus(null);
           return;
         }
 

@@ -1,8 +1,9 @@
 // A Power BI project saved as PBIP (the semantic model as TMDL files). ERD
 // Studio's quick look at the folder finds the model, so the empty Diagrams
-// view leads with "Import your Power BI semantic model" (its one button, with
-// the reason "This folder has a Power BI or Fabric semantic model."). That
-// button is the quick path, ending in Draft-first's preview: no folder
+// view says "This folder has a Power BI or Fabric semantic model." above its
+// one button, Import Your Data Model…, and the import guide it opens leads
+// with a "Found in this folder" card whose "Import your Power BI semantic
+// model" is the quick path, ending in Draft-first's preview: no folder
 // dialog, layer pick or name box, a read-only "Draft: adventure-sales" of the
 // four model tables (Sales, Customer, Product and the 'Date Table', in
 // snake_case) and the four relationships, the inactive one included, and
@@ -32,22 +33,29 @@ export default story({
       await s.eventually(async () => (await s.ui.windowTitle()).includes('adventure-sales'), { message: 'the adventure-sales folder did not open' });
     }, { say: 'Given my Power BI project folder, Adventure Sales.' });
 
+    const ENTRY = 'Import Your Data Model…';
     const START = 'Import your Power BI semantic model';
-    await s.step('When I open the ERD Studio sidebar, it leads with "Import your Power BI semantic model"', async () => {
+    await s.step('When I open the ERD Studio sidebar, it leads with "Import Your Data Model…"', async () => {
       await s.ui.openSidebar('ERD Studio');
-      const button = s.sel.welcomeLink(START);
-      await s.expectVisible(button, { what: `the "${START}" button in the empty Diagrams view (the folder's suggested start)` });
-      s.assert.deepEqual(await s.wb.ev(s.sel.welcomeButtons), [START], 'the suggested start should be the one button in the empty Diagrams view');
+      const button = s.sel.welcomeLink(ENTRY);
+      await s.expectVisible(button, { what: `the "${ENTRY}" button in the empty Diagrams view` });
+      s.assert.deepEqual(await s.wb.ev(s.sel.welcomeButtons), [ENTRY], 'Import Your Data Model… should be the one button in the empty Diagrams view');
       const text = await s.ui.sidebarText();
-      s.expect(text.includes('This folder has a Power BI or Fabric semantic model.'), `the view should say why it suggests this: ${text}`);
+      s.expect(text.includes('This folder has a Power BI or Fabric semantic model.'), `the view should say what the folder holds: ${text}`);
       await s.wb.highlight(button);
       await s.pause(1500);
       await s.wb.unhighlight();
     });
 
     let draft;
-    await s.step('When I click it, it asks me nothing: a draft of my model opens', async () => {
-      await s.wb.click(s.sel.welcomeLink(START));
+    await s.step('When I click it, the guide leads with my model; its button asks me nothing: a draft of my model opens', async () => {
+      await s.wb.click(s.sel.welcomeLink(ENTRY));
+      await s.ui.waitForActiveTab('Import Your Data Model');
+      const guide = await s.webview();
+      // The folder's own find leads, open: "Found in this folder", with the start's own label and quick path.
+      const found = `doc.querySelector('[data-card="found"] [data-action="run"]')`;
+      await guide.waitFor(`${found}?.textContent.trim() === ${JSON.stringify(START)}`, { what: `the guide's "${START}" button` });
+      await guide.click(found);
       // No folder dialog, layer or name question: the draft is the first thing it shows.
       draft = await waitForDraft(s, 'Draft: adventure-sales', { tables: 4 });
       s.assert.deepEqual([...draft.tables].sort(), [...TABLES].sort(), `the draft should draw ${TABLES.join(', ')}, but draws ${draft.tables.join(', ')}`);
@@ -59,7 +67,7 @@ export default story({
       await draft.page.highlight(DRAFT.banner);
       await s.pause(2500);
       await s.wb.unhighlight();
-    }, { say: "When I click it, I don't have to answer anything: a draft of my model opens, with its four tables and four relationships." });
+    }, { say: "When I click it, the import guide leads with my model. I click its button and don't have to answer anything: a draft of my model opens, with its four tables and four relationships." });
 
     await s.step('"Show details" says what it leaves out, like the measures', async () => {
       await draft.page.click(DRAFT.link('Show details'));

@@ -122,7 +122,7 @@ describe('runImportModel', () => {
     });
     expect(items.map((i) => i.label)).toEqual([
       '$(database) SQL DDL scripts', '$(file-code) DBML file', '$(graph) Power BI or Fabric semantic model',
-      '$(question) Bring In Your Data Model…',
+      '$(question) Import Your Data Model…',
     ]);
     expect(ran).toEqual([['erdStudio.showImportGuide', { from: 'picker' }]]);
     expect(feature).not.toHaveBeenCalled();

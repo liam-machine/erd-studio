@@ -2,7 +2,7 @@
 // with nothing ERD Studio can bring in yet (a README), and turns to ERD
 // Studio: the ERD Studio icon opens the example draft (Draft-first: nothing
 // found, so a finished example, once per machine, written nowhere), whose
-// Bring In Your Data Model… opens the import guide (its own webview). There
+// Import Your Data Model… opens the import guide (its own webview). There
 // the Databricks card's Copy puts the notebook cell on the clipboard
 // (asserted: the clipboard holds the snippet, and the button says Copied).
 //
@@ -27,7 +27,7 @@ import { REPO } from '../lib/launch.mjs';
 import { DRAFT, waitForDraft, waitForDraftKeepingName } from '../lib/draft.mjs';
 import { story } from '../lib/story.mjs';
 
-const GUIDE_TAB = 'Bring In Your Data Model';
+const GUIDE_TAB = 'Import Your Data Model';
 const CARD = `doc.querySelector('[data-card="databricks"]')`;
 const COPY = `${CARD}.querySelector('[data-action="copy"][data-snippet="databricksSchema"]')`;
 const IMPORT = `${CARD}.querySelector('[data-action="run"][data-guide-action="databricks"]')`;
@@ -53,28 +53,28 @@ export default story({
       // Nothing found: the example draft, once per machine, the Diagrams view keeping the focus.
       draft = await waitForDraft(s, 'Example: Coffee shop');
       s.assert.deepEqual(draft.primary, ['New Diagram…'], 'New Diagram… is the example draft\'s primary');
-      s.expect(draft.buttons.includes('Bring In Your Data Model…'), `the draft should offer Bring In Your Data Model…: ${draft.buttons.join(', ')}`);
+      s.expect(draft.buttons.includes('Import Your Data Model…'), `the draft should offer Import Your Data Model…: ${draft.buttons.join(', ')}`);
       s.expectNoFile('.erd-studio');
-      await draft.page.highlight(DRAFT.button('Bring In Your Data Model…'));
+      await draft.page.highlight(DRAFT.button('Import Your Data Model…'));
       await s.pause(2000);
       await s.wb.unhighlight();
     }, { say: 'When I open ERD Studio, it shows me an example diagram, and offers to bring my own model in. Nothing is saved.' });
 
     let guide;
-    await s.step('I click "Bring In Your Data Model…": a guide for each place my model can come from', async () => {
-      await draft.page.click(DRAFT.button('Bring In Your Data Model…'));
+    await s.step('I click "Import Your Data Model…": a guide for each place my model can come from', async () => {
+      await draft.page.click(DRAFT.button('Import Your Data Model…'));
       draft.page.close();
       await s.ui.waitForActiveTab(GUIDE_TAB);
       guide = await s.webview();
       const heading = await guide.waitFor(`doc.querySelector('.ig__heading')?.textContent.trim()`, { what: 'the guide\'s heading' });
-      s.assert.equal(heading, 'Bring In Your Data Model');
+      s.assert.equal(heading, 'Import Your Data Model');
       const cards = await guide.ev(`[...doc.querySelectorAll('.ig-card')].map(c => c.dataset.card)`);
       // Nothing found here: no "Found in this folder" card, and no dbt card outside a dbt project.
       s.assert.deepEqual(cards, ['databricks', 'snowflake', 'powerBi', 'fabric', 'sqlServer', 'postgres', 'mysql', 'dbml', 'otherTools', 'notYet'], 'the guide\'s cards');
       await guide.highlight(`doc.querySelector('.ig__cards')`);
       await s.pause(1500);
       await s.wb.unhighlight();
-    }, { say: 'I click Bring In Your Data Model: a card for each place my model can come from.' });
+    }, { say: 'I click Import Your Data Model: a card for each place my model can come from.' });
 
     await s.step('My tables are in Databricks: its card says what to export', async () => {
       await guide.ev(`(${CARD}.scrollIntoView({ block: 'start', behavior: 'smooth' }), true)`);

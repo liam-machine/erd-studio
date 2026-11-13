@@ -5,8 +5,9 @@
  *
  *  - Viewer: closing hides the panel and keeps the table selected (its
  *    relationships stay lit); the rows wrap and show the role.
- *  - Editor: closing clears the selection, as it always has; the rows are the
- *    clickable, single-line rows they always were.
+ *  - Editor: closing hides the panel and keeps the table selected too (the
+ *    first step of a click-away); the rows are the clickable, single-line
+ *    rows they always were.
  */
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { cleanup, fireEvent, render } from '@testing-library/react';
@@ -61,12 +62,15 @@ describe('DetailPanel close', () => {
     expect(posted).toEqual([]);
   });
 
-  it('editor: closes the panel and clears the selection, as before', () => {
+  it('editor: hides the panel and keeps the table selected, as the first click away does; column rows go with the panel', () => {
     const { container, store } = renderPanel(false);
-    expect(container.querySelector('.detail-panel__close')!.getAttribute('title')).toBe('Close detail panel');
+    store.setState({ selectedColumns: ['order_line_key'], lastSelectedColumn: 'order_line_key', pendingDeleteConfirmation: false });
+    expect(container.querySelector('.detail-panel__close')!.getAttribute('title')).toBe('Close the panel (the table stays selected)');
     fireEvent.click(container.querySelector('.detail-panel__close')!);
+    expect(container.querySelector('.detail-panel')).toBeNull();
     expect(store.getState().detailPanelOpen).toBe(false);
-    expect(store.getState().selectedNode).toBeNull();
+    expect(store.getState().selectedNode).toBe('fct_order_line_with_a_very_long_name');
+    expect(store.getState().selectedColumns).toEqual([]);
   });
 });
 
@@ -139,7 +143,8 @@ describe('DetailPanel.css (viewer)', () => {
       return m ? m[1] : '';
     };
     const panel = rule('.detail-panel--viewer');
-    expect(panel).toMatch(/max-height:\s*min\(calc\(100vh - 100px\),\s*calc\(100% - 192px\)\)/);
+    // Above the minimap's row, whose height follows the canvas (lib/canvasChrome.ts).
+    expect(panel).toMatch(/max-height:\s*min\(calc\(100vh - 100px\),\s*calc\(100% - var\(--shell-inset\) - var\(--detail-panel-bottom-reserve, 177px\)\)\)/);
     expect(panel).toMatch(/overflow-x:\s*hidden/);
     const value = rule('.detail-panel--viewer .detail-panel__value');
     expect(value).toMatch(/overflow-wrap:\s*anywhere/);

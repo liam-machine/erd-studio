@@ -10,7 +10,11 @@
  *   - The overlay effect updates only the `dimmed` / `isExpanded` flags when
  *     selection, search or column expansion changes.
  *   - The handlers open the detail panel on a model click, select annotations,
- *     highlight an FK edge's columns and clear selection on a pane click.
+ *     highlight an FK edge's columns, and take a click-away step on a pane
+ *     click (`lib/clickAway.ts`): an open panel closes first, keeping the
+ *     selection; the next click clears it. React Flow clears its own
+ *     selection on every pane click, so a host passes its node changes
+ *     through `keepSelection` to keep the multi-selection on the first step.
  *
  * Hover preview and the moving relationship arrows are `useHoverFocus`, a
  * separate hook: it needs React Flow's store, and this one must keep working
@@ -20,7 +24,7 @@
  */
 
 import { useCallback, useEffect, useRef } from 'react';
-import type { OnSelectionChangeFunc } from '@xyflow/react';
+import type { NodeChange, OnSelectionChangeFunc } from '@xyflow/react';
 import type { DiscrepancyReport } from '@erd-studio/core';
 import { useEditorStore, useEditorStoreApi } from '../store/editorStore';
 import { useColumnExpansion } from '../hooks/useColumnExpansion';
@@ -28,6 +32,7 @@ import { transformSubjectArea } from '../lib/graphTransformer';
 import { applyNodeOverlays } from '../lib/nodeOverlays';
 import { columnPairs } from '../lib/relationshipDisplayKey';
 import { reuseUnchanged } from '../lib/reuseUnchanged';
+import { applyClickAway, clickAwayStep } from '../lib/clickAway';
 import type { TableFlowNode, FkFlowEdge, AnnotationFlowNode, AnnotationFlowEdge } from '../types/graph';
 
 export interface UseCanvasGraphOptions {
@@ -50,8 +55,17 @@ export interface UseCanvasGraphResult {
   edges: (FkFlowEdge | AnnotationFlowEdge)[];
   onNodeClick: (event: React.MouseEvent, node: TableFlowNode | AnnotationFlowNode) => void;
   onEdgeClick: (event: React.MouseEvent, edge: FkFlowEdge | AnnotationFlowEdge) => void;
+  /** A click on the empty canvas: one click-away step (`lib/clickAway.ts`). */
   onPaneClick: () => void;
   onSelectionChange: OnSelectionChangeFunc;
+  /**
+   * Pass React Flow's node changes through this before applying them. It
+   * drops the deselection React Flow makes on the pane click that only
+   * closed the detail panel, so the selection (one table or several) stays
+   * marked; every other change goes through as it is.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  keepSelection: <C extends NodeChange<any>>(changes: C[]) => C[];
 }
 
 export function useCanvasGraph({
@@ -237,17 +251,48 @@ export function useCanvasGraph({
     [setHighlightedColumns, selectNode, setDetailPanelOpen, setSelectedEdge],
   );
 
-  // Handle clicks on blank canvas to close the detail panel and clear selection.
+  // A click on the blank canvas: close an open detail panel first (the
+  // selection and its lit lines stay), else clear the selection. React Flow
+  // clears its own selection marks right after this handler, in the same
+  // event; on the close-panel step `keepSelection` drops that deselection.
   // The pointer is on the blank canvas, so no table is hovered either: the
-  // hover preview and its moving arrows stop now, not after the leave grace.
+  // hover preview stops now, not after the leave grace.
+  const keepFlowSelectionRef = useRef(false);
+  const keepFlowSelectionForThisEvent = useCallback(() => {
+    keepFlowSelectionRef.current = true;
+    // Until the event has been dispatched to every listener (a timer, not
+    // a microtask: a browser runs microtasks between two listeners).
+    setTimeout(() => {
+      keepFlowSelectionRef.current = false;
+    }, 0);
+  }, []);
   const onPaneClick = useCallback(() => {
-    setDetailPanelOpen(false);
-    selectNode(null);
-    selectAnnotation(null);
-    setHighlightedColumns(new Set());
-    setSelectedEdge(null);
+    const step = applyClickAway(storeApi);
     setHoverFocus(null);
-  }, [setDetailPanelOpen, selectNode, selectAnnotation, setHighlightedColumns, setSelectedEdge, setHoverFocus]);
+    if (step === 'close-panel') keepFlowSelectionForThisEvent();
+  }, [storeApi, setHoverFocus, keepFlowSelectionForThisEvent]);
+
+  // Escape on a focused table: React Flow deselects the node itself, before
+  // any window listener (the viewer's or the editor's Escape) takes its step.
+  // When that step will only close the panel, keep React Flow's selection
+  // through this key press, so the table stays marked as the click-away
+  // leaves it. Capture phase, so this runs before React Flow's handler.
+  useEffect(() => {
+    const onKeyDownCapture = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      const s = storeApi.getState();
+      if (clickAwayStep(s) === 'close-panel') keepFlowSelectionForThisEvent();
+    };
+    window.addEventListener('keydown', onKeyDownCapture, true);
+    return () => window.removeEventListener('keydown', onKeyDownCapture, true);
+  }, [storeApi, keepFlowSelectionForThisEvent]);
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const keepSelection = useCallback(<C extends NodeChange<any>>(changes: C[]): C[] => (
+    keepFlowSelectionRef.current
+      ? changes.filter((c) => !(c.type === 'select' && !c.selected))
+      : changes
+  ), []);
 
   // Close detail panel when multi-selecting (selection mismatch with single-node panel).
   // But don't close if the selection reset was caused by a domain update (nodes recreated).
@@ -274,5 +319,5 @@ export function useCanvasGraph({
     [selectNode, setDetailPanelOpen, setSelectedEdges, currentSelectedNode, selectedEdge, domain],
   );
 
-  return { nodes, edges, onNodeClick, onEdgeClick, onPaneClick, onSelectionChange };
+  return { nodes, edges, onNodeClick, onEdgeClick, onPaneClick, onSelectionChange, keepSelection };
 }

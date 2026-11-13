@@ -43,7 +43,7 @@ When the folder holds a model to bring in, that import leads instead (the first 
 
 Every import opens as a draft: nothing is written until you press **Keep as Diagram**.
 
-**More ways to start…** lists the rest, including **Import…** and **Bring In Your Data Model…**: the export steps for Databricks, Snowflake, Fabric, SQL Server and more ([the guide](docs/import-existing-models.md)).
+**Import Your Data Model…** (atop the sidebar) has the export steps for Databricks, Snowflake, Fabric, SQL Server and more ([the guide](docs/import-existing-models.md)); **More ways to start…** adds **Import…**.
 
 <table align="center"><tr>
 <td width="300"><a href="https://cdn.jsdelivr.net/gh/liam-machine/erd-studio@main/docs/assets/getting-started.mp4"><img src="https://raw.githubusercontent.com/liam-machine/erd-studio/main/docs/assets/getting-started-play.jpg" width="300" alt="Play Watch the Tour (2:48): ERD Studio recorded in VS Code's light theme. It shows the tools it imports from, imports a PostgreSQL schema exported with one pg_dump command, shows its DBML files next to the code and a 2,000-table diagram, edits it by hand and with an AI assistant, reviews the DBML and SQL in one pull request, compares the design with what the code builds, and shows ERD Studio for Confluence drawing it from GitHub." /></a></td>

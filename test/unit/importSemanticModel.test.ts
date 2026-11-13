@@ -113,7 +113,7 @@ afterEach(() => {
 });
 
 describe('Import Semantic Model… — contributed', () => {
-  it('is a palette command with no legacy alias, not pre-registered, and in the + menu after Import SQL DDL…', () => {
+  it('is a palette command with no legacy alias, not pre-registered; the + menu reaches it through Import Your Data Model… (the guide)', () => {
     const pkg = packageJson as unknown as {
       contributes: { commands: Array<{ command: string; title: string; category?: string }>; menus: Record<string, Array<{ command?: string; when?: string; group?: string }>> };
     };
@@ -123,7 +123,8 @@ describe('Import Semantic Model… — contributed', () => {
     expect(NO_LEGACY_ALIAS.has(IMPORT_SEMANTIC_MODEL_COMMAND)).toBe(true);
     expect(PRE_REGISTERED_COMMANDS.has(IMPORT_SEMANTIC_MODEL_COMMAND)).toBe(false);
     expect(pkg.contributes.menus.commandPalette.filter((m) => m.command === IMPORT_SEMANTIC_MODEL_COMMAND)).toEqual([{ command: IMPORT_SEMANTIC_MODEL_COMMAND, when: 'erdStudio.hasProject' }]);
-    expect(pkg.contributes.menus['erdStudio.newMenu']).toContainEqual({ command: IMPORT_SEMANTIC_MODEL_COMMAND, when: 'erdStudio.hasProject', group: '1_diagram@5' });
+    expect(pkg.contributes.menus['erdStudio.newMenu'].map((m) => m.command)).not.toContain(IMPORT_SEMANTIC_MODEL_COMMAND);
+    expect(pkg.contributes.menus['erdStudio.newMenu'].map((m) => m.command)).toContain('erdStudio.showImportGuide');
   });
 });
 

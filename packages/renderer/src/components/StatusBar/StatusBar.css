@@ -10,12 +10,17 @@
 
 .status-bar {
   display: flex;
+  flex-wrap: nowrap;
   align-items: center;
   gap: var(--space-4);
+  min-width: 0;
   min-height: var(--control-height);
   padding: 0 var(--space-5);
-  /* Clear of the legend's ? button: its inset, its width and a gap. */
+  /* Clear of the legend's ? button: its inset, its width and a gap. The
+     component sets the same margin inline (and the open legend's, in the
+     viewer), with a max-width from the canvas's size (lib/canvasChrome.ts). */
   margin-left: calc(var(--shell-inset) + var(--shell-control-size) + var(--shell-gap));
+  overflow: hidden;
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-pill);
   background: var(--glass-surface-1);
@@ -27,19 +32,29 @@
   font-size: var(--text-xs);
   font-weight: var(--weight-medium);
   line-height: var(--leading-tight);
+  white-space: nowrap;
 }
 
+/* The counts may shrink (to an ellipsis, the last resort); nothing else does. */
 .status-bar__item {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 
-/* "5 tables | 4 relationships": one group that never wraps (in the editor's
-   row it reads exactly as three separate items with the same gap). */
+/* The table count is kept whole; only the relationship count may be cut. */
+.status-bar__counts > .status-bar__item:first-child {
+  flex-shrink: 0;
+}
+
+/* "5 tables | 4 relationships": one group that never wraps. */
 .status-bar__counts {
   display: inline-flex;
   align-items: center;
   gap: var(--space-4);
+  min-width: 0;
   white-space: nowrap;
 }
 
@@ -57,9 +72,12 @@
   line-height: 0;
 }
 
-/* The key to the tables' layers: a swatch in each layer's colour, its name and how many tables. */
+/* The key to the tables' layers: a swatch in each layer's colour, its name
+   (dropped when the room is short) and how many tables. Never wraps. */
 .status-bar__layers {
   display: inline-flex;
+  flex-shrink: 0;
+  flex-wrap: nowrap;
   align-items: center;
   gap: var(--space-5);
 }
@@ -85,45 +103,14 @@
   line-height: 1.6;
 }
 
-/*
- * The viewer: clear of the legend's ? button (15px panel margin + 28px
- * button + a gap), never under the minimap (200px wide, 15px margin), and
- * beside the open legend (260px at most) rather than behind it. The counts
- * and the layer key are two rows that never break inside an item, with no
- * divider between them, and the box is only as wide as its widest row.
- */
-.status-bar--viewer {
-  margin-left: 51px;
-  max-width: calc(100% - 51px - 231px);
-  flex-direction: column;
-  align-items: flex-start;
-  justify-content: center;
-  flex-wrap: nowrap;
-  row-gap: var(--space-1);
-  padding: var(--space-2) var(--space-5);
-  border-radius: var(--radius-lg);
-}
-
-.status-bar--viewer .status-bar__divider--layers {
-  display: none;
-}
-
-.status-bar--viewer.status-bar--beside-legend {
-  margin-left: 283px;
-  max-width: calc(100% - 283px - 231px);
-}
-
-.status-bar--viewer .status-bar__layers {
-  flex-wrap: wrap;
-  row-gap: var(--space-1);
-}
-
-/* Beside the open legend there is no room for the counts on a canvas under
-   about 720px wide (283px legend + 231px minimap + the counts): they hide
-   until the legend closes. The canvas root is the size container
-   (`ErdCanvas`), so this follows the canvas, not the window. */
-@container (max-width: 719px) {
-  .status-bar--viewer.status-bar--beside-legend {
-    display: none;
-  }
+/* "+2": the layers the pill had no room for (named in its tooltip). */
+.status-bar__more {
+  padding: 0 var(--space-2);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-xs);
+  color: var(--text-tertiary);
+  font-size: 9px;
+  font-weight: var(--weight-bold);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.5;
 }

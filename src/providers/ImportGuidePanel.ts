@@ -1,5 +1,5 @@
 /**
- * The **Bring In Your Data Model** tab (`src/services/importGuide.ts`): a
+ * The **Import Your Data Model** tab (`src/services/importGuide.ts`): a
  * singleton webview panel, opened by `erdStudio.showImportGuide` from any
  * window (an empty one too: it is pre-registered). Every message is
  * validated (`isImportGuideToHost`) and mapped to a fixed command or a fixed
@@ -13,6 +13,7 @@ import * as vscode from 'vscode';
 import {
   IMPORT_GUIDE_ACTION_FEATURES,
   IMPORT_GUIDE_COPIED_FEATURE,
+  IMPORT_GUIDE_EXAMPLE_COMMAND,
   IMPORT_GUIDE_SNIPPET_COPIED_FEATURES,
   IMPORT_GUIDE_SNIPPETS,
   IMPORT_GUIDE_TITLE,
@@ -111,6 +112,10 @@ export class ImportGuidePanel {
       }
       case 'openFolder':
         await this.deps.executeCommand('vscode.openFolder');
+        return;
+      case 'openExample':
+        // Works with no folder open too: the example opens in a draft, or in a folder of its own.
+        await this.deps.executeCommand(IMPORT_GUIDE_EXAMPLE_COMMAND);
         return;
     }
   }

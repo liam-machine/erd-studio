@@ -132,8 +132,8 @@ describe('small (a SQL find)', () => {
     expect(menuButton.getAttribute('aria-expanded')).toBe('false');
     fireEvent.click(menuButton);
     const menu = screen.getByRole('menu');
-    expect(within(menu).getAllByRole('menuitem').map((i) => i.textContent)).toEqual(['New Diagram…', 'Import…', 'Bring In Your Data Model…', 'Open an Example…']);
-    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Bring In Your Data Model…' }));
+    expect(within(menu).getAllByRole('menuitem').map((i) => i.textContent)).toEqual(['New Diagram…', 'Import…', 'Import Your Data Model…', 'Open an Example…']);
+    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Import Your Data Model…' }));
     expect(posts.at(-1)).toEqual({ type: 'otherStart', start: 'guide' });
     expect(screen.queryByRole('menu')).toBeNull();
   });
@@ -326,14 +326,14 @@ describe('example with no folder open', () => {
     expect(posts.at(-1)).toEqual({ type: 'otherStart', start: 'openFolder' });
   });
 
-  it('example in a folder: New Diagram… primary, Bring In Your Data Model… beside it, Keep This Example quiet, Import… in the menu', () => {
+  it('example in a folder: New Diagram… primary, Import Your Data Model… beside it, Keep This Example quiet, Import… in the menu', () => {
     const base = fixture('example-no-folder');
     const view: DraftView = {
       ...base,
       banner: { ...base.banner, keepLabel: 'Keep This Example', primary: 'blank', shownStarts: ['guide'] },
       otherStarts: [
         { id: 'blank', label: 'New Diagram…' },
-        { id: 'guide', label: 'Bring In Your Data Model…' },
+        { id: 'guide', label: 'Import Your Data Model…' },
         { id: 'import', label: 'Import…' },
       ],
     };
@@ -344,7 +344,7 @@ describe('example with no folder open', () => {
     expect(keep.classList.contains('draft-button--quiet')).toBe(true);
     fireEvent.click(keep);
     expect(posts.at(-1)).toEqual({ type: 'keep' });
-    fireEvent.click(screen.getByRole('button', { name: 'Bring In Your Data Model…' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Import Your Data Model…' }));
     expect(posts.at(-1)).toEqual({ type: 'otherStart', start: 'guide' });
     fireEvent.click(screen.getByRole('button', { name: /More ways to start/ }));
     expect(screen.getAllByRole('menuitem').map((i) => i.textContent)).toEqual(['Import…']);

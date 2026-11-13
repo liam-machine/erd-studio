@@ -15,6 +15,7 @@ import { ErdCanvas } from '../../src/ErdCanvas';
 import { createCanvasStore, CanvasStoreProvider } from '../../src/store/editorStore';
 import { CanvasEnvironmentProvider } from '../../src/host/canvasEnvironment';
 import { DetailPanel } from '../../src/components/DetailPanel/DetailPanel';
+import { transformSubjectArea } from '../../src/lib/graphTransformer';
 import { Legend } from '../../src/components/Legend/Legend';
 import { SOURCE_LABEL_NEUTRAL, SOURCE_LEGEND_DESC_NEUTRAL, SOURCE_PHRASE_NEUTRAL } from '../../src/lib/badgeLabels';
 
@@ -110,7 +111,9 @@ describe('ErdCanvas (the viewer) never names dbt', () => {
     expect(chip.getAttribute('aria-label')).toContain(`types from ${SOURCE_PHRASE_NEUTRAL.manifest}`);
 
     const legend = container.querySelector('.legend')!;
-    expect(legend.textContent).toContain(SOURCE_LEGEND_DESC_NEUTRAL.yml);
+    // The legend explains the chip the canvas draws (the types' source), in neutral words.
+    expect(legend.textContent).toContain(SOURCE_LEGEND_DESC_NEUTRAL.manifest);
+    expect(legend.textContent).not.toMatch(/dbt/);
     expect(legend.textContent).toContain('Built from the project (read-only)');
     expect(legend.textContent).toContain('Not found in the project');
     expect(legend.textContent).toContain('Disabled in the project');
@@ -132,8 +135,10 @@ describe('ErdCanvas (the viewer) never names dbt', () => {
 
 describe('The editor in a dbt project keeps its dbt wording', () => {
   it('names dbt in the Warehouse name row, Columns from and the legend', () => {
+    const domain = physicalDomain();
     const store = createCanvasStore({
-      domain: physicalDomain(),
+      domain,
+      ...transformSubjectArea(domain),
       selectedNode: 'fct_sale',
       detailPanelOpen: true,
       legendOpen: true,
@@ -152,9 +157,9 @@ describe('The editor in a dbt project keeps its dbt wording', () => {
     expect(value.getAttribute('title')).toBe("Built as sale (dbt alias); the table's name is fct_sale");
     expect(container.querySelector('.detail-panel')!.textContent).toContain('your dbt .yml and dbt manifest');
     const legend = container.querySelector('.legend')!.textContent!;
-    expect(legend).toContain('Declared in dbt .yml files (read-only)');
+    expect(legend).toContain('What your dbt project builds (read-only)');
     expect(legend).toContain('Not found in your dbt project');
-    expect(legend).toContain('Compare with dbt');
+    expect(legend).toContain('Disabled in dbt');
     expect(legend).toContain('The compiled dbt manifest');
   });
 });

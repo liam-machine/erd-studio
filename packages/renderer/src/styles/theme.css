@@ -794,14 +794,9 @@ body.vscode-high-contrast-light {
   margin-right: calc(var(--shell-inset) + var(--detail-panel-width) + var(--shell-gap));
 }
 
-/* ...and steps aside on a window too narrow for both (below about 1180px
-   it would land on the status bar). */
-@media (max-width: 1180px) {
-  .editor-canvas:has(.react-flow__panel.detail-panel:not(.detail-panel--viewer)) .react-flow__minimap.erd-minimap {
-    opacity: 0;
-    pointer-events: none;
-  }
-}
+/* ...and is left out when the canvas left of the panel is too small for it:
+   lib/canvasChrome.ts sizes and hides the minimap from the canvas's own
+   width, not the window's. */
 
 /* A logical-only canvas draws its lines, their end labels, the moving
    arrows, the hover ring and the legend's samples in the neutral line colour

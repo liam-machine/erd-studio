@@ -21,7 +21,7 @@ const POLL_MS = 250;
 const QUICK_INPUT_GRACE_MS = 3000;
 
 /** Tabs ERD Studio opens: its webviews and its diagrams. */
-const ERD_TAB = /^(Draft|Example): |^ERD Studio Tour$|^Bring In Your Data Model$|^Convert to DBML$|\.dbml$/;
+const ERD_TAB = /^(Draft|Example): |^ERD Studio Tour$|^Import Your Data Model$|^Convert to DBML$|\.dbml$/;
 
 const SNAPSHOT = `(() => {
   const shown = (e) => { if (!e) return false; const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0 && r.right > 0 && r.left < innerWidth; };

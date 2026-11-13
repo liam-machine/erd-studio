@@ -23,6 +23,7 @@ export { useCanvasGraph } from './canvas/useCanvasGraph';
 export { useHoverFocus, type UseHoverFocusResult, type HoverFocusHandlers } from './canvas/useHoverFocus';
 export { CanvasBackdrop, ANNOTATION_MINIMAP_COLORS } from './canvas/CanvasBackdrop';
 export { canvasNodeTypes, canvasEdgeTypes } from './canvas/flowTypes';
+export { useCanvasChrome } from './canvas/useCanvasChrome';
 
 // Components
 export { TableNode } from './components/Graph/ModelNode';
@@ -31,7 +32,15 @@ export { EdgeFlow, EdgeFlowGlyphs, type EdgeFlowProps } from './components/Graph
 export { AnnotationNode } from './components/Graph/AnnotationNode';
 export { AnnotationEdge } from './components/Graph/AnnotationEdge';
 export { DetailPanel } from './components/DetailPanel/DetailPanel';
-export { Legend, legendEntries, type LegendEntries } from './components/Legend/Legend';
+export {
+  Legend,
+  legendEntries,
+  legendFacts,
+  hasXray,
+  type LegendEntries,
+  type LegendFacts,
+  type LegendFactsInput,
+} from './components/Legend/Legend';
 export { StatusBar, statusBarStats, type StatusBarStats, type StatusBarLayer } from './components/StatusBar/StatusBar';
 export { KeyBadge } from './components/common/KeyBadge';
 export { KeyBadgeGroup } from './components/common/KeyBadgeGroup';
@@ -56,3 +65,27 @@ export { columnPairs, foldComposites, relationshipDisplayKey, relationshipEdgeId
 export { computeTableLabels, headerName, matchesTableSearch, type LabelledTable } from './lib/modelLabels';
 export { LAYER_BADGE_FALLBACK, layerAbbreviation, isSingleLayerProject } from './lib/layerCues';
 export { ANNOTATION_COLORS } from './lib/annotationColors';
+export {
+  applyClickAway,
+  clickAwayStep,
+  clickAwayPatch,
+  CLOSE_PANEL_PATCH,
+  type ClickAwayStep,
+  type ClickAwayState,
+  type ClickAwayStore,
+} from './lib/clickAway';
+export {
+  canvasChrome,
+  minimapSize,
+  fitStatusBar,
+  pillWidths,
+  MINIMAP_MAX,
+  MINIMAP_HIDE_BELOW,
+  type CanvasChrome,
+  type CanvasSize,
+  type ChromeState,
+  type MinimapSize,
+  type PillFit,
+  type PillMode,
+  type PillLayer,
+} from './lib/canvasChrome';

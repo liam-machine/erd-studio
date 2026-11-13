@@ -20,14 +20,17 @@
  * grain, meta and rationale sections were: a section folded to its heading
  * and count until the reader opens it (it sits above Columns, so a few long
  * rationale values would push the columns and relationships out of a short
- * embedded canvas), and remembered from table to table. Its close button hides the
- * panel but keeps the table selected (its relationships stay lit; a click on
- * the table opens the panel again, and the empty canvas or Escape clears it),
- * its relationship rows wrap instead of cutting names off, and it is never
- * taller than the canvas it floats over.
+ * embedded canvas), and remembered from table to table. Its relationship
+ * rows wrap instead of cutting names off, and it is never taller than the
+ * canvas it floats over, stopping above the minimap's row.
+ *
+ * In both, the close button hides the panel but keeps the table selected
+ * (its relationships stay lit; a click on the table opens the panel again),
+ * which is exactly what the first click on the empty canvas, or Escape,
+ * leaves (`lib/clickAway.ts`); the next click or Escape clears it.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { Panel, useStoreApi } from '@xyflow/react';
 
 import { DescriptionEditor } from './DescriptionEditor';
@@ -36,7 +39,9 @@ import { ColumnEditor } from './ColumnEditor';
 import { FieldsSection, fieldRows, tableFieldsShown, type FieldsTable } from './FieldsSection';
 import { IconChevron, IconClose, IconOpen, IconPencil } from './panelIcons';
 import { roleLabel } from '../../lib/roleOptions';
-import { useEditorStore } from '../../store/editorStore';
+import { useEditorStore, useEditorStoreApi } from '../../store/editorStore';
+import { CLOSE_PANEL_PATCH } from '../../lib/clickAway';
+import { useCanvasChrome } from '../../canvas/useCanvasChrome';
 import { useCanvasHost, useIsViewer } from '../../host/canvasEnvironment';
 import { STARTING_FIELD_LIST, backwardsRelationshipNote } from '@erd-studio/core';
 import type { ColumnPair, DisplayRelationship, FieldList, PhysicalColumnSource, PhysicalProvenance } from '@erd-studio/core';
@@ -214,18 +219,23 @@ export function DetailPanel() {
     setConfirmingDelete(false);
   }, [setDetailPanelOpen, selectNode]);
 
-  // The viewer's close: hide the panel, keep the selection (and its
-  // highlight), and give the focus to the selected table so a keyboard user
-  // keeps their place (Enter on it opens the panel again).
+  // The close button: hide the panel, keep the selection (and its
+  // highlight), as the first click on the empty canvas does, and give the
+  // focus to the selected table so a keyboard user keeps their place (Enter
+  // on it opens the panel again).
   const flowStore = useStoreApi();
+  const storeApi = useEditorStoreApi();
+  // The viewer's panel stops above the minimap's row (sized from the canvas).
+  const { panelBottomReserve } = useCanvasChrome();
   const handleHide = useCallback(() => {
     const id = selectedNode;
-    setDetailPanelOpen(false);
+    storeApi.setState({ ...CLOSE_PANEL_PATCH });
+    setConfirmingDelete(false);
     if (!id) return;
     const escaped = typeof CSS !== 'undefined' && typeof CSS.escape === 'function' ? CSS.escape(id) : id.replace(/["\\]/g, '\\$&');
     const el = flowStore.getState().domNode?.querySelector<HTMLElement>(`.react-flow__node[data-id="${escaped}"]`);
     el?.focus({ preventScroll: true });
-  }, [selectedNode, setDetailPanelOpen, flowStore]);
+  }, [selectedNode, storeApi, flowStore]);
 
   // The selected table's own name: what the rename box starts from and
   // compares with. For one of two same-named tables from different schema
@@ -835,7 +845,12 @@ export function DetailPanel() {
   // --- Render ------------------------------------------------------------
 
   return (
-    <Panel ref={panelRef} position="top-right" className={viewer ? 'detail-panel detail-panel--viewer' : 'detail-panel'}>
+    <Panel
+      ref={panelRef}
+      position="top-right"
+      className={viewer ? 'detail-panel detail-panel--viewer' : 'detail-panel'}
+      style={viewer ? ({ '--detail-panel-bottom-reserve': `${panelBottomReserve}px` } as CSSProperties) : undefined}
+    >
       {/* Header */}
       <div ref={headerRef} className={`detail-panel__header${scrolled ? ' detail-panel__header--scrolled' : ''}`}>
         {editingName ? (
@@ -890,8 +905,8 @@ export function DetailPanel() {
         )}
         <button
           className="detail-panel__close"
-          onClick={viewer ? handleHide : handleClose}
-          title={viewer ? 'Close the panel (the table stays selected)' : 'Close detail panel'}
+          onClick={handleHide}
+          title="Close the panel (the table stays selected)"
           aria-label="Close detail panel"
         >
           <IconClose size={14} />

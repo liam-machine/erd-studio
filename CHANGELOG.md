@@ -8,6 +8,17 @@ The `Unreleased` heading below is renamed to the released version by the deploy 
 Releases are patch bumps by default. To ship a minor or major version, write it into the
 heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that.
 
+## Unreleased
+
+### Changed
+
+- **Clicking away from a table now takes two clicks.** With a table selected and its panel open, the first click on an empty part of the diagram closes the panel but keeps the table selected, with its relationship lines still lit; the second click clears the selection. Escape works the same way, and the panel's close button leaves the table selected too. Several selected tables stay selected on the first click, so Delete still acts on what you see selected. A selected relationship line, a note or tables selected without the panel clear on the first click, as before. Dragging the empty canvas to move around never counts as a click.
+- **The minimap fits the diagram's size.** It is smaller on a small or narrow diagram, never larger than before, and hidden when the diagram is too small for it to help.
+- **The table and relationship counts at the bottom left stay on one line.** When there is not enough room, the layer names go first (each layer's badge and count stay), then layers fold into "+2", then the layer key goes, keeping the two counts; hover the counts to see everything. While the legend is open, the counts move to its right.
+- **The legend explains what your diagram shows, and only that.** It lists the key badges, symbols, relationship types, notes and table header marks the diagram actually has, adds entries for marks it used to leave out (the warehouse name after a table's name, the grain line, a role on a line, a composite key, a line drawn backwards, a line passing under a table, and how lines light up in the layer's colour), draws the layer badge in your layer's colour, and says whether the badge is each table's own layer (DBML) or the diagram's layer (older YAML/JSON projects). The comparison colours show only while a comparison is open. It never runs past the top of a short canvas; it scrolls instead.
+- **One way to import from the side panel: Import Your Data Model….** The Diagrams **+** menu now has two entries, **Import Your Data Model…** and **New Diagram…**, in place of the separate Import from dbt…, Import DBML…, Import SQL DDL… and Import Power BI or Fabric Semantic Model… entries. It opens the import guide, which has every one of them: a card for each source, with the folder's own file or dbt project first. The separate imports are still in the Command Palette, and **New Layer…** is still the last row of the Diagrams list and the last choice when New Diagram… asks for a layer. The guide is now called **Import Your Data Model…** everywhere (it was **Bring In Your Data Model…**), and it ends with **Open an Example…** for when you have nothing to bring in yet.
+- **An empty project starts with Import Your Data Model….** When the project has no diagrams and no tables, the Diagrams section's first and only button is **Import Your Data Model…**, with **New Diagram…** as a link under it, in the glass side panel and the standard one. The text above it still says what ERD Studio found in the folder (SQL scripts, a semantic model, a DBML file or a dbt project), and the Table Library's empty text links to the same import. Once the project has a diagram or a table, **Import Your Data Model…** is the first row of **Help & Feedback** instead.
+
 ## 2.0.6 — 2026-11-13
 
 ### Added

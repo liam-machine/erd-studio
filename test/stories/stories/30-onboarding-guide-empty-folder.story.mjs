@@ -5,9 +5,9 @@
 // coffee-shop example as a draft, and the guide starts on it: "Nothing here
 // to draw from yet, so this is an example", then More ways to start, which
 // says how to get your own data model in (Import… for SQL scripts, Power BI,
-// Fabric and DBML; Bring In Your Data Model… for Databricks, Snowflake, SQL
+// Fabric and DBML; Import Your Data Model… for Databricks, Snowflake, SQL
 // Server and more). The story stays on the guide's path rather than opening
-// Bring In Your Data Model… (that replaces the draft, and story 27 shows it):
+// Import Your Data Model… (that replaces the draft, and story 27 shows it):
 // Keep This Example makes it a diagram in the folder, and the guide carries
 // on there with the example's tables through to Star on GitHub, proved by
 // the host's log line (ERD_STUDIO_STORIES_NO_BROWSER keeps the browser shut).
@@ -38,7 +38,7 @@ export default story({
     await s.step('The ERD Studio icon: an example, and the guide says why (1 of 3)', async () => {
       await s.ui.openSidebar('ERD Studio');
       draft = await waitForDraft(s, 'Example: Coffee shop');
-      s.assert.deepEqual(draft.buttons, ['New Diagram…', 'Bring In Your Data Model…', 'Keep This Example', 'More ways to start', 'Discard']);
+      s.assert.deepEqual(draft.buttons, ['New Diagram…', 'Import Your Data Model…', 'Keep This Example', 'More ways to start', 'Discard']);
       const mark = await waitForMark(s, draft.page, 'An example', { progress: '1 of 3' });
       s.assert.equal(mark.text, 'Nothing here to draw from yet, so this is an example: 6 tables, 8 relationships. Nothing is saved yet.');
       s.expectNoFile('.erd-studio');
@@ -47,13 +47,13 @@ export default story({
 
     await s.step('2 of 3, More ways to start: how to bring my own data model in', async () => {
       const mark = await nextMark(s, draft.page, 'More ways to start', { progress: '2 of 3' });
-      s.assert.equal(mark.text, 'Is your data model somewhere else? Import… reads SQL scripts, Power BI and Fabric models, and DBML. Bring In Your Data Model… shows how to get it out of Databricks, Snowflake, SQL Server, Fabric and more, into an open format.');
+      s.assert.equal(mark.text, 'Is your data model somewhere else? Import… reads SQL scripts, Power BI and Fabric models, and DBML. Import Your Data Model… shows how to get it out of Databricks, Snowflake, SQL Server, Fabric and more, into an open format.');
       await s.pause(1500);
       // The other start it names, beside the menu it points at.
-      await draft.page.highlight(DRAFT.button('Bring In Your Data Model…'));
+      await draft.page.highlight(DRAFT.button('Import Your Data Model…'));
       await s.pause(2000);
       await s.wb.unhighlight();
-    }, { say: 'Next, how to bring my own data model in. Import reads SQL scripts, Power BI and Fabric models, and DBML. Bring In Your Data Model shows how to get it out of Databricks, Snowflake, SQL Server and more, into an open format.' });
+    }, { say: 'Next, how to bring my own data model in. Import reads SQL scripts, Power BI and Fabric models, and DBML. Import Your Data Model shows how to get it out of Databricks, Snowflake, SQL Server and more, into an open format.' });
 
     await s.step('3 of 3, Keep it: I keep the example, to learn on it', async () => {
       const mark = await nextMark(s, draft.page, 'Keep it', { progress: '3 of 3' });

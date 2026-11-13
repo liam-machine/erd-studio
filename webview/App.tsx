@@ -474,7 +474,9 @@ function EditorCanvas() {
 
   // Nodes/edges from the domain (transform + overlay effects) and the
   // click/selection handlers — the shared canvas core in @erd-studio/renderer.
-  const { onNodeClick, onEdgeClick, onPaneClick, onSelectionChange } = useCanvasGraph({ discrepancyVisible, discrepancyReport });
+  // A pane click is one click-away step: an open detail panel closes first
+  // (the selection stays), the next click clears it (lib/clickAway.ts).
+  const { onNodeClick, onEdgeClick, onPaneClick, onSelectionChange, keepSelection } = useCanvasGraph({ discrepancyVisible, discrepancyReport });
   // Hover a table to preview its relationships; the lines of the hovered or
   // selected table carry moving direction arrows. Ephemeral: never persisted
   // or posted.
@@ -492,8 +494,14 @@ function EditorCanvas() {
     }
   }, [nodes.length, persistedViewport, setReactFlowViewport]);
 
-  // Position persistence and selection handling.
-  const { onNodesChange } = usePositionPersistence();
+  // Position persistence and selection handling. React Flow's deselection on
+  // the pane click that only closed the detail panel is dropped, so the
+  // selection (one table or several) stays marked.
+  const { onNodesChange: persistNodesChange } = usePositionPersistence();
+  const onNodesChange = useCallback(
+    (changes: Parameters<typeof persistNodesChange>[0]) => persistNodesChange(keepSelection(changes)),
+    [persistNodesChange, keepSelection],
+  );
 
   const onMoveEnd = useCallback(
     (_event: MouseEvent | TouchEvent | null, viewport: Viewport) => {
