@@ -257,8 +257,10 @@ describe('Toolbar layout-dirty button', () => {
 
     expect(layoutButton().hasAttribute('disabled')).toBe(false);
     expect(layoutButton().textContent).not.toContain('Running');
+    // #294: plain words by the failure's class (a dead worker is a bug), with its buttons; never "ELK" or the error's text.
     expect(mockStoreState.setToastMessage).toHaveBeenCalledWith(
-      'Auto layout failed: ELK layout worker crashed: boom',
+      "ERD Studio couldn't arrange this diagram. Your tables are where they were. This is a bug in ERD Studio, not a problem with your files.",
+      ['retryLayout', 'layoutFeedback'],
     );
     consoleSpy.mockRestore();
   });
@@ -309,7 +311,7 @@ describe('Toolbar layout-dirty button', () => {
     const finished = mockPostMessage.mock.calls.map(([m]) => m).find((m) => m?.type === 'layoutFinished');
     expect(finished.payload).toMatchObject({ ok: true, rung: 3 });
     expect(finished.payload.log.message).toBe('used the fallback with grouping off (asked for grouping depth); the default layout failed: Maximum call stack size exceeded');
-    expect(mockStoreState.setToastMessage).toHaveBeenCalledWith(expect.stringMatching(/^Grouping by Join depth failed on this diagram, so it was laid out with no grouping/));
+    expect(mockStoreState.setToastMessage).toHaveBeenCalledWith(expect.stringMatching(/^Grouping by Join depth failed on this diagram, so it was laid out with no grouping/), []);
   });
 
   it('a layout that worked as asked shows no notice and sends no log', async () => {

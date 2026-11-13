@@ -34,6 +34,8 @@ import {
   layoutFailureReport,
   layoutOutcomeLogMessage,
   layoutOutcomeNotice,
+  layoutFailureNotice,
+  classifyLayoutFailure,
   layoutLeftTablesInPlace,
   layoutUnchangedNotice,
   tableTypeBandCount,
@@ -135,6 +137,10 @@ export function Toolbar({ nodes, edges }: ToolbarProps) {
   const registerSearchFocus = useEditorStore((s) => s.registerSearchFocus);
   const registerAutoLayout = useEditorStore((s) => s.registerAutoLayout);
   const setToastMessage = useEditorStore((s) => s.setToastMessage);
+  // Read by runLayout through a ref, so a toast does not re-register the layout.
+  const toastActions = useEditorStore((s) => s.toastActions);
+  const toastActionsRef = useRef(toastActions);
+  toastActionsRef.current = toastActions;
   const recordError = useEditorStore((s) => s.recordError);
   const logicalOnly = useEditorStore((s) => s.logicalOnly);
   // Get current zoom level from React Flow store
@@ -572,6 +578,9 @@ export function Toolbar({ nodes, edges }: ToolbarProps) {
     }
 
     setIsLayouting(true);
+    // An earlier layout's failure toast (#294) waits for its close; this run
+    // tells its own outcome, so the old words must not sit over the new layout.
+    if (toastActionsRef.current) setToastMessage(null);
     const startedAt = performance.now();
     // Usage telemetry (2.0 B17): the stack-safe fallback, the fallback that
     // produced the layout, and a failure's class and size buckets (never its
@@ -644,8 +653,9 @@ export function Toolbar({ nodes, edges }: ToolbarProps) {
       vscode.postMessage(message);
       reportLayout(true);
       setLayoutDirty(false);
+      // A grid after a failure (a timeout among them, #294) says so in plain words, with its buttons.
       const notice = outcome ? layoutOutcomeNotice(outcome, modelNodes.length) : undefined;
-      if (notice) setToastMessage(notice);
+      if (notice) setToastMessage(notice.message, notice.actions);
       // A re-applied layout that moved nothing would look like it never ran.
       else if (!firstOpen && layoutLeftTablesInPlace(modelNodes, positions)) {
         setToastMessage(layoutUnchangedNotice(outcome, tableTypeBandCount(modelNodes)));
@@ -653,8 +663,11 @@ export function Toolbar({ nodes, edges }: ToolbarProps) {
     } catch (err) {
       reportLayout(false, err);
       console.error('[Toolbar] Auto layout failed:', err);
-      const detail = err instanceof Error ? err.message : String(err);
-      setToastMessage(`Auto layout failed: ${detail}`);
+      // Even the grid failed, so nothing is written and the tables stay where
+      // they were. Plain words by the failure's class, never the error's text
+      // (#294): that went to the ERD Studio log through `layoutFinished`.
+      const notice = layoutFailureNotice(classifyLayoutFailure(err), false);
+      setToastMessage(notice.message, notice.actions);
     } finally {
       setIsLayouting(false);
     }

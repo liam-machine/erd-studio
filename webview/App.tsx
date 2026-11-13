@@ -7,7 +7,7 @@
  * editor store.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ReactFlow,
   ReactFlowProvider,
@@ -50,7 +50,7 @@ import { Toolbar } from './components/Toolbar/Toolbar';
 import { NewTableDialog } from './components/NewModelDialog/NewModelDialog';
 import { NewFkDialog } from './components/NewFkDialog/NewFkDialog';
 import { AddExistingTableDialog } from './components/AddExistingModelDialog/AddExistingModelDialog';
-import { Toast } from './components/Toast/Toast';
+import { Toast, type ToastActionButton } from './components/Toast/Toast';
 import { ContextMenu } from './components/ContextMenu/ContextMenu';
 import { PhysicalSourceNotice } from './components/Canvas/PhysicalSourceNotice';
 import { ManifestHint } from './components/Canvas/ManifestHint';
@@ -194,12 +194,34 @@ function EditorCanvas() {
     }
   }, [invalidSelectedNode]);
 
-  // Memoized callback for toast dismissal (prevents timer re-creation)
+  // Memoized callback for toast dismissal (prevents timer re-creation).
+  // A store toast with buttons (#294) waits for its own close: a local toast
+  // drawn over it dismisses only itself, so the buttons come back under it.
+  const localToastRef = useRef(toastMessage);
+  localToastRef.current = toastMessage;
   const dismissToast = useCallback(() => {
+    const coveredActions = localToastRef.current !== null && useEditorStore.getState().toastActions !== null;
     setToastMessage(null);
-    setStoreToastMessage(null);
+    if (!coveredActions) setStoreToastMessage(null);
   }, [setStoreToastMessage]);
   const activeToastMessage = toastMessage ?? storeToastMessage;
+  // The store toast's buttons (#294: an Auto Layout failure's Try Again and
+  // Send Feedback), only while the store toast is the one on screen.
+  const storeToastActions = useEditorStore((s) => s.toastActions);
+  const triggerAutoLayout = useEditorStore((s) => s.triggerAutoLayout);
+  const activeToastActions = useMemo<ToastActionButton[] | undefined>(() => {
+    if (toastMessage !== null || !storeToastMessage || !storeToastActions) return undefined;
+    return storeToastActions.map((action) => action === 'retryLayout'
+      ? { label: 'Try Again', onClick: triggerAutoLayout }
+      : {
+        label: 'Send Feedback',
+        onClick: () => setFeedbackDialogOpen(true, {
+          kind: 'bug',
+          title: "Auto Layout couldn't arrange a diagram",
+          description: `The canvas showed: "${storeToastMessage}"`,
+        }),
+      });
+  }, [toastMessage, storeToastMessage, storeToastActions, triggerAutoLayout, setFeedbackDialogOpen]);
 
   // The table detail level on a first-ever domain load.
   // This effect runs AFTER useStatePersistence's restore effect (React guarantees
@@ -901,8 +923,16 @@ function EditorCanvas() {
         </AreaErrorBoundary>
       </ReactFlow>
 
-      {activeToastMessage && (
-        <Toast message={activeToastMessage} variant="warning" onDismiss={dismissToast} />
+      {/* A sticky layout-failure toast (#294) steps aside while a host error,
+          drawn in the same corner, is up; it comes back when that closes. */}
+      {activeToastMessage && !(activeToastActions && error) && (
+        <Toast
+          message={activeToastMessage}
+          variant="warning"
+          actions={activeToastActions}
+          autoDismissMs={activeToastActions ? null : undefined}
+          onDismiss={dismissToast}
+        />
       )}
 
       {/* The host's brief note (canvasNotice), under any other toast: they share the corner. */}
