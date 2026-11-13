@@ -165,6 +165,100 @@ describe('the glass sidebar page', () => {
     expect(posted[posted.length - 1]).toEqual({ type: 'invoke', section: 'tables', id: 'tables:b', menu: 'view/item/context', index: 9 });
   });
 
+  describe('drag and drop', () => {
+    const diagramsAndTables = (): GlassSection[] => [
+      {
+        key: 'diagrams', title: 'Diagrams', visible: true, defaultCollapsed: false, actions: { navigation: [], groups: [] }, welcome: [],
+        nodes: [
+          row('diagrams:bronze', 'Bronze', { drag: 'layer', drop: ['layer'] }),
+          row('diagrams:gold', 'Gold', { drag: 'layer', drop: ['layer'], collapsible: 2, children: [row('diagrams:gold/sales', 'sales', { drop: ['tables'] })] }),
+        ],
+      },
+      ...sections([row('tables:a', 'dim_customer', { drag: 'tables' }), row('tables:dup', 'dim_customer', {})]),
+    ];
+
+    /** A DataTransfer good enough for the page script (jsdom has none). */
+    function transfer() {
+      const data: Record<string, string> = {};
+      return { data, effectAllowed: 'uninitialized', dropEffect: 'none', setData: (t: string, v: string) => { data[t] = v; }, setDragImage: () => undefined };
+    }
+
+    function fire(win: Win, el: Element, type: string, dataTransfer = transfer()): Event & { dataTransfer: ReturnType<typeof transfer> } {
+      const ev = new win.Event(type, { bubbles: true, cancelable: true }) as Event & { dataTransfer: ReturnType<typeof transfer> };
+      Object.defineProperty(ev, 'dataTransfer', { value: dataTransfer });
+      el.dispatchEvent(ev);
+      return ev;
+    }
+
+    it('makes only the rows the host marked draggable', () => {
+      const { win } = load();
+      sendState(win, diagramsAndTables());
+      expect(rowEl(win, 'tables:a')!.getAttribute('draggable')).toBe('true');
+      expect(rowEl(win, 'tables:dup')!.hasAttribute('draggable')).toBe(false);
+      expect(fire(win, rowEl(win, 'tables:dup')!, 'dragstart').defaultPrevented).toBe(true);
+    });
+
+    it('sends row ids only: dragStart, the drop on a row that takes the drag, then dragEnd', () => {
+      const { win, posted } = load();
+      sendState(win, diagramsAndTables());
+      const start = fire(win, rowEl(win, 'tables:a')!, 'dragstart');
+      expect(start.defaultPrevented).toBe(false);
+      // Nothing of the table itself rides on the browser's drag: the host works out what the rows carry.
+      expect(Object.keys(start.dataTransfer.data).sort()).toEqual(['application/vnd.code.tree.erdstudio.modellibrary', 'application/vnd.erdstudio.glass-drag']);
+      expect(posted[posted.length - 1]).toEqual({ type: 'dragStart', section: 'tables', ids: ['tables:a'] });
+      expect(rowEl(win, 'tables:a')!.classList.contains('is-dragging')).toBe(true);
+
+      // A layer row takes layers, not tables: the drag is not accepted there.
+      expect(fire(win, rowEl(win, 'diagrams:gold')!, 'dragover').defaultPrevented).toBe(false);
+      expect(win.document.querySelector('.is-drop-target')).toBeNull();
+      // A diagram's row takes it, and a redraw mid-drag keeps the highlight.
+      const sales = rowEl(win, 'diagrams:gold/sales')!;
+      expect(fire(win, sales, 'dragover').defaultPrevented).toBe(true);
+      expect(sales.classList.contains('is-drop-target')).toBe(true);
+      const again = diagramsAndTables();
+      again[0].nodes[0].description = 'Layer';
+      sendState(win, again);
+      expect(rowEl(win, 'diagrams:gold/sales')!.classList.contains('is-drop-target')).toBe(true);
+      expect(rowEl(win, 'tables:a')!.classList.contains('is-dragging')).toBe(true);
+
+      const before = posted.length;
+      expect(fire(win, sales, 'drop').defaultPrevented).toBe(true);
+      expect(posted.slice(before)).toEqual([{ type: 'drop', section: 'diagrams', id: 'diagrams:gold/sales' }, { type: 'dragEnd' }]);
+      expect(win.document.querySelector('.is-drop-target, .is-dragging')).toBeNull();
+      expect(win.document.body.classList.contains('gs-dragging')).toBe(false);
+    });
+
+    it('posts no drop when the drag is let go on a row that does not take it, or outside the sidebar', () => {
+      const { win, posted } = load();
+      sendState(win, diagramsAndTables());
+      fire(win, rowEl(win, 'tables:a')!, 'dragstart');
+      const before = posted.length;
+      expect(fire(win, rowEl(win, 'tables:dup')!, 'drop').defaultPrevented).toBe(false);
+      fire(win, rowEl(win, 'tables:a')!, 'dragend');
+      expect(posted.slice(before)).toEqual([{ type: 'dragEnd' }]);
+      // A drag from somewhere else (no dragstart here) is none of the page's business.
+      expect(fire(win, rowEl(win, 'diagrams:gold/sales')!, 'dragover').defaultPrevented).toBe(false);
+      expect(fire(win, rowEl(win, 'diagrams:gold/sales')!, 'drop').defaultPrevented).toBe(false);
+      expect(posted.slice(before)).toEqual([{ type: 'dragEnd' }]);
+    });
+
+    it('draws a move within one tree as a line on the edge the row will sit at, under an open row\'s whole group', () => {
+      const { win } = load();
+      sendState(win, diagramsAndTables());
+      fire(win, rowEl(win, 'diagrams:bronze')!, 'dragstart');
+      fire(win, rowEl(win, 'diagrams:gold')!, 'dragover');
+      // Bronze moves below Gold: the line sits under Gold's last row.
+      expect(rowEl(win, 'diagrams:gold/sales')!.classList.contains('is-drop-after')).toBe(true);
+      expect(rowEl(win, 'diagrams:gold')!.classList.contains('is-drop-after')).toBe(false);
+      fire(win, rowEl(win, 'diagrams:bronze')!, 'dragend');
+      fire(win, rowEl(win, 'diagrams:gold')!, 'dragstart');
+      fire(win, rowEl(win, 'diagrams:bronze')!, 'dragover');
+      expect(rowEl(win, 'diagrams:bronze')!.classList.contains('is-drop-before')).toBe(true);
+      // A row is no target for itself.
+      expect(fire(win, rowEl(win, 'diagrams:gold')!, 'dragover').defaultPrevented).toBe(false);
+    });
+  });
+
   it('names a dotted theme colour the way VS Code does (only the first dot becomes a dash)', () => {
     const { win } = load();
     sendState(win, sections([row('tables:gold', 'Gold', { icon: { kind: 'theme', id: 'folder', color: 'erdStudio.layer.gold' } })]));

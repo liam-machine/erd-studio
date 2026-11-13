@@ -56,7 +56,7 @@ import {
   type ManifestMissingReasonDeps,
 } from './services/manifestMissingReasons';
 import { TableLibraryTreeProvider, tableOwnerOf, type TableLibraryNode, type TableLibraryTableNode } from './providers/ModelLibraryTreeProvider';
-import { TableLibraryDragController } from './providers/tableLibraryDrag';
+import { TableLibraryDragController, tablesOfDraggedRows } from './providers/tableLibraryDrag';
 import { describeOrganizePlan, planOrganizeByLayer, type SubjectAreaTableUsage } from './services/modelLibraryOrganizer';
 import { describeDuplicateFix, duplicateNamePrefix, duplicateNamePrompt, planDuplicateFix, repointSubjectAreaTable, suggestDuplicateName, type SubjectAreaReference } from './services/duplicateModelResolver';
 import { validateNewDbmlTableName, validateTableName } from './providers/payloadValidation';
@@ -1983,6 +1983,7 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
   // The two views a table is revealed in (Reveal in Table Library; Go to
   // Table → Show Relationships); set where they are created, below.
   let tableLibraryView: vscode.TreeView<TableLibraryNode> | undefined;
+  let tableLibraryDrag: TableLibraryDragController | undefined;
   let relationshipsView: vscode.TreeView<RelationshipsNode> | undefined;
   // Grouped under each table (the default) or by relationships file: the
   // view-title toggle, remembered for this workspace.
@@ -3284,7 +3285,13 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     (() => {
       domainTreeData!.attach(treeProvider);
       // The glass sidebar draws the same provider (it lists only while its view shows).
-      glassSidebar.setSource('diagrams', treeProvider);
+      // Its rows take the same drops the native view does: Table Library rows on a
+      // diagram's row, a layer row on another layer row (reorder).
+      glassSidebar.setSource<TreeElement>('diagrams', treeProvider, {
+        controller: treeProvider,
+        dragKind: (row) => (row.type === 'layer' ? 'layer' : undefined),
+        dropKinds: (row) => (row.type === 'domain' ? ['tables'] : row.type === 'layer' ? ['layer'] : []),
+      });
       // Whenever there is a choice to make, the first row of the tree names
       // the open project and switches it on click — always visible, unlike
       // the view-title icon, which VS Code only shows on hover (#82).
@@ -3310,11 +3317,13 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     vscode.window.registerFileDecorationProvider(decorationProvider),
     tableLibraryProvider,
     (() => {
+      // One drag source for the native view and the glass sidebar's Table Library.
+      tableLibraryDrag = new TableLibraryDragController((tables, files) => editorProvider.noteLibraryDrag(tables, files), { withFiles: true });
       tableLibraryView = vscode.window.createTreeView('erdStudio.modelLibrary', {
         treeDataProvider: tableLibraryProvider,
         // Rows drag onto a diagram: a drop there adds them (with Shift where they land; see docs/dev/architecture.md).
         // Each dragged table's file goes with its name: a drop adds that file where two schema folders share the name.
-        dragAndDropController: new TableLibraryDragController((tables, files) => editorProvider.noteLibraryDrag(tables, files), { withFiles: true }),
+        dragAndDropController: tableLibraryDrag,
         // Move Table moves every selected table to one folder.
         canSelectMany: true,
         showCollapseAll: true,
@@ -3333,9 +3342,13 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
       treeDataProvider: helpProvider,
       canSelectMany: false,
     }),
-    // The glass sidebar bridges the same three providers (the native views keep theirs, with drag and drop).
+    // The glass sidebar bridges the same three providers, and the Table Library's drag source.
     (() => {
-      glassSidebar.setSource('tables', tableLibraryProvider);
+      glassSidebar.setSource<TableLibraryNode>('tables', tableLibraryProvider, {
+        controller: tableLibraryDrag!,
+        // A row that carries at least one table: a table (not an ignored duplicate), or a schema or layer with one.
+        dragKind: (row) => (tablesOfDraggedRows([row], 1).names.length > 0 ? 'tables' : undefined),
+      });
       glassSidebar.setSource('relationships', relationshipsProvider);
       glassSidebar.setSource('help', helpProvider);
       return { dispose: () => {} };

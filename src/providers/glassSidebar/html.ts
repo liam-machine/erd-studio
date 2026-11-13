@@ -616,6 +616,72 @@ body.vscode-high-contrast-light .gs-row.is-selected {
   background: var(--control-fill-active);
 }
 
+/* --- Drag and drop ---------------------------------------------------------- */
+
+/* The rows being dragged step back; nothing else answers the pointer until the drag is over. */
+.gs-row.is-dragging { opacity: 0.45; }
+
+body.gs-dragging .gs-row:hover {
+  background: transparent;
+  border-color: transparent;
+}
+
+body.gs-dragging .gs-row__actions { visibility: hidden; }
+
+/* Where letting go adds the drag (a diagram's row under a table). */
+.gs-row.is-drop-target,
+body.gs-dragging .gs-row.is-drop-target:hover {
+  background: var(--glass-tint-accent-strong);
+  border-color: var(--accent);
+}
+
+/* Where letting go moves the drag to (a layer among layers): a line on the edge it will sit at. */
+.gs-row.is-drop-before::after,
+.gs-row.is-drop-after::after {
+  content: '';
+  position: absolute;
+  left: var(--space-2);
+  right: var(--space-2);
+  height: 2px;
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+  pointer-events: none;
+}
+
+.gs-row.is-drop-before::after { top: -2px; }
+.gs-row.is-drop-after::after { bottom: -2px; }
+
+/* A section header the drag is waiting on to open. */
+body.gs-dragging .gs-section__header.is-drop-wait {
+  border-color: var(--accent);
+}
+
+/* The drag's own picture: drawn off screen, handed to the browser at dragstart. */
+.gs-dragpill {
+  position: fixed;
+  top: -200px;
+  left: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 260px;
+  padding: 5px 12px 5px 8px;
+  border: 1px solid var(--glass-border-strong);
+  border-radius: var(--radius-pill);
+  background: var(--glass-surface-3);
+  color: var(--text-primary);
+  font: var(--weight-medium) var(--text-sm) var(--font-ui);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.gs-dragpill__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.gs-dragpill svg.gs-icon { width: 14px; height: 14px; flex: none; }
+
 /* Indent guides: a hairline under each ancestor's chevron, quiet until the tree is hovered. */
 .gs-guide {
   position: absolute;
@@ -1392,6 +1458,12 @@ export const GLASS_SIDEBAR_SCRIPT = String.raw`
     var owner = menuOwner();
     var ownsMenu = !!(owner && owner.id === n.id && owner.section === section.key);
     if (ownsMenu) row.className += ' is-menu-open';
+    // Drag and drop: the classes are part of the render, so a redraw mid-drag keeps them.
+    if (n.drag) row.setAttribute('draggable', 'true');
+    if (drag) {
+      if (drag.section === section.key && drag.ids.indexOf(n.id) !== -1) row.className += ' is-dragging';
+      if (drag.over && drag.over.section === section.key && drag.over.mark === n.id) row.className += ' ' + drag.over.cls;
+    }
     var aria = n.label + (n.description ? ', ' + n.description : '');
     row.setAttribute('aria-label', aria);
     if (n.tooltip) row.title = n.tooltip;
@@ -1640,7 +1712,10 @@ export const GLASS_SIDEBAR_SCRIPT = String.raw`
     }
     for (i = 0; i < b.attributes.length; i++) {
       at = b.attributes[i];
-      if (a.getAttribute(at.name) !== at.value) a.setAttribute(at.name, at.value);
+      if (a.getAttribute(at.name) === at.value) continue;
+      // The CSP refuses a style attribute set as text; the style object is allowed.
+      if (at.name === 'style') a.style.cssText = b.style.cssText;
+      else a.setAttribute(at.name, at.value);
     }
   }
 
@@ -2381,6 +2456,169 @@ export const GLASS_SIDEBAR_SCRIPT = String.raw`
   document.addEventListener('keydown', function (ev) {
     if (ev.key === 'Escape' && openMenuState) { ev.preventDefault(); closeMenu(true); }
   });
+
+  // --------------------------------------------------------- drag and drop
+  //
+  // A row with a drag kind (node.drag) can be dragged; a row whose node.drop
+  // lists that kind takes it. The webview only says which rows: the host runs
+  // the native views' own drag and drop handlers. A drag let go outside the
+  // sidebar (over a diagram) is finished by the canvas, not here.
+
+  var DRAG_MIME = 'application/vnd.erdstudio.glass-drag';
+  // The native Table Library's drag type: a canvas that does get the drop reads it as a Table Library drag.
+  var LIBRARY_MIME = 'application/vnd.code.tree.erdstudio.modellibrary';
+  var SPRING_MS = 650;
+  var drag = null;      // { kind, section, ids, over: { section, id, cls, mark } | null }; mark: the row that shows cls
+  var spring = null;    // { key, timer }: the row or header the drag is waiting on to open
+
+  function clearSpring() {
+    if (!spring) return;
+    clearTimeout(spring.timer);
+    var waiting = sectionsEl.querySelector('.gs-section__header.is-drop-wait');
+    if (waiting) waiting.classList.remove('is-drop-wait');
+    spring = null;
+  }
+
+  function springAfter(key, run) {
+    if (spring && spring.key === key) return;
+    clearSpring();
+    spring = { key: key, timer: setTimeout(function () { spring = null; run(); }, SPRING_MS) };
+  }
+
+  function setDragOver(over) {
+    if (!drag) return;
+    var was = drag.over;
+    if ((!was && !over) || (was && over && was.section === over.section && was.id === over.id && was.cls === over.cls && was.mark === over.mark)) return;
+    if (was) {
+      var old = rowEl(was.section, was.mark);
+      if (old) old.classList.remove(was.cls);
+    }
+    drag.over = over;
+    if (over) {
+      var now = rowEl(over.section, over.mark);
+      if (now) now.classList.add(over.cls);
+    }
+  }
+
+  /** Where a drag of drag.kind would land on this row: null when the row does not take it. */
+  function dropOn(row) {
+    var sectionKey = row.dataset.section, id = row.dataset.id;
+    var info = index[sectionKey] && index[sectionKey][id];
+    if (!info || !info.node.drop || info.node.drop.indexOf(drag.kind) === -1) return null;
+    if (drag.section === sectionKey && drag.ids.indexOf(id) !== -1) return null;
+    var cls = 'is-drop-target', mark = id;
+    // A drag within one tree is a move: the row lands where this one is, so mark the edge it will sit at.
+    if (drag.section === sectionKey) {
+      var from = rowEl(drag.section, drag.ids[0]);
+      cls = from && (from.compareDocumentPosition(row) & 4) ? 'is-drop-after' : 'is-drop-before';
+      // After an open row means after its last row: the line goes under the whole group.
+      if (cls === 'is-drop-after') {
+        var level = Number(row.getAttribute('aria-level'));
+        for (var next = row.nextElementSibling; next && Number(next.getAttribute('aria-level')) > level; next = next.nextElementSibling) {
+          if (next.dataset.id) mark = next.dataset.id;
+        }
+      }
+    }
+    return { section: sectionKey, id: id, cls: cls, mark: mark };
+  }
+
+  function endDrag() {
+    if (!drag) return;
+    setDragOver(null);
+    clearSpring();
+    var rows = sectionsEl.querySelectorAll('.gs-row.is-dragging');
+    for (var i = 0; i < rows.length; i++) rows[i].classList.remove('is-dragging');
+    document.body.classList.remove('gs-dragging');
+    drag = null;
+    post({ type: 'dragEnd' });
+  }
+
+  function dragPill(row, node) {
+    var pill = el('div', 'gs-dragpill');
+    // Drawn afresh, not cloned: a cloned row icon carries a style attribute, which the CSP refuses.
+    if (node.icon) pill.appendChild(rowIcon(node.icon, node));
+    pill.appendChild(el('span', 'gs-dragpill__label', node.label));
+    document.body.appendChild(pill);
+    setTimeout(function () { if (pill.parentNode) pill.parentNode.removeChild(pill); }, 0);
+    return pill;
+  }
+
+  sectionsEl.addEventListener('dragstart', function (ev) {
+    var row = ev.target.closest && ev.target.closest('.gs-row[data-id]');
+    var info = row && index[row.dataset.section] && index[row.dataset.section][row.dataset.id];
+    if (!info || !info.node.drag || !ev.dataTransfer) { ev.preventDefault(); return; }
+    closeMenu(false);
+    drag = { kind: info.node.drag, section: row.dataset.section, ids: [row.dataset.id], over: null };
+    try {
+      ev.dataTransfer.effectAllowed = 'copyMove';
+      ev.dataTransfer.setData(DRAG_MIME, drag.kind);
+      if (drag.kind === 'tables') ev.dataTransfer.setData(LIBRARY_MIME, '[]');
+      ev.dataTransfer.setDragImage(dragPill(row, info.node), 14, 14);
+    } catch (e) { /* the drag still works with the browser's own picture */ }
+    select(row.dataset.section, row.dataset.id);
+    row.classList.add('is-dragging');
+    document.body.classList.add('gs-dragging');
+    post({ type: 'dragStart', section: drag.section, ids: drag.ids });
+  });
+
+  function onDragOver(ev) {
+    if (!drag) return;
+    var row = ev.target.closest && ev.target.closest('.gs-row[data-id]');
+    var over = row ? dropOn(row) : null;
+    setDragOver(over);
+    if (over) {
+      ev.preventDefault();
+      try { ev.dataTransfer.dropEffect = over.cls === 'is-drop-target' ? 'copy' : 'move'; } catch (e) { /* read-only in some engines */ }
+    }
+    // Waiting over something closed opens it, as a native tree does: a folded row, a folded or parked section.
+    var head = !row && ev.target.closest && ev.target.closest('.gs-section__header');
+    if (row && row.getAttribute('aria-expanded') === 'false') {
+      var sectionKey = row.dataset.section, id = row.dataset.id;
+      springAfter('r' + sectionKey + '\u0000' + id, function () { setExpanded(sectionKey, id, true); });
+    } else if (head) {
+      var card = head.closest('.gs-section');
+      var folded = card.classList.contains('gs-section--collapsed');
+      if (folded || head.classList.contains('is-parked')) {
+        springAfter('h' + card.dataset.key, function () {
+          head.classList.remove('is-drop-wait');
+          if (folded) setSectionCollapsed(card, false); else bringSectionBack(card);
+        });
+        head.classList.add('is-drop-wait');
+      } else {
+        clearSpring();
+      }
+    } else {
+      clearSpring();
+    }
+  }
+
+  sectionsEl.addEventListener('dragenter', onDragOver);
+  sectionsEl.addEventListener('dragover', onDragOver);
+
+  sectionsEl.addEventListener('dragleave', function (ev) {
+    if (!drag || (ev.relatedTarget && sectionsEl.contains(ev.relatedTarget))) return;
+    // Chromium often names no relatedTarget: a leave is real only once the pointer is off the list.
+    var at = document.elementFromPoint(ev.clientX, ev.clientY);
+    if (at && sectionsEl.contains(at)) return;
+    setDragOver(null);
+    clearSpring();
+  });
+
+  sectionsEl.addEventListener('drop', function (ev) {
+    if (!drag) return;
+    var row = ev.target.closest && ev.target.closest('.gs-row[data-id]');
+    var over = row ? dropOn(row) : null;
+    if (!over) return;
+    ev.preventDefault();
+    post({ type: 'drop', section: over.section, id: over.id });
+    endDrag();
+  });
+
+  document.addEventListener('dragend', endDrag);
+  // The dragged row can be redrawn away mid-drag, and its dragend then reaches nothing:
+  // pointer events only come back once the drag is over, so the first one ends it.
+  window.addEventListener('pointermove', function () { if (drag) endDrag(); }, true);
+  window.addEventListener('pointerdown', function () { if (drag) endDrag(); }, true);
 
   // --------------------------------------------------------- host messages
 

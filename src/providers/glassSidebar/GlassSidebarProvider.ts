@@ -17,6 +17,13 @@
  *
  * The webview never names a command or a URL: it sends a row id and a menu
  * entry index, and the host looks both up and re-checks the entry's `when`.
+ *
+ * Drag and drop is bridged the same way ({@link BridgedDragAndDrop}): a drag
+ * that starts on a glass row runs the native view's own `handleDrag` on a
+ * DataTransfer made here, and a drop on a glass row hands that DataTransfer to
+ * the target view's own `handleDrop`. A drag that leaves the sidebar for a
+ * diagram is finished by the canvas, as a native one is (the Table Library's
+ * controller tells the editor provider about it; see tableLibraryDrag.ts).
  */
 import * as crypto from 'crypto';
 import * as vscode from 'vscode';
@@ -67,18 +74,39 @@ export interface BridgedTree<T = unknown> {
   readonly onDidFilter?: vscode.Event<unknown>;
 }
 
+/**
+ * A bridged tree's drag and drop: the controller its native view uses, and
+ * which rows the glass sidebar lets the user drag and drop on.
+ */
+export interface BridgedDragAndDrop<T = unknown> {
+  /** The native view's `dragAndDropController`. */
+  readonly controller: {
+    handleDrag?(source: readonly T[], dataTransfer: vscode.DataTransfer, token: vscode.CancellationToken): void | Thenable<void>;
+    handleDrop?(target: T | undefined, dataTransfer: vscode.DataTransfer, token: vscode.CancellationToken): void | Thenable<void>;
+  };
+  /** What a drag of this row is called (`tables`, `layer`); undefined when it cannot be dragged. */
+  dragKind?(element: T): string | undefined;
+  /** The drag kinds this row takes (from any section). */
+  dropKinds?(element: T): readonly string[];
+}
+
 /** Rows listed eagerly per section before collapsed rows wait to be expanded. */
 const NODE_BUDGET = 2500;
 const MAX_DEPTH = 8;
 const TREE_DEBOUNCE_MS = 120;
 const CONTEXT_DEBOUNCE_MS = 40;
 const MAX_ID_LENGTH = 4096;
+/** The most rows one drag may name. */
+const MAX_DRAG_ROWS = 500;
+/** A drag kind, as a row's `drag` / `drop` carry it. */
+const DRAG_KIND = /^[a-z][a-zA-Z]{0,31}$/;
 
 interface SectionState {
   readonly key: GlassSectionKey;
   readonly viewId: string;
   readonly multiSelect: boolean;
   tree?: BridgedTree;
+  dragAndDrop?: BridgedDragAndDrop;
   subscriptions: vscode.Disposable[];
   nodes: SerialisedNode[];
   elements: Map<string, unknown>;
@@ -105,13 +133,18 @@ export function parseGlassInbound(raw: unknown): Inbound | undefined {
   const isIndex = (v: unknown): v is number => typeof v === 'number' && Number.isInteger(v) && v >= 0 && v < 10000;
   const isId = (v: unknown): v is string => typeof v === 'string' && v.length > 0 && v.length <= MAX_ID_LENGTH;
   if (m.type === 'ready') return { type: 'ready' };
+  if (m.type === 'dragEnd') return { type: 'dragEnd' };
   if (typeof m.section !== 'string' || !SECTION_KEYS.has(m.section)) return undefined;
   const section = m.section as GlassSectionKey;
   switch (m.type) {
     case 'activate':
     case 'expand':
     case 'itemMenu':
+    case 'drop':
       return isId(m.id) ? { type: m.type, section, id: m.id } : undefined;
+    case 'dragStart':
+      if (!Array.isArray(m.ids) || m.ids.length === 0 || m.ids.length > MAX_DRAG_ROWS || !m.ids.every(isId)) return undefined;
+      return { type: 'dragStart', section, ids: [...new Set(m.ids as string[])] };
     case 'invoke':
       if (typeof m.menu !== 'string' || m.menu.length > 200 || !isIndex(m.index)) return undefined;
       if (m.id !== undefined && !isId(m.id)) return undefined;
@@ -138,6 +171,11 @@ export class GlassSidebarProvider implements vscode.WebviewViewProvider, vscode.
    */
   private lastPosted: string | undefined;
   private ready = false;
+  /**
+   * The drag in progress (from `dragStart` until `drop` or `dragEnd`): its
+   * kind and, once the source view's `handleDrag` has run, what it collected.
+   */
+  private drag: { kind: string; dataTransfer: Promise<vscode.DataTransfer> } | undefined;
   /** A reveal asked for before the webview had loaded: run once it is ready. */
   private pendingReveal: { key: GlassSectionKey; element: unknown; options: { focus?: boolean } } | undefined;
 
@@ -158,11 +196,12 @@ export class GlassSidebarProvider implements vscode.WebviewViewProvider, vscode.
   // ------------------------------------------------------------------ sources
 
   /** Draw `tree` in `section` (the native view keeps its own provider: this only reads it). */
-  setSource(key: GlassSectionKey, tree: BridgedTree): void {
+  setSource<T>(key: GlassSectionKey, tree: BridgedTree<T>, dragAndDrop?: BridgedDragAndDrop<T>): void {
     const section = this.sections.get(key)!;
     for (const d of section.subscriptions) d.dispose();
     section.subscriptions = [];
-    section.tree = tree;
+    section.tree = tree as BridgedTree;
+    section.dragAndDrop = dragAndDrop as BridgedDragAndDrop | undefined;
     if (tree.onDidChangeTreeData) section.subscriptions.push(tree.onDidChangeTreeData(() => this.invalidate(section)));
     // The bridged trees fire onDidFilter from inside their own root getChildren()
     // (so the native view's title can show the count), i.e. during every walk.
@@ -304,6 +343,10 @@ export class GlassSidebarProvider implements vscode.WebviewViewProvider, vscode.
         const item = await tree.getTreeItem(child);
         const id = nodeId(section.key, parentId, item, seen);
         const node = serialiseTreeItem(item, id, toWebviewUri);
+        const drag = dragKindOf(section.dragAndDrop, child);
+        if (drag) node.drag = drag;
+        const drop = dropKindsOf(section.dragAndDrop, child);
+        if (drop.length) node.drop = drop;
         elements.set(id, child);
         items.set(id, item);
         parents.set(id, parentId);
@@ -462,8 +505,44 @@ export class GlassSidebarProvider implements vscode.WebviewViewProvider, vscode.
       if (pending) await this.reveal(pending.key, pending.element, pending.options);
       return;
     }
+    if (msg.type === 'dragEnd') {
+      this.drag = undefined;
+      return;
+    }
     const section = this.sections.get(msg.section)!;
     switch (msg.type) {
+      case 'dragStart': {
+        this.drag = undefined;
+        const dnd = section.dragAndDrop;
+        if (!dnd?.controller.handleDrag || !msg.ids.every((id) => section.elements.has(id))) return;
+        const elements = msg.ids.map((id) => section.elements.get(id));
+        // One kind per drag, and every row must be one the host said could be dragged.
+        const kind = dragKindOf(dnd, elements[0]);
+        if (!kind || elements.some((e) => dragKindOf(dnd, e) !== kind)) return;
+        const dataTransfer = new vscode.DataTransfer();
+        const collected = (async () => {
+          try {
+            await dnd.controller.handleDrag!(elements, dataTransfer, new vscode.CancellationTokenSource().token);
+          } catch (err) {
+            log.warn(`[ERD Studio] Glass sidebar: starting a drag in ${section.viewId} failed:`, err);
+          }
+          return dataTransfer;
+        })();
+        this.drag = { kind, dataTransfer: collected };
+        await collected;
+        return;
+      }
+      case 'drop': {
+        // The drag is used up by its drop, whether or not the row takes it.
+        const drag = this.drag;
+        this.drag = undefined;
+        const dnd = section.dragAndDrop;
+        if (!drag || !dnd?.controller.handleDrop || !section.elements.has(msg.id)) return;
+        const target = section.elements.get(msg.id);
+        if (!dropKindsOf(dnd, target).includes(drag.kind)) return;
+        await dnd.controller.handleDrop(target, await drag.dataTransfer, new vscode.CancellationTokenSource().token);
+        return;
+      }
       case 'activate': {
         const item = section.items.get(msg.id);
         if (!item) return;
@@ -525,6 +604,19 @@ export class GlassSidebarProvider implements vscode.WebviewViewProvider, vscode.
     if (this.postTimer) clearTimeout(this.postTimer);
     if (this.treeTimer) clearTimeout(this.treeTimer);
   }
+}
+
+/** A row's drag kind, when its section can be dragged from and the kind is well formed. */
+function dragKindOf(dnd: BridgedDragAndDrop | undefined, element: unknown): string | undefined {
+  if (!dnd?.controller.handleDrag || !dnd.dragKind) return undefined;
+  const kind = dnd.dragKind(element);
+  return kind !== undefined && DRAG_KIND.test(kind) ? kind : undefined;
+}
+
+/** The drag kinds a row takes, when its section takes drops. */
+function dropKindsOf(dnd: BridgedDragAndDrop | undefined, element: unknown): string[] {
+  if (!dnd?.controller.handleDrop || !dnd.dropKinds) return [];
+  return dnd.dropKinds(element).filter((kind) => DRAG_KIND.test(kind));
 }
 
 /** Whether the glass sidebar is on (globalState; on by default in this prototype). */

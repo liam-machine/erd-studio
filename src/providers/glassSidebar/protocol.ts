@@ -7,7 +7,8 @@
  * Security rule the shapes encode: the webview never sends a command id, an
  * argument or a URL. It names a section, a row id the host gave it, and a
  * menu entry (`menu` + `index`) or a welcome link (`entry` + `link`) the
- * host gave it; the host looks each up again and re-checks its `when`.
+ * host gave it; the host looks each up again and re-checks its `when`. A drag
+ * is the same: row ids only, and the host works out what they carry.
  *
  * Pure types (plus two constant lists): no `vscode` import.
  */
@@ -84,6 +85,13 @@ export interface SerialisedNode {
   children?: SerialisedNode[];
   /** false: a collapsed row past the host's listing budget; expanding it sends `expand` and a new `state` follows. */
   childrenLoaded?: boolean;
+  /**
+   * The row can be dragged, and what its drag is called (`tables`, `layer`):
+   * send `dragStart` when one begins. Opaque: only compared with `drop`.
+   */
+  drag?: string;
+  /** The drag kinds the row takes: send `drop` when a drag of one of them is let go on it. */
+  drop?: string[];
 }
 
 /** viewsWelcome markdown, parsed: paragraphs of text and links. */
@@ -162,6 +170,16 @@ export type GlassWebviewMessage =
    */
   | { type: 'invoke'; section: GlassSectionKey; id?: string; menu: string; index: number }
   /** A link or button in an empty state: `entry` from GlassWelcomeEntry, `link` from its part. */
-  | { type: 'welcomeLink'; section: GlassSectionKey; entry: number; link: number };
+  | { type: 'welcomeLink'; section: GlassSectionKey; entry: number; link: number }
+  /**
+   * A drag of these rows (each with a `drag` kind, all the same) has begun:
+   * the host runs the native view's own `handleDrag` for them and keeps what
+   * it collected for the `drop`.
+   */
+  | { type: 'dragStart'; section: GlassSectionKey; ids: string[] }
+  /** The drag was let go on this row (its `drop` lists the drag's kind): the host runs that view's own `handleDrop`. */
+  | { type: 'drop'; section: GlassSectionKey; id: string }
+  /** The drag is over, wherever it ended (sent after any `drop`). */
+  | { type: 'dragEnd' };
 
-export const GLASS_WEBVIEW_MESSAGE_TYPES: ReadonlyArray<GlassWebviewMessage['type']> = ['ready', 'activate', 'expand', 'itemMenu', 'invoke', 'welcomeLink'];
+export const GLASS_WEBVIEW_MESSAGE_TYPES: ReadonlyArray<GlassWebviewMessage['type']> = ['ready', 'activate', 'expand', 'itemMenu', 'invoke', 'welcomeLink', 'dragStart', 'drop', 'dragEnd'];

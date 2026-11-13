@@ -9,7 +9,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 
-import { GlassSidebarProvider, parseGlassInbound, type BridgedTree } from '../../src/providers/glassSidebar/GlassSidebarProvider';
+import { GlassSidebarProvider, parseGlassInbound, type BridgedDragAndDrop, type BridgedTree } from '../../src/providers/glassSidebar/GlassSidebarProvider';
 import { _resetContextKeys, recordContextKey } from '../../src/providers/glassSidebar/contextKeys';
 import type { Contributions } from '../../src/providers/glassSidebar/contributions';
 import type { GlassHostMessage, GlassSection, SerialisedNode } from '../../src/providers/glassSidebar/protocol';
@@ -315,7 +315,123 @@ describe('the glass sidebar at rest (the hover flicker: an endless re-send loop)
   });
 });
 
+describe('the glass sidebar\'s drag and drop (the native views\' own controllers)', () => {
+  const NAMES = 'application/vnd.erdstudio.tables+json';
+
+  /** setUp(), with the Table Library a drag source and the Diagrams rows drop targets, as extension.ts wires them. */
+  async function setUpDnd() {
+    const s = await setUp();
+    const drags: Node[][] = [];
+    const drops: Array<{ target: Node | undefined; names: unknown }> = [];
+    const tableDnd: BridgedDragAndDrop<Node> = {
+      controller: {
+        handleDrag: (rows, dataTransfer) => {
+          drags.push([...rows]);
+          dataTransfer.set(NAMES, new vscode.DataTransferItem(JSON.stringify(rows.map((r) => r.name))));
+        },
+      },
+      dragKind: (row) => (row.kind === 'table' ? 'tables' : undefined),
+    };
+    const diagramDnd: BridgedDragAndDrop<Node> = {
+      controller: {
+        handleDrag: (rows, dataTransfer) => { dataTransfer.set('layer', new vscode.DataTransferItem(rows[0].name)); },
+        handleDrop: (target, dataTransfer) => { drops.push({ target, names: dataTransfer.get(NAMES)?.value ?? dataTransfer.get('layer')?.value }); },
+      },
+      dragKind: (row) => (row.kind === 'layer' ? 'layer' : undefined),
+      dropKinds: (row) => (row.kind === 'domain' ? ['tables'] : ['layer']),
+    };
+    s.provider.setSource('tables', s.tableTree, tableDnd);
+    s.provider.setSource('diagrams', s.diagramTree, diagramDnd);
+    await new Promise((r) => setTimeout(r, 200));
+    await flush();
+    return { ...s, drags, drops };
+  }
+
+  it('marks the rows that drag and the rows that take a drop, and none without a controller', async () => {
+    const plain = await setUp();
+    expect(JSON.stringify(lastState(plain.posted))).not.toMatch(/"drag"|"drop"/);
+    const { posted } = await setUpDnd();
+    expect(section(posted, 'tables').nodes[0]).toMatchObject({ drag: 'tables' });
+    expect(section(posted, 'tables').nodes[0].drop).toBeUndefined();
+    const layer = section(posted, 'diagrams').nodes[0];
+    expect(layer).toMatchObject({ drag: 'layer', drop: ['layer'] });
+    expect(layer.children![0].drag).toBeUndefined();
+    expect(layer.children![0].drop).toEqual(['tables']);
+  });
+
+  it('runs the source view\'s handleDrag at dragStart and hands what it collected to the target view\'s handleDrop', async () => {
+    const { send, drags, drops } = await setUpDnd();
+    send({ type: 'dragStart', section: 'tables', ids: ['tables:table:dim_customer'] });
+    await flush();
+    // The drag is announced as it starts (the canvas hint), before any drop.
+    expect(drags).toEqual([[tables[0]]]);
+    send({ type: 'drop', section: 'diagrams', id: 'diagrams:domain:finance' });
+    send({ type: 'dragEnd' });
+    await flush();
+    expect(drops).toEqual([{ target: diagrams[0].children![0], names: '["dim_customer"]' }]);
+  });
+
+  it('reorders through the same view: a layer row dropped on a layer row', async () => {
+    const { send, drops } = await setUpDnd();
+    send({ type: 'dragStart', section: 'diagrams', ids: ['diagrams:layer:gold'] });
+    send({ type: 'drop', section: 'diagrams', id: 'diagrams:layer:gold' });
+    await flush();
+    expect(drops).toEqual([{ target: diagrams[0], names: 'gold' }]);
+  });
+
+  it('refuses what it did not offer: a row that takes another kind, an unknown row, a drop with no drag, a drag used twice', async () => {
+    const { send, drags, drops } = await setUpDnd();
+    // A table on a layer row (it takes layers only).
+    send({ type: 'dragStart', section: 'tables', ids: ['tables:table:dim_customer'] });
+    send({ type: 'drop', section: 'diagrams', id: 'diagrams:layer:gold' });
+    await flush();
+    // The same drag again on a row that would take it: used up by its first drop.
+    send({ type: 'drop', section: 'diagrams', id: 'diagrams:domain:finance' });
+    await flush();
+    // A row that cannot be dragged, and one the host never listed.
+    send({ type: 'dragStart', section: 'diagrams', ids: ['diagrams:domain:finance'] });
+    send({ type: 'drop', section: 'diagrams', id: 'diagrams:domain:finance' });
+    send({ type: 'dragStart', section: 'tables', ids: ['tables:table:nope'] });
+    send({ type: 'drop', section: 'diagrams', id: 'diagrams:domain:finance' });
+    // A drag that ended without a drop leaves nothing for a later drop.
+    send({ type: 'dragStart', section: 'tables', ids: ['tables:table:dim_customer'] });
+    send({ type: 'dragEnd' });
+    send({ type: 'drop', section: 'diagrams', id: 'diagrams:domain:finance' });
+    // A section that takes no drops.
+    send({ type: 'dragStart', section: 'tables', ids: ['tables:table:dim_customer'] });
+    send({ type: 'drop', section: 'tables', id: 'tables:table:dim_customer' });
+    await flush();
+    expect(drops).toEqual([]);
+    expect(drags).toHaveLength(3);
+  });
+
+  it('logs a handleDrag that throws and carries on: the target view gets an empty drop, nothing reaches the user', async () => {
+    const s = await setUp();
+    const dropped = vi.fn();
+    s.provider.setSource('tables', s.tableTree, { controller: { handleDrag: () => { throw new Error('boom'); } }, dragKind: () => 'tables' });
+    s.provider.setSource('diagrams', s.diagramTree, { controller: { handleDrop: dropped }, dropKinds: () => ['tables'] });
+    await new Promise((r) => setTimeout(r, 200));
+    await flush();
+    s.send({ type: 'dragStart', section: 'tables', ids: ['tables:table:dim_customer'] });
+    s.send({ type: 'drop', section: 'diagrams', id: 'diagrams:domain:finance' });
+    await flush();
+    // The target view still gets the (empty) drop, and says what it says for one: nothing is thrown at the user.
+    expect(dropped).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('parseGlassInbound', () => {
+  it('reads a drag as row ids only', () => {
+    expect(parseGlassInbound({ type: 'dragStart', section: 'tables', ids: ['a', 'b', 'a'], names: ['evil'] })).toEqual({ type: 'dragStart', section: 'tables', ids: ['a', 'b'] });
+    expect(parseGlassInbound({ type: 'dragStart', section: 'tables', ids: [] })).toBeUndefined();
+    expect(parseGlassInbound({ type: 'dragStart', section: 'tables', ids: 'a' })).toBeUndefined();
+    expect(parseGlassInbound({ type: 'dragStart', section: 'tables', ids: ['a', 3] })).toBeUndefined();
+    expect(parseGlassInbound({ type: 'dragStart', section: 'tables', ids: Array.from({ length: 501 }, (_, i) => `r${i}`) })).toBeUndefined();
+    expect(parseGlassInbound({ type: 'drop', section: 'diagrams', id: 'x', uris: ['file:///etc/passwd'] })).toEqual({ type: 'drop', section: 'diagrams', id: 'x' });
+    expect(parseGlassInbound({ type: 'drop', section: 'diagrams' })).toBeUndefined();
+    expect(parseGlassInbound({ type: 'dragEnd', anything: 1 })).toEqual({ type: 'dragEnd' });
+  });
+
   it('accepts the six message types and drops everything else', () => {
     expect(parseGlassInbound({ type: 'ready' })).toEqual({ type: 'ready' });
     expect(parseGlassInbound({ type: 'expand', section: 'tables', id: 'x' })).toEqual({ type: 'expand', section: 'tables', id: 'x' });
