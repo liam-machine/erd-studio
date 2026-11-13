@@ -554,13 +554,14 @@ describe('contributions', () => {
 
   it('put Add to Open Diagram, then Add to Diagram…, on a Table Library table\'s right-click menu', () => {
     // the reporter: the right-click add goes to the open diagram; Add to Diagram… still asks, for any other diagram.
-    expect(menus['view/item/context']).toContainEqual({ command: 'erdStudio.addToOpenDiagram', when: 'view == erdStudio.modelLibrary && viewItem == logicalModel', group: 'navigation@2' });
-    expect(menus['view/item/context']).toContainEqual({ command: 'erdStudio.addToDiagram', when: 'view == erdStudio.modelLibrary && viewItem == logicalModel', group: 'navigation@3' });
+    // In their own add group, after the open / reveal group (rowActions.ts's verb order, in the native menu too).
+    expect(menus['view/item/context']).toContainEqual({ command: 'erdStudio.addToOpenDiagram', when: 'view == erdStudio.modelLibrary && viewItem =~ /^logicalModel(OnSeveral|Broken)?$/', group: '2_add@1' });
+    expect(menus['view/item/context']).toContainEqual({ command: 'erdStudio.addToDiagram', when: 'view == erdStudio.modelLibrary && viewItem =~ /^logicalModel(OnSeveral|Broken)?$/', group: '2_add@2' });
   });
 
   it('put Add to Open Diagram as a + button on a Table Library table row, out of the palette, with no legacy alias', () => {
     expect(commands.find((c) => c.command === 'erdStudio.addToOpenDiagram')).toMatchObject({ title: 'Add to Open Diagram', icon: '$(add)' });
-    expect(menus['view/item/context']).toContainEqual({ command: 'erdStudio.addToOpenDiagram', when: 'view == erdStudio.modelLibrary && viewItem == logicalModel', group: 'inline' });
+    expect(menus['view/item/context']).toContainEqual({ command: 'erdStudio.addToOpenDiagram', when: 'view == erdStudio.modelLibrary && viewItem =~ /^logicalModel(OnSeveral|Broken)?$/', group: 'inline' });
     expect(menus.commandPalette).toContainEqual({ command: 'erdStudio.addToOpenDiagram', when: 'false' });
     expect(NO_LEGACY_ALIAS.has('erdStudio.addToOpenDiagram')).toBe(true);
   });

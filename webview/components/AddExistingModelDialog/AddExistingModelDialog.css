@@ -1,21 +1,54 @@
 /**
  * AddExistingModelDialog styles.
  *
- * Dialog for selecting and adding models to a domain.
- * BEM naming, VS Code theme tokens from webview/styles/theme.css.
+ * An in-canvas glass sheet (a React Flow <Panel>, top-center) for picking
+ * tables to add to a diagram. It shares the dialog sheet language: surface-3
+ * material, an 18px radius, elevation-3, a title row, refined inputs, an
+ * inset well for the list and a footer with a quiet secondary and a filled
+ * primary button.
+ *
+ * Colours come only from the tokens in packages/renderer/src/styles/theme.css.
+ * The Panel root keeps React Flow's own `transform`; the entrance animates the
+ * independent `translate` / `scale` properties, which compose with it.
  */
 
 .add-existing-model-dialog {
-  width: 520px;
-  max-height: calc(100vh - 100px);
-  margin-top: 80px;
-  background: var(--panel-bg);
-  border: 1px solid var(--panel-border);
-  border-radius: 6px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+  width: 540px;
+  max-width: calc(100vw - 2 * var(--shell-inset));
+  /* Below the toolbar row and stage tabs (about 80px under the 15px inset),
+     so the two glass layers never overlap; runs to 15px above the bottom. */
+  margin-top: calc(var(--shell-inset) + 80px + var(--shell-gap));
+  max-height: calc(100% - 80px - var(--shell-gap) - 2 * var(--shell-inset));
   display: flex;
   flex-direction: column;
-  z-index: 10;
+  z-index: var(--z-chrome-raised);
+
+  background: var(--glass-surface-3);
+  -webkit-backdrop-filter: var(--glass-backdrop);
+  backdrop-filter: var(--glass-backdrop);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--glass-elevation-3);
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+  font-size: var(--text-md);
+  line-height: var(--leading-normal);
+
+  transform-origin: top center;
+  animation: add-existing-model-dialog-in var(--duration-base) var(--ease-spring);
+}
+
+@keyframes add-existing-model-dialog-in {
+  from {
+    opacity: 0;
+    translate: 0 -8px;
+    scale: 0.98;
+  }
+  to {
+    opacity: 1;
+    translate: 0 0;
+    scale: 1;
+  }
 }
 
 /* ---------------------------------------------------------------------------
@@ -26,18 +59,20 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--panel-border);
-  background: var(--panel-bg);
+  gap: var(--space-4);
+  padding: var(--space-6) var(--space-6) var(--space-5) var(--space-7);
+  border-bottom: 1px solid var(--glass-divider);
+  background: transparent;
   flex-shrink: 0;
 }
 
 .add-existing-model-dialog__title {
   margin: 0;
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--editor-fg);
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-tight);
+  line-height: var(--leading-tight);
+  color: var(--text-primary);
 }
 
 .add-existing-model-dialog__close {
@@ -45,21 +80,38 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
-  border: none;
-  border-radius: 4px;
-  background: transparent;
-  color: var(--editor-fg);
-  font-size: 18px;
+  width: var(--control-height);
+  height: var(--control-height);
+  padding: 0;
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-pill);
+  background: var(--control-fill);
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: var(--text-lg);
   line-height: 1;
   cursor: pointer;
-  transition: background 0.1s ease, color 0.1s ease;
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard),
+    transform var(--duration-instant) var(--ease-standard);
 }
 
 .add-existing-model-dialog__close:hover {
-  background: var(--button-bg);
-  color: var(--button-fg);
+  background: var(--control-fill-hover);
+  border-color: var(--control-border-hover);
+  color: var(--text-primary);
+}
+
+.add-existing-model-dialog__close:active {
+  background: var(--control-fill-active);
+  transform: scale(0.94);
+}
+
+.add-existing-model-dialog__close:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: var(--focus-offset);
 }
 
 /* ---------------------------------------------------------------------------
@@ -68,55 +120,103 @@
 
 .add-existing-model-dialog__content {
   flex: 1;
-  padding: 16px;
+  padding: var(--space-6) var(--space-7);
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: var(--space-5);
   min-height: 200px;
 }
 
 /* ---------------------------------------------------------------------------
-   Search
+   Search — one field with a leading glyph and the count inside it
    --------------------------------------------------------------------------- */
 
 .add-existing-model-dialog__search {
+  position: relative;
   display: flex;
   align-items: center;
-  gap: 8px;
+  flex-shrink: 0;
+}
+
+.add-existing-model-dialog__search-icon {
+  position: absolute;
+  left: var(--space-5);
+  top: 50%;
+  translate: 0 -50%;
+  color: var(--text-tertiary);
+  pointer-events: none;
 }
 
 .add-existing-model-dialog__search-input {
   flex: 1;
-  padding: 8px 10px;
-  border: 1px solid var(--input-border, var(--panel-border));
-  border-radius: 4px;
-  background: var(--input-bg);
-  color: var(--input-fg, var(--editor-fg));
+  min-width: 0;
+  min-height: 36px;
+  padding: 0 84px 0 36px;
+  border: 1px solid var(--glass-input-border);
+  border-radius: var(--radius-md);
+  background: var(--glass-input-bg);
+  color: var(--input-fg);
   font-family: inherit;
-  font-size: 13px;
+  font-size: var(--text-md);
+  transition:
+    border-color var(--duration-fast) var(--ease-standard),
+    box-shadow var(--duration-fast) var(--ease-standard);
+}
+
+.add-existing-model-dialog__search-input:hover {
+  border-color: var(--glass-border-strong);
 }
 
 .add-existing-model-dialog__search-input:focus {
-  outline: 1px solid var(--focus-border);
-  outline-offset: -1px;
-  border-color: var(--focus-border);
+  outline: none;
+  border-color: var(--glass-input-border-focus);
+  box-shadow: var(--focus-halo);
 }
 
 .add-existing-model-dialog__search-input::placeholder {
-  color: var(--vscode-descriptionForeground, #888);
-  opacity: 0.7;
+  color: var(--text-quaternary);
+  opacity: 1;
 }
 
 .add-existing-model-dialog__pending {
-  font-size: 11px;
-  color: var(--dim-fg);
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+}
+
+/* A soft breathing dot while the host reads the table files. */
+.add-existing-model-dialog__pending::before {
+  content: '';
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-pill);
+  background: var(--focus-border);
+  animation: add-existing-model-dialog-breathe 1.2s var(--ease-standard) infinite alternate;
+}
+
+@keyframes add-existing-model-dialog-breathe {
+  from { opacity: 0.3; }
+  to { opacity: 1; }
 }
 
 .add-existing-model-dialog__search-count {
+  position: absolute;
+  right: var(--space-4);
+  top: 50%;
+  translate: 0 -50%;
   flex-shrink: 0;
-  font-size: 11px;
-  color: var(--vscode-descriptionForeground, #888);
+  padding: var(--space-1) var(--space-4);
+  border-radius: var(--radius-pill);
+  background: var(--control-fill);
+  color: var(--text-tertiary);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-medium);
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
 }
 
 /* ---------------------------------------------------------------------------
@@ -126,204 +226,307 @@
 .add-existing-model-dialog__selection {
   display: flex;
   align-items: center;
-  gap: 12px;
-  font-size: 11px;
+  gap: var(--space-5);
+  font-size: var(--text-xs);
 }
 
 .add-existing-model-dialog__selection-count {
-  color: var(--vscode-descriptionForeground, #888);
+  color: var(--text-secondary);
+  font-weight: var(--weight-medium);
+  font-variant-numeric: tabular-nums;
 }
 
 .add-existing-model-dialog__link {
   padding: 0;
   border: none;
+  border-radius: var(--radius-xs);
   background: transparent;
   color: var(--focus-border);
   font-family: inherit;
-  font-size: 11px;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
   cursor: pointer;
+  transition: color var(--duration-fast) var(--ease-standard);
 }
 
 .add-existing-model-dialog__link:hover:not(:disabled) {
   text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.add-existing-model-dialog__link:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: var(--focus-offset);
 }
 
 .add-existing-model-dialog__link:disabled {
-  opacity: 0.5;
+  color: var(--text-quaternary);
   cursor: default;
 }
 
 /* ---------------------------------------------------------------------------
-   Filter Chips
+   Filter Chips — glass pills, tinted with their source's colour when on
    --------------------------------------------------------------------------- */
 
 .add-existing-model-dialog__filters {
   display: flex;
-  gap: 6px;
+  gap: var(--space-3);
   flex-wrap: wrap;
 }
 
 .add-existing-model-dialog__filter-chip {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  padding: 3px 10px;
-  border: 1px solid var(--panel-border);
-  border-radius: 12px;
+  gap: var(--space-3);
+  min-height: var(--control-height-sm);
+  padding: 0 var(--space-5);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-pill);
   background: transparent;
-  color: var(--vscode-descriptionForeground, #888);
+  color: var(--text-tertiary);
   font-family: inherit;
-  font-size: 11px;
-  font-weight: 500;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
   cursor: pointer;
-  transition: background 0.1s ease, border-color 0.1s ease, color 0.1s ease, opacity 0.1s ease;
-  opacity: 0.5;
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard),
+    transform var(--duration-instant) var(--ease-standard);
 }
 
+/* The source's colour as a small dot, so an off chip still says which it is. */
+.add-existing-model-dialog__filter-chip::before {
+  content: '';
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-pill);
+  background: currentColor;
+}
+
+.add-existing-model-dialog__filter-chip--logical::before { background: var(--stage-logical); }
+.add-existing-model-dialog__filter-chip--yml::before { background: var(--stage-physical); }
+.add-existing-model-dialog__filter-chip--manifest::before { background: var(--stage-ghost); }
+
 .add-existing-model-dialog__filter-chip:hover {
-  opacity: 0.8;
+  background: var(--control-fill-hover);
+  border-color: var(--glass-border-strong);
+  color: var(--text-secondary);
+}
+
+.add-existing-model-dialog__filter-chip:active {
+  transform: scale(0.96);
+}
+
+.add-existing-model-dialog__filter-chip:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: var(--focus-offset);
 }
 
 .add-existing-model-dialog__filter-chip--active {
-  opacity: 1;
+  color: var(--text-primary);
 }
 
 .add-existing-model-dialog__filter-chip--logical.add-existing-model-dialog__filter-chip--active {
-  border-color: var(--stage-logical);
-  background: var(--stage-logical-bg);
-  color: var(--stage-logical);
+  border-color: var(--glass-tint-logical-edge);
+  background: var(--glass-tint-logical);
+  color: var(--text-primary);
 }
 
 .add-existing-model-dialog__filter-chip--yml.add-existing-model-dialog__filter-chip--active {
-  border-color: var(--stage-physical);
-  background: var(--stage-physical-bg);
-  color: var(--stage-physical);
+  border-color: var(--glass-tint-physical-edge);
+  background: var(--glass-tint-physical);
+  color: var(--text-primary);
 }
 
 .add-existing-model-dialog__filter-chip--manifest.add-existing-model-dialog__filter-chip--active {
-  border-color: var(--stage-ghost);
-  background: var(--stage-ghost-bg);
-  color: var(--stage-ghost);
+  border-color: var(--glass-border-strong);
+  background: var(--glass-tint-ghost);
+  color: var(--text-primary);
 }
 
 .add-existing-model-dialog__filter-count {
-  font-size: 10px;
-  opacity: 0.7;
+  color: var(--text-tertiary);
+  font-size: var(--text-2xs);
+  font-variant-numeric: tabular-nums;
 }
 
 /* ---------------------------------------------------------------------------
-   Model List
+   Model List — an inset well of rounded, selectable rows
    --------------------------------------------------------------------------- */
 
 .add-existing-model-dialog__list {
   flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-2);
   overflow-y: auto;
-  border: 1px solid var(--panel-border);
-  border-radius: 4px;
-  background: var(--input-bg);
+  border: 1px solid var(--glass-divider);
+  border-radius: var(--radius-lg);
+  background: var(--glass-well);
+  scrollbar-width: thin;
+  scrollbar-color: var(--glass-scrollbar) transparent;
 }
 
 .add-existing-model-dialog__item {
-  padding: 8px 12px;
+  flex-shrink: 0;
+  padding: var(--space-4) var(--space-5);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
   cursor: pointer;
-  border-bottom: 1px solid var(--panel-border);
-  transition: background 0.1s ease;
-}
-
-.add-existing-model-dialog__item:last-child {
-  border-bottom: none;
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard);
 }
 
 .add-existing-model-dialog__item:hover {
-  background: rgba(128, 128, 128, 0.1);
+  background: var(--control-fill-hover);
+  border-color: var(--control-border-hover);
 }
 
 .add-existing-model-dialog__item--selected {
-  background: var(--vscode-list-activeSelectionBackground, rgba(0, 120, 212, 0.2));
+  background: var(--glass-tint-accent);
+  border-color: var(--control-border-selected);
 }
 
 .add-existing-model-dialog__item--selected:hover {
-  background: var(--vscode-list-activeSelectionBackground, rgba(0, 120, 212, 0.25));
+  background: var(--glass-tint-accent-strong);
+  border-color: var(--control-border-selected);
 }
 
 .add-existing-model-dialog__item-main {
   display: flex;
-  align-items: baseline;
-  gap: 8px;
-  margin-bottom: 2px;
+  align-items: center;
+  gap: var(--space-4);
+  min-width: 0;
+  margin-bottom: var(--space-1);
 }
 
+/* The row's tick: drawn on glass. Read-only and hidden from assistive tech (the row is the option). */
 .add-existing-model-dialog__item-check {
+  -webkit-appearance: none;
+  appearance: none;
   flex-shrink: 0;
+  display: inline-grid;
+  place-content: center;
+  width: 16px;
+  height: 16px;
   margin: 0;
   align-self: center;
   pointer-events: none;
-  accent-color: var(--button-bg);
+  border: 1px solid var(--glass-border-strong);
+  border-radius: var(--radius-xs);
+  background: var(--glass-input-bg);
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard);
+}
+
+.add-existing-model-dialog__item-check::before {
+  content: '';
+  width: 8px;
+  height: 4px;
+  margin-top: -2px;
+  border-left: 1.5px solid var(--text-on-accent);
+  border-bottom: 1.5px solid var(--text-on-accent);
+  rotate: -45deg;
+  scale: 0;
+  transition: scale var(--duration-fast) var(--ease-spring);
+}
+
+.add-existing-model-dialog__item-check:checked {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+.add-existing-model-dialog__item-check:checked::before {
+  scale: 1;
 }
 
 .add-existing-model-dialog__item-name {
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--editor-fg);
-}
-
-.add-existing-model-dialog__item-source {
-  font-size: 10px;
-  font-weight: 600;
-  padding: 1px 6px;
-  border-radius: 3px;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-  flex-shrink: 0;
-}
-
-.add-existing-model-dialog__item-source--logical {
-  background: rgba(96, 165, 250, 0.15);
-  color: #60a5fa;
-}
-
-.add-existing-model-dialog__item-source--yml {
-  background: rgba(34, 197, 94, 0.15);
-  color: #22c55e;
-}
-
-.add-existing-model-dialog__item-source--manifest {
-  background: rgba(156, 163, 175, 0.15);
-  color: #9ca3af;
-}
-
-.add-existing-model-dialog__item-schema {
-  font-size: 11px;
-  color: var(--vscode-descriptionForeground, #888);
-  font-family: var(--vscode-editor-font-family, monospace);
-}
-
-.add-existing-model-dialog__item-path {
-  font-size: 11px;
-  color: var(--vscode-descriptionForeground, #888);
-  font-family: var(--vscode-editor-font-family, monospace);
-  margin-bottom: 2px;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  opacity: 0.7;
+  font-size: var(--text-md);
+  font-weight: var(--weight-medium);
+  color: var(--text-primary);
+}
+
+.add-existing-model-dialog__item-source {
+  flex-shrink: 0;
+  padding: 0 var(--space-3);
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-semibold);
+  line-height: 16px;
+}
+
+.add-existing-model-dialog__item-source--logical {
+  border-color: var(--glass-tint-logical-edge);
+  background: var(--glass-tint-logical);
+  color: var(--stage-logical);
+}
+
+.add-existing-model-dialog__item-source--yml {
+  border-color: var(--glass-tint-physical-edge);
+  background: var(--glass-tint-physical);
+  color: var(--stage-physical);
+}
+
+.add-existing-model-dialog__item-source--manifest {
+  border-color: var(--glass-border);
+  background: var(--glass-tint-ghost);
+  color: var(--stage-ghost);
+}
+
+.add-existing-model-dialog__item-schema {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+}
+
+.add-existing-model-dialog__item-path {
+  margin-bottom: var(--space-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-2xs);
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+}
+
+/* With the tick shown, the lines under the name start under the name. */
+.add-existing-model-dialog__item-main:has(.add-existing-model-dialog__item-check) ~ .add-existing-model-dialog__item-path,
+.add-existing-model-dialog__item-main:has(.add-existing-model-dialog__item-check) ~ .add-existing-model-dialog__item-meta {
+  padding-left: calc(16px + var(--space-4));
 }
 
 .add-existing-model-dialog__item-meta {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: var(--space-5);
+  min-width: 0;
 }
 
 .add-existing-model-dialog__item-columns {
-  font-size: 11px;
-  color: var(--vscode-descriptionForeground, #888);
+  flex-shrink: 0;
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
 }
 
 .add-existing-model-dialog__item-desc {
   flex: 1;
-  font-size: 11px;
-  color: var(--vscode-descriptionForeground, #888);
+  min-width: 0;
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -335,27 +538,42 @@
 
 .add-existing-model-dialog__empty,
 .add-existing-model-dialog__no-results {
-  padding: 24px 16px;
+  padding: var(--space-8) var(--space-6);
   text-align: center;
-  color: var(--vscode-descriptionForeground, #888);
-  font-size: 13px;
+  color: var(--text-secondary);
+  font-size: var(--text-md);
+}
+
+.add-existing-model-dialog__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-4);
+  margin: auto 0;
 }
 
 .add-existing-model-dialog__empty p {
-  margin: 0 0 8px 0;
+  margin: 0;
 }
 
 .add-existing-model-dialog__empty-hint {
-  font-size: 12px;
-  opacity: 0.8;
+  max-width: 380px;
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
+  color: var(--text-tertiary);
 }
 
 .add-existing-model-dialog__empty-hint code {
-  background: rgba(128, 128, 128, 0.15);
-  padding: 2px 5px;
-  border-radius: 3px;
-  font-family: var(--vscode-editor-font-family, monospace);
-  font-size: 11px;
+  padding: 1px var(--space-2);
+  border-radius: var(--radius-xs);
+  background: var(--control-fill);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+.add-existing-model-dialog__empty .add-existing-model-dialog__button {
+  margin-top: var(--space-3);
 }
 
 /* ---------------------------------------------------------------------------
@@ -366,42 +584,104 @@
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 8px;
-  padding: 12px 16px;
-  border-top: 1px solid var(--panel-border);
+  gap: var(--space-4);
+  padding: var(--space-5) var(--space-7) var(--space-6);
+  border-top: 1px solid var(--glass-divider);
   flex-shrink: 0;
 }
 
 .add-existing-model-dialog__button {
-  padding: 6px 14px;
-  border: 1px solid transparent;
-  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--control-height-lg);
+  padding: 0 var(--space-6);
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-md);
   font-family: inherit;
-  font-size: 12px;
+  font-size: var(--text-md);
+  font-weight: var(--weight-medium);
   cursor: pointer;
-  transition: background 0.1s ease, opacity 0.1s ease;
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard),
+    box-shadow var(--duration-fast) var(--ease-standard),
+    opacity var(--duration-fast) var(--ease-standard),
+    transform var(--duration-instant) var(--ease-standard);
+}
+
+.add-existing-model-dialog__button:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.add-existing-model-dialog__button:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: var(--focus-offset);
 }
 
 .add-existing-model-dialog__button--primary {
-  background: var(--button-bg);
-  color: var(--button-fg);
+  background: var(--accent);
+  color: var(--text-on-accent);
+  box-shadow: var(--glass-elevation-1);
 }
 
 .add-existing-model-dialog__button--primary:hover:not(:disabled) {
-  background: var(--button-hover-bg);
+  background: var(--accent-hover);
+  border-color: var(--control-border-hover);
 }
 
 .add-existing-model-dialog__button--secondary {
-  background: transparent;
-  border-color: var(--panel-border);
-  color: var(--editor-fg);
+  background: var(--control-fill);
+  color: var(--text-primary);
 }
 
 .add-existing-model-dialog__button--secondary:hover {
-  background: rgba(128, 128, 128, 0.1);
+  background: var(--control-fill-hover);
+  border-color: var(--control-border-hover);
+}
+
+.add-existing-model-dialog__button--secondary:active {
+  background: var(--control-fill-active);
 }
 
 .add-existing-model-dialog__button:disabled {
-  opacity: 0.5;
+  opacity: 0.45;
   cursor: not-allowed;
+  box-shadow: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .add-existing-model-dialog,
+  .add-existing-model-dialog__pending::before {
+    animation: none;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   The canvas dims behind an in-canvas sheet (New Table, Add Existing Tables),
+   as it already does for New Relationship. The scrim is drawn on the flow
+   renderer, a sibling of the sheet's Panel, never on an ancestor of the
+   sheet, so the sheet's own blur still sees the canvas.
+   --------------------------------------------------------------------------- */
+
+@keyframes erd-sheet-scrim-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.editor-canvas:has(.react-flow__panel.new-model-dialog, .react-flow__panel.add-existing-model-dialog) .react-flow__renderer::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: var(--z-canvas-overlay);
+  background: color-mix(in srgb, var(--editor-bg) 45%, transparent);
+  pointer-events: none;
+  animation: erd-sheet-scrim-in var(--duration-base) var(--ease-out);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .editor-canvas:has(.react-flow__panel.new-model-dialog, .react-flow__panel.add-existing-model-dialog) .react-flow__renderer::after {
+    animation: none;
+  }
 }

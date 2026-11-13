@@ -355,9 +355,9 @@ describe('New Relationship: the "Stored in" band', () => {
 
   it('never shrinks, and a divider and top padding set it apart from the scrolling fields, in theme colours only', () => {
     expect(rule).toContain('flex-shrink: 0;');
-    expect(rule).toMatch(/border-top: 1px solid var\(--panel-border\);/);
-    const padding = /\n  padding: (\d+)px/.exec(rule);
-    expect(Number(padding?.[1])).toBeGreaterThan(0);
+    // The glass look draws the divider and the padding from theme tokens.
+    expect(rule).toMatch(/border-top: 1px solid var\(--glass-divider\);/);
+    expect(rule).toMatch(/\n  padding: var\(--space-[1-9]\d*\)/);
     expect(rule).not.toMatch(/#[0-9a-f]{3,8}\b|rgba?\(/i);
   });
 });

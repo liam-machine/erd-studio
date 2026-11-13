@@ -1,19 +1,53 @@
 /**
  * KeyBadge styles.
  *
- * Status-aware badge styling for PK/FK/NK column indicators.
- * Uses BEM naming and VS Code theme tokens.
+ * PK / FK / NK as small refined capsules: a faint wash of the key's hue, a
+ * hairline in the same hue and the label in a deepened version of it (mixed
+ * toward the text colour, so it reads on light themes as well as dark).
+ * Uses BEM naming and the theme tokens only.
+ *
+ * The key hues are declared here on `body` (where the text tier they mix
+ * with resolves) as --key-badge-{pk,fk,nk}-{fg,bg,edge}, so anything that
+ * explains these badges (the Legend's samples) can draw the same colours.
  */
 
+body {
+  --key-badge-pk: var(--star-gold);
+  --key-badge-fk: var(--focus-border);
+  --key-badge-nk: var(--ai-fg);
+
+  --key-badge-pk-fg: color-mix(in srgb, var(--key-badge-pk) 78%, var(--text-primary));
+  --key-badge-pk-bg: color-mix(in srgb, var(--key-badge-pk) 15%, transparent);
+  --key-badge-pk-edge: color-mix(in srgb, var(--key-badge-pk) 34%, transparent);
+  --key-badge-fk-fg: color-mix(in srgb, var(--key-badge-fk) 78%, var(--text-primary));
+  --key-badge-fk-bg: color-mix(in srgb, var(--key-badge-fk) 15%, transparent);
+  --key-badge-fk-edge: color-mix(in srgb, var(--key-badge-fk) 34%, transparent);
+  --key-badge-nk-fg: color-mix(in srgb, var(--key-badge-nk) 78%, var(--text-primary));
+  --key-badge-nk-bg: color-mix(in srgb, var(--key-badge-nk) 15%, transparent);
+  --key-badge-nk-edge: color-mix(in srgb, var(--key-badge-nk) 34%, transparent);
+}
+
 .key-badge {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  height: 15px;
   padding: 0 3px;
-  border-radius: 2px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-xs);
+  font-family: var(--font-ui);
   font-size: 9px;
-  font-weight: 700;
-  line-height: 1.5;
-  letter-spacing: 0.3px;
-  transition: opacity 0.15s ease, background 0.15s ease, color 0.15s ease;
+  font-weight: var(--weight-semibold);
+  font-style: normal;
+  line-height: 1;
+  letter-spacing: 0.04em;
+  transition:
+    opacity var(--duration-fast) var(--ease-standard),
+    background-color var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard),
+    transform var(--duration-instant) var(--ease-standard);
 }
 
 /* ---------------------------------------------------------------------------
@@ -26,13 +60,21 @@
 }
 
 .key-badge--clickable:hover {
-  filter: brightness(1.15);
+  filter: brightness(1.12);
+}
+
+.key-badge--clickable:active {
+  transform: scale(0.94);
 }
 
 /* Keyboard focus */
-.key-badge--clickable:focus {
-  outline: 2px solid var(--focus-border);
+.key-badge--clickable:focus-visible {
+  outline: var(--focus-outline);
   outline-offset: 1px;
+}
+
+.key-badge--clickable:focus:not(:focus-visible) {
+  outline: none;
 }
 
 /* ---------------------------------------------------------------------------
@@ -40,13 +82,16 @@
    --------------------------------------------------------------------------- */
 
 .key-badge--inactive {
-  opacity: 0.3;
-  background: rgba(128, 128, 128, 0.15);
-  color: var(--vscode-descriptionForeground, #888);
+  opacity: 0.6;
+  background: transparent;
+  border-color: var(--glass-divider);
+  border-style: dashed;
+  color: var(--text-quaternary);
 }
 
 .key-badge--inactive:hover {
-  opacity: 0.6;
+  opacity: 1;
+  color: var(--text-secondary);
 }
 
 /* ---------------------------------------------------------------------------
@@ -61,22 +106,25 @@
    Type-specific colors (active state)
    --------------------------------------------------------------------------- */
 
-/* PK — Yellow/gold */
+/* PK — gold */
 .key-badge--pk.key-badge--active {
-  background: rgba(234, 179, 8, 0.2);
-  color: #ca8a04;
+  background: var(--key-badge-pk-bg);
+  border-color: var(--key-badge-pk-edge);
+  color: var(--key-badge-pk-fg);
 }
 
-/* FK — Blue */
+/* FK — blue (the theme's focus blue) */
 .key-badge--fk.key-badge--active {
-  background: rgba(59, 130, 246, 0.2);
-  color: #3b82f6;
+  background: var(--key-badge-fk-bg);
+  border-color: var(--key-badge-fk-edge);
+  color: var(--key-badge-fk-fg);
 }
 
-/* NK — Purple */
+/* NK — purple */
 .key-badge--nk.key-badge--active {
-  background: rgba(168, 85, 247, 0.2);
-  color: #a855f7;
+  background: var(--key-badge-nk-bg);
+  border-color: var(--key-badge-nk-edge);
+  color: var(--key-badge-nk-fg);
 }
 
 /* ---------------------------------------------------------------------------

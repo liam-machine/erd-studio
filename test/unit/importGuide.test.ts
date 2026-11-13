@@ -21,6 +21,7 @@ import * as vscode from 'vscode';
 
 import { _resetMockWebviewPanels } from '../__mocks__/vscode';
 import { ImportGuidePanel, type ImportGuideDeps } from '../../src/providers/ImportGuidePanel';
+import { GLASS_PAGE_STYLE, GLASS_PAGE_TOKENS } from '../../src/types/glassPageStyle';
 import {
   IMPORT_GUIDE_ACTIONS,
   IMPORT_GUIDE_ACTION_FEATURES,
@@ -320,8 +321,11 @@ describe('the page', () => {
     // The only images are the sources' marks, built into the page: none is fetched (img-src data:).
     for (const img of html.match(/<img\b[^>]*>/gi) ?? []) expect(img).toMatch(/\ssrc="data:image\/svg\+xml;base64,[A-Za-z0-9+/=]+"/);
     for (const tag of html.match(/<(script|style)\b[^>]*>/g) ?? []) expect(tag).toContain('nonce="NONCE123"');
-    // Colours only from VS Code's theme variables.
-    expect(html).not.toMatch(/#[0-9a-f]{3,8}\b|rgba?\(/i);
+    // Styled by the shared glass kit first, then the guide's own layer, in the one nonce'd style element.
+    expect(html).toContain(`<style nonce="NONCE123">${GLASS_PAGE_STYLE}${IMPORT_GUIDE_STYLE}</style>`);
+    // Colours only from tokens: the shared token block's theme fallbacks are the page's only colour literals.
+    expect(html.replace(GLASS_PAGE_TOKENS, '')).not.toMatch(/#[0-9a-f]{3,8}\b|rgba?\(/i);
+    expect(IMPORT_GUIDE_STYLE).not.toMatch(/#[0-9a-f]{3,8}\b|rgba?\(|hsla?\(|[\s(](white|black)\b(?!-)/i);
   });
 
   it('says DBML is an open format, in a short intro with no sales line; never "open standard", and "open-source" only for DBML\'s language', () => {
@@ -364,6 +368,8 @@ describe('the page', () => {
     p.click('[data-card="databricks"] [data-action="copy"]');
     expect(p.posted).toEqual([{ type: 'run', action: 'databricks' }, { type: 'copy', snippet: 'databricksCatalog' }]);
     expect(p.doc.querySelector('[data-card="databricks"] [data-action="copy"]')?.textContent).toBe('Copied');
+    // The glass look's cue for it: a tinted Copy while it says Copied (presentation only).
+    expect(p.doc.querySelector('[data-card="databricks"] [data-action="copy"]')?.classList.contains('ig-btn--copied')).toBe(true);
     for (const message of p.posted) expect(isImportGuideToHost(message)).toBe(true);
   });
 });

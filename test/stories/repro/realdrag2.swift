@@ -19,6 +19,8 @@
 //   early          Shift held from the sidebar, released 300 ms before the mouse button
 //   none           no Shift at all
 //   recover        no drag: move over the target, then click it (what a person does after a lost drop)
+//   glass-still    no Shift (a glass sidebar drag); release, then the pointer perfectly still for 3 s, then a small move
+//   glass-move     no Shift; release, then small moves straight away (a hand moving on), then still
 import AppKit
 import CoreGraphics
 import Foundation
@@ -122,9 +124,27 @@ case "early":
 default:
   jiggle(12, amp: 1, ms: 40)
 }
-if !mode.hasSuffix("-still") { mouse(.leftMouseDragged, tx, ty) }
+if !mode.hasSuffix("-still") || mode.hasPrefix("glass-") { mouse(.leftMouseDragged, tx, ty) }
 log("mouse-up")
 mouse(.leftMouseUp, tx, ty)
+if mode == "glass-still" {
+  // Let go and hold perfectly still: does anything land without a move?
+  pause(3000)
+  log("still-end")
+  for i in 1...6 { mouse(.mouseMoved, tx + Double(i * 2), ty + Double(i)); pause(30) }
+  log("moved-after-still")
+  pause(2500)
+  log("done")
+  exit(0)
+}
+if mode == "glass-move" {
+  // Let go and move on at once, as a hand does.
+  for i in 1...10 { mouse(.mouseMoved, tx + Double(i * 2), ty + Double(i)); pause(16) }
+  log("moved-after")
+  pause(3000)
+  log("done")
+  exit(0)
+}
 pause(150)
 if shiftDown { shift(false) }
 // A hand moves on after letting go: a few small moves from the drop point.

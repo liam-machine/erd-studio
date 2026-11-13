@@ -18,7 +18,10 @@
  * repo), and the folder then gets no automatic draft and no walkthrough.
  * It is shown once per folder ({@link MAX_START_SUGGESTION_SHOWS}): closing it
  * leaves the sidebar's button and the automatic draft on the ERD Studio icon,
- * never another notification. It is the window's one activation prompt
+ * never another notification. An install that was not new on this machine
+ * (an upgrader) is asked once per machine in all
+ * ({@link MAX_UPGRADER_START_SUGGESTION_SHOWS}, issue #305), unless Turn On
+ * asked for it in a folder. It is the window's one activation prompt
  * (`SessionPromptGate`, kind `startSuggestion`).
  *
  * Turned off by the button, by **ERD Studio: Turn Off Start Suggestions for
@@ -57,13 +60,31 @@ export const TURN_ON_START_SUGGESTIONS_TITLE = 'ERD Studio: Turn On Start Sugges
 /** Shown at most this many times per folder in all: once. Closing it never brings it back in a later window. */
 export const MAX_START_SUGGESTION_SHOWS = 1;
 
+/**
+ * Global state (machine-local; never synced: nothing calls `setKeysForSync`
+ * for it, so one machine's showing never silences another's): whether this
+ * install was new on this machine, and how often the suggestion was shown on
+ * it in all folders together.
+ */
+export const START_SUGGESTION_MACHINE_KEY = 'erdStudio.startSuggestion.machine';
+/**
+ * An upgrader (an install that was not new on this machine) is shown it at
+ * most this many times on the machine, whatever the folder: once. A new
+ * install keeps once per folder. Turn On for a folder lifts it there.
+ */
+export const MAX_UPGRADER_START_SUGGESTION_SHOWS = 1;
+
 /** Opens the start's draft (nothing is written until Keep). */
 export const SHOW_ME_BUTTON = 'Show Me';
 export const DONT_ASK_AGAIN_FOLDER_BUTTON = "Don't Ask Again for This Folder";
 /** Convert creates no diagram: its button says what it does (the opening notice's own). */
 export const CONVERT_BUTTON = 'Convert to DBML…';
 
-/** VS Code's own focus command for the Diagrams view (`erdStudio.domainTree`, contributed in package.json). */
+/**
+ * VS Code's own focus command for the native Diagrams view (`erdStudio.domainTree`,
+ * contributed in package.json). Hidden while the glass sidebar is on: the
+ * extension passes `showDiagramsView` (GlassSidebarProvider.focusView), which picks.
+ */
 export const DIAGRAMS_VIEW_FOCUS_COMMAND = 'erdStudio.domainTree.focus';
 /**
  * A late Show Me, after a diagram was kept meanwhile (from the sidebar, the
@@ -76,10 +97,21 @@ export const START_SUGGESTION_ALREADY_KEPT_MESSAGE =
 /**
  * What "Don't Ask Again" (and Turn Off) answers with: one short line, and
  * {@link UNDO_BUTTON}, which runs Turn On Start Suggestions for This Folder
- * (also in the palette).
+ * (also in the palette) with {@link START_SUGGESTIONS_UNDO_ARG}.
  */
 export const START_SUGGESTIONS_OFF_MESSAGE = 'Start suggestions are off for this folder.';
 export const UNDO_BUTTON = 'Undo';
+/**
+ * The argument Undo passes to Turn On (#305): it takes the off back and
+ * nothing more, so it never sets the folder's `on` and never lifts an
+ * upgrader's once-per-machine limit in a folder that limit held back. Only
+ * the palette's Turn On (no argument) asks for the suggestion here.
+ */
+export const START_SUGGESTIONS_UNDO_ARG = { undo: true } as const;
+/** Whether Turn On was run by an Undo ({@link START_SUGGESTIONS_UNDO_ARG}), not from the palette. */
+export function isStartSuggestionsUndo(arg: unknown): boolean {
+  return typeof arg === 'object' && arg !== null && (arg as { undo?: unknown }).undo === true;
+}
 export const START_SUGGESTIONS_ON_MESSAGE =
   'Start suggestions are on for this folder: ERD Studio suggests a start the next time it opens this folder without a diagram.';
 /** Turn On while the setting is false: the folder's flag is cleared, but the setting still decides. */
@@ -104,6 +136,20 @@ export interface StartSuggestionState {
   answered?: boolean;
   /** The automatic draft (the ERD Studio icon) was shown in this folder: it is never shown automatically again. */
   draftShown?: boolean;
+  /** Turn On Start Suggestions for This Folder, run from the palette (never by an Undo): asked for here, so an upgrader's machine-wide limit does not apply. */
+  on?: boolean;
+}
+
+/** What the global state holds ({@link START_SUGGESTION_MACHINE_KEY}). */
+export interface StartSuggestionMachine {
+  /** How many times it was shown on this machine, in every folder. */
+  shown: number;
+  /**
+   * Written once, on the activation that was a fresh install on this machine
+   * (activate()'s `freshInstall`; never from telemetry, which may be off).
+   * Absent: an upgrader, including installs fresh before this key existed.
+   */
+  newInstall?: boolean;
 }
 
 function count(value: unknown): number {
@@ -119,6 +165,17 @@ export function readStartSuggestionState(raw: unknown): StartSuggestionState {
     ...(r.off === true ? { off: true } : {}),
     ...(r.answered === true ? { answered: true } : {}),
     ...(r.draftShown === true ? { draftShown: true } : {}),
+    ...(r.on === true ? { on: true } : {}),
+  };
+}
+
+/** The machine's record as stored, or a fresh one (an upgrader shown nothing yet) for anything else. */
+export function readStartSuggestionMachine(raw: unknown): StartSuggestionMachine {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return { shown: 0 };
+  const r = raw as Record<string, unknown>;
+  return {
+    shown: count(r.shown),
+    ...(r.newInstall === true ? { newInstall: true } : {}),
   };
 }
 
@@ -127,10 +184,20 @@ export function startSuggestionsOff(state: StartSuggestionState, settingOn: bool
   return state.off === true || !settingOn;
 }
 
-/** Whether the notification may still be shown in this folder (cheap: no look at the files). */
-export function startSuggestionDue(input: { settingOn: boolean; state: StartSuggestionState; hasDiagrams: boolean }): boolean {
-  const { settingOn, state, hasDiagrams } = input;
-  return settingOn && !state.off && !state.answered && !hasDiagrams && state.shown < MAX_START_SUGGESTION_SHOWS;
+/**
+ * Whether the notification may still be shown in this folder (cheap: no look
+ * at the files): once per folder, and for an upgrader once per machine unless
+ * Turn On asked for it in this folder.
+ */
+export function startSuggestionDue(input: {
+  settingOn: boolean;
+  state: StartSuggestionState;
+  machine: StartSuggestionMachine;
+  hasDiagrams: boolean;
+}): boolean {
+  const { settingOn, state, machine, hasDiagrams } = input;
+  const machineAllows = machine.newInstall === true || state.on === true || machine.shown < MAX_UPGRADER_START_SUGGESTION_SHOWS;
+  return settingOn && !state.off && !state.answered && !hasDiagrams && state.shown < MAX_START_SUGGESTION_SHOWS && machineAllows;
 }
 
 /** Every suggestion but Convert's ends on this: Show Me writes nothing. */
@@ -182,6 +249,8 @@ export function startSuggestionPrimary(intent: SuggestedStart): string {
 /** The funnel keys (`telemetry/README.md` → Onboarding funnel): user choices, never what was found. */
 export const START_SUGGESTION_FEATURES = {
   shown: 'suggestPromptShown',
+  /** A showing on a machine where it was already shown (another folder, or this one after Turn On): the repeat cost. */
+  shownAgain: 'suggestPromptShownAgain',
   /** Show Me: the draft. */
   showMe: 'suggestPromptShowMe',
   /** Convert to DBML… (Convert's own; `suggestPromptMore`, More Options…, is no longer sent). */
@@ -205,11 +274,20 @@ export interface StartSuggestionDeps {
   convertApplies(): boolean;
   state(): StartSuggestionState;
   saveState(state: StartSuggestionState): PromiseLike<unknown>;
+  /** The machine's record (global state): new install or upgrader, and showings in every folder. */
+  machine(): StartSuggestionMachine;
+  saveMachine(machine: StartSuggestionMachine): PromiseLike<unknown>;
   /** The notification (non-modal); resolves with the button chosen, undefined when closed. */
   show(message: string, ...buttons: string[]): PromiseLike<string | undefined>;
   /** A short non-modal message with optional buttons; resolves with the one chosen. */
   info(message: string, ...buttons: string[]): PromiseLike<string | undefined> | void;
   executeCommand(command: string, ...args: unknown[]): PromiseLike<unknown>;
+  /**
+   * Show the Diagrams view wherever it is drawn now (the glass sidebar's
+   * Diagrams section while it is on: the native view is hidden then).
+   * Optional: without it, VS Code's own {@link DIAGRAMS_VIEW_FOCUS_COMMAND}.
+   */
+  showDiagramsView?(): PromiseLike<unknown>;
   /** The start-screen count for a shown suggestion (`startSuggested<Intent>`). */
   recordSuggested(intent: StartIntent): void;
   feature(key: TelemetryFeature): void;
@@ -240,11 +318,15 @@ export async function runStartSuggestion(deps: StartSuggestionDeps): Promise<Sta
   if (!isConcreteSuggestion(intent)) return nothing;
   if (intent === 'convert' && !deps.convertApplies()) return nothing;
   const state = deps.state();
+  // Read after the look, as late as it can be: another window on this machine may have shown it meanwhile.
+  const machine = deps.machine();
   // Checked again after the look: a diagram made meanwhile, a setting or a command since activation.
-  if (!startSuggestionDue({ settingOn: deps.settingOn(), state, hasDiagrams: deps.hasDiagrams() })) return nothing;
+  if (!startSuggestionDue({ settingOn: deps.settingOn(), state, machine, hasDiagrams: deps.hasDiagrams() })) return nothing;
 
   await deps.saveState({ ...state, shown: state.shown + 1 });
+  await deps.saveMachine({ ...machine, shown: machine.shown + 1 });
   deps.feature(START_SUGGESTION_FEATURES.shown);
+  if (machine.shown > 0) deps.feature(START_SUGGESTION_FEATURES.shownAgain);
   deps.recordSuggested(intent);
   const primary = startSuggestionPrimary(intent);
   const start: StartAction = intent;
@@ -260,7 +342,8 @@ export async function runStartSuggestion(deps: StartSuggestionDeps): Promise<Sta
         // finally pressed: a folder that has a diagram now gets the Diagrams view, not a second draft.
         // Convert is unaffected: it converts the project, whatever diagrams it has.
         if (start !== 'convert' && deps.hasDiagrams()) {
-          await deps.executeCommand(DIAGRAMS_VIEW_FOCUS_COMMAND);
+          if (deps.showDiagramsView) await deps.showDiagramsView();
+          else await deps.executeCommand(DIAGRAMS_VIEW_FOCUS_COMMAND);
           await deps.info(START_SUGGESTION_ALREADY_KEPT_MESSAGE);
           return;
         }
@@ -271,7 +354,7 @@ export async function runStartSuggestion(deps: StartSuggestionDeps): Promise<Sta
         await deps.saveState({ ...latest, off: true });
         deps.setOffContext(true);
         const undo = await deps.info(START_SUGGESTIONS_OFF_MESSAGE, UNDO_BUTTON);
-        if (undo === UNDO_BUTTON) await deps.executeCommand(TURN_ON_START_SUGGESTIONS_COMMAND);
+        if (undo === UNDO_BUTTON) await deps.executeCommand(TURN_ON_START_SUGGESTIONS_COMMAND, START_SUGGESTIONS_UNDO_ARG);
       } else {
         deps.feature(START_SUGGESTION_FEATURES.dismissed);
       }

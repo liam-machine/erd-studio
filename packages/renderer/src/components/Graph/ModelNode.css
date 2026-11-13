@@ -1,8 +1,17 @@
 /**
- * ModelNode styles.
+ * ModelNode styles: the table card.
  *
- * Uses design tokens from webview/styles/theme.css for VS Code theme
- * compatibility. Status colours (built/design/missing) are defined there.
+ * A glass card INSIDE the React Flow viewport, so it never uses
+ * backdrop-filter (there can be hundreds of cards and they move on every
+ * pan): a translucent layered fill, a hairline border, the inner lit edge and
+ * a soft shadow that deepens on hover and selection. Every colour comes from
+ * the tokens in theme.css; high contrast and reduced transparency follow
+ * through the tokens themselves.
+ *
+ * Geometry is pinned to the size estimate in lib/nodeSizing.ts (ELK layout
+ * and saved positions assume it): header 29px + 1px, rows 25px, footer
+ * 25px + 1px, the extra pixel on each standing in for the 2px border the card
+ * used to have (it now has a 1px hairline).
  */
 
 /* -----------------------------------------------------------------------
@@ -10,29 +19,51 @@
    ----------------------------------------------------------------------- */
 
 .model-node {
+  /* Local recipe values, overridden per stage and state below. */
+  --model-node-wash: var(--glass-tint-logical);
+  --model-node-row-hover: var(--control-fill-hover);
+
   width: max-content;
   min-width: 200px;
   max-width: 480px;
-  background: var(--editor-bg);
-  border: 2px solid var(--panel-border);
-  border-radius: 6px;
-  font-size: 12px;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
+  /* The glass tone laid over the editor background: the same colour as the
+     floating chrome, but opaque, so cards that overlap (dragging, dense
+     layouts) never show each other's text through. High contrast resolves to
+     an opaque --editor-bg anyway. */
+  background:
+    var(--glass-sheen),
+    linear-gradient(var(--glass-surface-3), var(--glass-surface-3)),
+    var(--editor-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+  box-shadow: var(--glass-elevation-1);
   overflow: hidden;
   /* On the base so un-dimming fades too, not just dimming. */
-  transition: opacity 0.15s ease, filter 0.15s ease;
+  transition:
+    opacity var(--duration-fast) var(--ease-standard),
+    filter var(--duration-fast) var(--ease-standard),
+    box-shadow var(--duration-base) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard);
 }
 
 /* -----------------------------------------------------------------------
    Stage variants
+   A neutral hairline on every card (the stage tab already says which stage
+   is showing) and only a faint stage wash across the header. The stage
+   colour is kept for the selection ring, so "selected" stands out.
    ----------------------------------------------------------------------- */
 
 .model-node--logical {
-  border-color: var(--stage-logical);
+  --model-node-wash: color-mix(in srgb, var(--stage-logical) 8%, transparent);
+  border-color: var(--glass-border);
 }
 
 .model-node--physical {
-  border-color: var(--stage-physical);
+  --model-node-wash: color-mix(in srgb, var(--stage-physical) 8%, transparent);
+  border-color: var(--glass-border);
 }
 
 /* The selection ring's colour: the stage being viewed (a ghost on the
@@ -54,6 +85,7 @@
    labels go neutral through the --stage-logical override in theme.css. */
 .editor-canvas--neutral .model-node--logical {
   border-color: var(--canvas-neutral-border);
+  --model-node-wash: var(--control-fill);
 }
 
 .editor-canvas--neutral .model-node {
@@ -61,9 +93,18 @@
   --model-node-ring-glow: var(--canvas-selection-glow);
 }
 
+/* On a logical-only canvas the layer colour is the one colour a table has,
+   so a table that knows its layer washes its header in it, faintly. */
+.editor-canvas--neutral .model-node--layered {
+  --model-node-wash: color-mix(in srgb, var(--model-node-layer-color) 11%, transparent);
+}
+
 .model-node--ghost {
-  border-color: var(--stage-ghost);
+  --model-node-wash: var(--glass-tint-ghost);
+  background: color-mix(in srgb, var(--glass-surface-3) 70%, transparent);
+  border-color: color-mix(in srgb, var(--stage-ghost) 65%, transparent);
   border-style: dashed;
+  box-shadow: none;
   /* Was 0.5, which multiplied with the 0.25 of --dimmed down to an invisible
      0.125 for a ghost that a search misses. Ghosts are now a routine sight on
      the physical canvas, so both the base and the pairing are tuned below. */
@@ -78,7 +119,11 @@
 
 /* Discrepancy: extra model — amber glow (model exists here but not in comparison) */
 .model-node--disc-extra {
-  box-shadow: 0 0 0 2px var(--discrepancy-extra), 0 0 12px 2px rgba(245, 158, 11, 0.35);
+  border-color: var(--discrepancy-extra);
+  box-shadow:
+    0 0 0 1px var(--discrepancy-extra),
+    0 0 0 5px color-mix(in srgb, var(--discrepancy-extra) 26%, transparent),
+    var(--glass-shadow-md);
 }
 
 /* Selected — stage-coloured ring + glow (--model-node-ring, above). Applies
@@ -86,13 +131,19 @@
    draws the same ring. */
 .model-node--selected,
 .react-flow__node.selected .model-node {
-  box-shadow: 0 0 0 2px var(--model-node-ring), 0 0 10px 1px var(--model-node-ring-glow);
+  box-shadow:
+    0 0 0 1.5px var(--model-node-ring),
+    0 0 0 4px color-mix(in srgb, var(--model-node-ring-glow) 55%, transparent),
+    var(--glass-shadow-lg);
 }
 
 /* Discrepancy-extra takes visual priority over selected so the amber glow wins. */
 .model-node--disc-extra.model-node--selected,
 .react-flow__node.selected .model-node--disc-extra {
-  box-shadow: 0 0 0 2px var(--discrepancy-extra), 0 0 12px 2px rgba(245, 158, 11, 0.35);
+  box-shadow:
+    0 0 0 2px var(--discrepancy-extra),
+    0 0 0 6px color-mix(in srgb, var(--discrepancy-extra) 30%, transparent),
+    var(--glass-shadow-md);
 }
 
 /* Search dimming (F402) — applied when node doesn't match search query */
@@ -118,72 +169,83 @@
 .model-node__header {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 10px;
-  background: var(--panel-bg);
-  border-bottom: 1px solid var(--panel-border);
-  font-weight: 600;
+  gap: var(--space-3);
+  min-height: 30px;
+  padding: 5px var(--space-5);
+  background: linear-gradient(
+    180deg,
+    var(--model-node-wash) 0%,
+    color-mix(in srgb, var(--model-node-wash) 45%, transparent) 100%
+  );
+  border-bottom: 1px solid var(--glass-divider);
+  font-weight: var(--weight-semibold);
   line-height: 1.3;
+  letter-spacing: var(--tracking-tight);
 }
 
 .model-node__name {
   flex: 1;
   white-space: nowrap;
+  color: var(--text-primary);
 }
 
 /* A table's schema before its name (`sales.` of sales.fct_order), when it is
    not the layer's own name: read as SQL would qualify it, quieter than the name. */
 .model-node__schema {
-  font-weight: 400;
-  color: var(--dim-fg);
+  font-weight: var(--weight-regular);
+  color: var(--text-tertiary);
 }
 
-/* A table whose layer is known: a strip in that layer's colour along the top
-   of the header, so the tables of each layer can be told apart at a glance
-   on a diagram that borrows tables from other layers. */
-.model-node--layered .model-node__header {
-  box-shadow: inset 0 3px 0 var(--model-node-layer-color);
-}
+/* A table whose layer is known says so with its layer badge alone (one
+   layer signal per card: the coloured cap along the header is gone). */
 
 /* The warehouse name after the model name (`as orders`), or the model name
    after an older label — the identity, not the headline. */
 .model-node__model-id {
-  margin-left: 8px;
-  font-family: var(--vscode-editor-font-family, monospace);
-  font-size: 10px;
-  font-weight: 400;
-  color: var(--dim-fg);
+  margin-left: var(--space-3);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-regular);
+  letter-spacing: var(--tracking-normal);
+  color: var(--text-tertiary);
 }
 
+/* The layer badge: a small capsule in the layer's colour
+   (--model-node-badge-color, set inline from the layer config), neutral
+   when the layer has none. */
 .model-node__badge {
   flex-shrink: 0;
-  padding: 1px 5px;
-  border-radius: 3px;
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.5px;
-  background: var(--button-bg);
-  color: var(--button-fg);
+  padding: 1px 6px;
+  border: 1px solid color-mix(in srgb, var(--model-node-badge-color, var(--editor-fg)) 30%, transparent);
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--model-node-badge-color, var(--editor-fg)) 14%, transparent);
+  color: color-mix(in srgb, var(--model-node-badge-color, var(--text-secondary)) 82%, var(--text-primary));
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-caps);
+  line-height: 1.3;
 }
 
 /* Where the physical shape came from. Neutral by default: the source is
-   information, not a warning. Deliberately built from theme tokens rather than
-   following the hardcoded literals further down this file. */
+   information, not a warning. */
 .model-node__source {
   flex-shrink: 0;
-  padding: 1px 5px;
-  border-radius: 3px;
+  padding: 1px 6px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-pill);
+  background: var(--control-fill);
+  color: var(--text-secondary);
   font-size: 9px;
-  font-weight: 700;
-  letter-spacing: 0.3px;
-  background: var(--dim-fg);
-  color: var(--editor-bg);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-caps);
+  line-height: 1.3;
 }
 
 /* The one distinction worth a colour: these types were read back from the
    warehouse, not declared by hand. */
 .model-node__source--catalog {
-  background: var(--ok-bg);
+  border-color: color-mix(in srgb, var(--ok-fg) 40%, transparent);
+  background: var(--glass-tint-ok);
   color: var(--ok-fg);
 }
 
@@ -191,33 +253,35 @@
   flex-shrink: 0;
   display: inline-flex;
   align-items: center;
-  gap: 2px;
-  padding: 1px 5px;
-  border-radius: 3px;
-  font-size: 10px;
-  font-weight: 700;
-  background: rgba(204, 167, 0, 0.2);
-  color: var(--vscode-editorWarning-foreground, #cca700);
+  gap: var(--space-1);
+  padding: 1px 6px;
+  border: 1px solid var(--glass-tint-warning-edge);
+  border-radius: var(--radius-pill);
+  background: var(--glass-tint-warning);
+  color: var(--warning-fg);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-semibold);
 }
 
 .model-node__rationale-badge {
   flex-shrink: 0;
-  padding: 1px 5px;
-  border-radius: 3px;
+  padding: 1px 6px;
+  border: 1px solid color-mix(in srgb, var(--ai-fg) 40%, transparent);
+  border-radius: var(--radius-pill);
+  background: var(--glass-tint-ai);
+  color: var(--ai-fg);
   font-size: 9px;
-  font-weight: 700;
-  letter-spacing: 0.3px;
-  background: rgba(139, 92, 246, 0.2);
-  color: #8b5cf6;
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-caps);
 }
 
 .model-node__role-badge {
   flex-shrink: 0;
-  padding: 1px 5px;
-  border-radius: 3px;
+  padding: 1px 6px;
+  border-radius: var(--radius-pill);
   font-size: 9px;
-  font-weight: 700;
-  letter-spacing: 0.3px;
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-caps);
 }
 
 
@@ -226,20 +290,21 @@
    ----------------------------------------------------------------------- */
 
 .model-node__grain {
-  padding: 1px 10px 4px;
-  font-size: 10px;
-  font-weight: 400;
+  padding: 1px var(--space-5) 4px;
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-regular);
   line-height: 1.3;
-  color: var(--editor-fg);
-  opacity: 0.6;
+  color: var(--text-tertiary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  border-bottom: 1px solid var(--panel-border);
+  background: color-mix(in srgb, var(--model-node-wash) 45%, transparent);
+  border-bottom: 1px solid var(--glass-divider);
 }
 
 /* -----------------------------------------------------------------------
    Columns
+   Inset rows with rounded hover, in the iOS list manner. Each row is 25px.
    ----------------------------------------------------------------------- */
 
 .model-node__columns {
@@ -250,16 +315,25 @@
   position: relative;
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 3px 10px;
+  gap: var(--space-3);
+  min-height: 25px;
+  margin: 0 var(--space-2);
+  padding: 0 var(--space-4);
+  border-radius: var(--radius-sm);
   line-height: 1.4;
   cursor: grab;
   user-select: none;
-  transition: box-shadow 0.15s ease, filter 0.15s ease;
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    box-shadow var(--duration-fast) var(--ease-standard),
+    filter var(--duration-fast) var(--ease-standard);
 }
 
 .model-node__column:hover {
-  background: var(--selection-bg);
+  background: var(--model-node-row-hover);
+  /* High contrast has no fills: the hover shows as a border there. */
+  outline: 1px solid var(--control-border-hover);
+  outline-offset: -1px;
 }
 
 /* Long-press feedback — pulsing glow during 200ms delay */
@@ -270,12 +344,14 @@
 
 @keyframes column-press-pulse {
   0%, 100% {
-    box-shadow: inset 0 0 0 2px var(--focus-border);
-    filter: brightness(1.15);
+    box-shadow: inset 0 0 0 1.5px var(--focus-border);
+    filter: brightness(1.1);
   }
   50% {
-    box-shadow: inset 0 0 0 2px var(--focus-border), 0 0 8px 2px var(--focus-border);
-    filter: brightness(1.25);
+    box-shadow:
+      inset 0 0 0 1.5px var(--focus-border),
+      0 0 10px 1px color-mix(in srgb, var(--focus-border) 45%, transparent);
+    filter: brightness(1.2);
   }
 }
 
@@ -283,68 +359,76 @@
 .model-node__column--dragging {
   cursor: grabbing;
   opacity: 0.6;
-  box-shadow: inset 0 0 0 2px var(--focus-border);
+  box-shadow: inset 0 0 0 1.5px var(--focus-border);
 }
 
 /* Drop target — column under cursor during cross-model drag */
 .model-node__column--drop-target {
-  background: rgba(0, 127, 212, 0.18) !important;
-  box-shadow: inset 0 0 0 2px var(--focus-border), 0 0 10px 2px rgba(0, 127, 212, 0.35);
-  filter: brightness(1.2);
+  background: color-mix(in srgb, var(--focus-border) 20%, transparent) !important;
+  box-shadow:
+    inset 0 0 0 1.5px var(--focus-border),
+    0 0 12px 1px color-mix(in srgb, var(--focus-border) 40%, transparent);
+  filter: brightness(1.15);
   cursor: crosshair;
-  transition: box-shadow 0.1s ease, background 0.1s ease;
+  transition:
+    box-shadow var(--duration-instant) var(--ease-standard),
+    background-color var(--duration-instant) var(--ease-standard);
 }
 
 /* Relationship highlight — column involved in a selected FK edge */
 .model-node__column--relationship-highlight {
-  background: var(--selection-bg) !important;
-  box-shadow: inset 0 0 0 1.5px var(--focus-border), 0 0 6px 1px rgba(0, 127, 212, 0.25);
-  filter: brightness(1.15);
-  transition: box-shadow 0.15s ease, background 0.15s ease, filter 0.15s ease;
+  background: color-mix(in srgb, var(--focus-border) 16%, transparent) !important;
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--focus-border) 70%, transparent),
+    0 0 8px 0 color-mix(in srgb, var(--focus-border) 24%, transparent);
+  filter: brightness(1.08);
 }
 
-/* Column discrepancy: extra — amber left highlight */
+/* Column discrepancy: extra — amber edge on the left */
 .model-node__column--disc-extra {
-  background: rgba(245, 158, 11, 0.1);
-  border-left: 2px solid var(--discrepancy-extra);
+  background: color-mix(in srgb, var(--discrepancy-extra) 11%, transparent);
+  box-shadow: inset 2px 0 0 var(--discrepancy-extra);
 }
 
-/* Column discrepancy: type mismatch — red left highlight */
+/* Column discrepancy: type mismatch — red edge on the left */
 .model-node__column--disc-mismatch {
-  background: rgba(239, 68, 68, 0.08);
-  border-left: 2px solid var(--discrepancy-mismatch);
+  background: color-mix(in srgb, var(--discrepancy-mismatch) 9%, transparent);
+  box-shadow: inset 2px 0 0 var(--discrepancy-mismatch);
 }
 
 /* Column discrepancy: missing — ghost row */
 .model-node__column--disc-missing {
-  opacity: 0.45;
+  opacity: 0.55;
   cursor: default;
   font-style: italic;
 }
 
 .model-node__column--disc-missing .model-node__col-name {
   text-decoration: line-through;
+  text-decoration-color: color-mix(in srgb, var(--stage-ghost) 70%, transparent);
   color: var(--stage-ghost);
 }
 
 /* Column discrepancy badge (inline small label) */
 .model-node__col-disc-badge {
   flex-shrink: 0;
-  padding: 0 4px;
-  border-radius: 3px;
+  padding: 0 5px;
+  border-radius: var(--radius-pill);
   font-size: 9px;
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
+  font-style: normal;
+  line-height: 14px;
   text-transform: uppercase;
-  letter-spacing: 0.3px;
+  letter-spacing: var(--tracking-caps);
 }
 
 .model-node__col-disc-badge--extra {
-  background: rgba(245, 158, 11, 0.2);
+  background: color-mix(in srgb, var(--discrepancy-extra) 18%, transparent);
   color: var(--discrepancy-extra);
 }
 
 .model-node__col-disc-badge--missing {
-  background: rgba(156, 163, 175, 0.2);
+  background: var(--glass-tint-ghost);
   color: var(--stage-ghost);
 }
 
@@ -353,7 +437,8 @@
   display: flex;
   flex-direction: column;
   gap: 1px;
-  font-size: 10px;
+  padding: 2px 0;
+  font-size: var(--text-2xs);
   line-height: 1.3;
 }
 
@@ -365,8 +450,9 @@
 }
 
 .model-node__col-type-stage {
+  font-family: var(--font-ui);
   font-size: 9px;
-  opacity: 0.7;
+  opacity: 0.75;
   text-transform: capitalize;
 }
 
@@ -374,27 +460,26 @@
 .model-node__separator {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 4px 10px;
-  margin: 2px 0;
-  border-top: 1px dashed var(--warning-fg);
-  border-bottom: 1px dashed var(--warning-fg);
-  background: rgba(204, 167, 0, 0.08);
+  gap: var(--space-4);
+  margin: 3px var(--space-2);
+  padding: 3px var(--space-4);
+  border: 1px dashed var(--glass-tint-warning-edge);
+  border-radius: var(--radius-sm);
+  background: var(--glass-tint-warning);
 }
 
 .model-node__separator-label {
   font-size: 9px;
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   text-transform: uppercase;
-  letter-spacing: 0.5px;
+  letter-spacing: var(--tracking-caps);
   color: var(--warning-fg);
 }
 
 /* Discrepancy separator variant — uses ghost colours */
 .model-node__separator--disc {
-  border-top: 1px dashed var(--stage-ghost);
-  border-bottom: 1px dashed var(--stage-ghost);
-  background: rgba(156, 163, 175, 0.06);
+  border-color: color-mix(in srgb, var(--stage-ghost) 45%, transparent);
+  background: var(--glass-tint-ghost);
 }
 
 .model-node__separator-label--missing {
@@ -405,51 +490,67 @@
 .model-node__separator--subtle {
   height: 1px;
   padding: 0;
-  margin: 2px 0;
-  border-top: 1px solid var(--panel-border);
-  border-bottom: none;
-  background: transparent;
-  opacity: 0.6;
+  margin: 2px var(--space-5);
+  border: 0;
+  border-radius: 0;
+  background: var(--glass-divider);
 }
 
 .model-node__col-indicators {
   display: flex;
-  gap: 2px;
+  align-items: center;
+  gap: 3px;
   flex-shrink: 0;
 }
 
-/* Key badges now use shared KeyBadge component */
+/* Key badges use the shared KeyBadge component (common/KeyBadge.css). */
 
 .model-node__col-name {
   flex: 1;
   white-space: nowrap;
+  color: var(--text-primary);
+  font-weight: var(--weight-regular);
+}
+
+/* A key column's name reads one step firmer than the rest. */
+.model-node__column:has(.key-badge--pk) .model-node__col-name {
+  font-weight: var(--weight-medium);
 }
 
 .model-node__col-name--editable:hover,
 .model-node__col-type--editable:hover {
   text-decoration: underline dotted;
+  text-decoration-color: var(--text-tertiary);
+  text-underline-offset: 3px;
   cursor: text;
 }
 
+/* The type: monospace, in a quieter tier, keeping a hint of its type colour
+   (--model-node-type-color, set inline from lib/dataTypeColors). Mixing with
+   the secondary text tier also keeps it readable on light themes. */
 .model-node__col-type {
   flex-shrink: 0;
-  color: var(--vscode-descriptionForeground, #888);
-  font-size: 11px;
-  font-family: var(--vscode-editor-font-family, monospace);
+  margin-left: var(--space-2);
+  color: color-mix(in srgb, var(--model-node-type-color, var(--text-secondary)) 16%, var(--text-secondary));
+  font-size: var(--text-xs);
+  font-family: var(--font-mono);
+  letter-spacing: var(--tracking-normal);
 }
 
 /* Inline edit input on graph node */
 .model-node__col-edit-input {
   min-width: 0;
-  background: var(--vscode-input-background, #3c3c3c);
-  color: var(--vscode-input-foreground, #ccc);
-  border: 1px solid var(--vscode-focusBorder, #007fd4);
-  border-radius: 3px;
-  font-size: 12px;
+  height: 19px;
+  padding: 0 5px;
+  border: 1px solid var(--glass-input-border-focus);
+  border-radius: var(--radius-xs);
+  background: var(--glass-input-bg);
+  color: var(--input-fg);
+  box-shadow: var(--focus-halo);
+  font-size: var(--text-sm);
   font-family: inherit;
-  padding: 1px 4px;
-  outline: none;
   line-height: 1.3;
+  outline: none;
 }
 
 .model-node__col-edit-input--name {
@@ -459,26 +560,27 @@
 .model-node__col-edit-input--type {
   flex: 0 0 auto;
   width: 80px;
-  font-size: 11px;
-  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: var(--text-xs);
+  font-family: var(--font-mono);
 }
 
 /* Reorder drag handle — visible when node is selected */
 .model-node__col-reorder-handle {
   flex-shrink: 0;
   cursor: grab;
-  color: var(--vscode-descriptionForeground, #888);
-  opacity: 0.3;
-  font-size: 10px;
+  color: var(--text-tertiary);
+  opacity: 0.45;
+  font-size: var(--text-2xs);
   user-select: none;
   line-height: 1;
-  transition: opacity 0.1s ease;
+  transition: opacity var(--duration-fast) var(--ease-standard);
   padding: 4px 6px;
   margin: -4px -2px -4px -6px;
 }
 
 .model-node__col-reorder-handle:hover {
-  opacity: 0.85;
+  opacity: 1;
+  color: var(--text-secondary);
 }
 
 .model-node__col-reorder-handle:active {
@@ -491,22 +593,25 @@
   opacity: 0.35;
 }
 
-/* Drop indicator — blue top border shows where the row will land */
+/* Drop indicator — an accent rule above the row shows where it will land */
 .model-node__column--reorder-target {
-  box-shadow: 0 -2px 0 0 var(--vscode-focusBorder, #007fd4);
+  box-shadow: 0 -2px 0 0 var(--focus-border);
 }
 
 .model-node__col-edit-error {
   position: absolute;
-  bottom: -16px;
-  left: 10px;
-  font-size: 10px;
-  color: var(--vscode-errorForeground, #f48771);
+  bottom: -17px;
+  left: var(--space-4);
+  z-index: var(--z-chrome-raised);
+  padding: 0 6px;
+  border: 1px solid var(--glass-tint-error-edge);
+  border-radius: var(--radius-xs);
+  background: var(--glass-surface-solid);
+  box-shadow: var(--glass-shadow-sm);
+  color: var(--error-fg);
+  font-size: var(--text-2xs);
+  line-height: 15px;
   white-space: nowrap;
-  z-index: 10;
-  background: var(--vscode-editor-background, #1e1e1e);
-  padding: 0 4px;
-  border-radius: 2px;
 }
 
 /* Inline column delete button — fades in on row hover, single-click delete (undo via Cmd+Z). */
@@ -518,23 +623,37 @@
   width: 16px;
   height: 16px;
   padding: 0;
-  border: none;
-  border-radius: 3px;
-  background: rgba(239, 68, 68, 0.1);
-  color: #ef4444;
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+  background: var(--glass-tint-error);
+  color: var(--error-fg);
   font-size: 13px;
   line-height: 1;
   cursor: pointer;
   opacity: 0;
-  transition: opacity 0.1s ease, background 0.1s ease;
+  transition:
+    opacity var(--duration-fast) var(--ease-standard),
+    background-color var(--duration-fast) var(--ease-standard),
+    transform var(--duration-instant) var(--ease-standard);
 }
 
-.model-node__column:hover .model-node__col-delete {
+.model-node__column:hover .model-node__col-delete,
+.model-node__col-delete:focus-visible {
   opacity: 1;
 }
 
 .model-node__col-delete:hover {
-  background: rgba(239, 68, 68, 0.25);
+  border-color: var(--glass-tint-error-edge);
+  background: color-mix(in srgb, var(--error-fg) 24%, transparent);
+}
+
+.model-node__col-delete:active {
+  transform: scale(0.9);
+}
+
+.model-node__col-delete:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: 1px;
 }
 
 /* SCD type and additive type column badges (F502) */
@@ -542,20 +661,22 @@
   flex-shrink: 0;
   font-size: 9px;
   line-height: 1;
-  opacity: 0.7;
+  opacity: 0.85;
 }
 
+/* SCD: the purple of dimensions. */
 .model-node__col-badge--scd {
-  color: #6366f1; /* indigo — matches dimension badge colour */
+  color: var(--ai-fg);
 }
 
+/* Additive: the rose of facts. */
 .model-node__col-badge--additive {
-  color: #e11d48; /* rose — matches fact badge colour */
+  color: color-mix(in srgb, var(--discrepancy-mismatch) 70%, var(--ai-fg));
 }
 
 .model-node__empty {
-  padding: 8px 10px;
-  color: var(--vscode-descriptionForeground, #888);
+  padding: var(--space-4) var(--space-5);
+  color: var(--text-tertiary);
   font-style: italic;
   text-align: center;
 }
@@ -565,10 +686,13 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 6px;
-  padding: 8px 10px;
-  background: var(--warning-bg);
-  color: var(--warning-fg);
+  gap: var(--space-3);
+  margin: 2px var(--space-2);
+  padding: var(--space-4) var(--space-5);
+  border: 1px solid var(--glass-tint-warning-edge);
+  border-radius: var(--radius-md);
+  background: var(--glass-tint-warning);
+  color: var(--text-primary);
   text-align: center;
 }
 
@@ -576,41 +700,51 @@
 .model-node__load-warning {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 4px 10px;
-  background: var(--warning-bg);
-  color: var(--warning-fg);
-  border-bottom: 1px solid var(--warning-fg);
+  gap: var(--space-4);
+  padding: var(--space-2) var(--space-5);
+  background: var(--glass-tint-warning);
+  color: var(--text-primary);
+  border-bottom: 1px solid var(--glass-tint-warning-edge);
 }
 
 .model-node__load-warning-text {
   flex: 1;
-  font-size: 11px;
+  font-size: var(--text-xs);
   line-height: 1.4;
 }
 
 .model-node__load-error-text {
-  font-size: 11px;
+  font-size: var(--text-xs);
   line-height: 1.4;
 }
 
 .model-node__load-error-open {
+  flex-shrink: 0;
   padding: 2px 10px;
-  border: none;
-  border-radius: 3px;
-  background: var(--button-bg);
-  color: var(--button-fg);
-  font-size: 11px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+  color: var(--text-on-accent);
+  font-family: inherit;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
   cursor: pointer;
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    transform var(--duration-instant) var(--ease-standard);
 }
 
 .model-node__load-error-open:hover {
-  background: var(--button-hover-bg);
+  background: var(--accent-hover);
+}
+
+.model-node__load-error-open:active {
+  transform: scale(0.97);
 }
 
 .model-node__load-error-open:focus-visible {
-  outline: 1px solid var(--focus-border);
-  outline-offset: 1px;
+  outline: var(--focus-outline);
+  outline-offset: var(--focus-offset);
 }
 
 /* -----------------------------------------------------------------------
@@ -620,17 +754,21 @@
 .model-node__expand-button {
   display: block;
   width: 100%;
-  padding: 6px 10px;
+  min-height: 25px;
+  padding: 0 var(--space-5);
   margin: 0;
-  background: var(--panel-bg);
+  background: transparent;
   border: none;
-  border-top: 1px solid var(--panel-border);
-  color: var(--vscode-textLink-foreground, #3b82f6);
-  font-size: 11px;
-  font-weight: 500;
+  border-top: 1px solid var(--glass-divider);
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
   cursor: pointer;
   text-align: center;
-  transition: background 0.15s ease, color 0.15s ease;
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard);
 }
 
 /* A table with only the button in its body (no rows drawn): the button
@@ -644,13 +782,18 @@
 }
 
 .model-node__expand-button:hover {
-  background: var(--selection-bg);
-  color: var(--vscode-textLink-activeForeground, #2563eb);
+  background: var(--control-fill-hover);
+  color: var(--text-primary);
 }
 
 .model-node__expand-button:active {
-  background: var(--button-bg);
-  color: var(--button-fg);
+  background: var(--control-fill-active);
+  color: var(--text-primary);
+}
+
+.model-node__expand-button:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: -2px;
 }
 
 /* -----------------------------------------------------------------------
@@ -658,12 +801,15 @@
    ----------------------------------------------------------------------- */
 
 .model-node__footer {
-  padding: 4px 10px;
-  border-top: 1px solid var(--panel-border);
-  background: var(--panel-bg);
+  min-height: 26px;
+  padding: 6px var(--space-5);
+  border-top: 1px solid var(--glass-divider);
+  background: transparent;
   text-align: center;
-  font-size: 11px;
-  color: var(--vscode-descriptionForeground, #888);
+  font-size: var(--text-xs);
+  line-height: 13px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-tertiary);
 }
 
 /* The footer as a button: a closed table at the name level, which it opens. */
@@ -676,27 +822,33 @@
   border-left: none;
   font-family: inherit;
   cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease;
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard);
 }
 
 .model-node__footer--toggle:hover {
-  background: var(--selection-bg);
-  color: var(--editor-fg);
+  background: var(--control-fill-hover);
+  color: var(--text-primary);
+}
+
+.model-node__footer--toggle:active {
+  background: var(--control-fill-active);
 }
 
 .model-node__footer--toggle:focus-visible {
-  outline: 1px solid var(--focus-border);
-  outline-offset: -1px;
+  outline: var(--focus-outline);
+  outline-offset: -2px;
 }
 
 .model-node__footer-chevron {
-  margin-left: 6px;
-  color: var(--vscode-textLink-foreground, #3b82f6);
+  margin-left: var(--space-3);
+  color: var(--text-secondary);
 }
 
 .model-node__footer-disc {
   color: var(--discrepancy-extra);
-  font-weight: 500;
+  font-weight: var(--weight-medium);
 }
 
 /* -----------------------------------------------------------------------
@@ -711,14 +863,29 @@
    ----------------------------------------------------------------------- */
 
 /* React Flow wraps nodes in a container with class .react-flow__node.
-   During drag, it adds .dragging to that container. We target the inner
-   .model-node via the parent selector to show a visible outline. */
+   During drag, it adds .dragging to that container: the card lifts, with a
+   deeper shadow and the selection ring. */
 
 .react-flow__node.dragging .model-node {
-  opacity: 0.85;
+  opacity: 0.94;
   box-shadow:
-    0 0 0 2px var(--vscode-focusBorder, #007fd4),
-    0 4px 12px rgba(0, 0, 0, 0.25);
+    0 0 0 2px var(--model-node-ring),
+    var(--glass-shadow-lg);
+}
+
+/* "+3": relationships to tables not on this diagram (editing host only). Muted:
+   it says there is more, it does not ask for anything. */
+.model-node__off-diagram {
+  flex-shrink: 0;
+  padding: 0 6px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-pill);
+  background: var(--control-fill);
+  font-size: 9px;
+  font-weight: var(--weight-semibold);
+  line-height: 14px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-tertiary);
 }
 
 /* -----------------------------------------------------------------------
@@ -753,32 +920,26 @@
   opacity: 0.65;
 }
 
-/* The hovered table's ring. Never over the selection ring, and never over
-   the amber discrepancy-extra glow, which keeps priority as it does over
-   selected: hovering an extra table must not hide why it is amber. */
+/* The hovered table's ring, with the card lifted. Never over the selection
+   ring, and never over the amber discrepancy-extra glow, which keeps
+   priority as it does over selected: hovering an extra table must not hide
+   why it is amber. */
 .model-node--logical.model-node--focus-origin:not(.model-node--selected):not(.model-node--disc-extra) {
-  box-shadow: 0 0 0 3px var(--stage-logical-ring);
+  box-shadow: 0 0 0 3px var(--stage-logical-ring), var(--glass-shadow-md);
 }
 
 .model-node--physical.model-node--focus-origin:not(.model-node--selected):not(.model-node--disc-extra) {
-  box-shadow: 0 0 0 3px var(--stage-physical-ring);
+  box-shadow: 0 0 0 3px var(--stage-physical-ring), var(--glass-shadow-md);
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .model-node {
+  .model-node,
+  .model-node__column {
     transition: none;
   }
-}
 
-/* "+3": relationships to tables not on this diagram (editing host only). Muted:
-   it says there is more, it does not ask for anything. */
-.model-node__off-diagram {
-  flex-shrink: 0;
-  padding: 0 5px;
-  border: 1px solid var(--panel-border);
-  border-radius: 8px;
-  font-size: 9px;
-  font-weight: 600;
-  line-height: 14px;
-  color: var(--dim-fg);
+  .model-node__column--pressing {
+    animation: none;
+    box-shadow: inset 0 0 0 1.5px var(--focus-border);
+  }
 }

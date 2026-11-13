@@ -43,7 +43,6 @@ import {
   PARSE_OK_ON_PHYSICAL_MESSAGE,
   PARSE_REFRESH_MESSAGE,
   PROFILE_DOCS_ACTION,
-  PROFILE_WRITE_FAILED_MESSAGE,
   REPLACE_MANIFEST_ACTION,
   RUN_DBT_DEPS_ACTION,
   runDbtParse,
@@ -490,12 +489,16 @@ describe('runDbtParse: the run and its success', () => {
     expect(feature).toHaveBeenCalledWith('dbtParseStopped');
 
     _resetDbtFlowsForTests();
-    const d2 = deps();
+    // dbt's file is gone (not a broken venv, whose file is still there).
+    const d2 = deps({ fs: recordingFs({ isFile: (p) => p !== onPath.executable && fs.existsSync(p) }) });
     const s2 = await runDbtParse(root, {}, d2);
     d2.calls[0].finish({ outcome: 'notStarted', exitCode: null, startError: 'ENOENT' });
     await s2.settled;
     expect(feature).toHaveBeenCalledWith('dbtParseNoStart');
-    expect(shown.at(-1)).toMatchObject({ kind: 'error', message: 'ERD Studio couldn\'t start /usr/local/bin/dbt (ENOENT).' });
+    expect(shown.at(-1)).toMatchObject({
+      kind: 'error',
+      message: 'ERD Studio couldn\'t start /usr/local/bin/dbt: the file is no longer there. If you moved or rebuilt dbt\'s virtual environment, try again: ERD Studio looks for dbt again each time.',
+    });
   });
 
   it('a signal (no exit code) is a failure', async () => {
@@ -796,7 +799,8 @@ describe('runDbtParse: failures and Parse without your credentials', () => {
     d.calls[0].finish({ exitCode: 2, tail: OUT.B_profilename });
     await s.settled;
     expect(error).toHaveBeenCalledWith('dbtProfileWriteFailed');
-    expect(shown.at(-1)).toMatchObject({ kind: 'error', message: PROFILE_WRITE_FAILED_MESSAGE });
+    expect(shown.at(-1)).toMatchObject({ kind: 'error', message: expect.stringContaining('ERD Studio isn\'t allowed to write to') });
+    expect(shown.at(-1)!.message).not.toContain('EACCES');
     for (const call of warn.mock.calls) expect(JSON.stringify(call)).not.toContain(storage);
     expect(d.calls).toHaveLength(1);
   });

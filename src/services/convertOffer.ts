@@ -14,7 +14,20 @@
  * - **the Diagrams view** shows a **Convert to DBML…** row above the layers
  *   ({@link convertRowShows}) until the project is DBML, the offer was turned
  *   down for good in this workspace (Don't Ask Again) or everywhere
- *   (`erdStudio.dbml.offerConvert`).
+ *   (`erdStudio.dbml.offerConvert`);
+ * - **the canvas** keeps an information button ("i", at the end of the
+ *   toolbar's identity island; #305) with a card and **Convert to DBML…**,
+ *   on the logical stage, for as long as {@link convertOfferApplies} holds
+ *   (`SemanticEditorProvider.convertInfoShows`, the `convertOffer` message):
+ *   the canvas offer's checks without its once-a-session flag, the window's
+ *   one prompt or the start suggestion's cap, since it is not a prompt. A run
+ *   that was refused or left only files to fix with nothing changed since
+ *   (`goesNowhere`) hides it, as its button would lead to the same refusal;
+ *   the Diagrams view's row stays, and the button returns once a file changes.
+ *
+ * Besides these, the canvas's once-a-session modal
+ * (`SemanticEditorProvider.maybeOfferDbmlConversion`) and the palette command
+ * `erdStudio.convertProjectToDbml`.
  */
 
 import type { DbmlConversionCandidates } from './dbmlConversionFiles';

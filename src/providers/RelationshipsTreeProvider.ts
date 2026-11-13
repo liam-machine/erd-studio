@@ -10,8 +10,12 @@
  * lists its tables without the layer level, as before. Relationships that
  * name a table or column the library does not have are gathered first under
  * "Needs attention".
- * Clicking a relationship opens where it is written: the Ref's line in a DBML
- * relationships file, the FK table's YAML file, or the diagram that holds it.
+ * Clicking a relationship (grouped by table) shows its line on a diagram
+ * (`sidebarRowClick.ts`'s rule: the diagram in front of the user, else the
+ * only one, else a pick, else where it is written); a double-click opens
+ * where it is written: the Ref's line in a DBML relationships file, the FK
+ * table's YAML file, or the diagram that holds it. Grouped by file, and for
+ * a relationship with a problem, the click opens where it is written.
  *
  * **Group by Relationships File** (a view-title toggle, remembered per
  * workspace) lists them as they are stored instead: each layer's
@@ -776,17 +780,35 @@ export class RelationshipsTreeProvider implements vscode.TreeDataProvider<Relati
     item.iconPath = problem
       ? new vscode.ThemeIcon('warning', new vscode.ThemeColor('list.warningForeground'))
       : new vscode.ThemeIcon(side === 'to' ? 'arrow-left' : side === 'stored' ? 'arrow-both' : 'arrow-right');
-    item.tooltip = this.relationshipTooltip(entry);
+    item.tooltip = this.relationshipTooltip(entry, this.clickOpensFile(element));
     item.accessibilityInformation = {
       label: `${entry.fromModel} ${columnList(entry.fromColumns)} to ${entry.toModel} ${columnList(entry.toColumns)}, ${entry.cardinality.replace(/-/g, ' ')}${problem ? `, ${describeProblem(problem)}` : ''}`,
     };
-    item.contextValue = 'relationship';
     // A click follows the grouping: grouped by file, it opens the file at the Ref's line;
-    // grouped by table, the line on a diagram. A problem is fixed in the file either way.
-    item.command = side === 'problem' || this.grouping === 'file'
+    // grouped by table, the line on a diagram (and a double-click the file). A problem is
+    // fixed in the file either way. The row's value says which, so its hover button and
+    // menu offer the other way (`relationshipInFile`: the click opens the file).
+    const opensFile = this.clickOpensFile(element);
+    item.contextValue = opensFile ? 'relationshipInFile' : 'relationship';
+    item.command = opensFile
       ? { command: 'erdStudio.openRelationshipSource', title: 'Open in File', arguments: [element] }
-      : { command: 'erdStudio.openInDiagram', title: 'Open in Diagram', arguments: [element, { fallBackToFile: true }] };
+      : { command: 'erdStudio.openInDiagram', title: 'Show on Diagram', arguments: [element, { fallBackToFile: true, rowClick: true }] };
     return item;
+  }
+
+  /** Whether a relationship row's click opens its file (grouped by file, or a problem) rather than a diagram. */
+  private clickOpensFile(element: RelationshipNode): boolean {
+    return element.side === 'problem' || this.grouping === 'file';
+  }
+
+  /**
+   * A row's double-click, for a view that has one (the glass sidebar): a
+   * relationship whose click goes to a diagram opens where it is written.
+   * One whose click already opens the file has none.
+   */
+  secondaryCommand(element: RelationshipsNode): vscode.Command | undefined {
+    if (element.type !== 'relationship' || this.clickOpensFile(element)) return undefined;
+    return { command: 'erdStudio.openRelationshipSource', title: 'Open in File', arguments: [element, { doubleClick: true }] };
   }
 
   /**
@@ -811,7 +833,7 @@ export class RelationshipsTreeProvider implements vscode.TreeDataProvider<Relati
     return others.length > 0 ? `in ${others.map((l) => this.layerLabel(l)).join(', ')} · ` : '';
   }
 
-  private relationshipTooltip(entry: RelationshipEntry): vscode.MarkdownString {
+  private relationshipTooltip(entry: RelationshipEntry, clickOpensFile: boolean): vscode.MarkdownString {
     const from = `${entry.fromModel}.${columnList(entry.fromColumns)}`;
     const to = `${entry.toModel}.${columnList(entry.toColumns)}`;
     const lines = [`**${from} → ${to}**`, '', `${cardinalityWords(entry.cardinality)} (${SHORT_CARDINALITY[entry.cardinality]})`];
@@ -828,9 +850,9 @@ export class RelationshipsTreeProvider implements vscode.TreeDataProvider<Relati
         ? `Stored in \`${this.shownPath(at.filePath)}\` (line ${at.line}), with its foreign-key table ${entry.source.table}`
         : `Kept with the table ${entry.source.table}`);
     for (const problem of entry.problems) lines.push('', `$(warning) ${describeProblem(problem)}`);
-    lines.push('', this.grouping === 'file' || entry.problems.length > 0
+    lines.push('', clickOpensFile
       ? 'Click to open it in its file; **Open in Diagram** is on the row and its right-click menu.'
-      : 'Click to show it on a diagram; **Open in File** is on the row and its right-click menu.');
+      : 'Click to show it on a diagram; double-click to open it in its file (**Open in File** is also on the row and its right-click menu).');
     const md = new vscode.MarkdownString(lines.join('\n'));
     md.supportThemeIcons = true;
     return md;

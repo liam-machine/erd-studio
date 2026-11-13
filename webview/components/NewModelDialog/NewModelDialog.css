@@ -1,21 +1,61 @@
 /**
  * NewModelDialog styles.
  *
- * Centered dialog for creating new models with built-in templates.
- * BEM naming, VS Code theme tokens from webview/styles/theme.css.
+ * An in-canvas glass sheet (a React Flow <Panel>, top-center) for creating a
+ * table from a starter template. One sheet language is shared by every
+ * dialog: frosted surface-3 material, an 18px radius, the deep elevation-3
+ * shadow, a title row, refined inputs, a well for grouped content and a
+ * footer with a quiet secondary and a filled primary button.
+ *
+ * Colours come only from the tokens in packages/renderer/src/styles/theme.css
+ * (the glass layer), so dark, light, high contrast and reduced transparency
+ * are handled there. BEM naming; every class the TSX and tests use is kept.
+ *
+ * The Panel root keeps React Flow's own `transform` (it centres itself); the
+ * entrance animates the independent `translate` / `scale` properties, which
+ * compose with it rather than replace it.
  */
 
 .new-model-dialog {
-  width: 480px;
-  max-height: calc(100vh - 100px);
-  margin-top: 80px;
-  background: var(--panel-bg);
-  border: 1px solid var(--panel-border);
-  border-radius: 6px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+  /* The select's chevron, drawn with two gradients (no images: webview CSP). */
+  --new-model-dialog-caret: var(--text-tertiary);
+
+  width: 540px;
+  max-width: calc(100vw - 2 * var(--shell-inset));
+  /* Below the toolbar row and stage tabs (about 80px under the 15px inset),
+     so the two glass layers never overlap; runs to 15px above the bottom. */
+  margin-top: calc(var(--shell-inset) + 80px + var(--shell-gap));
+  max-height: calc(100% - 80px - var(--shell-gap) - 2 * var(--shell-inset));
   display: flex;
   flex-direction: column;
-  z-index: 10; /* Above toolbar and other panels */
+  z-index: var(--z-chrome-raised); /* Above toolbar and other panels */
+
+  background: var(--glass-surface-3);
+  -webkit-backdrop-filter: var(--glass-backdrop);
+  backdrop-filter: var(--glass-backdrop);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--glass-elevation-3);
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+  font-size: var(--text-md);
+  line-height: var(--leading-normal);
+
+  transform-origin: top center;
+  animation: new-model-dialog-in var(--duration-base) var(--ease-spring);
+}
+
+@keyframes new-model-dialog-in {
+  from {
+    opacity: 0;
+    translate: 0 -8px;
+    scale: 0.98;
+  }
+  to {
+    opacity: 1;
+    translate: 0 0;
+    scale: 1;
+  }
 }
 
 /* ---------------------------------------------------------------------------
@@ -26,18 +66,20 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--panel-border);
-  background: var(--panel-bg);
+  gap: var(--space-4);
+  padding: var(--space-6) var(--space-6) var(--space-5) var(--space-7);
+  border-bottom: 1px solid var(--glass-divider);
+  background: transparent;
   flex-shrink: 0;
 }
 
 .new-model-dialog__title {
   margin: 0;
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--editor-fg);
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-tight);
+  line-height: var(--leading-tight);
+  color: var(--text-primary);
 }
 
 .new-model-dialog__close {
@@ -45,21 +87,38 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
-  border: none;
-  border-radius: 4px;
-  background: transparent;
-  color: var(--editor-fg);
-  font-size: 18px;
+  width: var(--control-height);
+  height: var(--control-height);
+  padding: 0;
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-pill);
+  background: var(--control-fill);
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: var(--text-lg);
   line-height: 1;
   cursor: pointer;
-  transition: background 0.1s ease, color 0.1s ease;
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard),
+    transform var(--duration-instant) var(--ease-standard);
 }
 
 .new-model-dialog__close:hover {
-  background: var(--button-bg);
-  color: var(--button-fg);
+  background: var(--control-fill-hover);
+  border-color: var(--control-border-hover);
+  color: var(--text-primary);
+}
+
+.new-model-dialog__close:active {
+  background: var(--control-fill-active);
+  transform: scale(0.94);
+}
+
+.new-model-dialog__close:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: var(--focus-offset);
 }
 
 /* ---------------------------------------------------------------------------
@@ -68,11 +127,20 @@
 
 .new-model-dialog__content {
   flex: 1;
-  padding: 16px;
+  min-height: 0;
+  padding: var(--space-6) var(--space-7) var(--space-7);
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: var(--space-6);
+  scrollbar-width: thin;
+  scrollbar-color: var(--glass-scrollbar) transparent;
+}
+
+/* The "Loading templates..." line. */
+.new-model-dialog__content > p {
+  margin: 0;
+  color: var(--text-secondary);
 }
 
 /* ---------------------------------------------------------------------------
@@ -82,79 +150,132 @@
 .new-model-dialog__field {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--space-3);
+  min-width: 0;
 }
 
 .new-model-dialog__label {
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--editor-fg);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  color: var(--text-secondary);
 }
 
 .new-model-dialog__input,
 .new-model-dialog__select,
 .new-model-dialog__textarea {
-  padding: 6px 8px;
-  border: 1px solid var(--input-border, var(--panel-border));
-  border-radius: 3px;
-  background: var(--input-bg);
-  color: var(--input-fg, var(--editor-fg));
+  width: 100%;
+  min-height: var(--control-height-lg);
+  padding: 0 var(--space-5);
+  border: 1px solid var(--glass-input-border);
+  border-radius: var(--radius-md);
+  background: var(--glass-input-bg);
+  color: var(--input-fg);
   font-family: inherit;
-  font-size: 12px;
+  font-size: var(--text-md);
+  transition:
+    border-color var(--duration-fast) var(--ease-standard),
+    box-shadow var(--duration-fast) var(--ease-standard),
+    background-color var(--duration-fast) var(--ease-standard);
+}
+
+.new-model-dialog__input:hover,
+.new-model-dialog__select:hover,
+.new-model-dialog__textarea:hover {
+  border-color: var(--glass-border-strong);
 }
 
 .new-model-dialog__input:focus,
 .new-model-dialog__select:focus,
 .new-model-dialog__textarea:focus {
-  outline: 1px solid var(--focus-border);
-  outline-offset: -1px;
-  border-color: var(--focus-border);
+  outline: none;
+  border-color: var(--glass-input-border-focus);
+  box-shadow: var(--focus-halo);
 }
 
 .new-model-dialog__input::placeholder,
 .new-model-dialog__textarea::placeholder {
-  color: var(--vscode-descriptionForeground, #888);
-  opacity: 0.7;
+  color: var(--text-quaternary);
+  opacity: 1;
 }
 
-.new-model-dialog__input--error {
-  border-color: var(--error-fg, #f48771);
+.new-model-dialog__input--error,
+.new-model-dialog__input--error:hover {
+  border-color: var(--error-fg);
+}
+
+.new-model-dialog__input--error:focus {
+  border-color: var(--error-fg);
+  box-shadow: 0 0 0 3px var(--glass-tint-error);
 }
 
 .new-model-dialog__textarea {
-  min-height: 50px;
+  min-height: 64px;
+  padding: var(--space-3) var(--space-5);
+  line-height: var(--leading-normal);
   resize: vertical;
 }
 
-.new-model-dialog__select {
+/* A native select with a drawn chevron: the popup stays the platform's. */
+.new-model-dialog__select,
+.new-model-dialog__col-select {
+  -webkit-appearance: none;
+  appearance: none;
   cursor: pointer;
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--new-model-dialog-caret) 50%),
+    linear-gradient(135deg, var(--new-model-dialog-caret) 50%, transparent 50%);
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+}
+
+.new-model-dialog__select {
+  padding-right: var(--space-9);
+  background-position: calc(100% - 17px) 52%, calc(100% - 12px) 52%;
+}
+
+.new-model-dialog__select option,
+.new-model-dialog__col-select option {
+  background-color: var(--input-bg);
+  color: var(--input-fg);
 }
 
 .new-model-dialog__error {
-  font-size: 11px;
-  color: var(--error-fg, #f48771);
+  font-size: var(--text-xs);
+  line-height: var(--leading-tight);
+  color: var(--error-fg);
 }
 
 /* "Add <name> from the Table Library": swaps to Add Existing Table. */
 .new-model-dialog__add-existing {
   align-self: flex-start;
-  padding: 3px 10px;
-  border: none;
-  border-radius: 3px;
-  background: var(--button-bg);
-  color: var(--button-fg);
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--control-height-sm);
+  padding: 0 var(--space-5);
+  border: 1px solid var(--control-border-selected);
+  border-radius: var(--radius-pill);
+  background: var(--glass-tint-accent);
+  color: var(--text-primary);
   font-family: inherit;
-  font-size: 11px;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
   cursor: pointer;
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    transform var(--duration-instant) var(--ease-standard);
 }
 
 .new-model-dialog__add-existing:hover {
-  background: var(--button-hover-bg);
+  background: var(--glass-tint-accent-strong);
+}
+
+.new-model-dialog__add-existing:active {
+  transform: scale(0.97);
 }
 
 .new-model-dialog__add-existing:focus-visible {
-  outline: 1px solid var(--focus-border);
-  outline-offset: 1px;
+  outline: var(--focus-outline);
+  outline-offset: var(--focus-offset);
 }
 
 /* ---------------------------------------------------------------------------
@@ -163,7 +284,7 @@
 
 .new-model-dialog__bridge-fields {
   display: flex;
-  gap: 12px;
+  gap: var(--space-5);
 }
 
 .new-model-dialog__bridge-fields .new-model-dialog__field {
@@ -171,163 +292,236 @@
 }
 
 /* ---------------------------------------------------------------------------
-   Column Editor
+   Column Editor — an inset well grouping the table's columns
    --------------------------------------------------------------------------- */
 
 .new-model-dialog__column-editor {
-  margin-top: 4px;
-  padding-top: 12px;
-  border-top: 1px solid var(--panel-border);
+  padding: var(--space-5);
+  border: 1px solid var(--glass-divider);
+  border-radius: var(--radius-lg);
+  background: var(--glass-well);
 }
 
 .new-model-dialog__column-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 8px;
+  gap: var(--space-4);
+  margin-bottom: var(--space-4);
 }
 
 .new-model-dialog__preview-title {
   margin: 0;
-  font-size: 11px;
-  font-weight: 600;
+  color: var(--text-tertiary);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-caps);
   text-transform: uppercase;
-  letter-spacing: 0.5px;
-  color: var(--vscode-descriptionForeground, #888);
 }
 
 .new-model-dialog__add-column-btn {
-  padding: 3px 8px;
-  border: 1px solid var(--panel-border);
-  border-radius: 3px;
-  background: transparent;
-  color: var(--editor-fg);
-  font-size: 11px;
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--control-height-sm);
+  padding: 0 var(--space-4);
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-sm);
+  background: var(--control-fill);
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
   cursor: pointer;
-  transition: background 0.1s ease;
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard),
+    transform var(--duration-instant) var(--ease-standard);
 }
 
 .new-model-dialog__add-column-btn:hover {
-  background: rgba(128, 128, 128, 0.15);
+  background: var(--control-fill-hover);
+  border-color: var(--control-border-hover);
+  color: var(--text-primary);
+}
+
+.new-model-dialog__add-column-btn:active {
+  background: var(--control-fill-active);
+  transform: scale(0.97);
+}
+
+.new-model-dialog__add-column-btn:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: var(--focus-offset);
 }
 
 .new-model-dialog__section-label {
   display: block;
-  margin-bottom: 4px;
-  font-size: 10px;
-  font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.3px;
-  color: var(--vscode-descriptionForeground, #888);
-  opacity: 0.8;
+  margin: 0 0 var(--space-2) var(--space-1);
+  color: var(--text-tertiary);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-medium);
 }
 
 .new-model-dialog__template-columns,
 .new-model-dialog__custom-columns {
-  margin-bottom: 10px;
+  margin-bottom: var(--space-5);
 }
 
+.new-model-dialog__template-columns:last-child,
+.new-model-dialog__custom-columns:last-child {
+  margin-bottom: 0;
+}
+
+/* Template columns: a read-only list, hairline-separated rows. */
 .new-model-dialog__columns {
   display: flex;
   flex-direction: column;
-  gap: 1px;
-  max-height: 140px;
+  max-height: 156px;
   overflow-y: auto;
+  border: 1px solid var(--glass-divider);
+  border-radius: var(--radius-md);
+  background: var(--glass-input-bg);
+  scrollbar-width: thin;
+  scrollbar-color: var(--glass-scrollbar) transparent;
 }
 
 .new-model-dialog__column {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 4px 6px;
-  border-radius: 3px;
-  background: rgba(249, 115, 22, 0.1); /* Design model orange tint */
-  line-height: 1.4;
+  gap: var(--space-3);
+  min-height: 28px;
+  padding: var(--space-1) var(--space-4);
+  border-bottom: 1px solid var(--glass-divider);
+  background: transparent;
+  line-height: var(--leading-tight);
 }
 
-.new-model-dialog__column--template {
-  opacity: 0.85;
+.new-model-dialog__column:last-child {
+  border-bottom: 0;
+}
+
+/* Read-only template rows: quieter text, never `opacity` (calm, not faded). */
+.new-model-dialog__column--template .new-model-dialog__col-name {
+  color: var(--text-secondary);
 }
 
 /* Key badges now handled by KeyBadgeGroup component */
 
 .new-model-dialog__col-name {
   flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--editor-fg);
-  font-size: 12px;
+  color: var(--text-primary);
+  font-size: var(--text-sm);
 }
 
 .new-model-dialog__col-type {
   flex-shrink: 0;
-  color: var(--vscode-descriptionForeground, #888);
-  font-size: 11px;
-  font-family: var(--vscode-editor-font-family, monospace);
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
 }
 
-/* Custom column row (editable) */
+/* Custom column rows (editable) */
 .new-model-dialog__column-list {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  max-height: 180px;
+  gap: var(--space-2);
+  max-height: 196px;
   overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--glass-scrollbar) transparent;
 }
 
 .new-model-dialog__column-row {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 8px;
-  border-radius: 4px;
-  background: rgba(249, 115, 22, 0.08);
-  border: 1px solid rgba(249, 115, 22, 0.2);
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-2) var(--space-2) var(--space-4);
+  border: 1px solid var(--glass-divider);
+  border-radius: var(--radius-md);
+  background: var(--glass-input-bg);
+  transition: border-color var(--duration-fast) var(--ease-standard);
+}
+
+.new-model-dialog__column-row:focus-within {
+  border-color: var(--glass-border-strong);
 }
 
 /* Old checkbox removed - using KeyBadgeGroup dropdown instead */
 
-.new-model-dialog__col-input {
-  padding: 4px 6px;
-  border: 1px solid var(--input-border, var(--panel-border));
-  border-radius: 3px;
-  background: var(--input-bg);
-  color: var(--input-fg, var(--editor-fg));
+/* Inline inputs: borderless until hovered or focused, like an iOS list cell. */
+.new-model-dialog__col-input,
+.new-model-dialog__col-select {
+  min-width: 0;
+  height: var(--control-height-sm);
+  padding: 0 var(--space-3);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background-color: transparent;
+  color: var(--input-fg);
   font-family: inherit;
-  font-size: 11px;
+  font-size: var(--text-xs);
+  transition:
+    border-color var(--duration-fast) var(--ease-standard),
+    box-shadow var(--duration-fast) var(--ease-standard),
+    background-color var(--duration-fast) var(--ease-standard);
 }
 
-.new-model-dialog__col-input:focus {
-  outline: 1px solid var(--focus-border);
-  outline-offset: -1px;
-  border-color: var(--focus-border);
+.new-model-dialog__col-input:hover,
+.new-model-dialog__col-select:hover {
+  border-color: var(--glass-border);
+  background-color: var(--control-fill);
+}
+
+.new-model-dialog__col-input:focus,
+.new-model-dialog__col-select:focus {
+  outline: none;
+  border-color: var(--glass-input-border-focus);
+  background-color: var(--glass-input-bg);
+  box-shadow: var(--focus-halo);
+}
+
+.new-model-dialog__col-input::placeholder {
+  color: var(--text-quaternary);
+  opacity: 1;
 }
 
 .new-model-dialog__col-input--name {
   flex: 1;
   min-width: 100px;
+  font-weight: var(--weight-medium);
 }
 
 .new-model-dialog__col-input--desc {
   flex: 1.5;
-  min-width: 120px;
+  min-width: 110px;
+  color: var(--text-secondary);
 }
 
-.new-model-dialog__col-input--error {
-  border-color: var(--error-fg, #f48771);
+.new-model-dialog__col-input--error,
+.new-model-dialog__col-input--error:hover {
+  border-color: var(--error-fg);
+  background-color: var(--glass-tint-error);
+}
+
+.new-model-dialog__col-input--error:focus {
+  border-color: var(--error-fg);
+  box-shadow: 0 0 0 3px var(--glass-tint-error);
 }
 
 .new-model-dialog__col-select {
-  padding: 4px 6px;
-  border: 1px solid var(--input-border, var(--panel-border));
-  border-radius: 3px;
-  background: var(--input-bg);
-  color: var(--input-fg, var(--editor-fg));
-  font-family: var(--vscode-editor-font-family, monospace);
-  font-size: 10px;
-  cursor: pointer;
-  min-width: 110px;
+  flex-shrink: 0;
+  min-width: 112px;
+  padding-right: var(--space-7);
+  background-color: var(--control-fill);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  background-position: calc(100% - 13px) 52%, calc(100% - 8px) 52%;
 }
 
 .new-model-dialog__col-remove {
@@ -335,52 +529,76 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 20px;
-  height: 20px;
-  border: none;
-  border-radius: 3px;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-pill);
   background: transparent;
-  color: var(--error-fg, #f48771);
-  font-size: 16px;
+  color: var(--text-tertiary);
+  font-family: inherit;
+  font-size: var(--text-lg);
   line-height: 1;
   cursor: pointer;
-  transition: background 0.1s ease;
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard),
+    transform var(--duration-instant) var(--ease-standard);
 }
 
 .new-model-dialog__col-remove:hover {
-  background: rgba(244, 135, 113, 0.15);
+  background: var(--glass-tint-error);
+  border-color: var(--control-border-hover);
+  color: var(--error-fg);
+}
+
+.new-model-dialog__col-remove:active {
+  transform: scale(0.92);
+}
+
+.new-model-dialog__col-remove:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: 1px;
 }
 
 /* Inline "add column" row at the bottom of the list */
 .new-model-dialog__column-row--add {
   justify-content: center;
+  min-height: 30px;
+  padding: var(--space-2) var(--space-4);
+  border: 1px dashed var(--glass-border);
   background: transparent;
-  border: 1px dashed var(--panel-border);
   cursor: pointer;
-  padding: 5px 8px;
-  transition: background 0.1s ease, border-color 0.1s ease;
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard);
 }
 
 .new-model-dialog__column-row--add:hover {
-  background: rgba(249, 115, 22, 0.06);
-  border-color: rgba(249, 115, 22, 0.4);
+  background: var(--control-fill);
+  border-color: var(--glass-border-strong);
 }
 
 .new-model-dialog__add-row-text {
-  color: var(--vscode-descriptionForeground, #888);
-  font-size: 11px;
-  font-style: italic;
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  transition: color var(--duration-fast) var(--ease-standard);
+}
+
+.new-model-dialog__column-row--add:hover .new-model-dialog__add-row-text {
+  color: var(--text-primary);
 }
 
 .new-model-dialog__empty-columns {
-  padding: 16px;
+  padding: var(--space-6) var(--space-5);
+  border: 1px dashed var(--glass-border);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-tertiary);
+  font-size: var(--text-sm);
   text-align: center;
-  color: var(--vscode-descriptionForeground, #888);
-  font-size: 12px;
-  font-style: italic;
-  background: rgba(128, 128, 128, 0.05);
-  border-radius: 4px;
-  border: 1px dashed var(--panel-border);
 }
 
 /* ---------------------------------------------------------------------------
@@ -391,54 +609,90 @@
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 8px;
-  padding: 12px 16px;
-  border-top: 1px solid var(--panel-border);
+  gap: var(--space-4);
+  padding: var(--space-5) var(--space-7) var(--space-6);
+  border-top: 1px solid var(--glass-divider);
   flex-shrink: 0;
 }
 
 .new-model-dialog__button {
-  padding: 6px 14px;
-  border: 1px solid transparent;
-  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--control-height-lg);
+  padding: 0 var(--space-6);
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-md);
   font-family: inherit;
-  font-size: 12px;
+  font-size: var(--text-md);
+  font-weight: var(--weight-medium);
   cursor: pointer;
-  transition: background 0.1s ease, opacity 0.1s ease;
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard),
+    box-shadow var(--duration-fast) var(--ease-standard),
+    opacity var(--duration-fast) var(--ease-standard),
+    transform var(--duration-instant) var(--ease-standard);
+}
+
+.new-model-dialog__button:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.new-model-dialog__button:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: var(--focus-offset);
 }
 
 .new-model-dialog__button--primary {
-  background: var(--button-bg);
-  color: var(--button-fg);
+  background: var(--accent);
+  border-color: var(--glass-border);
+  color: var(--text-on-accent);
+  box-shadow: var(--glass-elevation-1);
 }
 
 .new-model-dialog__button--primary:hover:not(:disabled) {
-  background: var(--button-hover-bg);
+  background: var(--accent-hover);
+  border-color: var(--control-border-hover);
 }
 
 .new-model-dialog__button--secondary {
-  background: transparent;
-  border-color: var(--panel-border);
-  color: var(--editor-fg);
+  background: var(--control-fill);
+  color: var(--text-primary);
 }
 
 .new-model-dialog__button--secondary:hover {
-  background: rgba(128, 128, 128, 0.1);
+  background: var(--control-fill-hover);
+  border-color: var(--control-border-hover);
+}
+
+.new-model-dialog__button--secondary:active {
+  background: var(--control-fill-active);
 }
 
 .new-model-dialog__button:disabled {
-  opacity: 0.5;
+  opacity: 0.45;
   cursor: not-allowed;
+  box-shadow: none;
 }
 
 /* One line under a field, e.g. the starter columns' table-name prefix. */
 .new-model-dialog__hint {
-  font-size: 11px;
-  color: var(--dim-fg);
+  font-size: var(--text-xs);
+  line-height: var(--leading-tight);
+  color: var(--text-tertiary);
 }
 
 /* The file New Table creates (DBML): a path, so it may wrap anywhere. */
 .new-model-dialog__path {
-  font-family: var(--vscode-editor-font-family, monospace);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
   overflow-wrap: anywhere;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .new-model-dialog {
+    animation: none;
+  }
 }

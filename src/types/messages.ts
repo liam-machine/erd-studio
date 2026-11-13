@@ -7,8 +7,8 @@
  *                         manifestStaleness, syncPlanGenerated, error,
  *                         openFeedback, feedbackContext, feedbackAnalysis,
  *                         feedbackSubmitted, revealRelationship, canvasContext,
- *                         revealTable, libraryDragStarted, libraryDragEnded, filesNotShown,
- *                         canvasNotice
+ *                         revealTable, selectTables, libraryDragStarted, libraryDragReleased,
+ *                         libraryDragEnded, filesNotShown, canvasNotice, dropTrace
  *   Webview → Extension:  ready, requestExistingTables, requestNewRelationshipFiles, addModel, addColumn, removeColumn, addRelationship,
  *                         removeModel(s), removeRelationship(s), editRelationship,
  *                         addExistingModel(s), dropTables, updatePositions, switchStage,
@@ -18,7 +18,9 @@
  *                         layoutFinished, webviewError (usage telemetry only),
  *                         crashFallback (the crash screen's two buttons),
  *                         openNotedFile, addRelationshipsImports, reloadFromDisk
- *                         (the "not shown" strip's file links and buttons)
+ *                         (the "not shown" strip's file links and buttons),
+ *                         canvasFrame (where the canvas sits on screen)
+ *                         dropShown (a timed drop's table is on screen; timing only)
  *
  * All message types use a discriminated union pattern with a `type` field,
  * enabling exhaustive switch handling in message handlers.
@@ -397,6 +399,13 @@ export interface RevealRelationshipMessage {
     toModel: string;
     /** Every column pair of the line (more than one for a composite key). */
     pairs: Array<{ fromColumn: string; toColumn: string }>;
+    /**
+     * Optional (additive): select the line without moving the zoom, panning
+     * only as far as it takes to bring its two tables into view, clear of
+     * the toolbar and the detail panel (a sidebar row's click). Absent: the
+     * view is fitted to the line, as before. An older webview ignores it.
+     */
+    gentle?: boolean;
   };
 }
 
@@ -455,6 +464,32 @@ export interface RevealTableMessage {
   type: 'revealTable';
   payload: {
     modelName: string;
+    /**
+     * Optional (additive): select the table without opening its detail panel
+     * or moving the zoom, panning only as far as it takes to bring it into
+     * view, clear of the toolbar and the detail panel (a sidebar row's
+     * click). Absent: centred with its panel open, as before. An older
+     * webview ignores it.
+     */
+    gentle?: boolean;
+  };
+}
+
+/**
+ * Select these tables on the canvas, and nothing else: no pan, no zoom, no
+ * detail panel (a drop on the canvas: the tables appear where they were
+ * dropped, at the zoom the user had). Posted by `handleDropTables` after a
+ * drop adds tables (the ones added) or finds them all there already (with a
+ * `canvasNotice`). The webview waits for a refresh that draws them (up to
+ * `REVEAL_TABLE_WAIT_MS`), then marks them selected; names it does not draw
+ * are skipped silently. At most `ADD_EXISTING_TABLES_LIMIT` names. An older
+ * webview ignores it (the tables are added all the same). Every other
+ * "show this table" path keeps {@link RevealTableMessage}.
+ */
+export interface SelectTablesMessage {
+  type: 'selectTables';
+  payload: {
+    modelNames: string[];
   };
 }
 
@@ -471,6 +506,66 @@ export interface LibraryDragStartedMessage {
   payload: {
     tables: string[];
   };
+}
+
+/**
+ * Where a canvas page sits on screen, learned from two of its own pointer
+ * events at least a few pixels apart: `scale` is screen pixels per page
+ * pixel (a pointer event's `screenX` is in screen pixels, its `clientX` in
+ * the page's CSS pixels: they differ by VS Code's zoom), and `originX` /
+ * `originY` the page's top-left corner on screen (`screenX - clientX *
+ * scale`). The rest is what the page measured then (`window.screenX` /
+ * `screenY`, `innerWidth` / `innerHeight`, `devicePixelRatio`): the frame
+ * holds only while all of those are unchanged (a window move, a resize, a
+ * layout change or a zoom changes one). Plain numbers only.
+ */
+export interface CanvasFrame {
+  originX: number;
+  originY: number;
+  scale: number;
+  windowX: number;
+  windowY: number;
+  width: number;
+  height: number;
+  pixelRatio: number;
+}
+
+/**
+ * Where a glass sidebar drag was let go, as the sidebar page saw it: `x`,
+ * `y` the release point in that page's CSS pixels (outside its bounds), and
+ * one pointer event of that page for reference (`refX` / `refY` its page
+ * point, `refScreenX` / `refScreenY` its screen point) with the window's
+ * place then (`windowX` / `windowY`). A page that knows its own scale and
+ * place on screen ({@link CanvasFrame}) maps it into its own coordinates:
+ * screen = ref screen + (point - ref point) * scale. Plain numbers only.
+ */
+export interface LibraryDragRelease {
+  x: number;
+  y: number;
+  refX: number;
+  refY: number;
+  refScreenX: number;
+  refScreenY: number;
+  windowX: number;
+  windowY: number;
+}
+
+/**
+ * A Table Library drag that started in the glass sidebar (a webview) was let
+ * go outside the sidebar ({@link LibraryDragRelease}). Posted by
+ * `SemanticEditorProvider.libraryDragReleased` to every loaded logical canvas
+ * that was on screen when the drag started and still is, about as soon as
+ * the mouse button comes up. A canvas in the same window that knows where it
+ * sits on screen (its own {@link CanvasFrame}, or `frame`: the last one a
+ * canvas in the same editor group reported, used only when every measured
+ * value still matches) and finds the point well inside its diagram finishes
+ * the drop at once (`dropTables` with `afterDrag`), instead of waiting for
+ * the pointer to move. Otherwise it ignores this and the pointer path
+ * applies. An older webview ignores it.
+ */
+export interface LibraryDragReleasedMessage {
+  type: 'libraryDragReleased';
+  payload: LibraryDragRelease & { frame?: CanvasFrame };
 }
 
 /**
@@ -511,9 +606,58 @@ export interface LineStyleMessage {
   };
 }
 
+/**
+ * Whether the canvas's tab is on screen, sent whenever that changes
+ * (`onDidChangeViewState`). A webview behind another tab keeps running at a
+ * stand-in size, so a gentle reveal (`RevealTableMessage.gentle`,
+ * `RevealRelationshipMessage.gentle`) that arrives as the canvas goes behind
+ * another tab (a row's double-click opening the file) waits until it is back
+ * before it measures what is in sight. Additive: an older webview ignores it,
+ * and a webview that never gets it treats the canvas as on screen.
+ */
+export interface CanvasVisibilityMessage {
+  type: 'canvasVisibility';
+  payload: { visible: boolean };
+}
+
+/**
+ * A table drop is being timed (`src/services/dropTiming.ts`): posted right
+ * after the diagram redrawn with the dropped tables. The canvas answers with
+ * {@link DropShownMessage} after its next paint, so the host learns when the
+ * table was on screen. An older webview ignores it (the drop is then logged
+ * as not shown).
+ */
+export interface DropTraceMessage {
+  type: 'dropTrace';
+  payload: {
+    /** The drop's id, echoed back. */
+    trace: number;
+  };
+}
+
+/**
+ * Whether the canvas shows its information button about converting this
+ * project to DBML (`webview/components/Toolbar/ConvertInfo.tsx`): the
+ * Convert offer's own checks (`convertOfferApplies`,
+ * `src/services/convertOffer.ts`), never the once-a-session flag or the
+ * window's one prompt, since the button is not a prompt. Posted after each
+ * logical-stage `domainLoaded` / `stageData`, and to every open canvas when
+ * the answer may have changed (a Convert run, `erdStudio.dbml.offerConvert`
+ * changed, Don't Ask Again). Never on the physical stage; the webview also
+ * hides the button there. A canvas that never gets one shows no button.
+ */
+export interface ConvertOfferMessage {
+  type: 'convertOffer';
+  payload: {
+    show: boolean;
+  };
+}
+
 export type ExtensionMessage =
   | GuideStartMessage
+  | CanvasVisibilityMessage
   | LineStyleMessage
+  | ConvertOfferMessage
   | LoadingMessage
   | ExistingTablesMessage
   | NewRelationshipFilesMessage
@@ -532,8 +676,11 @@ export type ExtensionMessage =
   | FilesNotShownMessage
   | CanvasNoticeMessage
   | RevealTableMessage
+  | SelectTablesMessage
   | LibraryDragStartedMessage
+  | LibraryDragReleasedMessage
   | LibraryDragEndedMessage
+  | DropTraceMessage
   | ErrorMessage;
 
 // ---------------------------------------------------------------------------
@@ -751,6 +898,18 @@ export interface DropTablesMessage {
      */
     afterDrag?: boolean;
   };
+}
+
+/**
+ * Where this canvas sits on screen ({@link CanvasFrame}), sent when it
+ * changes (read from the canvas's own pointer events): the host keeps the
+ * last one per editor group and passes it with `libraryDragReleased` to a
+ * canvas of that group that has not seen the pointer since it opened. Writes
+ * nothing, so it is allowed on the physical stage too.
+ */
+export interface CanvasFrameMessage {
+  type: 'canvasFrame';
+  payload: CanvasFrame;
 }
 
 /**
@@ -1139,6 +1298,21 @@ export interface ShowLogsMessage {
 }
 
 /**
+ * The canvas's answer to {@link DropTraceMessage}, after the first paint
+ * that follows it: the timed drop's tables are on screen. `renderMs`: the
+ * canvas's own time from receiving the redrawn diagram (`domainLoaded`) to
+ * that paint. Timing only (the ERD Studio log and fixed telemetry keys);
+ * writes nothing, so it is on the physical-stage allowlist.
+ */
+export interface DropShownMessage {
+  type: 'dropShown';
+  payload: {
+    trace: number;
+    renderMs?: number;
+  };
+}
+
+/**
  * Request to export this diagram as Mermaid or DBML — the canvas toolbar's
  * **Export** button. No payload: the host runs `erdStudio.exportDiagram` with
  * the panel's document, which asks for the format and what to do with the
@@ -1247,10 +1421,23 @@ export interface SetLineStyleMessage {
   };
 }
 
+/**
+ * The canvas's information button's **Convert to DBML…** (it shows while the
+ * host's `convertOffer` says so): run Convert Project to DBML, the same hook
+ * as the Convert offer's **Convert…**, whose panel lists every change before
+ * anything is written. No payload. Logical stage only: not on the physical
+ * allowlist (`NON_MUTATION_TYPES`).
+ */
+export interface ConvertProjectToDbmlMessage {
+  type: 'convertProjectToDbml';
+  payload?: Record<string, never>;
+}
+
 /** Union of all messages the webview can send to the extension. */
 export type WebviewMessage =
   | ReadyMessage
   | SetLineStyleMessage
+  | ConvertProjectToDbmlMessage
   | GuideMessage
   | RequestExistingTablesMessage
   | RequestNewRelationshipFilesMessage
@@ -1271,6 +1458,7 @@ export type WebviewMessage =
   | AddExistingModelsMessage
   | AddModelsFromDbtMessage
   | DropTablesMessage
+  | CanvasFrameMessage
   | UpdatePositionsMessage
   | RefreshManifestMessage
   | UndoMessage
@@ -1298,6 +1486,7 @@ export type WebviewMessage =
   | OpenAnotherDomainMessage
   | OpenGettingStartedMessage
   | ShowLogsMessage
+  | DropShownMessage
   | ExportDiagramMessage
   | GenerateSyncPlanMessage
   | RunDbtCompileMessage

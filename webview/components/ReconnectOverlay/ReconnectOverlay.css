@@ -1,75 +1,159 @@
+/**
+ * ReconnectOverlay styles: a soft frosted scrim over the loading screen and a
+ * raised glass card in the middle, with an amber "link broken" badge.
+ *
+ * The scrim carries the blur, so the card itself needs none (a blurred
+ * ancestor is the card's backdrop root). Glass tokens only
+ * (packages/renderer/src/styles/theme.css); high contrast and reduced
+ * transparency come through the tokens.
+ */
+
 .reconnect-overlay {
   position: fixed;
   inset: 0;
-  z-index: 2000;
+  z-index: var(--z-takeover);
 
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(0, 0, 0, 0.45);
+  padding: var(--space-6);
+
+  background: color-mix(in srgb, var(--editor-bg) 45%, transparent);
+  -webkit-backdrop-filter: var(--glass-backdrop-thin);
+  backdrop-filter: var(--glass-backdrop-thin);
+
+  animation: reconnect-overlay-fade var(--duration-base) var(--ease-standard);
 }
 
 .reconnect-overlay__panel {
+  box-sizing: border-box;
   max-width: 420px;
-  padding: 20px 24px;
+  padding: var(--space-8);
 
-  background: var(--panel-bg);
-  border: 1px solid var(--panel-border);
-  border-left: 3px solid var(--warning-fg);
-  border-radius: 6px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  background:
+    radial-gradient(110% 60% at 0% 0%, var(--glass-tint-warning), transparent 70%),
+    var(--glass-surface-3);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--glass-elevation-3);
 
-  color: var(--editor-fg);
-  font-size: 13px;
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+  font-size: var(--text-md);
+
+  animation: reconnect-overlay-rise var(--duration-slow) var(--ease-out);
+}
+
+@keyframes reconnect-overlay-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes reconnect-overlay-rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reconnect-overlay,
+  .reconnect-overlay__panel {
+    animation: none;
+  }
+}
+
+.reconnect-overlay__icon {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  margin-bottom: var(--space-6);
+  border: 1px solid var(--glass-tint-warning-edge);
+  border-radius: var(--radius-lg);
+  background: var(--glass-tint-warning);
+  box-shadow: var(--glass-highlight);
+  color: var(--warning-fg);
+}
+
+.reconnect-overlay__icon svg {
+  display: block;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .reconnect-overlay__title {
-  margin: 0 0 8px;
-  font-size: 15px;
-  font-weight: 600;
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-tight);
+  line-height: var(--leading-tight);
 }
 
 .reconnect-overlay__body {
-  margin: 0 0 16px;
-  line-height: 1.5;
-  opacity: 0.9;
-}
-
-.reconnect-overlay__button {
-  padding: 6px 14px;
-
-  background: var(--button-bg);
-  color: var(--button-fg);
-  border: none;
-  border-radius: 3px;
-
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
-
-  transition: background 0.1s ease;
-}
-
-.reconnect-overlay__button:hover {
-  background: var(--button-hover-bg);
-}
-
-.reconnect-overlay__button:focus {
-  outline: 1px solid var(--focus-border);
-  outline-offset: 1px;
+  margin: 0 0 var(--space-7);
+  color: var(--text-secondary);
+  line-height: var(--leading-normal);
 }
 
 .reconnect-overlay__actions {
   display: flex;
-  gap: 8px;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+}
+
+.reconnect-overlay__button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--control-height-lg);
+  padding: 0 var(--space-6);
+
+  background: var(--accent);
+  color: var(--text-on-accent);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-pill);
+  box-shadow: var(--glass-highlight);
+
+  font-family: inherit;
+  font-size: var(--text-md);
+  font-weight: var(--weight-medium);
+  cursor: pointer;
+
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
+    transform var(--duration-instant) var(--ease-standard);
+}
+
+.reconnect-overlay__button:hover {
+  background: var(--accent-hover);
+}
+
+.reconnect-overlay__button:active {
+  transform: scale(0.97);
+}
+
+.reconnect-overlay__button:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: var(--focus-offset);
 }
 
 .reconnect-overlay__button--secondary {
-  background: transparent;
-  color: var(--editor-fg);
-  border: 1px solid var(--panel-border);
+  background: var(--control-fill);
+  color: var(--text-primary);
+  border-color: var(--glass-border);
+  box-shadow: none;
 }
 
 .reconnect-overlay__button--secondary:hover {
-  background: var(--selection-bg);
+  background: var(--control-fill-hover);
+  border-color: var(--glass-border-strong);
 }

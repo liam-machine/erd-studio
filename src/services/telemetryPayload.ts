@@ -740,6 +740,54 @@ export const FEATURES = [
   // placement (rung 2), or that with post-compaction left out (rung 3).
   'layoutFallbackRung2',
   'layoutFallbackRung3',
+  // #304: the host's search for dbt_project.yml failed (dbtSearchFailed) and
+  // the bounded walk alone still found a dbt project. Not an error: the user
+  // lost nothing. Activation only, never Select dbt Project….
+  'dbtSearchFailedWalkFound',
+  // Also added after 2.0.4 (#295). An activation that read its project after more
+  // than 10 s (beside activationOver10s): which stretch held the longest
+  // share, the wait on the host's dbt search, the rest of Discovery, or
+  // Services. A retry of the start look after a timeout turned the blank
+  // suggestion into an import. The host's dbt search was not waited for: the
+  // first dbt workspace folder already holds ERD data, so it cannot change
+  // the project that opens.
+  'activationSlowDbtSearch',
+  'activationSlowDiscovery',
+  'activationSlowServices',
+  'startLookLateSuggestion',
+  'dbtSearchSkipped',
+  // Also #295: the synchronous folder walk that finds the project held the
+  // longest share of a slow activation (activationSlowDiscovery is then the
+  // rest of Discovery, without the walk).
+  'activationSlowWalk',
+  // #305: the start suggestion showed on a machine where it had already been
+  // shown (another folder, or this one after Turn On): the repeat cost.
+  'suggestPromptShownAgain',
+  // #305: Convert to DBML… pressed in the canvas's information button (a project
+  // from before 2.0), counted beside the command's own convertToDbml.
+  'convertToDbmlFromCanvasInfo',
+  // Added after 2.0.5: a table drop from the Table Library, timed from the
+  // moment the host learned of it (src/services/dropTiming.ts). How it
+  // arrived (always); how long until the canvas painted the table, as a range
+  // (a drop that wrote), or that it never said so; and, for a drop that took
+  // a second or more, its slowest stage. Never a name, a path or a count.
+  'dropRouteCanvas',
+  'dropRouteAfterDrag',
+  'dropRouteMissedDrop',
+  'dropRouteDiagramsRow',
+  'dropShownUnder1s',
+  'dropShown1to5s',
+  'dropShown5to15s',
+  'dropShownOver15s',
+  'dropShownNever',
+  'dropSlowOpen',
+  'dropSlowWait',
+  'dropSlowPrepare',
+  'dropSlowPlan',
+  'dropSlowEdit',
+  'dropSlowSave',
+  'dropSlowRedraw',
+  'dropSlowCanvas',
 ] as const;
 export type TelemetryFeature = (typeof FEATURES)[number];
 
@@ -1039,6 +1087,12 @@ export const ERROR_CODES = [
   'layoutFailedLastRungTimeout',
   'layoutFailedLastRungWorker',
   'layoutFailedLastRungMemory',
+  // #304: why the host's search for dbt_project.yml failed, one beside each
+  // dbtSearchFailed (the total): findFiles rejected, reading or sorting what
+  // it returned threw, or findFiles threw before returning a promise.
+  'dbtSearchFailedRejected',
+  'dbtSearchFailedSort',
+  'dbtSearchFailedThrew',
 ] as const;
 export type TelemetryErrorCode = (typeof ERROR_CODES)[number];
 
@@ -1123,6 +1177,13 @@ export type TelemetryOs = 'darwin' | 'win32' | 'linux' | 'other';
 export const MAX_ACTIVATIONS = 50;
 export const MAX_CANVAS_OPENS = 200;
 export const MAX_COUNTER = 100;
+/** At most this many diagrams are listed for one day; the rest are added up under {@link OTHER_DIAGRAM_ID}. */
+export const MAX_DIAGRAMS = 30;
+/** A diagram's number is a random integer from 1 to this, made up on the device ({@link DiagramUse}). */
+export const MAX_DIAGRAM_ID = 65535;
+/** The entry that adds up every diagram past {@link MAX_DIAGRAMS} on one day. */
+export const OTHER_DIAGRAM_ID = 0;
+export const MAX_DIAGRAM_EDITS = 1000;
 
 /** The Worker refuses a day older than this, so a heartbeat for one is not sent. */
 export const MAX_HEARTBEAT_AGE_DAYS = 7;
@@ -1210,6 +1271,15 @@ export type RecentDaysBucket = '0' | '1' | '2-3' | '4-7' | '8-14' | '15-28';
 /** Days from first activation to the first canvas open, or `never` (yet). */
 export type FirstCanvasBucket = TenureBucket | 'never';
 
+/**
+ * One diagram's use on one day: `[id, opens, edits]`. `id` is a random number
+ * the extension made up for the diagram and keeps on the device; it is not
+ * derived from the diagram's name, path or contents, so it says only "the same
+ * diagram as on another day". `opens` counts canvas opens, `edits` the edit
+ * requests made on its canvas.
+ */
+export type DiagramUse = [id: number, opens: number, edits: number];
+
 /** Everything counted for one UTC day, as kept in globalState. */
 export interface DailyCounters {
   /** The UTC day (`YYYY-MM-DD`) these counts describe. */
@@ -1233,6 +1303,8 @@ export interface DailyCounters {
    * the heartbeat goes out the next day. Absent in counters from older builds.
    */
   env?: CounterEnv;
+  /** Today's use per diagram ({@link recordDiagramUse}). Absent until a diagram is opened or edited. */
+  diagrams?: DiagramUse[];
   /** AI assistants detected on this machine today (union). */
   assistants?: TelemetryAssistant[];
   /** ERD Studio harness targets installed and version-marked in the open project today (union). */
@@ -1324,6 +1396,8 @@ export interface HeartbeatBody {
   physicalTools?: TelemetryPhysicalTool[];
   /** Omitted when no detection ran that day. */
   platforms?: TelemetryPlatform[];
+  /** Use per diagram that day; omitted when no diagram was opened or edited. */
+  diagrams?: DiagramUse[];
   /** The onboarding trail; omitted on a day it was not kept. */
   trail?: TrailEntry[];
   /** With `trail`: entries past its cap, counted only. */
@@ -1571,6 +1645,48 @@ export function recordCanvasOpen(
     schemaFormats: addOnce(state.schemaFormats, info.format),
     modelCount: largest,
   };
+}
+
+/**
+ * Count one open or one edit of the diagram numbered `id`. Past
+ * {@link MAX_DIAGRAMS} diagrams in a day, a new one is added up under
+ * {@link OTHER_DIAGRAM_ID}, so the day's totals stay right.
+ */
+export function recordDiagramUse(state: DailyCounters, id: number, kind: 'open' | 'edit'): DailyCounters {
+  if (!isDiagramId(id)) return state;
+  const list = sentDiagrams(state.diagrams);
+  const listed = list.some(d => d[0] === id);
+  const real = list.filter(d => d[0] !== OTHER_DIAGRAM_ID).length;
+  const target = listed || real < MAX_DIAGRAMS ? id : OTHER_DIAGRAM_ID;
+  const prev = list.find(d => d[0] === target) ?? [target, 0, 0];
+  const next: DiagramUse = [
+    target,
+    Math.min(prev[1] + (kind === 'open' ? 1 : 0), MAX_CANVAS_OPENS),
+    Math.min(prev[2] + (kind === 'edit' ? 1 : 0), MAX_DIAGRAM_EDITS),
+  ];
+  return { ...state, diagrams: [...list.filter(d => d[0] !== target), next] };
+}
+
+function isDiagramId(id: unknown): id is number {
+  return typeof id === 'number' && Number.isInteger(id) && id >= 1 && id <= MAX_DIAGRAM_ID;
+}
+
+/**
+ * `diagrams` as sent: well-formed entries only, every number clamped, one
+ * entry per id, at most {@link MAX_DIAGRAMS} plus the "other" entry.
+ */
+export function sentDiagrams(diagrams: unknown): DiagramUse[] {
+  if (!Array.isArray(diagrams)) return [];
+  const out: DiagramUse[] = [];
+  for (const d of diagrams) {
+    if (!Array.isArray(d) || d.length !== 3) continue;
+    const id: unknown = d[0];
+    if (id !== OTHER_DIAGRAM_ID && !isDiagramId(id)) continue;
+    if (out.some(o => o[0] === id)) continue;
+    if (id !== OTHER_DIAGRAM_ID && out.filter(o => o[0] !== OTHER_DIAGRAM_ID).length >= MAX_DIAGRAMS) continue;
+    out.push([id as number, clampCount(d[1], MAX_CANVAS_OPENS), clampCount(d[2], MAX_DIAGRAM_EDITS)]);
+  }
+  return out;
 }
 
 export function recordStage(state: DailyCounters, stage: TelemetryStage): DailyCounters {
@@ -1866,6 +1982,7 @@ export function buildHeartbeat(state: DailyCounters, env: HeartbeatEnv): Heartbe
       ? { physicalTools: PHYSICAL_TOOLS.filter(t => state.physicalTools?.includes(t)) }
       : {}),
     ...(Array.isArray(state.platforms) ? { platforms: PLATFORMS.filter(p => state.platforms?.includes(p)) } : {}),
+    ...(sentDiagrams(state.diagrams).length > 0 ? { diagrams: sentDiagrams(state.diagrams) } : {}),
     ...(Array.isArray(state.trail)
       ? { trail: sentTrail(state.trail), trailDropped: clampCount(state.trailDropped ?? 0, MAX_TRAIL_DROPPED) }
       : {}),

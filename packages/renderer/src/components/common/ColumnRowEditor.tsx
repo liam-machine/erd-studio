@@ -12,6 +12,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { DataTypeSelect } from './DataTypeSelect';
 import { KeyBadgeGroup } from './KeyBadgeGroup';
+import { IconChevron, IconClose, IconGrip } from '../DetailPanel/panelIcons';
 import { useFocusWithinRow } from '../../hooks/useFocusWithinRow';
 import type { ColumnDef, TableRole } from '@erd-studio/core';
 import type { UpdateColumnPayloadColumn } from '@erd-studio/core';
@@ -20,6 +21,20 @@ import './ColumnRowEditor.css';
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
+
+/** What each SCD / additive choice means (the pickers show the short name). */
+const SCD_HINTS: Record<string, string> = {
+  '': 'Slowly changing dimension type: not set',
+  '0': 'Type 0: never changes',
+  '1': 'Type 1: overwrite the old value',
+  '2': 'Type 2: keep history as new rows',
+};
+const ADDITIVE_HINTS: Record<string, string> = {
+  '': 'How this measure adds up: not set',
+  additive: 'Additive: sums across every dimension',
+  'semi-additive': 'Semi-additive: sums across some dimensions, never across time',
+  'non-additive': 'Non-additive: never sum it; store its components',
+};
 
 export interface ColumnRowEditorColumn {
   name: string;
@@ -538,25 +553,78 @@ export function ColumnRowEditor({
 
   return (
     <div className={rowClasses} {...rowProps} onClick={mode !== 'new' ? handleRowClick : undefined}>
-      {/* Main row content */}
+      {/* Main row content: a two-line cell. Line 1 is the name; line 2 the
+          type and, while collapsed, the description's first line. Keys,
+          delete and the disclosure chevron trail at the right edge. */}
       <div className="column-row-editor__main">
-        {/* Drag handle for reordering — always rendered to reserve space, hidden when not editable */}
+        {/* Drag handle for reordering — out of flow at the row's leading edge, hidden when not editable */}
         <span
           className={`column-row-editor__drag-handle${!dragHandleProps ? ' column-row-editor__drag-handle--hidden' : ''}`}
           {...(dragHandleProps ?? {})}
-        >⠿</span>
-        {/* Expand/collapse chevron */}
-        {onToggleExpand && (
-          <button
-            className="column-row-editor__chevron"
-            onClick={handleChevronClick}
-            title={expanded ? 'Collapse description (Alt+Click: all)' : 'Expand description (Alt+Click: all)'}
-            aria-label={expanded ? 'Collapse description' : 'Expand description'}
-            aria-expanded={expanded}
-          >
-            {expanded ? '▾' : '▸'}
-          </button>
-        )}
+        ><IconGrip size={12} /></span>
+
+        <div className="column-row-editor__text">
+          {/* Column name */}
+          {isEditing && editingField === 'name' ? (
+            <input
+              ref={nameInputRef}
+              type="text"
+              className={`column-row-editor__input ${validationError ? 'column-row-editor__input--error' : ''}`}
+              value={localColumn.name}
+              onChange={(e) =>
+                setLocalColumn((prev) => ({ ...prev, name: e.target.value }))
+              }
+              onKeyDown={handleKeyDown}
+              placeholder="column_name"
+            />
+          ) : (
+            <span
+              className="column-row-editor__name"
+              onDoubleClick={(e) => { e.stopPropagation(); handleFieldClick('name'); }}
+              title={mode !== 'readonly' ? `${localColumn.name} — double-click to edit` : localColumn.name || undefined}
+            >
+              {localColumn.name || (
+                <em className="column-row-editor__placeholder">column_name</em>
+              )}
+            </span>
+          )}
+
+          <div className="column-row-editor__subtitle">
+            {/* Data type */}
+            {isEditing && editingField === 'dataType' ? (
+              <DataTypeSelect
+                value={localColumn.dataType}
+                onChange={handleDataTypeChange}
+                onBlur={() => {
+                  // Dismissed without selecting — allow normal blur saves again
+                  skipNextBlurSaveRef.current = false;
+                  setEditingField(null);
+                }}
+                className="column-row-editor__type-select"
+                autoOpen={true}
+              />
+            ) : (
+              <span
+                className="column-row-editor__type"
+                onDoubleClick={(e) => { e.stopPropagation(); handleFieldClick('dataType'); }}
+                // The whole type, since a long one is cut with an ellipsis.
+                title={mode !== 'readonly' ? `${localColumn.dataType} — double-click to edit` : localColumn.dataType}
+              >
+                {localColumn.dataType}
+              </span>
+            )}
+
+            {/* The description's first line, while collapsed */}
+            {!expanded && hasDescription && (
+              <span
+                className="column-row-editor__summary"
+                title={localColumn.description}
+              >
+                {localColumn.description.trim().split('\n')[0]}
+              </span>
+            )}
+          </div>
+        </div>
 
         {/* PK/FK/NK key badges — always pass toggles so built columns can edit keys */}
         {showIndicators && (
@@ -571,66 +639,6 @@ export function ColumnRowEditor({
             onToggleNK={onToggleNK ? () => { skipNextBlurSaveRef.current = true; onToggleNK(); } : undefined}
             showMultiplePKWarning={showMultiplePKWarning}
           />
-        )}
-
-        {/* Column name */}
-        {isEditing && editingField === 'name' ? (
-          <input
-            ref={nameInputRef}
-            type="text"
-            className={`column-row-editor__input ${validationError ? 'column-row-editor__input--error' : ''}`}
-            value={localColumn.name}
-            onChange={(e) =>
-              setLocalColumn((prev) => ({ ...prev, name: e.target.value }))
-            }
-            onKeyDown={handleKeyDown}
-            placeholder="column_name"
-          />
-        ) : (
-          <span
-            className="column-row-editor__name"
-            onDoubleClick={(e) => { e.stopPropagation(); handleFieldClick('name'); }}
-            title={mode !== 'readonly' ? 'Double-click to edit' : undefined}
-          >
-            {localColumn.name || (
-              <em className="column-row-editor__placeholder">column_name</em>
-            )}
-          </span>
-        )}
-
-        {/* Info indicator — shows when collapsed and has description */}
-        {!expanded && hasDescription && (
-          <span
-            className="column-row-editor__info-badge"
-            title={localColumn.description}
-            onClick={handleChevronClick}
-          >
-            ⓘ
-          </span>
-        )}
-
-        {/* Data type */}
-        {isEditing && editingField === 'dataType' ? (
-          <DataTypeSelect
-            value={localColumn.dataType}
-            onChange={handleDataTypeChange}
-            onBlur={() => {
-              // Dismissed without selecting — allow normal blur saves again
-              skipNextBlurSaveRef.current = false;
-              setEditingField(null);
-            }}
-            className="column-row-editor__type-select"
-            autoOpen={true}
-          />
-        ) : (
-          <span
-            className="column-row-editor__type"
-            onDoubleClick={(e) => { e.stopPropagation(); handleFieldClick('dataType'); }}
-            // The whole type, since a long one is cut with an ellipsis.
-            title={mode !== 'readonly' ? `${localColumn.dataType} — double-click to edit` : localColumn.dataType}
-          >
-            {localColumn.dataType}
-          </span>
         )}
 
         {/* Delete button */}
@@ -651,7 +659,7 @@ export function ColumnRowEditor({
                 title="Cancel"
                 aria-label="Cancel delete"
               >
-                ✕
+                <IconClose size={10} />
               </button>
             </span>
           ) : (
@@ -661,9 +669,22 @@ export function ColumnRowEditor({
               title="Delete column"
               aria-label="Delete column"
             >
-              ×
+              <IconClose size={12} />
             </button>
           )
+        )}
+
+        {/* Expand/collapse chevron (a trailing disclosure) */}
+        {onToggleExpand && (
+          <button
+            className="column-row-editor__chevron"
+            onClick={handleChevronClick}
+            title={expanded ? 'Collapse description (Alt+Click: all)' : 'Expand description (Alt+Click: all)'}
+            aria-label={expanded ? 'Collapse description' : 'Expand description'}
+            aria-expanded={expanded}
+          >
+            <IconChevron size={11} />
+          </button>
         )}
       </div>
 
@@ -700,7 +721,7 @@ export function ColumnRowEditor({
               title={mode !== 'readonly' ? 'Click to edit description' : undefined}
             >
               {localColumn.description || (
-                mode !== 'readonly' ? '✏ Add description...' : 'No description'
+                mode !== 'readonly' ? 'Add a description…' : 'No description'
               )}
             </div>
           )}
@@ -713,12 +734,13 @@ export function ColumnRowEditor({
                 className="column-row-editor__metadata-select"
                 value={localColumn.scdType != null ? String(localColumn.scdType) : ''}
                 onChange={handleScdTypeChange}
+                title={SCD_HINTS[localColumn.scdType != null ? String(localColumn.scdType) : '']}
                 disabled={mode === 'readonly'}
               >
                 <option value="">Not set</option>
-                <option value="0">Type 0 — Never changes</option>
-                <option value="1">Type 1 — Overwrite</option>
-                <option value="2">Type 2 — Track history</option>
+                <option value="0" title="Never changes">Type 0</option>
+                <option value="1" title="Overwrite">Type 1</option>
+                <option value="2" title="Track history">Type 2</option>
               </select>
             </div>
           )}
@@ -731,12 +753,13 @@ export function ColumnRowEditor({
                 className="column-row-editor__metadata-select"
                 value={localColumn.additiveType ?? ''}
                 onChange={handleAdditiveTypeChange}
+                title={ADDITIVE_HINTS[localColumn.additiveType ?? '']}
                 disabled={mode === 'readonly'}
               >
                 <option value="">Not set</option>
-                <option value="additive">Additive — Sum across all dims</option>
-                <option value="semi-additive">Semi-additive — Not across time</option>
-                <option value="non-additive">Non-additive — Store components</option>
+                <option value="additive" title="Sums across every dimension">Additive</option>
+                <option value="semi-additive" title="Sums across some dimensions, never across time">Semi-additive</option>
+                <option value="non-additive" title="Never sum it; store its components">Non-additive</option>
               </select>
             </div>
           )}

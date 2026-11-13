@@ -48,11 +48,22 @@ function Section({ section }: { section: DraftDetailSection }) {
 
 export function DetailsDrawer({ sections, onClose }: DetailsDrawerProps) {
   const closeRef = useRef<HTMLButtonElement>(null);
+  const asideRef = useRef<HTMLElement>(null);
   useEffect(() => {
+    // Focus moves into the drawer, and back to what opened it (Show details)
+    // when it closes, unless focus has already gone somewhere else.
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const aside = asideRef.current;
     closeRef.current?.focus();
+    return () => {
+      const active = document.activeElement;
+      const focusWasInDrawer = !active || active === document.body || (aside !== null && aside.contains(active));
+      if (focusWasInDrawer && opener?.isConnected) opener.focus();
+    };
   }, []);
   return (
     <aside
+      ref={asideRef}
       className="draft-drawer"
       aria-label="Details"
       onKeyDown={(e) => {

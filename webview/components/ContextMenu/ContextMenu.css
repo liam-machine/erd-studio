@@ -1,55 +1,101 @@
 /**
- * ContextMenu styles.
+ * ContextMenu styles: a macOS-style glass menu.
  *
- * Floating menu positioned at cursor location. Uses VS Code theme
- * tokens from webview/styles/theme.css for consistent dark/light support.
+ * A frosted, rounded sheet floating at the cursor (it is fixed-positioned
+ * outside the React Flow viewport, so backdrop-filter is allowed), with
+ * inset rows that light up softly on hover, hairline separators and quiet
+ * secondary text. Colours come only from the glass tokens in
+ * packages/renderer/src/styles/theme.css; high contrast and reduced
+ * transparency fall back through the tokens themselves.
  */
+
+/* Local recipes, derived from the tokens. */
+.context-menu {
+  --cm-row-height: 26px;
+  --cm-inset: var(--space-2);          /* the gap between the sheet's edge and a row */
+  --cm-row-pad: var(--space-4);        /* a row's own side padding */
+  --cm-label-width: 64px;
+}
 
 .context-menu {
   position: fixed;
-  z-index: 1000;
-  min-width: 200px;
+  z-index: var(--z-menu);
+  box-sizing: border-box;
+  min-width: 212px;
   max-width: 280px;
-  background: var(--panel-bg);
-  border: 1px solid var(--panel-border);
-  border-radius: 6px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  padding: var(--cm-inset);
   overflow: visible;
+
+  background: var(--glass-surface-3);
+  -webkit-backdrop-filter: var(--glass-backdrop);
+  backdrop-filter: var(--glass-backdrop);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--glass-elevation-3);
+
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+  line-height: var(--leading-tight);
+
+  /* Arrives with a short drop and fade. Translate only (no scale), so the
+     size the component measures to keep the menu on screen is exact. */
+  animation: context-menu-in var(--duration-base) var(--ease-out);
+}
+
+@keyframes context-menu-in {
+  from {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .context-menu {
+    animation: none;
+  }
 }
 
 /* ---------------------------------------------------------------------------
-   Header
+   Header: the menu's subject (a table name, "Relationship", "Note")
    --------------------------------------------------------------------------- */
 
 .context-menu__header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--panel-border);
-  background: rgba(255, 255, 255, 0.02);
+  gap: var(--space-4);
+  min-height: var(--cm-row-height);
+  padding: var(--space-1) var(--space-2) var(--space-1) var(--cm-row-pad);
 }
 
 .context-menu__header-actions {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-1);
+  flex-shrink: 0;
 }
 
 .context-menu__title {
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  color: var(--editor-fg);
-  opacity: 0.7;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-normal);
 }
 
 .context-menu__status {
-  padding: 2px 6px;
-  border-radius: 3px;
-  font-size: 10px;
-  font-weight: 500;
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-pill);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-medium);
   text-transform: capitalize;
 }
 
@@ -74,77 +120,95 @@
 }
 
 /* ---------------------------------------------------------------------------
-   Info section
+   Info section: key / value rows in a sunken well
    --------------------------------------------------------------------------- */
 
 .context-menu__info {
-  padding: 8px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: var(--space-1) 0 var(--space-1);
+  padding: var(--space-3) var(--cm-row-pad);
+  border-radius: var(--radius-md);
+  background: var(--glass-well);
 }
 
 .context-menu__row {
   display: flex;
-  align-items: baseline;
-  gap: 8px;
-  padding: 4px 0;
-}
-
-.context-menu__row:first-child {
-  padding-top: 0;
-}
-
-.context-menu__row:last-child {
-  padding-bottom: 0;
+  align-items: center;
+  gap: var(--space-4);
+  min-height: 22px;
+  padding: 0;
 }
 
 .context-menu__label {
   flex-shrink: 0;
-  width: 70px;
-  font-size: 11px;
-  color: var(--editor-fg);
-  opacity: 0.6;
+  width: var(--cm-label-width);
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
 }
 
 .context-menu__value {
-  font-size: 12px;
-  color: var(--editor-fg);
+  min-width: 0;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
   word-break: break-word;
 }
 
 .context-menu__value strong {
-  font-weight: 600;
+  color: var(--text-primary);
+  font-weight: var(--weight-semibold);
 }
 
 /* ---------------------------------------------------------------------------
-   Divider
+   Separator: an inset hairline, as on macOS
    --------------------------------------------------------------------------- */
 
 .context-menu__divider {
   height: 1px;
-  background: var(--panel-border);
-  margin: 0;
+  margin: var(--space-2) var(--cm-row-pad);
+  background: var(--glass-divider);
 }
 
 /* ---------------------------------------------------------------------------
-   Menu items
+   Menu items: inset rounded rows
    --------------------------------------------------------------------------- */
 
 .context-menu__item {
-  display: block;
+  display: flex;
+  align-items: center;
+  box-sizing: border-box;
   width: 100%;
-  padding: 8px 12px;
-  border: none;
+  min-height: var(--cm-row-height);
+  padding: 0 var(--cm-row-pad);
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-sm);
   background: transparent;
-  color: var(--editor-fg);
+  color: var(--text-primary);
   font-family: inherit;
-  font-size: 12px;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-regular);
   text-align: left;
   cursor: pointer;
-  transition: background 0.1s ease;
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard);
 }
 
 .context-menu__item:hover {
-  background: var(--button-bg);
-  color: var(--button-fg);
+  background: var(--glass-tint-accent-strong);
+  border-color: var(--control-border-hover);
+}
+
+.context-menu__item:active {
+  background: var(--control-fill-selected);
+}
+
+.context-menu__item:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: -2px;
 }
 
 .context-menu__item--danger {
@@ -152,8 +216,9 @@
 }
 
 .context-menu__item--danger:hover {
-  background: var(--error-fg);
-  color: white;
+  background: var(--glass-tint-error);
+  border-color: var(--glass-tint-error-edge);
+  color: var(--error-fg);
 }
 
 /* ---------------------------------------------------------------------------
@@ -167,82 +232,118 @@
 .context-menu__cardinality-wrapper {
   position: relative;
   flex: 1;
+  min-width: 0;
 }
 
 .context-menu__cardinality-button {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 4px;
+  gap: var(--space-2);
+  box-sizing: border-box;
   width: 100%;
-  padding: 4px 8px;
-  border: 1px solid var(--panel-border);
-  border-radius: 4px;
-  background: var(--input-bg);
-  color: var(--editor-fg);
+  min-height: var(--control-height-sm);
+  padding: 0 var(--space-3) 0 var(--space-4);
+  border: 1px solid var(--glass-input-border);
+  border-radius: var(--radius-sm);
+  background: var(--glass-input-bg);
+  color: var(--input-fg);
   font-family: inherit;
-  font-size: 12px;
+  font-size: var(--text-sm);
   text-align: left;
   cursor: pointer;
-  transition: border-color 0.15s ease;
+  transition:
+    border-color var(--duration-fast) var(--ease-standard),
+    box-shadow var(--duration-fast) var(--ease-standard);
 }
 
 .context-menu__cardinality-button:hover {
-  border-color: var(--focus-border);
+  border-color: var(--glass-border-strong);
+}
+
+.context-menu__cardinality-button[aria-expanded='true'],
+.context-menu__cardinality-button:focus-visible {
+  outline: none;
+  border-color: var(--glass-input-border-focus);
+  box-shadow: var(--focus-halo);
 }
 
 .context-menu__cardinality-arrow {
-  font-size: 10px;
-  opacity: 0.6;
+  color: var(--text-tertiary);
+  font-size: var(--text-2xs);
+  transition: transform var(--duration-fast) var(--ease-standard);
 }
 
+/* The list opens inside the menu's own glass (a backdrop root), so its blur
+   would see nothing past the menu's edge: it is the opaque tone instead. */
 .context-menu__cardinality-dropdown {
   position: absolute;
   top: 100%;
   left: 0;
   right: 0;
-  margin: 4px 0 0 0;
-  padding: 4px 0;
+  z-index: var(--z-popover);
+  margin: var(--space-2) 0 0 0;
+  padding: var(--space-2);
   list-style: none;
-  background: var(--panel-bg);
-  border: 1px solid var(--panel-border);
-  border-radius: 4px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-  z-index: 10;
+  background: var(--glass-surface-solid);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--glass-elevation-2);
+  animation: context-menu-in var(--duration-fast) var(--ease-out);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .context-menu__cardinality-dropdown {
+    animation: none;
+  }
 }
 
 /* Flipped dropdown (opens upward) */
 .context-menu__cardinality-dropdown--flipped {
   top: auto;
   bottom: 100%;
-  margin: 0 0 4px 0;
+  margin: 0 0 var(--space-2) 0;
 }
 
 .context-menu__cardinality-arrow--flipped {
   transform: rotate(180deg);
 }
 
-
 .context-menu__cardinality-option {
-  padding: 6px 10px;
-  font-size: 12px;
-  color: var(--editor-fg);
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: var(--control-height-sm);
+  padding: 0 var(--space-4) 0 var(--space-3);
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
   cursor: pointer;
-  transition: background 0.1s ease;
+  transition: background-color var(--duration-fast) var(--ease-standard);
+}
+
+/* Room for the check mark, so labels line up whether ticked or not. */
+.context-menu__cardinality-option::before {
+  content: '';
+  flex: none;
+  width: 12px;
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  text-align: center;
 }
 
 .context-menu__cardinality-option:hover {
-  background: var(--button-bg);
+  background: var(--glass-tint-accent-strong);
+  border-color: var(--control-border-hover);
 }
 
 .context-menu__cardinality-option--selected {
-  background: rgba(255, 255, 255, 0.05);
-  font-weight: 500;
+  font-weight: var(--weight-medium);
 }
 
 .context-menu__cardinality-option--selected::before {
-  content: '✓ ';
-  opacity: 0.7;
+  content: '✓';
 }
 
 /* ---------------------------------------------------------------------------
@@ -252,8 +353,9 @@
 .context-menu__cardinality-control {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-2);
   flex: 1;
+  min-width: 0;
 }
 
 .context-menu__cardinality-control .context-menu__cardinality-wrapper {
@@ -269,74 +371,100 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
+  width: var(--control-height-sm);
+  height: var(--control-height-sm);
   padding: 0;
-  border: 1px solid var(--panel-border);
-  border-radius: 4px;
-  background: var(--input-bg);
-  color: var(--editor-fg);
-  font-size: 14px;
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-sm);
+  background: var(--control-fill);
+  color: var(--text-secondary);
+  font-size: var(--text-md);
   cursor: pointer;
-  opacity: 0.7;
-  transition: opacity 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard),
+    transform var(--duration-instant) var(--ease-standard);
 }
 
 .context-menu__swap-btn:hover {
-  opacity: 1;
-  border-color: var(--focus-border);
-  background: var(--button-bg);
-  color: var(--button-fg);
+  background: var(--control-fill-hover);
+  border-color: var(--control-border-hover);
+  color: var(--text-primary);
+}
+
+.context-menu__swap-btn:active {
+  background: var(--control-fill-active);
+  transform: scale(0.94);
+}
+
+.context-menu__swap-btn:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: var(--focus-offset);
 }
 
 /* ---------------------------------------------------------------------------
-   Subtle edit link in header
+   Quiet header actions: Edit… / Unlink (neutral) and Remove (destructive)
    --------------------------------------------------------------------------- */
 
-.context-menu__edit-link {
-  padding: 2px 6px;
-  border: none;
-  border-radius: 3px;
-  background: transparent;
-  color: var(--button-bg);
+.context-menu__edit-link,
+.context-menu__delete-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 0 var(--space-4);
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-pill);
   font-family: inherit;
-  font-size: 10px;
-  opacity: 0.7;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  white-space: nowrap;
   cursor: pointer;
-  transition: opacity 0.15s ease, background 0.15s ease;
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard),
+    transform var(--duration-instant) var(--ease-standard);
+}
+
+.context-menu__edit-link {
+  background: var(--control-fill);
+  color: var(--text-secondary);
 }
 
 .context-menu__edit-link:hover {
-  opacity: 1;
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--control-fill-hover);
+  border-color: var(--control-border-hover);
+  color: var(--text-primary);
 }
 
-/* ---------------------------------------------------------------------------
-   Subtle delete link in header
-   --------------------------------------------------------------------------- */
-
 .context-menu__delete-link {
-  padding: 2px 6px;
-  border: none;
-  border-radius: 3px;
   background: transparent;
   color: var(--error-fg);
-  font-family: inherit;
-  font-size: 10px;
-  opacity: 0.5;
-  cursor: pointer;
-  transition: opacity 0.15s ease, background 0.15s ease;
 }
 
 .context-menu__delete-link:hover {
-  opacity: 1;
+  background: var(--glass-tint-error);
+  border-color: var(--control-border-hover);
 }
 
-/* Confirming state - more prominent to draw attention */
-.context-menu__delete-link--confirming {
-  opacity: 1;
+.context-menu__edit-link:active,
+.context-menu__delete-link:active {
+  transform: scale(0.96);
+}
+
+.context-menu__edit-link:focus-visible,
+.context-menu__delete-link:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: var(--focus-offset);
+}
+
+/* Confirming state: a clear red capsule asking for the second click. */
+.context-menu__delete-link--confirming,
+.context-menu__delete-link--confirming:hover {
+  background: var(--glass-tint-error);
+  border-color: var(--glass-tint-error-edge);
   color: var(--error-fg);
-  background: rgba(239, 68, 68, 0.15);
 }
 
 /* ---------------------------------------------------------------------------
@@ -345,24 +473,36 @@
 
 .context-menu__action-button {
   display: block;
-  width: calc(100% - 24px);
-  margin: 0 12px 8px;
-  padding: 8px 12px;
-  border: none;
-  border-radius: 4px;
-  background: var(--button-bg);
-  color: var(--button-fg);
+  box-sizing: border-box;
+  width: calc(100% - 2 * var(--space-2));
+  min-height: var(--control-height);
+  margin: var(--space-2);
+  padding: 0 var(--space-5);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  background: var(--accent);
+  color: var(--text-on-accent);
   font-family: inherit;
-  font-size: 12px;
-  font-weight: 500;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
   text-align: center;
   cursor: pointer;
-  transition: background 0.15s ease;
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    transform var(--duration-instant) var(--ease-standard);
 }
 
 .context-menu__action-button:hover {
-  background: var(--button-hover-bg, var(--button-bg));
-  filter: brightness(1.1);
+  background: var(--accent-hover);
+}
+
+.context-menu__action-button:active {
+  transform: scale(0.97);
+}
+
+.context-menu__action-button:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: var(--focus-offset);
 }
 
 .context-menu__action-button--approve {
@@ -371,9 +511,13 @@
 }
 
 .context-menu__action-button--unapprove {
-  background: transparent;
-  border: 1px solid var(--panel-border);
-  color: var(--editor-fg);
+  background: var(--control-fill);
+  border-color: var(--glass-border);
+  color: var(--text-primary);
+}
+
+.context-menu__action-button--unapprove:hover {
+  background: var(--control-fill-hover);
 }
 
 /* ---------------------------------------------------------------------------
@@ -382,44 +526,70 @@
 
 .context-menu__color-swatches {
   display: flex;
-  gap: 4px;
+  flex-wrap: wrap;
+  gap: var(--space-3);
 }
 
 .context-menu__color-swatch {
   width: 18px;
   height: 18px;
-  border: 2px solid transparent;
-  border-radius: 4px;
-  cursor: pointer;
-  transition: border-color 0.15s ease, transform 0.1s ease;
   padding: 0;
+  border: 1px solid var(--glass-border-strong);
+  border-radius: var(--radius-pill);
+  box-shadow: var(--glass-highlight);
+  cursor: pointer;
+  transition:
+    transform var(--duration-fast) var(--ease-spring),
+    box-shadow var(--duration-fast) var(--ease-standard);
 }
 
 .context-menu__color-swatch:hover {
-  border-color: var(--focus-border);
   transform: scale(1.15);
+  box-shadow: var(--glass-highlight), 0 0 0 2px var(--glass-border-strong);
+}
+
+.context-menu__color-swatch:active {
+  transform: scale(1.02);
+}
+
+.context-menu__color-swatch:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: var(--focus-offset);
 }
 
 .context-menu__link-select {
   flex: 1;
-  padding: 3px 6px;
-  border: 1px solid var(--panel-border);
-  border-radius: 4px;
-  background: var(--input-bg);
+  min-width: 0;
+  min-height: var(--control-height-sm);
+  padding: 0 var(--space-3);
+  border: 1px solid var(--glass-input-border);
+  border-radius: var(--radius-sm);
+  background: var(--glass-input-bg);
   color: var(--input-fg);
   font-family: inherit;
-  font-size: 11px;
+  font-size: var(--text-xs);
   cursor: pointer;
+  transition: border-color var(--duration-fast) var(--ease-standard);
 }
 
-/* Ghost edge hint — shown for relationships from comparison stage */
+.context-menu__link-select:hover {
+  border-color: var(--glass-border-strong);
+}
+
+.context-menu__link-select:focus,
+.context-menu__link-select:focus-visible {
+  outline: none;
+  border-color: var(--glass-input-border-focus);
+  box-shadow: var(--focus-halo);
+}
+
+/* Ghost edge hint: shown for relationships from the comparison stage */
 .context-menu__ghost-hint {
-  padding: 6px 10px;
-  border-top: 1px solid var(--panel-border);
-  font-size: 10px;
+  margin: var(--space-2) var(--cm-row-pad) var(--space-1);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--glass-divider);
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
   font-style: italic;
-  color: var(--editor-fg);
-  opacity: 0.5;
-  border-bottom-left-radius: 5px;
-  border-bottom-right-radius: 5px;
+  line-height: var(--leading-normal);
 }

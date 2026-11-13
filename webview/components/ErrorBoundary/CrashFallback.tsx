@@ -104,6 +104,12 @@ export function CrashFallback({ surface, onReload, onSendFeedback }: CrashFallba
   return (
     <div className="crash-fallback" role="alert">
       <div className="crash-fallback__panel">
+        {/* Decorative: a warning mark. Colour from CSS (currentColor). */}
+        <span className="crash-fallback__icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="22" height="22" focusable="false">
+            <path d="M12 3.5 2.8 19.5h18.4L12 3.5ZM12 10v4.5M12 17.2v.1" />
+          </svg>
+        </span>
         <p className="crash-fallback__title">{what} stopped working</p>
         <p className="crash-fallback__body">
           This is a problem in ERD Studio, not in your files.{' '}

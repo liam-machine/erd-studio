@@ -33,8 +33,10 @@ import { MigrationFailed, MigrationService, migrateLegacySemanticDir } from './s
 import {
   DRAW_FROM_DBT_NEEDS_DBT_MESSAGE,
   hasErdStudioData,
+  hostSearchCannotChangeRoot,
   resolveDbtProject,
   samePath,
+  withHostCandidates,
   type DbtProjectResolution,
 } from './services/projectDiscovery';
 import { YmlParserService, emptyYmlData } from './services/ymlParserService';
@@ -56,7 +58,7 @@ import {
   type ManifestMissingReasonDeps,
 } from './services/manifestMissingReasons';
 import { TableLibraryTreeProvider, tableOwnerOf, type TableLibraryNode, type TableLibraryTableNode } from './providers/ModelLibraryTreeProvider';
-import { TableLibraryDragController } from './providers/tableLibraryDrag';
+import { TableLibraryDragController, tablesOfDraggedRows } from './providers/tableLibraryDrag';
 import { describeOrganizePlan, planOrganizeByLayer, type SubjectAreaTableUsage } from './services/modelLibraryOrganizer';
 import { describeDuplicateFix, duplicateNamePrefix, duplicateNamePrompt, planDuplicateFix, repointSubjectAreaTable, suggestDuplicateName, type SubjectAreaReference } from './services/duplicateModelResolver';
 import { validateNewDbmlTableName, validateTableName } from './providers/payloadValidation';
@@ -83,10 +85,12 @@ import {
   REFRESH_FAILED,
   SLOW_ACTIVATION_MS,
   activationFailureCodes,
+  dbtSearchFailureCodes,
   harnessFailureKeys,
   loggedErrorCodes,
+  slowActivationFeature,
   type ActivationPhase,
-  type DbtSearchOutcome,
+  type DbtSearchResult,
   type RefreshKind,
 } from './services/runtimeTelemetry';
 import { setErrorHook } from './services/logger';
@@ -150,7 +154,10 @@ import { HelpTreeProvider } from './providers/HelpTreeProvider';
 import { RelationshipsTreeProvider, type RelationshipsGrouping, type RelationshipsNode } from './providers/RelationshipsTreeProvider';
 import { registerSidebarFilters } from './providers/sidebarFilter';
 import { registerRowDetails } from './providers/rowDetails';
-import { openInDiagram, openRelationshipSource, type RelationshipsViewDeps } from './commands/relationshipsView';
+import { installContextKeyRecorder } from './providers/glassSidebar/contextKeys';
+import { FOCUS_GLASS_SEARCH_COMMAND, TOGGLE_GLASS_SIDEBAR_COMMAND, glassSidebarEnabled, registerGlassSidebar } from './providers/glassSidebar/GlassSidebarProvider';
+import { diagramsShowing, openInDiagram, openRelationshipSource, openTableFile, type RelationshipsViewDeps } from './commands/relationshipsView';
+import { RowActivations, diagramTheClickChooses, rowActivationKey } from './commands/sidebarRowClick';
 import {
   ADD_TO_DIAGRAM_COMMAND,
   ADD_TO_OPEN_DIAGRAM_COMMAND,
@@ -250,14 +257,19 @@ import {
   START_SUGGESTIONS_SETTING,
   START_SUGGESTIONS_SETTING_OFF_MESSAGE,
   UNDO_BUTTON,
+  START_SUGGESTION_MACHINE_KEY,
   START_SUGGESTION_STATE_KEY,
+  START_SUGGESTIONS_UNDO_ARG,
   TURN_OFF_START_SUGGESTIONS_COMMAND,
   TURN_ON_START_SUGGESTIONS_COMMAND,
   dbtProjectAboveOpenFolders,
+  isStartSuggestionsUndo,
+  readStartSuggestionMachine,
   readStartSuggestionState,
   runStartSuggestion,
   startSuggestionDue,
   startSuggestionsOff,
+  type StartSuggestionMachine,
   type StartSuggestionState,
 } from './services/startSuggestion';
 
@@ -410,12 +422,16 @@ function workspaceFolderPaths(): string[] {
  * ({@link findHostDbtProjects}), merged with the bounded walk.
  */
 function resolveWorkspaceProject(context: vscode.ExtensionContext, hostCandidates?: readonly string[]): DbtProjectResolution {
-  return resolveDbtProject(workspaceFolderPaths(), {
+  return resolveDbtProject(workspaceFolderPaths(), { ...workspaceProjectChoice(context), hostCandidates });
+}
+
+/** The user's own say in the project: `erdStudio.projectPath`, the picked project, and where ERD data lives. */
+function workspaceProjectChoice(context: vscode.ExtensionContext): { projectPath: string; picked: string | undefined; semanticDir: string } {
+  return {
     projectPath: getErdStudioSetting('projectPath', ''),
     picked: context.workspaceState.get<string>(SELECTED_PROJECT_KEY),
     semanticDir: getErdStudioSetting('semanticDir', '.erd-studio'),
-    hostCandidates,
-  });
+  };
 }
 
 /** How long activation waits for the host's dbt_project.yml search before the walk alone decides. */
@@ -429,9 +445,13 @@ const HOST_DBT_SEARCH_MAX = 50;
  * the `workspaceContains` activation event looks), skipping the folders the
  * walk skips (`DBT_SEARCH_EXCLUDE_GLOB`), shallowest first. No `paths` when
  * it does not answer within `timeoutMs` (`timeout`) or fails (`error`): the
- * walk alone decides. The outcome is for usage telemetry (B4).
+ * walk alone decides. The outcome is for usage telemetry (B4), and a failure
+ * says which step failed (#304): `rejected` (findFiles rejected), `sort`
+ * (reading or sorting what it returned threw) or `threw` (findFiles threw
+ * before returning a promise). Nothing is recorded here: a rejection that
+ * arrives after the timeout (the `finally` cancels the search) is ignored.
  */
-export async function findHostDbtProjects(timeoutMs: number): Promise<{ paths?: string[]; outcome: DbtSearchOutcome }> {
+export async function findHostDbtProjects(timeoutMs: number): Promise<DbtSearchResult> {
   const folders = workspaceFolderPaths();
   if (folders.length === 0) return { paths: [], outcome: 'ok' };
   const source = new vscode.CancellationTokenSource();
@@ -439,13 +459,19 @@ export async function findHostDbtProjects(timeoutMs: number): Promise<{ paths?: 
   try {
     const search = Promise.resolve(vscode.workspace.findFiles('**/dbt_project.yml', DBT_SEARCH_EXCLUDE_GLOB, HOST_DBT_SEARCH_MAX, source.token))
       .then(
-        (uris): { paths?: string[]; outcome: DbtSearchOutcome } => ({ paths: sortDbtCandidates((uris ?? []).map((u) => u.fsPath), folders), outcome: 'ok' }),
-        (): { outcome: DbtSearchOutcome } => ({ outcome: 'error' }),
+        (uris): DbtSearchResult => {
+          try {
+            return { paths: sortDbtCandidates((uris ?? []).map((u) => u.fsPath), folders), outcome: 'ok' };
+          } catch {
+            return { outcome: 'error', reason: 'sort' };
+          }
+        },
+        (): DbtSearchResult => ({ outcome: 'error', reason: 'rejected' }),
       );
-    const timedOut = new Promise<{ outcome: DbtSearchOutcome }>((resolve) => { timer = setTimeout(() => resolve({ outcome: 'timeout' }), timeoutMs); });
+    const timedOut = new Promise<DbtSearchResult>((resolve) => { timer = setTimeout(() => resolve({ outcome: 'timeout' }), timeoutMs); });
     return await Promise.race([search, timedOut]);
   } catch {
-    return { outcome: 'error' };
+    return { outcome: 'error', reason: 'threw' };
   } finally {
     if (timer) clearTimeout(timer);
     source.cancel();
@@ -508,7 +534,7 @@ async function selectDbtProject(
 ): Promise<void> {
   // The host's whole search, so a project deeper than the walk is listed too.
   const search = await findHostDbtProjects(5000);
-  if (search.outcome === 'error') telemetry.error('dbtSearchFailed');
+  if (search.outcome === 'error') for (const code of dbtSearchFailureCodes(search.reason)) telemetry.error(code);
   const resolution = resolveWorkspaceProject(context, search.paths);
   if (resolution.candidates.length === 0) {
     // A window always has a root here (the command is registered only then),
@@ -849,6 +875,8 @@ export const NO_LEGACY_ALIAS = new Set([
   'erdStudio.newSchema',
   'erdStudio.openRelationshipSource',
   'erdStudio.openInDiagram',
+  'erdStudio.openTableFile',
+  'erdStudio.showOnAnotherDiagram',
   'erdStudio.groupRelationshipsByFile',
   'erdStudio.groupRelationshipsByTable',
   'erdStudio.goToTable',
@@ -877,6 +905,8 @@ export const NO_LEGACY_ALIAS = new Set([
   'erdStudio.customiseFields',
   'erdStudio.showImportReport',
   'erdStudio.suggestRelationships',
+  TOGGLE_GLASS_SIDEBAR_COMMAND,
+  FOCUS_GLASS_SEARCH_COMMAND,
 ]);
 
 /**
@@ -896,6 +926,9 @@ export const PRE_REGISTERED_COMMANDS = new Set([
   'erdStudio.showImportGuide',
   // Show Me Around: the onboarding guide (an empty window gets the example's draft).
   'erdStudio.showMeAround',
+  // The glass sidebar (prototype) shows in an empty window too, and so does its search field.
+  TOGGLE_GLASS_SIDEBAR_COMMAND,
+  FOCUS_GLASS_SEARCH_COMMAND,
 ]);
 
 /**
@@ -906,6 +939,19 @@ export const PRE_REGISTERED_COMMANDS = new Set([
  * and domain JSON files show a helpful message instead of "command not
  * found" / a blank editor error.
  */
+/**
+ * The file or folder a side-panel row's Reveal in Explorer shows: a Table
+ * Library row's own (`filePath`: a table's file, a schema's, layer's or
+ * folder's folder), or a Diagrams diagram row's file. Undefined for anything else.
+ */
+export function revealInExplorerPath(node: unknown): string | undefined {
+  if (typeof node !== 'object' || node === null) return undefined;
+  const n = node as { type?: unknown; filePath?: unknown; summary?: { filePath?: unknown } };
+  if (n.type === 'domain') return typeof n.summary?.filePath === 'string' ? n.summary.filePath : undefined;
+  if (n.type === 'model' || n.type === 'folder' || n.type === 'layer') return typeof n.filePath === 'string' && n.filePath !== '' ? n.filePath : undefined;
+  return undefined;
+}
+
 function registerFallbackCommands(context: vscode.ExtensionContext): void {
   const contributed = (context.extension.packageJSON as {
     contributes?: { commands?: Array<{ command: string }> };
@@ -1307,6 +1353,11 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
   // The ERD Studio output channel (a LogOutputChannel: the user picks its
   // level). Plugged in first so every later line reaches it.
   const activationStart = Date.now();
+  // The glass sidebar (prototype) evaluates the views' `when` clauses itself:
+  // mirror every erdStudio.* setContext from here on (each still reaches VS
+  // Code unchanged). Its view and toggle are registered below, before the
+  // no-project return.
+  installContextKeyRecorder();
   // The walkthrough is listed from now on (its `when`, WALKTHROUGH_READY_CONTEXT_KEY).
   void vscode.commands.executeCommand('setContext', WALKTHROUGH_READY_CONTEXT_KEY, true);
   const outputChannel = vscode.window.createOutputChannel(LOG_CHANNEL_NAME, { log: true });
@@ -1357,6 +1408,14 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
   const freshInstall = previousVersion === undefined && !context.globalState.get<boolean>(GETTING_STARTED_SHOWN_KEY);
   if (freshInstall) {
     await context.globalState.update(GETTING_STARTED_PENDING_KEY, true);
+    // The start suggestion's own record that this install was new here (#305): this
+    // activation is the only one that can tell, and telemetry (which may be off) is
+    // never asked. A later window's start suggestion keeps once per folder for it;
+    // every install without it is an upgrader, asked once per machine.
+    await context.globalState.update(START_SUGGESTION_MACHINE_KEY, {
+      ...readStartSuggestionMachine(context.globalState.get(START_SUGGESTION_MACHINE_KEY)),
+      newInstall: true,
+    } satisfies StartSuggestionMachine);
   }
   if (previousVersion && previousVersion !== currentVersion && hasOpenSubjectAreaCanvas()) {
     // If the user cancels the reload (unsaved files), keep activating so
@@ -1574,13 +1633,47 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     }),
   );
 
+  // The glass sidebar (prototype): its WebviewView and Toggle Glass Sidebar work in an empty window too.
+  const glassSidebar = registerGlassSidebar(context);
+
   // The host's own search for dbt_project.yml (every depth), bounded so it
-  // never holds activation up; the walk alone decides when it is late.
-  const hostDbtSearch = await findHostDbtProjects(ACTIVATION_DBT_SEARCH_MS);
-  const hostDbtProjects = hostDbtSearch.paths;
-  if (hostDbtSearch.outcome === 'timeout') telemetry.feature('dbtSearchTimedOut');
-  else if (hostDbtSearch.outcome === 'error') telemetry.error('dbtSearchFailed');
+  // never holds activation up; the walk alone decides when it is late. Not
+  // waited for at all when nothing it finds can change the project that
+  // opens (#295: the first dbt workspace folder already holds ERD data): it
+  // then runs on, off activation's path, only to count the workspace's dbt
+  // projects for the Select dbt Project button (below, with the project row).
+  const dbtSearchStart = Date.now();
+  // Undefined when activation did not wait for the search (dbtSearchSkipped).
+  let hostDbtSearch: DbtSearchResult | undefined;
+  let lateHostDbtSearch: Promise<string[] | undefined> | undefined;
+  if (hostSearchCannotChangeRoot(workspaceFolderPaths(), workspaceProjectChoice(context))) {
+    // What activation found, not something the user did: off the onboarding trail.
+    telemetry.featureQuiet('dbtSearchSkipped');
+    lateHostDbtSearch = findHostDbtProjects(60_000).then((late) => {
+      if (late.outcome === 'error') {
+        for (const code of dbtSearchFailureCodes(late.reason)) telemetry.error(code);
+        // No projectPath, no pick, and the walk found the dbt project that
+        // opens (hostSearchCannotChangeRoot), so this failure lost nothing.
+        telemetry.feature('dbtSearchFailedWalkFound');
+      }
+      return late.paths;
+    });
+  } else {
+    hostDbtSearch = await findHostDbtProjects(ACTIVATION_DBT_SEARCH_MS);
+    if (hostDbtSearch.outcome === 'timeout') telemetry.feature('dbtSearchTimedOut');
+    else if (hostDbtSearch.outcome === 'error') for (const code of dbtSearchFailureCodes(hostDbtSearch.reason)) telemetry.error(code);
+  }
+  const hostDbtProjects = hostDbtSearch?.paths;
+  // Activation's stretches, for a slow one (slowActivationFeature, below).
+  const dbtSearchMs = elapsedMs(dbtSearchStart);
+  const walkStart = Date.now();
   const projectResolution = resolveWorkspaceProject(context, hostDbtProjects);
+  const walkMs = elapsedMs(walkStart);
+  // The search failed and the walk alone still found a dbt project (#304):
+  // a failure without this is one that may have cost the user their project.
+  // `autoRoot` is what the walk resolves (a projectPath setting or a pick does
+  // not make it), so a setting or a pick says nothing either way.
+  if (hostDbtSearch?.outcome === 'error' && projectResolution.autoRoot !== undefined) telemetry.feature('dbtSearchFailedWalkFound');
   const workspaceRoot = projectResolution.root;
   // Logical-only mode: a root without dbt_project.yml (any folder now opens).
   // No Physical stage, no dbt services or watchers, nothing written unasked.
@@ -1663,6 +1756,7 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
   }
 
   activationPhase = 'Services';
+  const servicesStartMs = elapsedMs(activationStart);
   log.info(hasDbt
     ? `ERD Studio: Found dbt project at ${workspaceRoot}`
     : `ERD Studio: Opened ${workspaceRoot} (no dbt_project.yml: logical-only)`);
@@ -1885,6 +1979,40 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
   // (the nothing-found notification's one trigger, set up with the start suggestion below).
   let emptyDiagramsViewShown = false;
   let onEmptyDiagramsViewShown: () => void = () => {};
+  // A root listing found no rows, and the empty view it means has not yet been
+  // counted as on screen (see emptyDiagramsOnScreen): `undefined` when none is waiting,
+  // else who listed it.
+  let emptyDiagramsListed: 'native' | 'glass' | undefined;
+  /**
+   * The empty Diagrams view is on screen: the funnel's sidebar step, and the
+   * automatic draft's one trigger. VS Code lists a native view only to draw
+   * it, so a native listing with no rows is the signal. The glass sidebar
+   * lists every section as soon as its page loads, folded or not, so its
+   * listing waits until its Diagrams card is drawn open in a visible view
+   * (`sectionShown`). Once per listing that found the tree empty.
+   *
+   * A glass listing still waiting when the user turns the glass sidebar off
+   * (Toggle Glass Sidebar fires onDidChangeShownSections) counts as the
+   * native view's: the standard Diagrams view now draws that same empty
+   * tree, and its provider lists nothing again to say so (it reports only a
+   * change of its loading state).
+   */
+  const emptyDiagramsOnScreen = (): void => {
+    if (!emptyDiagramsListed) return;
+    if (emptyDiagramsListed === 'glass' && glassSidebarEnabled(context.globalState) && !glassSidebar.sectionShown('diagrams')) return;
+    emptyDiagramsListed = undefined;
+    telemetry.featureOnce('sidebarStartShown');
+    emptyDiagramsViewShown = true;
+    // Its start variants follow the suggestion, so look now (deferred: this
+    // can be the first listing, still inside activation) and count what it shows.
+    setTimeout(() => {
+      void startIntent.refresh().then((intent) => {
+        if (intent) recordStartSuggested(intent);
+        onEmptyDiagramsViewShown();
+      });
+    }, 0);
+  };
+  context.subscriptions.push(glassSidebar.onDidChangeShownSections(emptyDiagramsOnScreen));
   const treeProvider = new SubjectAreaTreeProvider(
     subjectAreaService,
     layerService,
@@ -1892,20 +2020,9 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     semanticDir,
     (loading) => {
       void vscode.commands.executeCommand('setContext', 'erdStudio.diagramsLoading', loading);
-      // VS Code lists a view only to draw it: a listing with no rows means the
-      // empty view, with its start buttons, is on screen (the funnel's sidebar step).
-      // Its start variants follow the suggestion, so look now (deferred: this
-      // can be the first listing, still inside activation) and count what it shows.
-      if (!loading) {
-        telemetry.featureOnce('sidebarStartShown');
-        emptyDiagramsViewShown = true;
-        setTimeout(() => {
-          void startIntent.refresh().then((intent) => {
-            if (intent) recordStartSuggested(intent);
-            onEmptyDiagramsViewShown();
-          });
-        }, 0);
-      }
+      // A listing with no rows: the empty view, with its start buttons (counted once it is on screen).
+      emptyDiagramsListed = loading ? undefined : glassSidebar.listingNow ? 'glass' : 'native';
+      emptyDiagramsOnScreen();
     },
     (kind) => dbmlFileIcon(context.extensionUri, kind),
     tableHomes,
@@ -1948,6 +2065,8 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     diagramMembers,
   );
   tableLibraryProvider.setHasDbtProject(hasDbt);
+  // Reading table files for a col: filter shows progress on the native view and the glass Table Library section.
+  tableLibraryProvider.setProgress((task) => glassSidebar.withSectionProgress('tables', task));
   // Held while Convert Project to DBML writes: one refresh of each view after, not one per file.
   const viewRefreshes = new RefreshGate();
   viewRefreshes.gateMethod(treeProvider, 'refresh', 'subjectAreas');
@@ -1970,6 +2089,7 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
   // The two views a table is revealed in (Reveal in Table Library; Go to
   // Table → Show Relationships); set where they are created, below.
   let tableLibraryView: vscode.TreeView<TableLibraryNode> | undefined;
+  let tableLibraryDrag: TableLibraryDragController | undefined;
   let relationshipsView: vscode.TreeView<RelationshipsNode> | undefined;
   // Grouped under each table (the default) or by relationships file: the
   // view-title toggle, remembered for this workspace.
@@ -2148,6 +2268,14 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     activationMs: projectReadMs,
   });
   if (projectReadMs > SLOW_ACTIVATION_MS) telemetry.featureOnce('activationOver10s');
+  // Which stretch held a slow one (#295): the later phases start after this point.
+  const slowStretch = slowActivationFeature({
+    dbtSearch: dbtSearchMs,
+    walk: walkMs,
+    discovery: servicesStartMs - dbtSearchMs - walkMs,
+    services: projectReadMs - servicesStartMs,
+  }, projectReadMs);
+  if (slowStretch) telemetry.featureOnce(slowStretch);
 
   // A diagram in a picker: its layer and table count, and its tables as the
   // detail line, so typing a table's name finds every diagram that shows it.
@@ -2214,10 +2342,14 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     if (unused) {
       noteUnusedDbtProject(workspaceRoot, unused, projectResolution.source === 'setting' ? 'setting' : 'discovery');
     } else if (hostDbtProjects === undefined) {
-      // The host's search was late: let it finish, off activation's path.
-      void findHostDbtProjects(60_000).then(({ paths: late, outcome }) => {
-        if (outcome === 'error') telemetry.error('dbtSearchFailed');
-        const found = late?.find((dir) => !samePath(dir, workspaceRoot));
+      // The host's search was late or failed: let it finish (or try once
+      // more), off activation's path. A failure is counted once per window
+      // (#304): only when activation's own search timed out and so counted none.
+      void findHostDbtProjects(60_000).then((late) => {
+        if (late.outcome === 'error' && hostDbtSearch?.outcome === 'timeout') {
+          for (const code of dbtSearchFailureCodes(late.reason)) telemetry.error(code);
+        }
+        const found = late.paths?.find((dir) => !samePath(dir, workspaceRoot));
         if (found) noteUnusedDbtProject(workspaceRoot, found, 'search');
       });
     }
@@ -2510,6 +2642,7 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
         // By its file: another schema folder may have a table of its name.
         const node = tableLibraryProvider.findTableNode(name, filePath);
         if (node && tableLibraryView?.visible) await tableLibraryView.reveal(node, { select: true, focus: false });
+        else if (node && glassSidebar.visible) await glassSidebar.reveal('tables', node);
         await vscode.commands.executeCommand('vscode.open', vscode.Uri.file(filePath));
       } catch (err) {
         log.warn('[ERD Studio] New Table: the new table could not be shown:', err);
@@ -3269,6 +3402,14 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     projectChangedSubscription,
     (() => {
       domainTreeData!.attach(treeProvider);
+      // The glass sidebar draws the same provider (it lists only while its view shows).
+      // Its rows take the same drops the native view does: Table Library rows on a
+      // diagram's row, a layer row on another layer row (reorder).
+      glassSidebar.setSource<TreeElement>('diagrams', treeProvider, {
+        controller: treeProvider,
+        dragKind: (row) => (row.type === 'layer' ? 'layer' : undefined),
+        dropKinds: (row) => (row.type === 'domain' ? ['tables'] : row.type === 'layer' ? ['layer'] : []),
+      });
       // Whenever there is a choice to make, the first row of the tree names
       // the open project and switches it on click — always visible, unlike
       // the view-title icon, which VS Code only shows on hover (#82).
@@ -3278,12 +3419,25 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
           : undefined);
       };
       showProjectName();
+      // The host's search that activation did not wait for (#295): a dbt project
+      // only it found (deeper than the walk goes) reveals the button and the
+      // row, as it would have had activation waited. The open project stays.
+      let lateSearchSettled = false;
+      void lateHostDbtSearch?.then((paths) => {
+        if (lateSearchSettled || !paths || !hasDbt || hasMultipleProjects) return;
+        if (withHostCandidates(projectResolution.candidates, paths).length <= 1) return;
+        hasMultipleProjects = true;
+        void vscode.commands.executeCommand('setContext', 'erdStudio.hasMultipleDbtProjects', true);
+        showProjectName();
+      });
       const foldersChanged = vscode.workspace.onDidChangeWorkspaceFolders(() => {
+        // The late search answered for the old folders: these are counted afresh.
+        lateSearchSettled = true;
         hasMultipleProjects = hasDbt && resolveWorkspaceProject(context).candidates.length > 1;
         void vscode.commands.executeCommand('setContext', 'erdStudio.hasMultipleDbtProjects', hasMultipleProjects);
         showProjectName();
       });
-      return vscode.Disposable.from(domainTreeView!, domainTreeData!, foldersChanged);
+      return vscode.Disposable.from(domainTreeView!, domainTreeData!, foldersChanged, { dispose: () => { lateSearchSettled = true; } });
     })(),
     vscode.window.registerCustomEditorProvider(SUBJECT_AREA_EDITOR_VIEW_TYPE, editorProvider, {
       // Keep the webview (React tree, ELK worker, in-progress discrepancy /
@@ -3294,11 +3448,13 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     vscode.window.registerFileDecorationProvider(decorationProvider),
     tableLibraryProvider,
     (() => {
+      // One drag source for the native view and the glass sidebar's Table Library.
+      tableLibraryDrag = new TableLibraryDragController((tables, files) => editorProvider.noteLibraryDrag(tables, files), { withFiles: true });
       tableLibraryView = vscode.window.createTreeView('erdStudio.modelLibrary', {
         treeDataProvider: tableLibraryProvider,
         // Rows drag onto a diagram: a drop there adds them (with Shift where they land; see docs/dev/architecture.md).
         // Each dragged table's file goes with its name: a drop adds that file where two schema folders share the name.
-        dragAndDropController: new TableLibraryDragController((tables, files) => editorProvider.noteLibraryDrag(tables, files), { withFiles: true }),
+        dragAndDropController: tableLibraryDrag,
         // Move Table moves every selected table to one folder.
         canSelectMany: true,
         showCollapseAll: true,
@@ -3317,6 +3473,21 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
       treeDataProvider: helpProvider,
       canSelectMany: false,
     }),
+    // The glass sidebar bridges the same three providers, and the Table Library's drag source.
+    (() => {
+      glassSidebar.setSource<TableLibraryNode>('tables', tableLibraryProvider, {
+        controller: tableLibraryDrag!,
+        // A row that carries at least one table: a table (not an ignored duplicate), or a schema or layer with one.
+        dragKind: (row) => (tablesOfDraggedRows([row], 1).names.length > 0 ? 'tables' : undefined),
+        // The tables a drag of the row carries, as the drop counts them: the drag picture says "4 tables".
+        dragCount: (row) => tablesOfDraggedRows([row]).names.length,
+        // Let go outside the sidebar: the canvas under that point adds the drag at once (not at the pointer's next move).
+        released: (at) => editorProvider.libraryDragReleased(at),
+      });
+      glassSidebar.setSource('relationships', relationshipsProvider);
+      glassSidebar.setSource('help', helpProvider);
+      return { dispose: () => {} };
+    })(),
     activationCheckpoint('Commands'),
     (() => {
       const deps: RelationshipsViewDeps = {
@@ -3327,9 +3498,15 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
         usage: tableUsage,
         layerLabel: (layer) => layerService.getLabel(layer),
         revealRelationship: (filePath, target) => editorProvider.revealRelationship(vscode.Uri.file(filePath), target),
-        revealTable: (filePath, modelName) => editorProvider.revealTable(vscode.Uri.file(filePath), modelName),
+        revealTable: (filePath, modelName, options) => editorProvider.revealTable(vscode.Uri.file(filePath), modelName, options),
         addToDiagram: (tables) => addToDiagramCommand(addToDiagramDeps, tables),
+        // The diagram in front of the user: the active editor's, else the canvas last active while it is still on screen.
+        lookingAtDiagram: () => activeSubjectAreaCanvasPath() ?? editorProvider.lastActiveVisibleDiagramPath(),
       };
+      // A sidebar row's click and double-click (the native views have no double-click event: a second
+      // activation of the same row soon after is one; the glass page's dblclick settles through it too).
+      const rowActivations = new RowActivations();
+      const isPlainObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
       const addToDiagramDeps: AddToDiagramDeps = {
         listSubjectAreas: deps.listSubjectAreas,
         memberNames: deps.memberNames,
@@ -3343,6 +3520,8 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
           } else {
             await vscode.commands.executeCommand('erdStudio.openDomain', filePath);
           }
+          // A timed drop (a Diagrams row, a missed canvas drop): the diagram is in front.
+          editorProvider.noteDropDiagramOpened(filePath);
           return editorProvider.addTablesToDiagram(vscode.Uri.file(filePath), tables, files);
         },
         // The diagram in front of the user (or the only one on screen) takes the tables without a pick.
@@ -3359,6 +3538,7 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
           ...(remembered ? { remembered } : {}),
         });
         if (!found) return false;
+        editorProvider.noteDropSeen('diagramsRow', filePath);
         await addToDiagramDeps.addTables(filePath, found.names, found.files);
         return true;
       });
@@ -3390,6 +3570,8 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
         relationships: { view: relationshipsView!, tree: relationshipsProvider },
       });
       context.subscriptions.push(...sidebarFilters.disposables);
+      // The glass sidebar's search field drives the same three filters (all at once).
+      glassSidebar.setFilters(sidebarFilters.filters);
       // Show / Hide Row Details (each view's … menu): `erdStudio.sidebar.rowDetails`, applied to the three trees now and on change.
       context.subscriptions.push(...registerRowDetails([treeProvider, tableLibraryProvider, relationshipsProvider]));
       // A Go to Table row's table: by its file where one is given (told apart by identity), else by its name.
@@ -3416,14 +3598,19 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
           let node = await relationshipsProvider.findTableNode(name);
           // Hidden by the view's filter: clear it, then show the table.
           if (!node && sidebarFilters.filters.relationships.isFiltered()) {
-            sidebarFilters.filters.relationships.clear();
+            // In the glass sidebar the filter may be the search field's: that clears the field.
+            if (glassSidebarEnabled(context.globalState)) glassSidebar.clearFilter('relationships');
+            else sidebarFilters.filters.relationships.clear();
             node = await relationshipsProvider.findTableNode(name);
           }
           if (!node) {
             void vscode.window.showInformationMessage(`ERD Studio: "${name}" has no relationships yet.`);
             return;
           }
-          await relationshipsView?.reveal(node, { select: true, focus: true, expand: true });
+          // With the glass sidebar on, the native view is hidden (its `when`): reveal the row there instead.
+          // Both open the table's row on its relationships (`expand`).
+          if (glassSidebarEnabled(context.globalState)) await glassSidebar.reveal('relationships', node, { focus: true, expand: true });
+          else await relationshipsView?.reveal(node, { select: true, focus: true, expand: true });
         },
       };
       return vscode.Disposable.from(
@@ -3435,6 +3622,7 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
           diagramName: (filePath) => deps.listSubjectAreas().find((s) => samePath(s.filePath, filePath))?.domain
             ?? path.basename(filePath, path.extname(filePath)),
           addTables: (filePath, tables, files) => addToDiagramDeps.addTables(filePath, tables, files),
+          dropSeen: (filePath) => editorProvider.noteDropSeen('missedDrop', filePath),
         }),
         vscode.commands.registerCommand(GO_TO_TABLE_COMMAND, (query?: unknown) =>
           goToTableCommand(goToTableDeps, typeof query === 'string' ? query : undefined)),
@@ -3450,31 +3638,69 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
           let node = typeof name === 'string' ? tableLibraryProvider.findTableNode(name, file) : undefined;
           // Hidden by the view's filter: clear it, then reveal the table.
           if (!node && typeof name === 'string' && sidebarFilters.filters.tableLibrary.isFiltered()) {
-            sidebarFilters.filters.tableLibrary.clear();
+            // In the glass sidebar the filter may be the search field's: that clears the field.
+            if (glassSidebarEnabled(context.globalState)) glassSidebar.clearFilter('tables');
+            else sidebarFilters.filters.tableLibrary.clear();
             node = tableLibraryProvider.findTableNode(name, file);
           }
           if (!node) {
             void vscode.window.showErrorMessage(`Reveal in Table Library: ${typeof name === 'string' ? `"${name}" is not in the Table Library.` : 'No table named.'}`);
             return;
           }
-          await tableLibraryView?.reveal(node, { select: true, focus: true });
+          if (glassSidebarEnabled(context.globalState)) await glassSidebar.reveal('tables', node, { focus: true });
+          else await tableLibraryView?.reveal(node, { select: true, focus: true });
         }),
-        vscode.commands.registerCommand('erdStudio.openRelationshipSource', (node?: RelationshipsNode) => openRelationshipSource(node, deps)),
-        vscode.commands.registerCommand('erdStudio.groupRelationshipsByFile', () => setRelationshipsGrouping('file')),
-        vscode.commands.registerCommand('erdStudio.groupRelationshipsByTable', () => setRelationshipsGrouping('table')),
-        // A relationship row's click passes `{ fallBackToFile: true }`: with no
-        // diagram to show it on, it opens where it is written.
-        vscode.commands.registerCommand('erdStudio.openInDiagram', (node?: RelationshipsNode | TableLibraryTableNode, options?: unknown) => {
-          if (!node) {
-            void vscode.window.showErrorMessage('Open in Diagram: Right-click a table in the Table Library, or a relationship or table in the Relationships view.');
+        // Open in File, and a relationship row's double-click (`{ doubleClick: true }`): a pick the click left open closes first.
+        vscode.commands.registerCommand('erdStudio.openRelationshipSource', async (node?: RelationshipsNode, options?: unknown) => {
+          if (isPlainObject(options) && options.doubleClick === true) await rowActivations.settle();
+          await openRelationshipSource(node, deps);
+        }),
+        // A table row's Open File, and its double-click (`{ doubleClick: true }`: the tab is kept, as the Explorer's is).
+        vscode.commands.registerCommand('erdStudio.openTableFile', async (node?: unknown, options?: unknown) => {
+          const doubleClick = isPlainObject(options) && options.doubleClick === true;
+          if (doubleClick) await rowActivations.settle();
+          await openTableFile(node, { pinned: doubleClick });
+        }),
+        // A table row's Show on Another Diagram…: the diagrams its click does not choose (the canvas's
+        // Show on Other Diagrams… path, `excludeDiagram`), selected gently as the click does.
+        vscode.commands.registerCommand('erdStudio.showOnAnotherDiagram', async (node?: unknown) => {
+          if (!isPlainObject(node) || node.type !== 'model' || typeof node.name !== 'string') {
+            void vscode.window.showErrorMessage('Show on Another Diagram: Right-click a table in the Table Library.');
             return;
           }
-          const fallBackToFile = typeof options === 'object' && options !== null && (options as { fallBackToFile?: unknown }).fallBackToFile === true;
-          // The canvas's Show on Other Diagrams… leaves out the diagram it is on.
-          const excludeDiagram = typeof options === 'object' && options !== null && typeof (options as { excludeDiagram?: unknown }).excludeDiagram === 'string'
-            ? (options as { excludeDiagram: string }).excludeDiagram
-            : undefined;
-          return openInDiagram(node, deps, { fallBackToFile, ...(excludeDiagram !== undefined ? { excludeDiagram } : {}) });
+          const row = node as unknown as TableLibraryTableNode;
+          const table = { name: row.name, ...(typeof row.filePath === 'string' ? { filePath: row.filePath } : {}) };
+          const shownOn = diagramsShowing([table], deps).map((s) => s.filePath);
+          const excludeDiagram = diagramTheClickChooses(shownOn, deps.lookingAtDiagram?.());
+          await openInDiagram(row, deps, { highlight: true, ...(excludeDiagram !== undefined ? { excludeDiagram } : {}) });
+        }),
+        vscode.commands.registerCommand('erdStudio.groupRelationshipsByFile', () => setRelationshipsGrouping('file')),
+        vscode.commands.registerCommand('erdStudio.groupRelationshipsByTable', () => setRelationshipsGrouping('table')),
+        // A row's click (a Table Library table, a relationship grouped by table) passes
+        // `{ fallBackToFile: true, rowClick: true }`: the diagram in front of the user, else
+        // the only one, else a pick, else the file; a second click soon after opens the file.
+        // From a row's menu (no options, or the Table Library's selection) it is the same
+        // rule without the file. The canvas's Show on Other Diagrams… (`excludeDiagram`)
+        // keeps centring the table with its panel open.
+        vscode.commands.registerCommand('erdStudio.openInDiagram', (node?: RelationshipsNode | TableLibraryTableNode, options?: unknown) => {
+          if (!node) {
+            void vscode.window.showErrorMessage('Open in Diagram: Right-click a relationship or a table in the Relationships view, or an ignored duplicate in the Table Library.');
+            return;
+          }
+          const opts = isPlainObject(options) ? options : {};
+          const fallBackToFile = opts.fallBackToFile === true;
+          const excludeDiagram = typeof opts.excludeDiagram === 'string' ? opts.excludeDiagram : undefined;
+          const highlight = excludeDiagram === undefined;
+          const run = (token?: vscode.CancellationToken): Promise<void> => openInDiagram(node, deps, {
+            fallBackToFile, highlight, ...(excludeDiagram !== undefined ? { excludeDiagram } : {}), ...(token ? { token } : {}),
+          });
+          if (opts.rowClick !== true) return run();
+          return rowActivations.click(
+            rowActivationKey(node),
+            run,
+            // The double-click: the code.
+            () => (node.type === 'model' ? openTableFile(node, { pinned: true }) : openRelationshipSource(node, deps)),
+          );
         }),
       );
     })(),
@@ -3965,12 +4191,14 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
           await editorProvider.refreshAllOpenSubjectAreas();
         },
       })),
-    vscode.commands.registerCommand('erdStudio.revealLogicalModel', (node: TableLibraryNode | undefined) => {
-      if (!node || node.type !== 'model') {
-        void vscode.window.showErrorMessage('Reveal in Explorer: No table selected. Right-click a table in the Table Library.');
+    // A Table Library table, schema, layer or folder row (its file or folder), or a Diagrams diagram row (its file).
+    vscode.commands.registerCommand('erdStudio.revealLogicalModel', (node: unknown) => {
+      const target = revealInExplorerPath(node);
+      if (!target) {
+        void vscode.window.showErrorMessage('Reveal in Explorer: Nothing selected. Right-click a table or a diagram in the ERD Studio side panel.');
         return;
       }
-      void vscode.commands.executeCommand('revealInExplorer', vscode.Uri.file(node.filePath));
+      void vscode.commands.executeCommand('revealInExplorer', vscode.Uri.file(target));
     }),
     vscode.commands.registerCommand('erdStudio.openDomain', async (filePath?: string, stage?: Stage) => {
       // From the palette or the status bar there is no file: ask which.
@@ -4496,7 +4724,11 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
       if (await runMigrateToV5Command()) await migrateNaming();
     }),
     vscode.commands.registerCommand('erdStudio.migrateToTableNaming', async () => { await migrateNaming(); }),
-    vscode.commands.registerCommand('erdStudio.convertProjectToDbml', async () => { await convertToDbml(); }),
+    vscode.commands.registerCommand('erdStudio.convertProjectToDbml', async () => {
+      await convertToDbml();
+      // Converted, refused or cancelled: each canvas's Convert information button follows.
+      editorProvider.refreshConvertOffer();
+    }),
 
     // F408: Set up semantic directory for new projects
     vscode.commands.registerCommand(
@@ -5074,12 +5306,18 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
 
   // The start suggestion (src/services/startSuggestion.ts): a folder with no
   // diagram whose start is obvious gets one notification offering it. Its
-  // state is workspace state (machine-local: nothing goes into the repo);
+  // state is workspace state (machine-local: nothing goes into the repo), plus
+  // one global-state record for the machine (new install or upgrader, and the
+  // showings in every folder: an upgrader is asked once per machine);
   // erdStudio.startSuggestions can be committed to turn it off for a team.
   const startSuggestionState = (): StartSuggestionState =>
     readStartSuggestionState(context.workspaceState.get(START_SUGGESTION_STATE_KEY));
   const saveStartSuggestionState = (state: StartSuggestionState): Thenable<void> =>
     context.workspaceState.update(START_SUGGESTION_STATE_KEY, state);
+  const startSuggestionMachine = (): StartSuggestionMachine =>
+    readStartSuggestionMachine(context.globalState.get(START_SUGGESTION_MACHINE_KEY));
+  const saveStartSuggestionMachine = (machine: StartSuggestionMachine): Thenable<void> =>
+    context.globalState.update(START_SUGGESTION_MACHINE_KEY, machine);
   const startSuggestionsSettingOn = (): boolean => getErdStudioSetting<boolean>(START_SUGGESTIONS_SETTING, true) !== false;
   // The palette shows Turn Off… or Turn On… (package.json gates them on this key).
   const publishStartSuggestionsOff = (): void => {
@@ -5096,12 +5334,20 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
       telemetry.feature('startSuggestionsOff');
       publishStartSuggestionsOff();
       void vscode.window.showInformationMessage(START_SUGGESTIONS_OFF_MESSAGE, UNDO_BUTTON).then((choice) => {
-        if (choice === UNDO_BUTTON) void vscode.commands.executeCommand(TURN_ON_START_SUGGESTIONS_COMMAND);
+        if (choice === UNDO_BUTTON) void vscode.commands.executeCommand(TURN_ON_START_SUGGESTIONS_COMMAND, START_SUGGESTIONS_UNDO_ARG);
       });
     }),
-    vscode.commands.registerCommand(TURN_ON_START_SUGGESTIONS_COMMAND, async () => {
-      // A fresh start: the count and an earlier answer are forgotten too.
-      await saveStartSuggestionState({ shown: 0 });
+    vscode.commands.registerCommand(TURN_ON_START_SUGGESTIONS_COMMAND, async (arg?: unknown) => {
+      // A fresh start: the count and an earlier answer are forgotten too. From the
+      // palette it is asked for here, so an upgrader's once-per-machine limit does not
+      // hold this folder back. An Undo (#305) only takes the off back: it keeps an
+      // earlier Turn On's `on` but never sets it, so Off then Undo cannot lift the
+      // machine limit in a folder it held back.
+      const undo = isStartSuggestionsUndo(arg);
+      const next: StartSuggestionState = undo
+        ? { shown: 0, ...(startSuggestionState().on === true ? { on: true } : {}) }
+        : { shown: 0, on: true };
+      await saveStartSuggestionState(next);
       publishStartSuggestionsOff();
       if (!startSuggestionsSettingOn()) {
         const choice = await vscode.window.showInformationMessage(START_SUGGESTIONS_SETTING_OFF_MESSAGE, OPEN_SETTINGS_BUTTON);
@@ -5110,7 +5356,11 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
         }
         return;
       }
-      void vscode.window.showInformationMessage(START_SUGGESTIONS_ON_MESSAGE);
+      // The message promises a suggestion next time: an Undo the machine limit still
+      // holds back (an upgrader already asked elsewhere) says nothing rather than promise it.
+      if (startSuggestionDue({ settingOn: true, state: next, machine: startSuggestionMachine(), hasDiagrams: false })) {
+        void vscode.window.showInformationMessage(START_SUGGESTIONS_ON_MESSAGE);
+      }
     }),
   );
   activationPhase = 'Prompts';
@@ -5173,7 +5423,8 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
           log.warn('[ERD Studio] The automatic draft failed:', err);
         })
         .finally(() => markShown());
-      void vscode.window.withProgress({ location: { viewId: 'erdStudio.domainTree' } }, () => firstShown);
+      // Both sidebars show it: the native view's bar, and the glass Diagrams section's header.
+      void glassSidebar.withSectionProgress('diagrams', () => firstShown);
       await firstShown;
       onDraftAsk = () => {};
       if (!shown) {
@@ -5406,7 +5657,7 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
   // place, and the walkthrough stays owed.
   if (!afterOpenFolder && existingDiagrams.length === 0 && !hasOpenSubjectAreaCanvas()) {
     const settingOn = startSuggestionsSettingOn();
-    if (startSuggestionDue({ settingOn, state: startSuggestionState(), hasDiagrams: false })) {
+    if (startSuggestionDue({ settingOn, state: startSuggestionState(), machine: startSuggestionMachine(), hasDiagrams: false })) {
       const walkthroughOwed = (): boolean => activationPrompts.has('walkthrough');
       activationPrompts.set('startSuggestion', () => {
         setTimeout(() => {
@@ -5424,9 +5675,13 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
             }),
             state: startSuggestionState,
             saveState: saveStartSuggestionState,
+            machine: startSuggestionMachine,
+            saveMachine: saveStartSuggestionMachine,
             show: (message, ...buttons) => vscode.window.showInformationMessage(message, ...buttons),
             info: (message, ...buttons) => vscode.window.showInformationMessage(message, ...buttons),
             executeCommand: (command, ...args) => vscode.commands.executeCommand(command, ...args),
+            // The glass sidebar's Diagrams section while it is on, else the native view.
+            showDiagramsView: () => glassSidebar.focusView('diagrams'),
             recordSuggested: recordStartSuggested,
             feature: (key) => telemetry.feature(key),
             setOffContext: (off) => { void vscode.commands.executeCommand('setContext', START_SUGGESTIONS_OFF_CONTEXT_KEY, off); },

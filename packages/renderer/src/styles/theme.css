@@ -149,6 +149,660 @@ body {
   --star-gold-shine: rgba(255, 255, 255, 0.6);
 }
 
+/* =======================================================================
+   GLASS LAYER — the design foundation (prototype: exp/glass-ui)
+   =======================================================================
+
+   Translucent "material" surfaces in the Apple / Revolut manner: frosted
+   panels floating over a softly lit canvas, hairline borders, an inner top
+   highlight, layered soft shadows, generous radii, calm type, smooth motion.
+
+   Everything below is derived from the --vscode-* variables (through the
+   aliases above), so it follows the user's theme. Component CSS uses these
+   tokens and never special-cases a theme: the light, high-contrast and
+   reduced-transparency variants are handled ONCE, here, by redefining the
+   tokens.
+
+   Where the tokens live
+   - Theme-independent scales (radius, spacing, type, motion, z-index, the
+     shell geometry) sit on :root.
+   - Theme-dependent tokens (surfaces, borders, shadows, tints, text tiers,
+     control fills, the ambient wash) sit on `body`, because a custom
+     property's var() references resolve where it is declared: declaring them
+     on body lets `body.vscode-light` / `body.vscode-high-contrast` redefine a
+     base token and have every derived token follow.
+
+   Performance rule: backdrop-filter (--glass-backdrop) is for floating
+   chrome only (toolbar, panels, dialogs, menus, toasts, tooltips, minimap).
+   NEVER use it inside the React Flow viewport (table nodes, edges, notes):
+   they number in the hundreds and transform on every pan. Nodes get
+   translucent fills, gradients, borders and shadows only.
+   ======================================================================= */
+
+:root {
+  /* --- Radius ------------------------------------------------------------ */
+  --radius-xs: 4px;    /* key badges, tiny chips, checkboxes */
+  --radius-sm: 6px;    /* small controls inside a dense row */
+  --radius-md: 8px;    /* buttons, inputs, menu items */
+  --radius-lg: 12px;   /* panels, popovers, table nodes */
+  --radius-xl: 18px;   /* dialogs, sheets, the large floating panels */
+  --radius-pill: 999px;
+
+  /* --- Spacing (4px grid, with 2/6 for dense UI) ------------------------- */
+  --space-0: 0;
+  --space-1: 2px;
+  --space-2: 4px;
+  --space-3: 6px;
+  --space-4: 8px;
+  --space-5: 12px;
+  --space-6: 16px;
+  --space-7: 20px;
+  --space-8: 24px;
+  --space-9: 32px;
+
+  /* --- Type ---------------------------------------------------------------- */
+  --font-ui: var(--vscode-font-family, -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif);
+  --font-mono: var(--vscode-editor-font-family, ui-monospace, 'SF Mono', Menlo, Consolas, monospace);
+  --text-2xs: 10px;    /* caps labels, badges */
+  --text-xs: 11px;     /* meta, secondary rows */
+  --text-sm: 12px;     /* body in panels, controls */
+  --text-md: 13px;     /* default UI text */
+  --text-lg: 15px;     /* panel titles */
+  --text-xl: 18px;     /* dialog titles */
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --weight-bold: 700;
+  --leading-tight: 1.25;
+  --leading-normal: 1.45;
+  --tracking-tight: -0.01em;   /* titles */
+  --tracking-normal: 0;
+  --tracking-caps: 0.06em;     /* small uppercase section labels */
+
+  /* --- Motion ------------------------------------------------------------ */
+  --duration-instant: 80ms;    /* press feedback */
+  --duration-fast: 140ms;      /* hover, colour changes */
+  --duration-base: 220ms;      /* panels opening, moving chrome */
+  --duration-slow: 360ms;      /* large surfaces, sheets */
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);         /* most transitions */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);           /* things arriving */
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);               /* things leaving */
+  --ease-spring: cubic-bezier(0.34, 1.32, 0.64, 1);    /* a gentle overshoot: popovers, toggles */
+
+  /* --- Z-index scale ------------------------------------------------------
+     React Flow panels default to z-index 5 inside the flow wrapper (its own
+     stacking context, z-index 0). Use these names, not new numbers.        */
+  --z-canvas-overlay: 4;    /* full-canvas hints under the chrome (drop overlay, empty card) */
+  --z-chrome: 5;            /* floating chrome: toolbar, detail panel, status bar, minimap */
+  --z-chrome-raised: 10;    /* chrome that sits over other chrome: legend, compare panel, in-canvas dialogs */
+  --z-popover: 100;         /* dropdowns and popovers anchored to chrome */
+  --z-modal: 200;           /* modal dialogs and their scrim */
+  --z-menu: 1000;           /* context menus, toasts, coach marks */
+  --z-toast: 1000;
+  --z-takeover: 2000;       /* reconnect / crash screens */
+  --z-tooltip: 10000;       /* hover tips, column tooltips */
+
+  /* --- The floating shell geometry (see "Floating shell" below) ----------- */
+  --shell-inset: 15px;          /* = React Flow's panel margin = PANEL_MARGIN_PX (webview/lib/fitViewPadding.ts); do not change */
+  --shell-gap: 10px;            /* space between two floating layers */
+  --shell-control-size: 28px;   /* the legend's ? button; square icon controls */
+  --shell-corner-height: 34px;  /* outer height of the top-right corner cluster (a glass pill of 28px controls + 3px padding) */
+  --detail-panel-width: 340px;  /* = DETAIL_PANEL_WIDTH_PX; DetailPanel.css keeps the literal `width: 340px;` for its test */
+  --minimap-width: 200px;       /* React Flow's default minimap size */
+  --minimap-height: 150px;
+
+  /* --- Focus ------------------------------------------------------------- */
+  --focus-ring-color: var(--focus-border);
+  --focus-outline: 2px solid var(--focus-ring-color);
+  --focus-offset: 2px;
+}
+
+body {
+  /* --- Base material -------------------------------------------------------
+     The panel tone: the editor background lifted a little toward white.
+     Dark themes get a soft grey glass; on a light background it stays white. */
+  --glass-tone: color-mix(in srgb, var(--editor-bg) 88%, white 12%);
+
+  /* Surface tiers, from more to less translucent. 1 for small floating
+     controls (pills, the minimap, tooltips), 2 for the toolbar and compact
+     panels, 3 for text-heavy panels (detail panel, menus, dialogs). */
+  --glass-surface-1: color-mix(in srgb, var(--glass-tone) 55%, transparent);
+  --glass-surface-2: color-mix(in srgb, var(--glass-tone) 70%, transparent);
+  --glass-surface-3: color-mix(in srgb, var(--glass-tone) 84%, transparent);
+  --glass-surface-solid: var(--glass-tone);  /* opaque, for nested sticky headers or fallbacks */
+  /* A sunken well inside a panel (inputs, code, grouped rows). */
+  --glass-well: color-mix(in srgb, var(--editor-fg) 5%, transparent);
+
+  --glass-blur: 24px;
+  --glass-saturate: 180%;
+  --glass-backdrop: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  --glass-backdrop-thin: blur(12px) saturate(160%);  /* tooltips, small pills */
+
+  /* Hairlines and the inner top highlight (the "lit edge" of the material). */
+  --glass-border: color-mix(in srgb, var(--editor-fg) 13%, transparent);
+  --glass-border-strong: color-mix(in srgb, var(--editor-fg) 22%, transparent);
+  --glass-divider: color-mix(in srgb, var(--editor-fg) 9%, transparent);
+  --glass-highlight: inset 0 1px 0 0 color-mix(in srgb, white 7%, transparent);
+  /* The soft top sheen of a table card or note (a background layer, inside
+     the viewport where there is no backdrop-filter). */
+  --glass-sheen: linear-gradient(180deg, color-mix(in srgb, white 4%, transparent), transparent 40%);
+
+  /* Soft layered shadows. "None" is written as a transparent shadow so a
+     token can always sit in a comma-separated box-shadow list. */
+  --glass-shadow-sm:
+    0 1px 2px color-mix(in srgb, black 28%, transparent),
+    0 4px 12px -4px color-mix(in srgb, black 30%, transparent);
+  --glass-shadow-md:
+    0 2px 6px -1px color-mix(in srgb, black 24%, transparent),
+    0 12px 32px -8px color-mix(in srgb, black 45%, transparent);
+  --glass-shadow-lg:
+    0 4px 12px -2px color-mix(in srgb, black 26%, transparent),
+    0 28px 72px -16px color-mix(in srgb, black 60%, transparent);
+  /* Ready-made elevations: the highlight plus a shadow. */
+  --glass-elevation-1: var(--glass-highlight), var(--glass-shadow-sm);
+  --glass-elevation-2: var(--glass-highlight), var(--glass-shadow-md);
+  --glass-elevation-3: var(--glass-highlight), var(--glass-shadow-lg);
+
+  /* Tints: a translucent wash of a meaning colour, for chips, selected rows,
+     notices and stage accents. -strong for a selected or active state,
+     -edge for a coloured hairline. */
+  --glass-tint-logical: color-mix(in srgb, var(--stage-logical) 14%, transparent);
+  --glass-tint-logical-strong: color-mix(in srgb, var(--stage-logical) 26%, transparent);
+  --glass-tint-logical-edge: color-mix(in srgb, var(--stage-logical) 45%, transparent);
+  --glass-tint-physical: color-mix(in srgb, var(--stage-physical) 14%, transparent);
+  --glass-tint-physical-strong: color-mix(in srgb, var(--stage-physical) 26%, transparent);
+  --glass-tint-physical-edge: color-mix(in srgb, var(--stage-physical) 45%, transparent);
+  --glass-tint-ghost: color-mix(in srgb, var(--stage-ghost) 14%, transparent);
+  --glass-tint-accent: color-mix(in srgb, var(--accent) 16%, transparent);
+  --glass-tint-accent-strong: color-mix(in srgb, var(--accent) 28%, transparent);
+  --glass-tint-warning: color-mix(in srgb, var(--warning-fg) 14%, transparent);
+  --glass-tint-warning-edge: color-mix(in srgb, var(--warning-fg) 38%, transparent);
+  --glass-tint-error: color-mix(in srgb, var(--error-fg) 14%, transparent);
+  --glass-tint-error-edge: color-mix(in srgb, var(--error-fg) 40%, transparent);
+  --glass-tint-ok: color-mix(in srgb, var(--ok-fg) 14%, transparent);
+  --glass-tint-ai: color-mix(in srgb, var(--ai-fg) 14%, transparent);
+
+  /* Accent: the theme's primary button colour (a solid, confident fill for
+     the one primary action in a view). */
+  --accent: var(--vscode-button-background, var(--focus-border));
+  --accent-fg: var(--vscode-button-foreground, var(--editor-fg));
+  --accent-hover: var(--vscode-button-hoverBackground, var(--accent));
+
+  /* Control fills (buttons, segmented items, menu rows, icon buttons):
+     a neutral veil of the foreground colour, so they work on any surface. */
+  --control-fill: color-mix(in srgb, var(--editor-fg) 6%, transparent);
+  --control-fill-hover: color-mix(in srgb, var(--editor-fg) 11%, transparent);
+  --control-fill-active: color-mix(in srgb, var(--editor-fg) 16%, transparent);
+  --control-fill-selected: color-mix(in srgb, var(--accent) 24%, transparent);
+  --control-fg-selected: var(--editor-fg);
+  --control-border: transparent;
+  --control-border-hover: transparent;
+  --control-border-selected: color-mix(in srgb, var(--accent) 45%, transparent);
+  /* The raised "thumb" of a segmented control (the iOS selected segment). */
+  --control-thumb: color-mix(in srgb, var(--glass-tone) 92%, white 8%);
+  --control-thumb-shadow: 0 1px 2px color-mix(in srgb, black 30%, transparent), 0 0 0 0.5px color-mix(in srgb, black 20%, transparent);
+  --control-height: 28px;
+  --control-height-sm: 24px;
+  --control-height-lg: 32px;
+
+  /* Inputs on glass. */
+  --glass-input-bg: color-mix(in srgb, var(--input-bg) 72%, transparent);
+  --glass-input-border: var(--glass-border);
+  --glass-input-border-focus: var(--focus-border);
+
+  /* Text tiers. */
+  --text-primary: var(--editor-fg);
+  /* Dark glass lifts the background, so the tiers sit higher than on light:
+     secondary about 5:1 and tertiary about 3.6:1 on --glass-surface-3. */
+  --text-secondary: color-mix(in srgb, var(--editor-fg) 78%, transparent);
+  --text-tertiary: color-mix(in srgb, var(--editor-fg) 60%, transparent);
+  --text-quaternary: color-mix(in srgb, var(--editor-fg) 36%, transparent);  /* placeholders, disabled */
+  --text-on-accent: var(--accent-fg);
+  /* Links in notices and cards. */
+  --text-link: var(--vscode-textLink-foreground, var(--focus-border));
+
+  /* Focus halo (a soft ring, paired with the outline for keyboard focus). */
+  --focus-halo: 0 0 0 3px color-mix(in srgb, var(--focus-ring-color) 35%, transparent);
+
+  /* Scrollbars inside glass panels. */
+  --glass-scrollbar: color-mix(in srgb, var(--editor-fg) 22%, transparent);
+
+  /* --- Ambient canvas wash --------------------------------------------------
+     Large, very soft colour fields behind the dot grid, so the glass has
+     something to refract and the canvas reads as deep rather than flat.
+     The stage blue with a violet and a teal neighbour; static. */
+  --ambient-1: color-mix(in srgb, var(--stage-logical) 22%, transparent);
+  --ambient-2: color-mix(in srgb, var(--vscode-charts-purple, #b48ce8) 15%, transparent);
+  --ambient-3: color-mix(in srgb, var(--model-approved) 12%, transparent);
+  /* The colour fields sit where the chrome floats, so every glass layer has
+     colour behind it: blue under the toolbar (top centre), violet down the
+     right edge under the detail panel, teal under the legend and status bar
+     (bottom left), and a faint blue counterweight at the bottom right. */
+  --canvas-wash:
+    radial-gradient(60% 45% at 50% 0%, var(--ambient-1) 0%, transparent 72%),
+    radial-gradient(38% 60% at 100% 40%, var(--ambient-2) 0%, transparent 74%),
+    radial-gradient(45% 50% at 0% 100%, var(--ambient-3) 0%, transparent 72%),
+    radial-gradient(40% 40% at 88% 100%, var(--ambient-1) 0%, transparent 75%);
+  --canvas-dot: color-mix(in srgb, var(--editor-fg) 17%, transparent);
+
+  /* Minimap on glass. */
+  --minimap-mask: color-mix(in srgb, var(--editor-bg) 25%, transparent);
+  --minimap-view-stroke: var(--glass-border-strong);
+}
+
+/* --- Light themes: whiter, more opaque glass; lighter shadows. ------------ */
+body.vscode-light {
+  --glass-tone: color-mix(in srgb, var(--editor-bg) 35%, white 65%);
+  --glass-surface-1: color-mix(in srgb, var(--glass-tone) 62%, transparent);
+  --glass-surface-2: color-mix(in srgb, var(--glass-tone) 74%, transparent);
+  --glass-surface-3: color-mix(in srgb, var(--glass-tone) 86%, transparent);
+  --glass-saturate: 160%;
+  --glass-border: color-mix(in srgb, var(--editor-fg) 11%, transparent);
+  --glass-border-strong: color-mix(in srgb, var(--editor-fg) 19%, transparent);
+  --glass-divider: color-mix(in srgb, var(--editor-fg) 8%, transparent);
+  --glass-highlight: inset 0 1px 0 0 color-mix(in srgb, white 85%, transparent);
+  --glass-shadow-sm:
+    0 1px 2px color-mix(in srgb, black 7%, transparent),
+    0 4px 12px -4px color-mix(in srgb, black 10%, transparent);
+  --glass-shadow-md:
+    0 2px 6px -1px color-mix(in srgb, black 7%, transparent),
+    0 12px 32px -8px color-mix(in srgb, black 16%, transparent);
+  --glass-shadow-lg:
+    0 4px 12px -2px color-mix(in srgb, black 8%, transparent),
+    0 28px 72px -16px color-mix(in srgb, black 24%, transparent);
+  --control-fill: color-mix(in srgb, var(--editor-fg) 5%, transparent);
+  --control-fill-hover: color-mix(in srgb, var(--editor-fg) 9%, transparent);
+  --control-fill-active: color-mix(in srgb, var(--editor-fg) 14%, transparent);
+  --control-fill-selected: color-mix(in srgb, var(--accent) 16%, transparent);
+  --control-thumb: white;
+  --control-thumb-shadow: 0 1px 3px color-mix(in srgb, black 12%, transparent), 0 0 0 0.5px color-mix(in srgb, black 8%, transparent);
+  --glass-input-bg: color-mix(in srgb, white 70%, transparent);
+  --text-secondary: color-mix(in srgb, var(--editor-fg) 72%, transparent);
+  --text-tertiary: color-mix(in srgb, var(--editor-fg) 56%, transparent);
+  --ambient-1: color-mix(in srgb, var(--stage-logical) 14%, transparent);
+  --ambient-2: color-mix(in srgb, var(--vscode-charts-purple, #b48ce8) 11%, transparent);
+  --ambient-3: color-mix(in srgb, var(--model-approved) 9%, transparent);
+  --canvas-dot: color-mix(in srgb, var(--editor-fg) 20%, transparent);
+  --minimap-mask: color-mix(in srgb, var(--editor-fg) 4%, transparent);
+}
+
+/* --- Browsers without backdrop-filter: more opaque surfaces. -------------- */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  body,
+  body.vscode-light {
+    --glass-surface-1: color-mix(in srgb, var(--glass-tone) 92%, transparent);
+    --glass-surface-2: color-mix(in srgb, var(--glass-tone) 95%, transparent);
+    --glass-surface-3: color-mix(in srgb, var(--glass-tone) 97%, transparent);
+  }
+}
+
+/* --- Reduced transparency: opaque surfaces, no blur. ---------------------- */
+@media (prefers-reduced-transparency: reduce) {
+  body,
+  body.vscode-light {
+    --glass-surface-1: var(--glass-tone);
+    --glass-surface-2: var(--glass-tone);
+    --glass-surface-3: var(--glass-tone);
+    --glass-input-bg: var(--input-bg);
+    --glass-backdrop: none;
+    --glass-backdrop-thin: none;
+    --glass-border: var(--panel-border);
+    --canvas-wash: none;
+  }
+}
+
+/* --- High contrast (dark and light): opaque, bordered, no shadows, no wash,
+   full-strength text. Hover and selection show as borders, as VS Code does. */
+body.vscode-high-contrast,
+body.vscode-high-contrast-light {
+  --glass-tone: var(--editor-bg);
+  --glass-surface-1: var(--editor-bg);
+  --glass-surface-2: var(--editor-bg);
+  --glass-surface-3: var(--editor-bg);
+  --glass-surface-solid: var(--editor-bg);
+  --glass-well: transparent;
+  --glass-backdrop: none;
+  --glass-backdrop-thin: none;
+  --glass-border: var(--vscode-contrastBorder, var(--panel-border));
+  --glass-border-strong: var(--vscode-contrastActiveBorder, var(--vscode-contrastBorder, var(--panel-border)));
+  --glass-divider: var(--vscode-contrastBorder, var(--panel-border));
+  --glass-highlight: 0 0 0 0 transparent;
+  --glass-sheen: none;
+  --glass-shadow-sm: 0 0 0 0 transparent;
+  --glass-shadow-md: 0 0 0 0 transparent;
+  --glass-shadow-lg: 0 0 0 0 transparent;
+  --glass-tint-logical: transparent;
+  --glass-tint-logical-strong: transparent;
+  --glass-tint-physical: transparent;
+  --glass-tint-physical-strong: transparent;
+  --glass-tint-ghost: transparent;
+  --glass-tint-accent: transparent;
+  --glass-tint-accent-strong: transparent;
+  --glass-tint-warning: transparent;
+  --glass-tint-error: transparent;
+  --glass-tint-ok: transparent;
+  --glass-tint-ai: transparent;
+  --control-fill: transparent;
+  --control-fill-hover: transparent;
+  --control-fill-active: transparent;
+  --control-fill-selected: transparent;
+  --control-border: transparent;
+  --control-border-hover: var(--vscode-contrastActiveBorder, var(--focus-border));
+  --control-border-selected: var(--vscode-contrastActiveBorder, var(--focus-border));
+  --control-thumb: var(--editor-bg);
+  --control-thumb-shadow: 0 0 0 1px var(--vscode-contrastActiveBorder, var(--focus-border));
+  --glass-input-bg: var(--input-bg);
+  --glass-input-border: var(--vscode-contrastBorder, var(--input-border));
+  --text-secondary: var(--editor-fg);
+  --text-tertiary: var(--editor-fg);
+  --text-quaternary: var(--editor-fg);
+  --focus-halo: 0 0 0 0 transparent;
+  --glass-scrollbar: var(--vscode-contrastBorder, var(--editor-fg));
+  --ambient-1: transparent;
+  --ambient-2: transparent;
+  --ambient-3: transparent;
+  --canvas-wash: none;
+  --canvas-dot: color-mix(in srgb, var(--editor-fg) 40%, transparent);
+  --minimap-mask: color-mix(in srgb, var(--editor-bg) 70%, transparent);
+  --minimap-view-stroke: var(--vscode-contrastActiveBorder, var(--focus-border));
+}
+
+/* --- Reduced motion: every duration collapses; springs stop overshooting. - */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --duration-instant: 0.01ms;
+    --duration-fast: 0.01ms;
+    --duration-base: 0.01ms;
+    --duration-slow: 0.01ms;
+    --ease-spring: var(--ease-standard);
+  }
+}
+
+/* -----------------------------------------------------------------------
+   Glass utilities
+   -----------------------------------------------------------------------
+   Wrapped in :where() so they have zero specificity: a component's own BEM
+   rule always wins over them, whatever the stylesheet order. Add the class
+   next to the BEM class (`className="toolbar glass-panel"`) or copy the
+   recipe into the BEM rule; both are fine. Never use them on anything
+   inside the React Flow viewport (they carry backdrop-filter): nodes use
+   `.glass-node-surface` instead. */
+
+/* A floating panel: toolbar, detail panel, legend, popovers, dialogs. */
+:where(.glass-panel) {
+  background: var(--glass-surface-2);
+  -webkit-backdrop-filter: var(--glass-backdrop);
+  backdrop-filter: var(--glass-backdrop);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--glass-elevation-2);
+  color: var(--text-primary);
+}
+
+/* Lighter, more see-through: small floating clusters (status pill, minimap). */
+:where(.glass-panel--thin) {
+  background: var(--glass-surface-1);
+  box-shadow: var(--glass-elevation-1);
+}
+
+/* Denser, higher: text-heavy panels, menus and dialogs. */
+:where(.glass-panel--raised) {
+  background: var(--glass-surface-3);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--glass-elevation-3);
+}
+
+/* A control on glass: buttons, icon buttons, menu rows. */
+:where(.glass-control) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  min-height: var(--control-height);
+  padding: 0 var(--space-5);
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-md);
+  background: var(--control-fill);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard),
+    box-shadow var(--duration-fast) var(--ease-standard),
+    transform var(--duration-instant) var(--ease-standard);
+}
+:where(.glass-control):hover {
+  background: var(--control-fill-hover);
+  border-color: var(--control-border-hover);
+}
+:where(.glass-control):active {
+  background: var(--control-fill-active);
+  transform: scale(0.97);
+}
+:where(.glass-control):focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: var(--focus-offset);
+}
+:where(.glass-control[aria-pressed='true'], .glass-control[aria-selected='true'], .glass-control.is-selected) {
+  background: var(--control-fill-selected);
+  border-color: var(--control-border-selected);
+  color: var(--control-fg-selected);
+}
+:where(.glass-control):disabled,
+:where(.glass-control[aria-disabled='true']) {
+  opacity: 0.45;
+  cursor: default;
+  transform: none;
+}
+/* Borderless until hovered: toolbar icon buttons. */
+:where(.glass-control--quiet) {
+  background: transparent;
+}
+/* Square icon-only control. */
+:where(.glass-control--icon) {
+  width: var(--control-height);
+  padding: 0;
+}
+/* The one primary action in a view. */
+:where(.glass-control--primary) {
+  background: var(--accent);
+  color: var(--text-on-accent);
+  border-color: var(--glass-border);
+}
+:where(.glass-control--primary):hover {
+  background: var(--accent-hover);
+}
+
+/* A segmented control (stage tabs, line style, table detail): a recessed
+   track with a raised thumb on the selected segment. */
+:where(.glass-segmented) {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1);
+  border-radius: var(--radius-md);
+  background: var(--control-fill);
+  border: 1px solid var(--control-border);
+}
+:where(.glass-segmented__item) {
+  min-height: var(--control-height-sm);
+  padding: 0 var(--space-4);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  cursor: pointer;
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard),
+    box-shadow var(--duration-fast) var(--ease-standard);
+}
+:where(.glass-segmented__item):hover {
+  color: var(--text-primary);
+}
+:where(.glass-segmented__item[aria-pressed='true'], .glass-segmented__item[aria-selected='true'], .glass-segmented__item.is-selected) {
+  background: var(--control-thumb);
+  color: var(--text-primary);
+  box-shadow: var(--control-thumb-shadow);
+}
+:where(.glass-segmented__item):focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: 1px;
+}
+
+/* A pill: counts, chips, small status capsules. */
+:where(.glass-pill) {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-4);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-pill);
+  background: var(--control-fill);
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+/* Hairline dividers. */
+:where(.glass-divider) {
+  height: 1px;
+  margin: var(--space-4) 0;
+  border: 0;
+  background: var(--glass-divider);
+}
+:where(.glass-divider--vertical) {
+  width: 1px;
+  height: 18px;
+  margin: 0 var(--space-2);
+  align-self: center;
+}
+
+/* A small uppercase section label inside a panel. */
+:where(.glass-label) {
+  color: var(--text-tertiary);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+}
+
+/* An input on glass. */
+:where(.glass-input) {
+  min-height: var(--control-height);
+  padding: 0 var(--space-4);
+  border: 1px solid var(--glass-input-border);
+  border-radius: var(--radius-md);
+  background: var(--glass-input-bg);
+  color: var(--input-fg);
+  font: inherit;
+  font-size: var(--text-sm);
+  transition: border-color var(--duration-fast) var(--ease-standard), box-shadow var(--duration-fast) var(--ease-standard);
+}
+:where(.glass-input):focus {
+  outline: none;
+  border-color: var(--glass-input-border-focus);
+  box-shadow: var(--focus-halo);
+}
+
+/* Thin, theme-toned scrollbars inside a glass panel. */
+:where(.glass-scroll) {
+  scrollbar-width: thin;
+  scrollbar-color: var(--glass-scrollbar) transparent;
+}
+
+/* The node recipe: what a table card or note may use INSIDE the viewport.
+   Translucent fill, hairline, highlight and shadow; no backdrop-filter. */
+:where(.glass-node-surface) {
+  background:
+    var(--glass-sheen),
+    var(--glass-surface-3);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--glass-elevation-1);
+}
+
+/* -----------------------------------------------------------------------
+   Floating shell
+   -----------------------------------------------------------------------
+   The canvas runs full-bleed under everything; the toolbar, the detail
+   panel, the status bar, the legend and the minimap float over it as
+   separate glass layers, each React Flow <Panel> inset --shell-inset
+   (15px, React Flow's own panel margin) from the canvas edge.
+
+     top-left    (free)              top-center  .toolbar-container   top-right  .toolbar__corner
+                                                                                 .detail-panel (below the corner)
+     bottom-left .legend-toggle / .legend, .status-bar beside it
+     bottom-center .drag-hint        bottom-right .react-flow__minimap (slides left of an open detail panel)
+
+   Shared by the editor (webview/App.tsx) and the viewer (ErdCanvas); both
+   roots are `.editor-canvas`. */
+
+/* The canvas root carries the ambient wash, so the in-flow notice strips
+   above the flow area (editor) and the flow area share one backdrop. */
+.editor-canvas {
+  position: relative;
+  background-color: var(--editor-bg);
+  background-image: var(--canvas-wash);
+  background-repeat: no-repeat;
+}
+
+/* The flow area is see-through so the wash shows behind the dot grid. */
+.editor-canvas > .react-flow {
+  background-color: transparent;
+}
+
+/* The editor's detail panel opens under the top-right corner actions rather
+   than over them, and runs as a tall sheet down the right edge. The viewer's
+   panel (no toolbar) keeps its own geometry (DetailPanel.css). */
+.editor-canvas:has(.toolbar__corner) .react-flow__panel.detail-panel:not(.detail-panel--viewer) {
+  margin-top: calc(var(--shell-inset) + var(--shell-corner-height) + var(--shell-gap));
+  max-height: calc(100% - 2 * var(--shell-inset) - var(--shell-corner-height) - var(--shell-gap));
+}
+
+/* The minimap: a small glass tile. */
+.editor-canvas .react-flow__minimap.erd-minimap {
+  overflow: hidden;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+  background: var(--glass-surface-1);
+  -webkit-backdrop-filter: var(--glass-backdrop);
+  backdrop-filter: var(--glass-backdrop);
+  box-shadow: var(--glass-elevation-2);
+  transition:
+    margin-right var(--duration-base) var(--ease-standard),
+    opacity var(--duration-base) var(--ease-standard);
+}
+
+.editor-canvas .react-flow__minimap.erd-minimap .react-flow__minimap-svg {
+  display: block;
+}
+
+/* With the editor's detail panel open, the minimap moves left of it instead
+   of hiding under it. */
+.editor-canvas:has(.react-flow__panel.detail-panel:not(.detail-panel--viewer)) .react-flow__minimap.erd-minimap {
+  margin-right: calc(var(--shell-inset) + var(--detail-panel-width) + var(--shell-gap));
+}
+
+/* ...and steps aside on a window too narrow for both (below about 1180px
+   it would land on the status bar). */
+@media (max-width: 1180px) {
+  .editor-canvas:has(.react-flow__panel.detail-panel:not(.detail-panel--viewer)) .react-flow__minimap.erd-minimap {
+    opacity: 0;
+    pointer-events: none;
+  }
+}
+
 /* A logical-only canvas draws its lines, their end labels, the moving
    arrows, the hover ring and the legend's samples in the neutral line colour
    rather than the logical stage's blue. Scoped to the diagram and the legend,

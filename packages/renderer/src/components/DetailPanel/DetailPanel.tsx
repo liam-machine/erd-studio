@@ -9,6 +9,12 @@
  * - "Modelling detail (optional)": the table's Fields (its context fields,
  *   from the project's field list), folded until one of them has a value
  *
+ * The editor's panel is a floating glass inspector: a sticky header (the
+ * name, chips for the stage, layer, role and read-only, and a jump bar to
+ * the sections once there are three), then the description and a grouped
+ * "Details" card, the columns, the relationships and the rest, each a
+ * quiet titled section.
+ *
  * The viewer (`useIsViewer`) never has the host's context and keeps the
  * layout it always had, in the old order, with the Fields where the role,
  * grain, meta and rationale sections were: a section folded to its heading
@@ -21,13 +27,15 @@
  * taller than the canvas it floats over.
  */
 
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Panel, useStoreApi } from '@xyflow/react';
 
 import { DescriptionEditor } from './DescriptionEditor';
 import { AliasEditor } from './AliasEditor';
 import { ColumnEditor } from './ColumnEditor';
 import { FieldsSection, fieldRows, tableFieldsShown, type FieldsTable } from './FieldsSection';
+import { IconChevron, IconClose, IconOpen, IconPencil } from './panelIcons';
+import { roleLabel } from '../../lib/roleOptions';
 import { useEditorStore } from '../../store/editorStore';
 import { useCanvasHost, useIsViewer } from '../../host/canvasEnvironment';
 import { STARTING_FIELD_LIST, backwardsRelationshipNote } from '@erd-studio/core';
@@ -134,6 +142,21 @@ export function removeConfirmText(
 
 /** Most tables one "Add all related" asks for (the host's `addExistingModels` limit). */
 const ADD_ALL_RELATED_LIMIT = 200;
+
+/**
+ * A relationship's cardinality in crow's-foot shorthand (`N:1`), read left
+ * to right as the row reads (from → to). The editor's rows show it; the
+ * full wording is the pill's tooltip. Anything unknown is shown as written.
+ */
+const CARDINALITY_SHORT: Record<string, string> = {
+  'many-to-one': 'N:1',
+  'one-to-many': '1:N',
+  'one-to-one': '1:1',
+  'many-to-many': 'N:M',
+};
+
+/** The editor's section jump bar: where each item scrolls to. */
+type PanelSectionKey = 'overview' | 'columns' | 'relationships' | 'modelling';
 
 /**
  * Whether any of the table's fields has a value, so "Modelling detail" opens
@@ -418,6 +441,55 @@ export function DetailPanel() {
     [host],
   );
 
+  // --- Scroll: the header's hairline and the editor's section jump bar ------
+  // The panel scrolls itself. Its sticky header shows a hairline only once
+  // something has scrolled under it (the "scroll edge" look), and in the
+  // editor the jump bar marks the section at the top of the view.
+  const panelRef = useRef<HTMLDivElement>(null);
+  const headerRef = useRef<HTMLDivElement>(null);
+  const [scrolled, setScrolled] = useState(false);
+  const [activeSection, setActiveSection] = useState<PanelSectionKey>('overview');
+  const panelShown = detailPanelOpen && !!domain && !!model;
+
+  useEffect(() => {
+    const panel = panelRef.current;
+    if (!panelShown || !panel) return undefined;
+    const onScroll = () => {
+      setScrolled(panel.scrollTop > 2);
+      if (viewer) return;
+      const sections = [...panel.querySelectorAll<HTMLElement>('[data-panel-section]')];
+      if (sections.length === 0) return;
+      const limit = panel.getBoundingClientRect().top + (headerRef.current?.offsetHeight ?? 0) + 24;
+      let current = sections[0].dataset.panelSection as PanelSectionKey;
+      for (const section of sections) {
+        if (section.getBoundingClientRect().top <= limit) current = section.dataset.panelSection as PanelSectionKey;
+      }
+      // At the very bottom, a short last section is the one being read.
+      if (panel.scrollHeight > panel.clientHeight && panel.scrollTop + panel.clientHeight >= panel.scrollHeight - 2) {
+        current = sections[sections.length - 1].dataset.panelSection as PanelSectionKey;
+      }
+      setActiveSection(current);
+    };
+    onScroll();
+    panel.addEventListener('scroll', onScroll, { passive: true });
+    return () => panel.removeEventListener('scroll', onScroll);
+  }, [panelShown, viewer, selectedNode]);
+
+  const jumpToSection = useCallback((key: PanelSectionKey) => {
+    const panel = panelRef.current;
+    const target = panel?.querySelector<HTMLElement>(`[data-panel-section="${key}"]`);
+    if (!panel || !target) return;
+    const headerHeight = headerRef.current?.offsetHeight ?? 0;
+    const top = key === 'overview'
+      ? 0
+      : panel.scrollTop + target.getBoundingClientRect().top - panel.getBoundingClientRect().top - headerHeight - 8;
+    const reduceMotion = typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (typeof panel.scrollTo === 'function') {
+      panel.scrollTo({ top: Math.max(0, top), behavior: reduceMotion ? 'auto' : 'smooth' });
+    }
+    setActiveSection(key);
+  }, []);
+
   // --- Early returns -----------------------------------------------------
 
   if (!detailPanelOpen || !selectedNode || !domain) {
@@ -441,7 +513,7 @@ export function DetailPanel() {
   // A read-only panel (viewer, physical stage) shows the Fields only when one has a value.
   const fieldsShown = viewer ? tableFieldsShown(model, fieldList) : (isReadOnly ? tableFieldsShown(model, fieldList) : true);
   const fieldsSection = fieldsShown ? (
-    <div className="detail-panel__section">
+    <div className="detail-panel__section detail-panel__section--fields">
       <FieldsSection
         modelName={model.name}
         table={model}
@@ -496,7 +568,7 @@ export function DetailPanel() {
   const columnsSection = (
     <>
       {/* Columns (editable) */}
-      <div className="detail-panel__section">
+      <div className="detail-panel__section detail-panel__section--columns" data-panel-section="columns">
         <ColumnEditor
           modelName={model.name}
           columns={model.columns}
@@ -508,11 +580,25 @@ export function DetailPanel() {
       </div>
     </>
   );
+
+  // The editor's pill reads N:1 (the wording is its tooltip); the viewer's wrapping row keeps the words.
+  const cardinalityPill = (cardinality: string) => (
+    viewer ? (
+      <span className="detail-panel__rel-cardinality">
+        {cardinality}
+      </span>
+    ) : (
+      <span className="detail-panel__rel-cardinality" title={cardinalityLabel(cardinality)}>
+        {CARDINALITY_SHORT[cardinality] ?? cardinality}
+      </span>
+    )
+  );
+
   const relationshipsSection = (
     <>
       {/* Relationships */}
       {totalRelationships > 0 && (
-        <div className="detail-panel__section">
+        <div className="detail-panel__section detail-panel__section--relationships" data-panel-section="relationships">
           <h4 className="detail-panel__section-title">
             Relationships ({totalRelationships})
           </h4>
@@ -545,14 +631,12 @@ export function DetailPanel() {
                   {viewer ? null : <span className="detail-panel__rel-arrow">→</span>}
                   <span className="detail-panel__rel-target" title={`${rel.toModel}.${columnsText(rel, 'to')}`}>
                     {/* The viewer keeps the arrow with the name it points at (a no-break space), so it never wraps onto a line alone. */}
-                    {viewer ? <><span className="detail-panel__rel-arrow">→</span>{'\u00a0'}</> : null}
+                    {viewer ? <><span className="detail-panel__rel-arrow">→</span>{' '}</> : null}
                     {viewer ? breakable(`${rel.toModel}.${columnsText(rel, 'to')}`) : <>{rel.toModel}.{columnsText(rel, 'to')}</>}
                   </span>
                   {viewer ? (rel.role ? <span className="detail-panel__rel-role" title={`Role: ${rel.role}`}>{rel.role}</span> : null) : null}
                 </span>
-                <span className="detail-panel__rel-cardinality">
-                  {rel.cardinality}
-                </span>
+                {cardinalityPill(rel.cardinality)}
                 {viewer ? null : (!isReadOnly && rel.keysContradict && (
                   <button
                     className="detail-panel__rel-backwards"
@@ -575,7 +659,7 @@ export function DetailPanel() {
                     title="Delete relationship"
                     aria-label="Delete relationship"
                   >
-                    ×
+                    <IconClose size={12} />
                   </button>
                 )}
               </div>
@@ -597,7 +681,7 @@ export function DetailPanel() {
                 }}
                 title={viewer ? undefined : 'Click to edit cardinality'}
               >
-                <span className="detail-panel__rel-direction" title="Incoming FK">
+                <span className="detail-panel__rel-direction detail-panel__rel-direction--in" title="Incoming FK">
                   ←
                 </span>
                 <span className="detail-panel__rel-columns">
@@ -606,14 +690,12 @@ export function DetailPanel() {
                   </span>
                   {viewer ? null : <span className="detail-panel__rel-arrow">→</span>}
                   <span className="detail-panel__rel-local" title={columnsText(rel, 'to')}>
-                    {viewer ? <><span className="detail-panel__rel-arrow">→</span>{'\u00a0'}</> : null}
+                    {viewer ? <><span className="detail-panel__rel-arrow">→</span>{' '}</> : null}
                     {viewer ? breakable(columnsText(rel, 'to')) : columnsText(rel, 'to')}
                   </span>
                   {viewer ? (rel.role ? <span className="detail-panel__rel-role" title={`Role: ${rel.role}`}>{rel.role}</span> : null) : null}
                 </span>
-                <span className="detail-panel__rel-cardinality">
-                  {rel.cardinality}
-                </span>
+                {cardinalityPill(rel.cardinality)}
                 {viewer ? null : (!isReadOnly && rel.keysContradict && (
                   <button
                     className="detail-panel__rel-backwards"
@@ -636,7 +718,7 @@ export function DetailPanel() {
                     title="Delete relationship"
                     aria-label="Delete relationship"
                   >
-                    ×
+                    <IconClose size={12} />
                   </button>
                 )}
               </div>
@@ -647,12 +729,115 @@ export function DetailPanel() {
     </>
   );
 
+  // --- Overview: the table's facts (a grouped card) and its description ---
+
+  const metadataCard = (
+    <div className="detail-panel__metadata">
+      {/* Editing host only: the table's file, and who reviews a change to it. */}
+      {tableFile !== undefined && (
+        <div className="detail-panel__metadata-row detail-panel__metadata-row--file">
+          <span className="detail-panel__label detail-panel__label--wide">File</span>
+          <span className="detail-panel__value detail-panel__file-path" title={tableFile}>{tableFile}</span>
+          <button
+            type="button"
+            className="detail-panel__file-open"
+            onClick={() => host.postMessage({ type: 'openModelFile', payload: { modelName: model.name } })}
+            title={`Open ${tableFile}`}
+            aria-label="Open this table's file"
+          >
+            <IconOpen size={12} />
+            Open
+          </button>
+        </div>
+      )}
+      {reviewers !== undefined && (
+        <div className="detail-panel__metadata-row">
+          <span className="detail-panel__label detail-panel__label--wide">Reviewed by</span>
+          <span className="detail-panel__value detail-panel__value--provenance" title={reviewers}>{reviewers}</span>
+        </div>
+      )}
+      <div className="detail-panel__metadata-row">
+        <span className="detail-panel__label detail-panel__label--wide">Schema</span>
+        <span className="detail-panel__value" title={viewer ? undefined : (model.schema || undefined)}>{model.schema || '—'}</span>
+      </div>
+      {/* Without a dbt project the row shows only for a table that already
+          has a warehouse name, so it can be seen and cleared. The viewer
+          keeps the row it always had, worded without dbt: a page outside
+          VS Code cannot know whether the project uses it. */}
+      {viewer ? (
+        <AliasEditor modelName={model.name} tableName={model.tableName} alias={model.alias} readOnly dbtWording={false} />
+      ) : (!logicalOnly || model.alias?.trim()) ? (
+        <AliasEditor modelName={model.name} tableName={model.tableName} alias={model.alias} readOnly={isReadOnly} dbtWording={!logicalOnly} />
+      ) : null}
+      {/* Physical stage only — logical models never carry provenance, so the
+          logical panel does not sprout an empty row. */}
+      {model.provenance && (
+        <div className="detail-panel__metadata-row">
+          <span className="detail-panel__label detail-panel__label--wide">Columns from</span>
+          <span className="detail-panel__value detail-panel__value--provenance">
+            {describeProvenance(
+              model.provenance,
+              model.columns.filter((c) => !c.dataType).length,
+              viewer,
+            )}
+          </span>
+        </div>
+      )}
+    </div>
+  );
+
+  const descriptionBlock = isReadOnly ? (
+    model.description && (
+      <p className="detail-panel__description">{model.description}</p>
+    )
+  ) : (
+    <DescriptionEditor modelName={model.name} description={model.description} />
+  );
+
+  // --- Header: the name, what kind of table it is, and the jump bar -------
+
+  const layerName = model.layer ?? domain.layer;
+  const chips = viewer ? null : (
+    <div className="detail-panel__chips">
+      {!logicalOnly && (
+        <span className={`detail-panel__chip detail-panel__chip--stage detail-panel__chip--${domain.stage}`}>
+          {domain.stage === 'physical' ? 'Physical' : 'Logical'}
+        </span>
+      )}
+      {layerName && <span className="detail-panel__chip" title="Layer">{layerName}</span>}
+      {model.modelRole && <span className="detail-panel__chip" title="Table role">{roleLabel(model.modelRole)}</span>}
+      {isReadOnly && <span className="detail-panel__chip detail-panel__chip--muted">Read-only</span>}
+    </div>
+  );
+
+  const navItems: Array<{ key: PanelSectionKey; label: string }> = [
+    { key: 'overview', label: 'Overview' },
+    { key: 'columns', label: 'Columns' },
+    ...(totalRelationships > 0 || showOffDiagram ? [{ key: 'relationships' as const, label: 'Relationships' }] : []),
+    ...(fieldsSection ? [{ key: 'modelling' as const, label: 'Modelling' }] : []),
+  ];
+  const nav = viewer || navItems.length < 3 ? null : (
+    <nav className="detail-panel__nav" aria-label="Panel sections">
+      {navItems.map((item) => (
+        <button
+          key={item.key}
+          type="button"
+          className={`detail-panel__nav-item${activeSection === item.key ? ' detail-panel__nav-item--active' : ''}`}
+          aria-current={activeSection === item.key ? 'true' : undefined}
+          onClick={() => jumpToSection(item.key)}
+        >
+          {item.label}
+        </button>
+      ))}
+    </nav>
+  );
+
   // --- Render ------------------------------------------------------------
 
   return (
-    <Panel position="top-right" className={viewer ? 'detail-panel detail-panel--viewer' : 'detail-panel'}>
+    <Panel ref={panelRef} position="top-right" className={viewer ? 'detail-panel detail-panel--viewer' : 'detail-panel'}>
       {/* Header */}
-      <div className="detail-panel__header">
+      <div ref={headerRef} className={`detail-panel__header${scrolled ? ' detail-panel__header--scrolled' : ''}`}>
         {editingName ? (
           <div className="detail-panel__title-edit">
             <input
@@ -675,6 +860,8 @@ export function DetailPanel() {
                   handleCancelRename();
                 }
               }}
+              aria-label="Table name"
+              aria-invalid={nameError ? true : undefined}
               autoFocus
               spellCheck={false}
             />
@@ -698,7 +885,7 @@ export function DetailPanel() {
             title="Rename table"
             aria-label="Rename table"
           >
-            ✎
+            <IconPencil size={13} />
           </button>
         )}
         <button
@@ -707,74 +894,19 @@ export function DetailPanel() {
           title={viewer ? 'Close the panel (the table stays selected)' : 'Close detail panel'}
           aria-label="Close detail panel"
         >
-          ×
+          <IconClose size={14} />
         </button>
-      </div>
-
-      {/* Metadata */}
-      <div className="detail-panel__section">
-        <div className="detail-panel__metadata">
-          {/* Editing host only: the table's file, and who reviews a change to it. */}
-          {tableFile !== undefined && (
-            <div className="detail-panel__metadata-row detail-panel__metadata-row--file">
-              <span className="detail-panel__label detail-panel__label--wide">File</span>
-              <span className="detail-panel__value detail-panel__file-path" title={tableFile}>{tableFile}</span>
-              <button
-                type="button"
-                className="detail-panel__file-open"
-                onClick={() => host.postMessage({ type: 'openModelFile', payload: { modelName: model.name } })}
-                title={`Open ${tableFile}`}
-                aria-label="Open this table's file"
-              >
-                Open
-              </button>
-            </div>
-          )}
-          {reviewers !== undefined && (
-            <div className="detail-panel__metadata-row">
-              <span className="detail-panel__label detail-panel__label--wide">Reviewed by</span>
-              <span className="detail-panel__value detail-panel__value--provenance" title={reviewers}>{reviewers}</span>
-            </div>
-          )}
-          <div className="detail-panel__metadata-row">
-            <span className="detail-panel__label detail-panel__label--wide">Schema</span>
-            <span className="detail-panel__value">{model.schema || '—'}</span>
-          </div>
-          {/* Without a dbt project the row shows only for a table that already
-              has a warehouse name, so it can be seen and cleared. The viewer
-              keeps the row it always had, worded without dbt: a page outside
-              VS Code cannot know whether the project uses it. */}
-          {viewer ? (
-            <AliasEditor modelName={model.name} tableName={model.tableName} alias={model.alias} readOnly dbtWording={false} />
-          ) : (!logicalOnly || model.alias?.trim()) ? (
-            <AliasEditor modelName={model.name} tableName={model.tableName} alias={model.alias} readOnly={isReadOnly} dbtWording={!logicalOnly} />
-          ) : null}
-          {/* Physical stage only — logical models never carry provenance, so the
-              logical panel does not sprout an empty row. */}
-          {model.provenance && (
-            <div className="detail-panel__metadata-row">
-              <span className="detail-panel__label detail-panel__label--wide">Columns from</span>
-              <span className="detail-panel__value detail-panel__value--provenance">
-                {describeProvenance(
-                  model.provenance,
-                  model.columns.filter((c) => !c.dataType).length,
-                  viewer,
-                )}
-              </span>
-            </div>
-          )}
-        </div>
-        {isReadOnly ? (
-          model.description && (
-            <p className="detail-panel__description">{model.description}</p>
-          )
-        ) : (
-          <DescriptionEditor modelName={model.name} description={model.description} />
-        )}
+        {chips}
+        {nav}
       </div>
 
       {viewer ? (
         <>
+          {/* Metadata */}
+          <div className="detail-panel__section detail-panel__section--overview">
+            {metadataCard}
+            {descriptionBlock}
+          </div>
           {fieldsSection}
           {removeSection}
           {columnsSection}
@@ -782,11 +914,20 @@ export function DetailPanel() {
         </>
       ) : (
         <>
+          {/* Overview: the description first, then the table's facts as a grouped card. */}
+          <div className="detail-panel__section detail-panel__section--overview" data-panel-section="overview">
+            {descriptionBlock}
+            <h4 className="detail-panel__section-title detail-panel__section-title--details">Details</h4>
+            {metadataCard}
+          </div>
           {columnsSection}
           {relationshipsSection}
           {/* Editing host, logical stage: relationships to tables not on this diagram. */}
           {showOffDiagram && (
-            <div className="detail-panel__section detail-panel__off-diagram">
+            <div
+              className="detail-panel__section detail-panel__off-diagram"
+              {...(totalRelationships > 0 ? {} : { 'data-panel-section': 'relationships' })}
+            >
               <div className="detail-panel__off-diagram-head">
                 <h4 className="detail-panel__section-title detail-panel__off-diagram-title">
                   Not on this diagram ({offRows.length})
@@ -802,18 +943,21 @@ export function DetailPanel() {
               </div>
               <div className="detail-panel__relationships">
                 {offRows.map((row) => {
-                  const text = [row.columns, cardinalityLabel(row.cardinality), ...(row.otherLayer ? [`in ${row.otherLayer}`] : [])].join(' \u00b7 ');
+                  const text = [row.columns, cardinalityLabel(row.cardinality), ...(row.otherLayer ? [`in ${row.otherLayer}`] : [])].join(' · ');
                   return (
                     <div
                       key={`off-${row.direction}-${row.otherTable}-${row.columns}`}
                       className="detail-panel__relationship detail-panel__off-row"
                     >
-                      <span className="detail-panel__rel-direction" title={row.direction === 'out' ? 'Outgoing FK' : 'Incoming FK'}>
-                        {row.direction === 'out' ? '\u2192' : '\u2190'}
+                      <span
+                        className={`detail-panel__rel-direction${row.direction === 'out' ? '' : ' detail-panel__rel-direction--in'}`}
+                        title={row.direction === 'out' ? 'Outgoing FK' : 'Incoming FK'}
+                      >
+                        {row.direction === 'out' ? '→' : '←'}
                       </span>
-                      <span className="detail-panel__off-text" title={`${row.otherTable} \u00b7 ${text}`}>
+                      <span className="detail-panel__off-text" title={`${row.otherTable} · ${text}`}>
                         <span className="detail-panel__rel-target">{row.otherTable}</span>
-                        <span className="detail-panel__off-detail">{` \u00b7 ${text}`}</span>
+                        <span className="detail-panel__off-detail">{` · ${text}`}</span>
                       </span>
                       <button
                         type="button"
@@ -833,14 +977,14 @@ export function DetailPanel() {
 
           {/* The table's Fields: folded until one has a value (a read-only stage shows the fold only when one has). */}
           {fieldsSection && (
-            <div className="detail-panel__section detail-panel__modelling">
+            <div className="detail-panel__section detail-panel__modelling" data-panel-section="modelling">
               <button
                 type="button"
                 className="detail-panel__modelling-toggle"
                 aria-expanded={modellingOpen}
                 onClick={() => setModellingOpen((open) => !open)}
               >
-                <span className="detail-panel__modelling-chevron" aria-hidden="true">{modellingOpen ? '\u25be' : '\u25b8'}</span>
+                <span className="detail-panel__modelling-chevron" aria-hidden="true"><IconChevron size={12} /></span>
                 <span className="detail-panel__modelling-title">Modelling detail</span>{' '}
                 <span className="detail-panel__modelling-optional">(optional)</span>
               </button>

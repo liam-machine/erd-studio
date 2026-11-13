@@ -1234,7 +1234,8 @@ describe('the canvas offer: cheap, and switched off by a setting', () => {
     const { open, candidates } = openWith(new Map());
     await open('gold/vault.json');
     expect(info.mock.calls.filter((c) => c[0] === DBML_CONVERSION_OFFER_TITLE)).toHaveLength(1);
-    expect(candidates).toHaveBeenCalledTimes(1);
+    // Once for the offer, once for the canvas's information button (#305): the listing only.
+    expect(candidates).toHaveBeenCalledTimes(2);
     expect(progress).not.toHaveBeenCalled();
     expect(plan).not.toHaveBeenCalled();
   });

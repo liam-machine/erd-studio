@@ -106,11 +106,12 @@ export default story({
       const canvas = await s.webview();
       await canvas.waitFor(`doc.querySelectorAll('.react-flow__node').length > 0`, { timeout: 60000, what: 'tables on the canvas' });
       await s.eventually(() => dbmlFiles(s.path('.erd-studio/main/tables')).length === TABLES, { message: `expected ${TABLES} table files under .erd-studio/main/tables/` });
-      // Laid out and saved: a position for every table in the diagram file, and no "Auto layout failed".
+      // Laid out and saved: a position for every table in the diagram file, and no layout failure toast
+      // (#294: a timeout also saves the grid, so the positions alone would not catch it).
       const file = s.path(`.erd-studio/main/diagrams/${diagram}.dbml`);
       await s.eventually(() => fs.existsSync(file) && (fs.readFileSync(file, 'utf8').match(/^\s+\w+ -?\d+ -?\d+$/gm) ?? []).length >= TABLES, { timeout: 60000, message: `the diagram file never held a position for each of the ${TABLES} tables (auto layout)` });
-      const failed = await canvas.ev(`doc.body.innerText.includes('Auto layout failed')`);
-      s.expect(!failed, 'the canvas says "Auto layout failed"');
+      const failed = await canvas.ev(`/too large to arrange automatically|couldn't arrange this diagram/.test(doc.body.innerText)`);
+      s.expect(!failed, 'the canvas says Auto Layout could not arrange the diagram');
       await s.wb.highlight(s.sel.activeEditor);
       await s.pause(2500);
       await s.wb.unhighlight();

@@ -1,8 +1,11 @@
 /**
  * DataTypeSelect styles.
  *
- * Custom dropdown that opens immediately on click.
- * BEM naming with VS Code theme tokens.
+ * Custom dropdown that opens immediately on click. The trigger is a small
+ * glass input (it also appears inside a table node, in the React Flow
+ * viewport, so it never blurs); the list is portalled to the document body
+ * and is a raised glass popover above every panel and dialog.
+ * Theme tokens only; BEM naming.
  */
 
 .data-type-select {
@@ -11,8 +14,11 @@
 }
 
 .data-type-select--disabled {
-  opacity: 0.6;
   pointer-events: none;
+}
+
+.data-type-select--disabled .data-type-select__trigger {
+  color: var(--text-quaternary);
 }
 
 /* ---------------------------------------------------------------------------
@@ -22,59 +28,93 @@
 .data-type-select__trigger {
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 2px 6px;
-  border: 1px solid var(--input-border, var(--panel-border));
-  border-radius: 2px;
-  background: var(--input-bg);
-  color: var(--input-fg, var(--editor-fg));
-  font-family: var(--vscode-editor-font-family, monospace);
-  font-size: 11px;
-  cursor: pointer;
-  min-width: 70px;
+  gap: var(--space-2);
+  box-sizing: border-box;
+  min-width: 76px;
+  height: 22px;
+  padding: 0 var(--space-2) 0 var(--space-3);
+  border: 1px solid var(--glass-input-border);
+  border-radius: var(--radius-sm);
+  background: var(--glass-input-bg);
+  color: var(--input-fg);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
   text-align: left;
+  cursor: pointer;
+  transition:
+    border-color var(--duration-fast) var(--ease-standard),
+    box-shadow var(--duration-fast) var(--ease-standard);
 }
 
 .data-type-select__trigger:hover {
-  background: var(--vscode-list-hoverBackground, rgba(255, 255, 255, 0.05));
+  border-color: var(--glass-border-strong);
 }
 
 .data-type-select__trigger:focus {
-  outline: 1px solid var(--focus-border);
-  outline-offset: -1px;
-  border-color: var(--focus-border);
+  outline: none;
 }
 
+.data-type-select__trigger:focus-visible,
 .data-type-select--open .data-type-select__trigger {
-  border-color: var(--focus-border);
+  border-color: var(--glass-input-border-focus);
+  box-shadow: var(--focus-halo);
 }
 
 .data-type-select__value {
   flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .data-type-select__arrow {
-  font-size: 10px;
-  color: var(--vscode-descriptionForeground, #888);
+  flex-shrink: 0;
+  color: var(--text-tertiary);
+  font-size: var(--text-2xs);
+  transition: transform var(--duration-base) var(--ease-spring);
+}
+
+.data-type-select--open .data-type-select__arrow {
+  transform: rotate(180deg);
 }
 
 /* ---------------------------------------------------------------------------
-   Dropdown Menu
+   Dropdown Menu (portalled to <body>: floating chrome, so it may blur)
    --------------------------------------------------------------------------- */
 
 .data-type-select__dropdown {
   position: fixed;
-  margin: 2px 0 0 0;
-  padding: 2px 0;
-  list-style: none;
-  background: var(--vscode-dropdown-background, var(--panel-bg));
-  border: 1px solid var(--vscode-dropdown-border, var(--panel-border));
-  border-radius: 3px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
-  z-index: 9999;
-  max-height: 200px;
+  z-index: var(--z-menu);
+  box-sizing: border-box;
+  min-width: 120px;
+  max-height: 240px;
+  margin: var(--space-1) 0 0 0;
+  padding: var(--space-2);
   overflow-y: auto;
-  min-width: 90px;
+  list-style: none;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+  background: var(--glass-surface-3);
+  -webkit-backdrop-filter: var(--glass-backdrop);
+  backdrop-filter: var(--glass-backdrop);
+  box-shadow: var(--glass-elevation-3);
+  font-family: var(--font-ui);
+  scrollbar-width: thin;
+  scrollbar-color: var(--glass-scrollbar) transparent;
+  transform-origin: top left;
+  animation: data-type-select-pop var(--duration-base) var(--ease-spring);
+}
+
+@keyframes data-type-select-pop {
+  from { opacity: 0; transform: translateY(-4px) scale(0.98); }
+  to { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .data-type-select__dropdown {
+    animation: none;
+  }
 }
 
 .data-type-select__dropdown:focus {
@@ -82,29 +122,45 @@
 }
 
 /* ---------------------------------------------------------------------------
-   Options
+   Options (each keeps its data-type colour, set inline from the theme)
    --------------------------------------------------------------------------- */
 
 .data-type-select__option {
-  padding: 4px 8px;
-  font-family: var(--vscode-editor-font-family, monospace);
-  font-size: 11px;
-  color: var(--vscode-dropdown-foreground, var(--editor-fg));
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  min-height: 26px;
+  padding: 0 var(--space-4);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
   cursor: pointer;
+  transition: background-color var(--duration-instant) var(--ease-standard);
 }
 
 .data-type-select__option:hover,
 .data-type-select__option:focus {
-  background: var(--vscode-list-hoverBackground, rgba(255, 255, 255, 0.1));
+  background: var(--control-fill-hover);
+  border-color: var(--control-border-hover);
   outline: none;
 }
 
 .data-type-select__option--selected {
-  background: var(--vscode-list-activeSelectionBackground, rgba(0, 120, 212, 0.3));
-  color: var(--vscode-list-activeSelectionForeground, var(--editor-fg));
+  background: var(--glass-tint-accent);
+  border-color: var(--control-border-selected);
+}
+
+.data-type-select__option--selected::after {
+  content: '\2713';
+  color: var(--text-secondary);
+  font-family: var(--font-ui);
+  font-size: var(--text-xs);
 }
 
 .data-type-select__option--selected:hover,
 .data-type-select__option--selected:focus {
-  background: var(--vscode-list-activeSelectionBackground, rgba(0, 120, 212, 0.4));
+  background: var(--glass-tint-accent-strong);
 }

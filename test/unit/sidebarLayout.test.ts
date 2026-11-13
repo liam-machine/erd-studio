@@ -9,13 +9,14 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 import { HelpTreeProvider, HELP_ACTIONS } from '../../src/providers/HelpTreeProvider';
+import { NO_LEGACY_ALIAS, revealInExplorerPath } from '../../src/extension';
 import type { ReportTrackingService } from '../../src/services/reportTrackingService';
 import type { TrackedReport } from '../../src/types/feedback';
 
 type MenuEntry = { command?: string; submenu?: string; when?: string; group?: string };
 const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '../../package.json'), 'utf8')) as {
   contributes: {
-    commands: Array<{ command: string; title: string; icon?: string }>;
+    commands: Array<{ command: string; title: string; icon?: string; category?: string }>;
     submenus: Array<{ id: string; label: string; icon?: string }>;
     views: Record<string, Array<{ id: string; name: string; when?: string; visibility?: string }>>;
     viewsWelcome: Array<{ view: string; contents: string; when?: string }>;
@@ -26,14 +27,18 @@ const { contributes } = pkg;
 
 describe('sidebar views', () => {
   it('are Diagrams, Table Library, Relationships and Help & Feedback, in that order', () => {
-    expect(contributes.views['erd-studio'].map((v) => [v.id, v.name])).toEqual([
+    // First, the glass sidebar (prototype): one webview drawing the same four, shown while erdStudio.glassSidebar is on.
+    expect(contributes.views['erd-studio'][0]).toEqual({ type: 'webview', id: 'erdStudio.glassSidebar', name: 'ERD Studio', when: 'erdStudio.glassSidebar' });
+    expect(contributes.views['erd-studio'].slice(1).map((v) => [v.id, v.name])).toEqual([
       ['erdStudio.domainTree', 'Diagrams'],
       ['erdStudio.modelLibrary', 'Table Library'],
       ['erdStudio.relationships', 'Relationships'],
       ['erdStudio.help', 'Help & Feedback'],
     ]);
+    // The native trees hide while the glass sidebar shows them.
+    for (const view of contributes.views['erd-studio'].slice(1)) expect(view.when ?? '', view.id).toMatch(/(^|&& )!erdStudio\.glassSidebar$/);
     // Relationships live in the table library, so the view shows with it.
-    const views = contributes.views['erd-studio'];
+    const views = contributes.views['erd-studio'].slice(1);
     expect(views[2].when).toBe(views[1].when);
     // Relationships starts collapsed too: a long list under the Table Library until asked for.
     expect(views[2].visibility).toBe('collapsed');
@@ -114,26 +119,49 @@ describe('sidebar views', () => {
     }
   });
 
-  it('offer Open in Diagram and Open in File on Relationships rows, never in the palette', () => {
+  it('offer the way in a row\'s click does not take (Open in Diagram…, Open in File, Open File), never in the palette', () => {
     const items = contributes.menus['view/item/context'];
     const entries = (command: string) => items.filter((m) => m.command === command).map((m) => [m.group, m.when]);
-    // A relationship row's click follows the grouping (by file: the file; by table: a diagram),
-    // so its icon is always the other way in.
+    // A row's click goes to the diagram (a healthy table; a relationship grouped by table: row
+    // value `relationship`) or opens the file (a duplicate, a read-only copy, a file to fix; a
+    // relationship grouped by file or with a problem: `relationshipInFile`): its button and
+    // menu are always the other way in, never the click's own.
     expect(entries('erdStudio.openInDiagram')).toEqual([
-      // A Table Library table too: its click opens its file, so the diagram is the icon.
-      ['inline', 'view == erdStudio.modelLibrary && viewItem == logicalModel'],
-      ['navigation@0', 'view == erdStudio.modelLibrary && viewItem =~ /^logicalModel(Duplicate|ReadOnly)?$/'],
+      ['navigation@2', 'view == erdStudio.modelLibrary && viewItem =~ /^logicalModel(Duplicate|ReadOnly|Broken)$/'],
       ['inline', 'view == erdStudio.relationships && viewItem == relationshipsTable'],
-      ['inline', 'view == erdStudio.relationships && viewItem == relationship && erdStudio.relationshipsGrouping == file'],
-      ['navigation@1', 'view == erdStudio.relationships && viewItem =~ /^(relationship|relationshipsTable)$/'],
+      ['inline', 'view == erdStudio.relationships && viewItem == relationshipInFile'],
+      ['navigation@1', 'view == erdStudio.relationships && viewItem =~ /^(relationshipInFile|relationshipsTable)$/'],
     ]);
     expect(entries('erdStudio.openRelationshipSource')).toEqual([
-      ['inline', 'view == erdStudio.relationships && viewItem == relationship && erdStudio.relationshipsGrouping != file'],
+      ['inline', 'view == erdStudio.relationships && viewItem == relationship'],
       ['navigation@2', 'view == erdStudio.relationships && viewItem == relationship'],
     ]);
-    for (const command of ['erdStudio.openInDiagram', 'erdStudio.openRelationshipSource']) {
+    expect(entries('erdStudio.openTableFile')).toEqual([
+      ['navigation@0', 'view == erdStudio.modelLibrary && viewItem =~ /^logicalModel(OnSeveral)?$/'],
+    ]);
+    expect(entries('erdStudio.showOnAnotherDiagram')).toEqual([
+      ['navigation@1', 'view == erdStudio.modelLibrary && viewItem == logicalModelOnSeveral'],
+    ]);
+    for (const command of ['erdStudio.openInDiagram', 'erdStudio.openRelationshipSource', 'erdStudio.openTableFile', 'erdStudio.showOnAnotherDiagram',
+      'erdStudio.revealLogicalModel', 'erdStudio.deleteLogicalModel']) {
       expect(contributes.menus.commandPalette).toContainEqual({ command, when: 'false' });
     }
+    // The new commands: ERD Studio's own, with no legacy alias.
+    for (const command of ['erdStudio.openTableFile', 'erdStudio.showOnAnotherDiagram']) {
+      expect(contributes.commands.find((c) => c.command === command)?.category).toBe('ERD Studio');
+      expect(NO_LEGACY_ALIAS.has(command)).toBe(true);
+    }
+  });
+
+  it('Reveal in Explorer reveals a table\'s file, a schema\'s, layer\'s or folder\'s folder, and a diagram\'s file; nothing else', () => {
+    expect(revealInExplorerPath({ type: 'model', name: 'a', filePath: '/p/a.dbml' })).toBe('/p/a.dbml');
+    expect(revealInExplorerPath({ type: 'folder', folder: 'sales', filePath: '/p/gold/tables/sales' })).toBe('/p/gold/tables/sales');
+    expect(revealInExplorerPath({ type: 'layer', layer: 'gold', filePath: '/p/gold/tables' })).toBe('/p/gold/tables');
+    expect(revealInExplorerPath({ type: 'domain', summary: { filePath: '/p/gold/diagrams/sales.dbml' } })).toBe('/p/gold/diagrams/sales.dbml');
+    // A Diagrams or Relationships layer row has no path of its own; a relationship row is not a file.
+    expect(revealInExplorerPath({ type: 'layer', layer: 'gold' })).toBeUndefined();
+    expect(revealInExplorerPath({ type: 'relationship' })).toBeUndefined();
+    expect(revealInExplorerPath(undefined)).toBeUndefined();
   });
 
   it('end the Diagrams tree with labelled New Diagram… and New Layer… rows (see domainTreeProvider.test.ts)', () => {

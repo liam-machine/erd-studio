@@ -199,6 +199,10 @@ const MAX_TRAIL_GAP_S = 3600;
 const MAX_TRAIL_WINDOWS = 20;
 const MAX_TRAIL_REPEAT = 100;
 const MAX_TRAIL_DROPPED = 10000;
+/** Use per diagram (migrations/0006): at most 30 listed, plus the entry (id 0) that adds up the rest. */
+const MAX_DIAGRAMS = 30;
+const MAX_DIAGRAM_ID = 65535;
+const MAX_DIAGRAM_EDITS = 1000;
 
 /** Array fields keep this order when stored, whatever order the client sent. */
 const STAGES = ['logical', 'physical'];
@@ -854,6 +858,38 @@ const FEATURES = [
   // Added after 2.0.4: the fallback that produced an auto layout whose default attempt failed.
   'layoutFallbackRung2',
   'layoutFallbackRung3',
+  // #304: the host's dbt_project.yml search failed and the walk alone still found a dbt project.
+  'dbtSearchFailedWalkFound',
+  // Also added after 2.0.4 (#295): which stretch held a slow activation, a late start
+  // suggestion, and the dbt search not waited for.
+  'activationSlowDbtSearch',
+  'activationSlowDiscovery',
+  'activationSlowServices',
+  'startLookLateSuggestion',
+  'dbtSearchSkipped',
+  'activationSlowWalk',
+  // #305: the start suggestion showed again on a machine where it had been shown before.
+  'suggestPromptShownAgain',
+  // #305: Convert to DBML… pressed in the canvas's information button.
+  'convertToDbmlFromCanvasInfo',
+  // Added after 2.0.5: a timed table drop: its route, how long until it showed (a range), its slowest stage.
+  'dropRouteCanvas',
+  'dropRouteAfterDrag',
+  'dropRouteMissedDrop',
+  'dropRouteDiagramsRow',
+  'dropShownUnder1s',
+  'dropShown1to5s',
+  'dropShown5to15s',
+  'dropShownOver15s',
+  'dropShownNever',
+  'dropSlowOpen',
+  'dropSlowWait',
+  'dropSlowPrepare',
+  'dropSlowPlan',
+  'dropSlowEdit',
+  'dropSlowSave',
+  'dropSlowRedraw',
+  'dropSlowCanvas',
 ];
 
 /** The only keys `errors` may carry; anything else is dropped. */
@@ -1111,6 +1147,10 @@ const ERROR_CODES = [
   'layoutFailedLastRungTimeout',
   'layoutFailedLastRungWorker',
   'layoutFailedLastRungMemory',
+  // #304: why the host's dbt_project.yml search failed, counted beside dbtSearchFailed.
+  'dbtSearchFailedRejected',
+  'dbtSearchFailedSort',
+  'dbtSearchFailedThrew',
 ];
 
 /** Every event the trail may carry: a marker, a feature key, or an error code written `!code`. */
@@ -1126,9 +1166,9 @@ const UPSERT_SQL = `INSERT INTO heartbeats (
   has_semantic_dir, domain_count, activations, canvas_opens, stages, schema_formats,
   model_count, manifest, catalog, features, errors,
   host, remote, dev, assistants, harnesses, active_days_28, canvas_days_28, first_canvas,
-  physical_tools, platforms, trail, trail_dropped
+  physical_tools, platforms, trail, trail_dropped, diagrams
 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19,
-  ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31)
+  ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32)
 ON CONFLICT(install_id, day) DO UPDATE SET
   received_day = excluded.received_day,
   ext_version = excluded.ext_version,
@@ -1158,7 +1198,8 @@ ON CONFLICT(install_id, day) DO UPDATE SET
   physical_tools = excluded.physical_tools,
   platforms = excluded.platforms,
   trail = excluded.trail,
-  trail_dropped = excluded.trail_dropped`;
+  trail_dropped = excluded.trail_dropped,
+  diagrams = excluded.diagrams`;
 
 const RETENTION_SQL = `DELETE FROM heartbeats WHERE received_day < date('now', '-${RETENTION_DAYS} days')`;
 
@@ -1186,7 +1227,7 @@ const LEDGER_RETENTION_SQL = `DELETE FROM worker_daily WHERE day < date('now', '
 const SHAPE_FIELDS = new Set([
   'installId', 'day', 'extVersion', 'vscodeMajor', 'os', 'tenure', 'activation', 'stages', 'schemaFormats',
   'modelCount', 'counts', 'features', 'errors', 'host', 'assistants', 'harnesses', 'physicalTools', 'platforms',
-  'trail', 'trailDropped', 'other',
+  'trail', 'trailDropped', 'diagrams', 'other',
 ]);
 
 /** `major.minor` of an extension version, one digit of major and at most two of minor. */
@@ -1337,6 +1378,7 @@ async function handleHeartbeat(request, env) {
       heartbeat.platforms === null ? null : JSON.stringify(heartbeat.platforms),
       heartbeat.trail === null ? null : JSON.stringify(heartbeat.trail),
       heartbeat.trailDropped,
+      heartbeat.diagrams === null ? null : JSON.stringify(heartbeat.diagrams),
     )
     .run();
 
@@ -1475,6 +1517,8 @@ function validateHeartbeat(raw, now) {
   const trail = b.trail === undefined ? null : trailOf(b.trail);
   if (trail === INVALID) return refused('trail');
   if (b.trailDropped !== undefined && (b.trail === undefined || !isIntIn(b.trailDropped, 0, MAX_TRAIL_DROPPED))) return refused('trailDropped');
+  const diagrams = b.diagrams === undefined ? null : diagramsOf(b.diagrams);
+  if (diagrams === INVALID) return refused('diagrams');
   const physicalTools = b.physicalTools === undefined ? null : subsetOf(b.physicalTools, PHYSICAL_TOOLS);
   if (b.physicalTools !== undefined && !physicalTools) return refused('physicalTools');
   const platforms = b.platforms === undefined ? null : subsetOf(b.platforms, PLATFORMS);
@@ -1515,6 +1559,7 @@ function validateHeartbeat(raw, now) {
       platforms,
       trail: trail === null ? null : trail.entries,
       trailDropped: trail === null ? null : typeof b.trailDropped === 'number' ? b.trailDropped : 0,
+      diagrams,
     },
   };
 }
@@ -1543,6 +1588,32 @@ function trailOf(value) {
     else dropped += 1;
   }
   return { entries, dropped };
+}
+
+/**
+ * Use per diagram: an array of `[id, opens, edits]`, one entry per id, at
+ * most {@link MAX_DIAGRAMS} with an id from 1 to {@link MAX_DIAGRAM_ID} plus
+ * one with id 0 (the rest of the day's diagrams added up). Every value is a
+ * whole number in range; anything else refuses the heartbeat ({@link INVALID}).
+ *
+ * @param {unknown} value
+ * @returns {Array<[number, number, number]> | typeof INVALID}
+ */
+function diagramsOf(value) {
+  if (!Array.isArray(value) || value.length > MAX_DIAGRAMS + 1) return INVALID;
+  /** @type {Array<[number, number, number]>} */
+  const entries = [];
+  const seen = new Set();
+  for (const entry of value) {
+    if (!Array.isArray(entry) || entry.length !== 3) return INVALID;
+    const [id, opens, edits] = entry;
+    if (!isIntIn(id, 0, MAX_DIAGRAM_ID) || seen.has(id)) return INVALID;
+    if (!isIntIn(opens, 0, 200) || !isIntIn(edits, 0, MAX_DIAGRAM_EDITS)) return INVALID;
+    seen.add(id);
+    entries.push([id, opens, edits]);
+  }
+  if (entries.length - (seen.has(0) ? 1 : 0) > MAX_DIAGRAMS) return INVALID;
+  return entries;
 }
 
 /** Marks an optional field that is present but invalid. */
@@ -1827,6 +1898,7 @@ function errorName(err) {
  * @property {string[] | null} platforms
  * @property {Array<[string, number, number, number]> | null} trail
  * @property {number | null} trailDropped
+ * @property {Array<[number, number, number]> | null} diagrams
  */
 
 /**

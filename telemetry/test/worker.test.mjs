@@ -446,7 +446,7 @@ describe('validation — acceptance and normalisation', () => {
     const flat = JSON.stringify(params);
     assert.ok(!flat.includes('secret-laptop'));
     assert.ok(!flat.includes('10.0.0.1'));
-    assert.equal(params.length, 31);
+    assert.equal(params.length, 32);
   });
 
   it('drops unknown feature and error keys, and zero counts', async () => {
@@ -528,6 +528,35 @@ describe('validation — acceptance and normalisation', () => {
     assert.deepEqual(JSON.parse(params[18]), errors);
   });
 
+  it('keeps why the dbt project search failed and whether the walk found it (#304), and drops a look-alike or a key on the wrong side', async () => {
+    const errors = { dbtSearchFailed: 3, dbtSearchFailedRejected: 1, dbtSearchFailedSort: 1, dbtSearchFailedThrew: 1 };
+    const params = await storedParams(
+      heartbeat({
+        // The reasons are errors and WalkFound a feature: each sent on the other side is dropped.
+        features: { dbtSearchFailedWalkFound: 2, dbtSearchFailedRejected: 1, dbtSearchFailedWalk: 1 },
+        errors: { ...errors, dbtSearchFailedWalkFound: 1, dbtSearchFailedTimeout: 1, dbtSearchFailedSorted: 1 },
+      }),
+    );
+    assert.deepEqual(JSON.parse(params[17]), { dbtSearchFailedWalkFound: 2 });
+    assert.deepEqual(JSON.parse(params[18]), errors);
+  });
+
+  it('keeps a timed table drop\'s route, time range and slowest stage (added after 2.0.5), and drops a look-alike, a raw time or an error-side copy', async () => {
+    const features = {
+      dropRouteCanvas: 1, dropRouteAfterDrag: 1, dropRouteMissedDrop: 3, dropRouteDiagramsRow: 1,
+      dropShownUnder1s: 2, dropShown1to5s: 1, dropShown5to15s: 1, dropShownOver15s: 1, dropShownNever: 1,
+      dropSlowOpen: 1, dropSlowWait: 2, dropSlowPrepare: 1, dropSlowPlan: 1, dropSlowEdit: 1, dropSlowSave: 1, dropSlowRedraw: 1, dropSlowCanvas: 1,
+    };
+    const params = await storedParams(
+      heartbeat({
+        features: { ...features, dropShown18432ms: 1, dropRouteExplorer: 1, dropSlowDrag: 1 },
+        errors: { dropSlowSave: 1 },
+      }),
+    );
+    assert.deepEqual(JSON.parse(params[17]), features);
+    assert.equal(params[18], '{}');
+  });
+
   it('keeps the automatic draft\'s time-limit drop key, after the import outcome keys', async () => {
     const params = await storedParams(heartbeat({ features: { draftDropTimeLimit: 1, importCauseTimeLimit: 1, draftDropTimeLimits: 1 } }));
     assert.equal(params[17], '{"importCauseTimeLimit":1,"draftDropTimeLimit":1}');
@@ -604,6 +633,8 @@ describe('validation — acceptance and normalisation', () => {
       null,
       // And the onboarding trail (migrations/0004).
       null,
+      null,
+      // And use per diagram (migrations/0006).
       null,
     ]);
   });
@@ -734,16 +765,16 @@ describe('the onboarding trail', () => {
     ['!layoutFailed', 0, 1, 1],
   ];
 
-  it('stores it in order as JSON, with the dropped count, last', async () => {
+  it('stores it in order as JSON, with the dropped count', async () => {
     const params = await storedParams(heartbeat({ trail: TRAIL, trailDropped: 3 }));
-    assert.equal(params.length, 31);
+    assert.equal(params.length, 32);
     assert.deepEqual(JSON.parse(params[29]), TRAIL);
     assert.equal(params[30], 3);
   });
 
   it('stores NULL for both when there is no trail, and 0 dropped when it is omitted', async () => {
-    assert.deepEqual((await storedParams(heartbeat({}))).slice(29), [null, null]);
-    assert.deepEqual((await storedParams(heartbeat({ trail: [] }))).slice(29), ['[]', 0]);
+    assert.deepEqual((await storedParams(heartbeat({}))).slice(29, 31), [null, null]);
+    assert.deepEqual((await storedParams(heartbeat({ trail: [] }))).slice(29, 31), ['[]', 0]);
   });
 
   it('drops an event it does not list (a newer extension\'s) and keeps the order of the rest', async () => {
@@ -778,6 +809,51 @@ describe('the onboarding trail', () => {
     it(`refuses ${what} with 400 and no write`, async () => {
       const env = makeEnv();
       const response = await post(heartbeat(body), env);
+      assert.equal(response.status, 400);
+      assert.equal(env.DB.statements.length, 0);
+    });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Use per diagram (migrations/0006)
+// ---------------------------------------------------------------------------
+
+describe('use per diagram', () => {
+  it('stores [id, opens, edits] entries as JSON, last', async () => {
+    const diagrams = [[41822, 3, 12], [7, 1, 0], [0, 2, 5]];
+    const params = await storedParams(heartbeat({ diagrams }));
+    assert.equal(params.length, 32);
+    assert.deepEqual(JSON.parse(params[31]), diagrams);
+  });
+
+  it('stores NULL when the client sends none, and [] for an empty list', async () => {
+    assert.equal((await storedParams(heartbeat({})))[31], null);
+    assert.equal((await storedParams(heartbeat({ diagrams: [] })))[31], '[]');
+  });
+
+  it('accepts 30 diagrams plus the entry for the rest, at every cap', async () => {
+    const diagrams = [...Array.from({ length: 30 }, (_, i) => [65535 - i, 200, 1000]), [0, 200, 1000]];
+    assert.equal(JSON.parse((await storedParams(heartbeat({ diagrams })))[31]).length, 31);
+  });
+
+  for (const [what, diagrams] of [
+    ['a list that is not an array', { 7: [1, 0] }],
+    ['31 numbered diagrams', Array.from({ length: 31 }, (_, i) => [i + 1, 1, 0])],
+    ['an entry of two values', [[7, 1]]],
+    ['a name as the id', [['customer-360', 1, 0]]],
+    ['a path as the id', [['/Users/jane/acme/.erd-studio/gold/finance.dbml', 1, 0]]],
+    ['an id over the cap', [[65536, 1, 0]]],
+    ['a negative id', [[-1, 1, 0]]],
+    ['a fractional id', [[1.5, 1, 0]]],
+    ['the same id twice', [[7, 1, 0], [7, 2, 0]]],
+    ['opens over the cap', [[7, 201, 0]]],
+    ['edits over the cap', [[7, 1, 1001]]],
+    ['a fourth value', [[7, 1, 0, 'finance']]],
+  ]) {
+    it(`refuses ${what} with 400 and no write`, async () => {
+      const env = makeEnv();
+      const response = await post(heartbeat({ diagrams }), env);
       assert.equal(response.status, 400);
       assert.equal(env.DB.statements.length, 0);
     });

@@ -26,6 +26,12 @@
  * file. A file whose name is already taken by a file earlier in the lookup
  * order is shown as a duplicate that is ignored. A library of more than
  * {@link COLLAPSE_LAYERS_OVER} tables starts with its layer rows collapsed.
+ *
+ * A table's click shows it on a diagram (`sidebarRowClick.ts`: the diagram
+ * in front of the user, else the only one, else a pick, else its file) and a
+ * double-click opens its file; a row whose fix is in its file (an ignored
+ * duplicate, a file that does not read) opens the file on click. Its row
+ * value (`tableRowContext`) picks the menu that goes with that.
  */
 
 import * as vscode from 'vscode';
@@ -112,10 +118,40 @@ export interface TableLibraryTableNode {
 /**
  * The command that opens a table file from the tree: `vscode.open`, for a
  * `.dbml` table too (the canvas's selector, `<layer>/diagrams/<name>.dbml`, never
- * matches `<layer>/tables/<schema>/`).
+ * matches `<layer>/tables/<schema>/`). A row whose file needs fixing (an
+ * ignored duplicate, a file that does not read) opens it on click.
  */
 function openTableCommand(uri: vscode.Uri, options?: Record<string, unknown>): vscode.Command {
   return { command: 'vscode.open', title: 'Open Table', arguments: [uri, ...(options ? [options] : [])] };
+}
+
+/**
+ * A healthy table row's click: the table on a diagram (`sidebarRowClick.ts`'s
+ * rule: the diagram in front of the user, else the only one, else a pick,
+ * else the file), and a second click soon after is a double-click that
+ * opens the file (`rowClick`).
+ */
+function showOnDiagramCommand(element: TableLibraryTableNode): vscode.Command {
+  return { command: 'erdStudio.openInDiagram', title: 'Show on Diagram', arguments: [element, { fallBackToFile: true, rowClick: true }] };
+}
+
+/** A table row's double-click (the glass sidebar's `dblclick`): its file, the code. */
+function openFileCommand(element: TableLibraryTableNode): vscode.Command {
+  return { command: 'erdStudio.openTableFile', title: 'Open File', arguments: [element, { doubleClick: true }] };
+}
+
+/** The last line of a healthy table's tooltip: what a click and a double-click do. */
+export const TABLE_CLICK_TOOLTIP = 'Click to show it on a diagram (its file when no diagram shows it yet). Double-click to open its file.';
+
+/**
+ * A healthy table's row value: `logicalModelOnSeveral` when two or more
+ * diagrams show it (its menu then offers Show on Another Diagram…: the click
+ * goes to one of them), else `logicalModel`. A file that needs fixing is
+ * `logicalModelBroken` (its click opens the file, so its menu has no Open File).
+ */
+export function tableRowContext(element: Pick<TableLibraryTableNode, 'referencingDomains' | 'fileError'>): 'logicalModel' | 'logicalModelOnSeveral' | 'logicalModelBroken' {
+  if (element.fileError) return 'logicalModelBroken';
+  return element.referencingDomains.length >= 2 ? 'logicalModelOnSeveral' : 'logicalModel';
 }
 
 export interface TableLibraryFolderNode {
@@ -277,6 +313,18 @@ export class TableLibraryTreeProvider implements vscode.TreeDataProvider<TableLi
     this.hasDbtProject = hasDbtProject;
   }
 
+  /**
+   * How a long read shows its progress: by default the view's own bar
+   * (`withProgress` on {@link TABLE_LIBRARY_VIEW_ID}). The extension passes
+   * one that also shows it on the glass sidebar's Table Library section.
+   */
+  private progress: <T>(task: () => Promise<T>) => Thenable<T> =
+    (task) => vscode.window.withProgress({ location: { viewId: TABLE_LIBRARY_VIEW_ID } }, task);
+
+  setProgress(run: <T>(task: () => Promise<T>) => Thenable<T>): void {
+    this.progress = run;
+  }
+
   refresh(): void {
     this._onDidChangeTreeData.fire(undefined);
   }
@@ -402,7 +450,7 @@ export class TableLibraryTreeProvider implements vscode.TreeDataProvider<TableLi
     const isOrphan = element.referencingDomains.length === 0;
     const item = new vscode.TreeItem(element.name, vscode.TreeItemCollapsibleState.None);
 
-    item.contextValue = 'logicalModel';
+    item.contextValue = tableRowContext(element);
     // A table on no diagram is not a problem (a staging table often is not
     // drawn), so it keeps its table icon, YAML or DBML: only a file error or
     // a duplicate gets a warning.
@@ -433,9 +481,20 @@ export class TableLibraryTreeProvider implements vscode.TreeDataProvider<TableLi
     item.tooltip = dbml ? this.dbmlTableTooltip(element, alias) : this.yamlTableTooltip(element);
 
     item.resourceUri = vscode.Uri.file(element.filePath);
-    item.command = openTableCommand(item.resourceUri);
+    // A click goes to the table on a diagram; a double-click opens its file.
+    item.command = showOnDiagramCommand(element);
 
     return item;
+  }
+
+  /**
+   * A row's double-click, for a view that has one (the glass sidebar): a
+   * healthy table's file. A row whose click already opens its file (an
+   * ignored duplicate, a file that needs fixing) has none: the click did it.
+   */
+  secondaryCommand(element: TableLibraryNode): vscode.Command | undefined {
+    if (element.type !== 'model' || element.shadowedBy || element.fileError) return undefined;
+    return openFileCommand(element);
   }
 
   getChildren(element?: TableLibraryNode): TableLibraryNode[] | undefined {
@@ -859,6 +918,8 @@ export class TableLibraryTreeProvider implements vscode.TreeDataProvider<TableLi
       shown.length === 0
         ? NO_DIAGRAM_TOOLTIP
         : `On ${shown.length === 1 ? 'the diagram' : 'the diagrams'}:\n${shown.map((d) => `- ${d}`).join('\n')}`,
+      '',
+      TABLE_CLICK_TOOLTIP,
     ].join('\n'));
   }
 
@@ -869,6 +930,8 @@ export class TableLibraryTreeProvider implements vscode.TreeDataProvider<TableLi
         ? NO_DIAGRAM_TOOLTIP
         : `**Referenced by:**\n${element.referencingDomains.map(d => `- ${d}`).join('\n')}`,
       ...this.ownerLines(element),
+      '',
+      TABLE_CLICK_TOOLTIP,
     ].join('\n'));
   }
 
@@ -995,7 +1058,7 @@ export class TableLibraryTreeProvider implements vscode.TreeDataProvider<TableLi
         if (queue.length > 0) await new Promise((resolve) => setTimeout(resolve, 0));
       }
     };
-    const done: Promise<void> = Promise.resolve(vscode.window.withProgress({ location: { viewId: TABLE_LIBRARY_VIEW_ID } }, read))
+    const done: Promise<void> = Promise.resolve(this.progress(read))
       .catch((err: unknown) => treeLog.warn(`Reading table files for the filter failed: ${err instanceof Error ? err.message : String(err)}`))
       .finally(() => {
         if (this.filterRead === done) this.filterRead = undefined;

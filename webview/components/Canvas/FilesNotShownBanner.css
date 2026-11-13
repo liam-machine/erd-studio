@@ -1,116 +1,203 @@
 /**
- * FilesNotShownBanner styles — the "not shown" strip, one of the family of
- * strips above the flow area (PhysicalSourceNotice, ManifestHint): it never
- * covers a node, and its list scrolls rather than push the canvas away.
+ * FilesNotShownBanner styles: the "not shown" notice, one of the family of
+ * glass cards in the editor's notice tray (`.editor-notices`, with
+ * PhysicalSourceNotice and ManifestHint): in flow above the flow area, so it
+ * never covers a node, and its list scrolls rather than push the canvas away.
  *
- * Theme tokens only (packages/renderer/src/styles/theme.css); no literal colours.
+ * Warning tone normally; error tone while the picture itself is out of date.
+ * Glass tokens only (packages/renderer/src/styles/theme.css).
  */
 
 .files-not-shown {
+  --notice-tone: var(--warning-fg);
+  --notice-tint: var(--glass-tint-warning);
+  --notice-edge: var(--glass-tint-warning-edge);
+
   flex-shrink: 0;
-  padding: 6px 12px;
-  background: var(--warning-bg);
-  color: var(--warning-fg);
-  border-bottom: 1px solid var(--panel-border);
-  font-size: 12px;
-  line-height: 1.4;
+  padding: var(--space-4) var(--space-3) var(--space-4) var(--space-4);
+
+  background: linear-gradient(var(--notice-tint), var(--notice-tint)), var(--glass-surface-2);
+  -webkit-backdrop-filter: var(--glass-backdrop);
+  backdrop-filter: var(--glass-backdrop);
+  border: 1px solid var(--notice-edge);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--glass-elevation-1);
+
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
+
+  animation: files-not-shown-in var(--duration-base) var(--ease-out);
 }
 
-/* The picture itself is out of date: the strongest of the strips. */
+@keyframes files-not-shown-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .files-not-shown {
+    animation: none;
+  }
+}
+
+/* The picture itself is out of date: the strongest of the notices. */
 .files-not-shown--stale {
-  background: var(--error-bg);
-  color: var(--error-fg);
+  --notice-tone: var(--error-fg);
+  --notice-tint: var(--glass-tint-error);
+  --notice-edge: var(--glass-tint-error-edge);
 }
 
 .files-not-shown__summary {
   display: flex;
-  align-items: baseline;
-  gap: 8px;
+  align-items: center;
+  gap: var(--space-4);
 }
 
 .files-not-shown__icon {
   flex-shrink: 0;
-  font-size: 13px;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--radius-pill);
+  background: var(--notice-tint);
+  color: var(--notice-tone);
+  font-size: var(--text-sm);
+  line-height: 1;
 }
 
 .files-not-shown__lead {
   flex: 1;
+  min-width: 0;
+  color: var(--text-primary);
+  font-weight: var(--weight-medium);
 }
 
+/* The list: a sunken well under the summary, lined up with its text. */
 .files-not-shown__list {
-  margin: 4px 0 0;
-  padding: 0 0 0 21px;
+  margin: var(--space-3) var(--space-1) 0 calc(20px + var(--space-4));
+  padding: var(--space-1) var(--space-4);
   list-style: none;
   max-height: 30vh;
   overflow-y: auto;
+  border-radius: var(--radius-md);
+  background: var(--glass-well);
+  scrollbar-width: thin;
+  scrollbar-color: var(--glass-scrollbar) transparent;
 }
 
 .files-not-shown__item {
   display: flex;
   align-items: baseline;
-  gap: 8px;
-  padding: 3px 0;
+  gap: var(--space-4);
+  padding: var(--space-3) 0;
 }
 
 .files-not-shown__item + .files-not-shown__item {
-  border-top: 1px solid var(--panel-border);
+  border-top: 1px solid var(--glass-divider);
 }
 
 .files-not-shown__message {
   flex: 1;
+  color: var(--text-secondary);
   overflow-wrap: anywhere;
 }
 
+/* Quiet text buttons: "Show details", "Open at line 12". */
 .files-not-shown__toggle,
 .files-not-shown__file {
   flex-shrink: 0;
-  padding: 0;
+  padding: 0 var(--space-1);
   border: none;
+  border-radius: var(--radius-xs);
   background: none;
-  color: inherit;
+  color: var(--text-link);
   font-family: inherit;
-  font-size: 12px;
-  text-decoration: underline;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  text-decoration: none;
+  white-space: nowrap;
   cursor: pointer;
+}
+
+.files-not-shown__toggle:hover,
+.files-not-shown__file:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 .files-not-shown__action {
   flex-shrink: 0;
   align-self: center;
-  padding: 2px 10px;
-  border: none;
-  border-radius: 2px;
-  background: var(--button-bg);
-  color: var(--button-fg);
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--control-height-sm);
+  padding: 0 var(--space-5);
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-pill);
+  background: var(--control-thumb);
+  box-shadow: var(--control-thumb-shadow);
+  color: var(--text-primary);
   font-family: inherit;
-  font-size: 12px;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  white-space: nowrap;
   cursor: pointer;
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
+    transform var(--duration-instant) var(--ease-standard);
 }
 
 .files-not-shown__action:hover {
-  background: var(--button-hover-bg);
+  border-color: var(--control-border-hover);
+  background:
+    linear-gradient(var(--control-fill), var(--control-fill)),
+    var(--control-thumb);
+}
+
+.files-not-shown__action:active {
+  transform: scale(0.97);
 }
 
 .files-not-shown__toggle:focus-visible,
 .files-not-shown__file:focus-visible,
 .files-not-shown__action:focus-visible,
 .files-not-shown__dismiss:focus-visible {
-  outline: 1px solid var(--focus-border);
-  outline-offset: 1px;
+  outline: var(--focus-outline);
+  outline-offset: var(--focus-offset);
 }
 
 .files-not-shown__dismiss {
   flex-shrink: 0;
-  padding: 0 4px;
-  border: none;
-  background: none;
-  color: inherit;
-  font-size: 15px;
+  display: grid;
+  place-items: center;
+  width: var(--control-height-sm);
+  height: var(--control-height-sm);
+  padding: 0;
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--text-tertiary);
+  font-size: var(--text-lg);
   line-height: 1;
   cursor: pointer;
-  opacity: 0.7;
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard);
 }
 
 .files-not-shown__dismiss:hover {
-  opacity: 1;
+  background: var(--control-fill-hover);
+  border-color: var(--control-border-hover);
+  color: var(--text-primary);
 }

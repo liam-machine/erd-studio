@@ -27,10 +27,12 @@ import {
   buildImportReportView,
   importReportCounts,
   parseImportReportToHost,
+  IMPORT_REPORT_STYLE,
   partialImportMessage,
   problemLedger,
   type ImportReportRecord,
 } from '../../src/services/importReport';
+import { GLASS_PAGE_STYLE } from '../../src/types/glassPageStyle';
 import {
   _resetImportReports,
   latestImportReport,
@@ -182,15 +184,29 @@ describe('Import report: file:line links', () => {
 
 describe('Import report: the page', () => {
   it('is nonce-only, loads nothing remote, uses theme colours and BEM classes', () => {
-    const html = buildImportReportHtml(buildImportReportView(record()), 'abc123');
+    const full = buildImportReportHtml(buildImportReportView(record()), 'abc123');
+    // The shared glass foundation comes first in the one <style>; its token definitions
+    // may hold literals (fallbacks), so the colour check reads everything else.
+    expect(full).toContain(`<style nonce="abc123">${GLASS_PAGE_STYLE}${IMPORT_REPORT_STYLE}</style>`);
+    const html = full.replace(GLASS_PAGE_STYLE, '');
     expect(buildImportReportCsp('abc123')).toBe("default-src 'none'; style-src 'nonce-abc123'; script-src 'nonce-abc123';");
     expect(html).toContain('<style nonce="abc123">');
     expect(html).toContain('<script nonce="abc123">');
     expect(html).not.toMatch(/https?:\/\//);
-    expect(html).not.toMatch(/#[0-9a-fA-F]{3,6}\b/);
+    expect(html).not.toMatch(/#[0-9a-fA-F]{3,8}\b|rgba?\(|hsla?\(/);
     expect(html).not.toMatch(/\son[a-z]+="/);
+    // The page's own `ir` BEM classes, beside the glass kit's `gp-` ones.
     const classes = [...html.matchAll(/class="([^"]+)"/g)].flatMap((m) => m[1].split(' '));
-    for (const c of classes) expect(c).toMatch(/^ir(-[a-z]+)?(__[a-z-]+)?(--[a-zA-Z]+)?$/);
+    for (const c of classes) expect(c).toMatch(/^(ir(-[a-z]+)?(__[a-z-]+)?(--[a-zA-Z]+)?|gp-[a-z]+(-[a-z]+)*(--[a-z]+)?)$/);
+  });
+
+  it('marks what was left out as a warning, and an all-clear as an ok notice', () => {
+    const html = buildImportReportHtml(buildImportReportView(record()), 'n');
+    expect(html).toContain('<li class="ir__total gp-pill gp-pill--warning" data-total="notImported">');
+    expect(html).toContain('<li class="ir__total gp-pill" data-total="repaired">');
+    const clean = buildImportReportHtml(buildImportReportView(record({ ledger: [] })), 'n');
+    expect(clean).toContain('<li class="ir__total gp-pill" data-total="notImported">');
+    expect(clean).toContain('<p class="ir__empty gp-notice gp-notice--ok">Nothing to report: everything was brought across as written.</p>');
   });
 
   it('escapes every string from the ledger and cuts it to one line', () => {
