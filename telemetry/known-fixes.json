@@ -26,5 +26,10 @@
     "fixedIn": "1.7.0",
     "summary": "A Draw from dbt that fails part-way now removes the diagram file it wrote and restores any table file it changed.",
     "issue": 189
+  },
+  {
+    "code": "layoutFailedStack",
+    "fixedIn": "2.0.4",
+    "summary": "Auto Layout on a large diagram with many relationships now arranges it instead of failing with a call stack error."
   }
 ]
