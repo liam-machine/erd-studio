@@ -146,13 +146,17 @@ describe('first-open auto layout (Toolbar + store)', () => {
     expect(updatePositionsPosts()).toHaveLength(0);
   });
 
-  it('keeps positions unpersisted when ELK fails, so the next open retries', async () => {
+  // runElkLayout rejects only when even its grid fallback failed (a timeout is
+  // laid out by the grid and saved, #294): then nothing is written.
+  it('keeps positions unpersisted when even the grid fails, so the next open retries', async () => {
     mockRunElkLayout.mockRejectedValueOnce(new Error('boom'));
     const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     deliverSubjectAreaLoaded(makeSubjectArea(), true);
     await renderToolbar();
 
-    await vi.waitFor(() => expect(useEditorStore.getState().toastMessage).toMatch(/Auto layout failed: boom/));
+    await vi.waitFor(() => expect(useEditorStore.getState().toastMessage).toMatch(/^ERD Studio couldn't arrange this diagram\./));
+    expect(useEditorStore.getState().toastMessage).not.toMatch(/boom|ELK/);
+    expect(useEditorStore.getState().toastActions).toEqual(['retryLayout', 'layoutFeedback']);
     expect(mockRunElkLayout).toHaveBeenCalledTimes(1);
     expect(updatePositionsPosts()).toHaveLength(0);
     // The host counts it as a failed first-open layout (usage telemetry).

@@ -25,6 +25,7 @@
 
 import type { TelemetryErrorCode, TelemetryFeature } from '../services/telemetryPayload';
 import {
+  isDirectImport,
   startIntentFor,
   startNeedsLook,
   type DetectedImportSource,
@@ -59,7 +60,11 @@ export interface StartIntentDeps {
   onDbtProjectSeen?(): void;
   timeoutMs?: number;
   now?(): number;
-  /** Counts a fixed key (`startLookTimeout`, `startLookGaveUp`; the host counts each once a day). */
+  /**
+   * Counts a fixed key (`startLookTimeout`, `startLookGaveUp`,
+   * `startLookLateSuggestion`: a retry after a timeout turned the published
+   * blank into an import; the host counts each once a day).
+   */
   feature?(key: TelemetryFeature): void;
   /** Counts a fixed error code (`startLookFailed`, `startContextFailed`). */
   error?(code: TelemetryErrorCode): void;
@@ -85,6 +90,13 @@ export class StartIntentTracker {
   private published: StartIntent | undefined;
   private scheduled: ReturnType<typeof setTimeout> | undefined;
   private disposed = false;
+  /**
+   * The first look that answered after a timeout has run (whatever it found):
+   * `startLookLateSuggestion` is decided on that look only, once a session.
+   */
+  private retrySettled = false;
+  /** That look just answered: the refresh that resumes after it decides the key. */
+  private retryJustSettled = false;
 
   constructor(private readonly deps: StartIntentDeps) {}
 
@@ -130,7 +142,15 @@ export class StartIntentTracker {
       await this.lookOnce();
     }
     const intent = startIntentFor({ ...ctx, found: this.found });
+    // What the first timeout cost: blank was shown, and the retry (the next
+    // look that answered) found an import. A later look finding a file added
+    // since is not counted.
+    const afterRetry = this.retryJustSettled;
+    this.retryJustSettled = false;
     if (intent && intent !== this.published && !this.disposed) {
+      if (afterRetry && this.published === 'blank' && isDirectImport(intent)) {
+        this.count(() => this.deps.feature?.('startLookLateSuggestion'));
+      }
       this.published = intent;
       this.deps.publish(intent);
     }
@@ -204,6 +224,10 @@ export class StartIntentTracker {
           this.found = findings.sources;
           this.sqlTables = findings.sqlTables;
           this.lookedAt = this.now();
+          if (this.timeouts > 0 && !this.retrySettled) {
+            this.retrySettled = true;
+            this.retryJustSettled = true;
+          }
           if (findings.dbtProject) this.noteDbtProject();
         }
       } finally {

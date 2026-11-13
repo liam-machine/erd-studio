@@ -528,6 +528,35 @@ describe('validation — acceptance and normalisation', () => {
     assert.deepEqual(JSON.parse(params[18]), errors);
   });
 
+  it('keeps why the dbt project search failed and whether the walk found it (#304), and drops a look-alike or a key on the wrong side', async () => {
+    const errors = { dbtSearchFailed: 3, dbtSearchFailedRejected: 1, dbtSearchFailedSort: 1, dbtSearchFailedThrew: 1 };
+    const params = await storedParams(
+      heartbeat({
+        // The reasons are errors and WalkFound a feature: each sent on the other side is dropped.
+        features: { dbtSearchFailedWalkFound: 2, dbtSearchFailedRejected: 1, dbtSearchFailedWalk: 1 },
+        errors: { ...errors, dbtSearchFailedWalkFound: 1, dbtSearchFailedTimeout: 1, dbtSearchFailedSorted: 1 },
+      }),
+    );
+    assert.deepEqual(JSON.parse(params[17]), { dbtSearchFailedWalkFound: 2 });
+    assert.deepEqual(JSON.parse(params[18]), errors);
+  });
+
+  it('keeps a timed table drop\'s route, time range and slowest stage (added after 2.0.5), and drops a look-alike, a raw time or an error-side copy', async () => {
+    const features = {
+      dropRouteCanvas: 1, dropRouteAfterDrag: 1, dropRouteMissedDrop: 3, dropRouteDiagramsRow: 1,
+      dropShownUnder1s: 2, dropShown1to5s: 1, dropShown5to15s: 1, dropShownOver15s: 1, dropShownNever: 1,
+      dropSlowOpen: 1, dropSlowWait: 2, dropSlowPrepare: 1, dropSlowPlan: 1, dropSlowEdit: 1, dropSlowSave: 1, dropSlowRedraw: 1, dropSlowCanvas: 1,
+    };
+    const params = await storedParams(
+      heartbeat({
+        features: { ...features, dropShown18432ms: 1, dropRouteExplorer: 1, dropSlowDrag: 1 },
+        errors: { dropSlowSave: 1 },
+      }),
+    );
+    assert.deepEqual(JSON.parse(params[17]), features);
+    assert.equal(params[18], '{}');
+  });
+
   it('keeps the automatic draft\'s time-limit drop key, after the import outcome keys', async () => {
     const params = await storedParams(heartbeat({ features: { draftDropTimeLimit: 1, importCauseTimeLimit: 1, draftDropTimeLimits: 1 } }));
     assert.equal(params[17], '{"importCauseTimeLimit":1,"draftDropTimeLimit":1}');

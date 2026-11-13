@@ -8,7 +8,7 @@
  *                         openFeedback, feedbackContext, feedbackAnalysis,
  *                         feedbackSubmitted, revealRelationship, canvasContext,
  *                         revealTable, selectTables, libraryDragStarted, libraryDragReleased,
- *                         libraryDragEnded, filesNotShown, canvasNotice
+ *                         libraryDragEnded, filesNotShown, canvasNotice, dropTrace
  *   Webview → Extension:  ready, requestExistingTables, requestNewRelationshipFiles, addModel, addColumn, removeColumn, addRelationship,
  *                         removeModel(s), removeRelationship(s), editRelationship,
  *                         addExistingModel(s), dropTables, updatePositions, switchStage,
@@ -20,6 +20,7 @@
  *                         openNotedFile, addRelationshipsImports, reloadFromDisk
  *                         (the "not shown" strip's file links and buttons),
  *                         canvasFrame (where the canvas sits on screen)
+ *                         dropShown (a timed drop's table is on screen; timing only)
  *
  * All message types use a discriminated union pattern with a `type` field,
  * enabling exhaustive switch handling in message handlers.
@@ -619,10 +620,44 @@ export interface CanvasVisibilityMessage {
   payload: { visible: boolean };
 }
 
+/**
+ * A table drop is being timed (`src/services/dropTiming.ts`): posted right
+ * after the diagram redrawn with the dropped tables. The canvas answers with
+ * {@link DropShownMessage} after its next paint, so the host learns when the
+ * table was on screen. An older webview ignores it (the drop is then logged
+ * as not shown).
+ */
+export interface DropTraceMessage {
+  type: 'dropTrace';
+  payload: {
+    /** The drop's id, echoed back. */
+    trace: number;
+  };
+}
+
+/**
+ * Whether the canvas shows its information button about converting this
+ * project to DBML (`webview/components/Toolbar/ConvertInfo.tsx`): the
+ * Convert offer's own checks (`convertOfferApplies`,
+ * `src/services/convertOffer.ts`), never the once-a-session flag or the
+ * window's one prompt, since the button is not a prompt. Posted after each
+ * logical-stage `domainLoaded` / `stageData`, and to every open canvas when
+ * the answer may have changed (a Convert run, `erdStudio.dbml.offerConvert`
+ * changed, Don't Ask Again). Never on the physical stage; the webview also
+ * hides the button there. A canvas that never gets one shows no button.
+ */
+export interface ConvertOfferMessage {
+  type: 'convertOffer';
+  payload: {
+    show: boolean;
+  };
+}
+
 export type ExtensionMessage =
   | GuideStartMessage
   | CanvasVisibilityMessage
   | LineStyleMessage
+  | ConvertOfferMessage
   | LoadingMessage
   | ExistingTablesMessage
   | NewRelationshipFilesMessage
@@ -645,6 +680,7 @@ export type ExtensionMessage =
   | LibraryDragStartedMessage
   | LibraryDragReleasedMessage
   | LibraryDragEndedMessage
+  | DropTraceMessage
   | ErrorMessage;
 
 // ---------------------------------------------------------------------------
@@ -1262,6 +1298,21 @@ export interface ShowLogsMessage {
 }
 
 /**
+ * The canvas's answer to {@link DropTraceMessage}, after the first paint
+ * that follows it: the timed drop's tables are on screen. `renderMs`: the
+ * canvas's own time from receiving the redrawn diagram (`domainLoaded`) to
+ * that paint. Timing only (the ERD Studio log and fixed telemetry keys);
+ * writes nothing, so it is on the physical-stage allowlist.
+ */
+export interface DropShownMessage {
+  type: 'dropShown';
+  payload: {
+    trace: number;
+    renderMs?: number;
+  };
+}
+
+/**
  * Request to export this diagram as Mermaid or DBML — the canvas toolbar's
  * **Export** button. No payload: the host runs `erdStudio.exportDiagram` with
  * the panel's document, which asks for the format and what to do with the
@@ -1370,10 +1421,23 @@ export interface SetLineStyleMessage {
   };
 }
 
+/**
+ * The canvas's information button's **Convert to DBML…** (it shows while the
+ * host's `convertOffer` says so): run Convert Project to DBML, the same hook
+ * as the Convert offer's **Convert…**, whose panel lists every change before
+ * anything is written. No payload. Logical stage only: not on the physical
+ * allowlist (`NON_MUTATION_TYPES`).
+ */
+export interface ConvertProjectToDbmlMessage {
+  type: 'convertProjectToDbml';
+  payload?: Record<string, never>;
+}
+
 /** Union of all messages the webview can send to the extension. */
 export type WebviewMessage =
   | ReadyMessage
   | SetLineStyleMessage
+  | ConvertProjectToDbmlMessage
   | GuideMessage
   | RequestExistingTablesMessage
   | RequestNewRelationshipFilesMessage
@@ -1422,6 +1486,7 @@ export type WebviewMessage =
   | OpenAnotherDomainMessage
   | OpenGettingStartedMessage
   | ShowLogsMessage
+  | DropShownMessage
   | ExportDiagramMessage
   | GenerateSyncPlanMessage
   | RunDbtCompileMessage

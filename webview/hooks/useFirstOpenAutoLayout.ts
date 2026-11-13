@@ -7,8 +7,11 @@
  * The host sends its simple fallback placement with that payload and does not
  * persist it; this hook hands the canvas to the same `runLayout` the Layout
  * button and Shift+L use, so the result is persisted by one `updatePositions`
- * (one edit, one undo step) and the viewport is fitted. If ELK fails, the
- * layout's own toast shows and nothing is written — the next open asks again.
+ * (one edit, one undo step) and the viewport is fitted. A layout ELK cannot
+ * finish (a timeout, the worker dying, a stack overflow, …) falls back to the
+ * grid's tidy columns, which are saved the same way, so the next open does not
+ * lay out again (#294). Only if even the grid fails is nothing written: the
+ * layout's toast says so in plain words and the next open asks again.
  *
  * Guards:
  *  - it waits until the canvas holds a model node for every model in the

@@ -858,6 +858,38 @@ const FEATURES = [
   // Added after 2.0.4: the fallback that produced an auto layout whose default attempt failed.
   'layoutFallbackRung2',
   'layoutFallbackRung3',
+  // #304: the host's dbt_project.yml search failed and the walk alone still found a dbt project.
+  'dbtSearchFailedWalkFound',
+  // Also added after 2.0.4 (#295): which stretch held a slow activation, a late start
+  // suggestion, and the dbt search not waited for.
+  'activationSlowDbtSearch',
+  'activationSlowDiscovery',
+  'activationSlowServices',
+  'startLookLateSuggestion',
+  'dbtSearchSkipped',
+  'activationSlowWalk',
+  // #305: the start suggestion showed again on a machine where it had been shown before.
+  'suggestPromptShownAgain',
+  // #305: Convert to DBML… pressed in the canvas's information button.
+  'convertToDbmlFromCanvasInfo',
+  // Added after 2.0.5: a timed table drop: its route, how long until it showed (a range), its slowest stage.
+  'dropRouteCanvas',
+  'dropRouteAfterDrag',
+  'dropRouteMissedDrop',
+  'dropRouteDiagramsRow',
+  'dropShownUnder1s',
+  'dropShown1to5s',
+  'dropShown5to15s',
+  'dropShownOver15s',
+  'dropShownNever',
+  'dropSlowOpen',
+  'dropSlowWait',
+  'dropSlowPrepare',
+  'dropSlowPlan',
+  'dropSlowEdit',
+  'dropSlowSave',
+  'dropSlowRedraw',
+  'dropSlowCanvas',
 ];
 
 /** The only keys `errors` may carry; anything else is dropped. */
@@ -1115,6 +1147,10 @@ const ERROR_CODES = [
   'layoutFailedLastRungTimeout',
   'layoutFailedLastRungWorker',
   'layoutFailedLastRungMemory',
+  // #304: why the host's dbt_project.yml search failed, counted beside dbtSearchFailed.
+  'dbtSearchFailedRejected',
+  'dbtSearchFailedSort',
+  'dbtSearchFailedThrew',
 ];
 
 /** Every event the trail may carry: a marker, a feature key, or an error code written `!code`. */

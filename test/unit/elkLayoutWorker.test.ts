@@ -35,10 +35,11 @@ vi.mock('elkjs/lib/elk-api', () => ({ default: fakes.FakeELK }));
 import {
   runElkLayout, LAYOUT_TIMEOUT_MS, STACK_SAFE_NODE_PLACEMENT, isStackOverflow, stackSafeFallbacks, stackSafeFallbackRungs,
   classifyLayoutFailure, layoutFailureReport, GRID_LAYOUT_MIN_TABLES, GRID_LAYOUT_MIN_RELATIONSHIPS,
-  layoutOutcomeNotice, layoutOutcomeLogMessage,
+  layoutOutcomeNotice, layoutOutcomeLogMessage, layoutFailureNotice,
 } from '../../webview/lib/elkLayout';
 import type { TableFlowNode } from '@erd-studio/renderer/editor';
 import type { LayoutOutcome } from '../../webview/lib/elkLayout';
+import { firstOpenLayoutOptions } from '../../webview/lib/firstOpenLayout';
 
 const node: TableFlowNode = {
   id: 'a',
@@ -118,7 +119,7 @@ describe('runElkLayout worker guard', () => {
 
     await expect(pending).resolves.toEqual({ a: { x: 0, y: 0 } });
     await expect(settled).resolves.toEqual({ a: { x: 0, y: 0 } });
-    expect(outcomes).toEqual([{ step: 'grid', grouping: 'none', bands: 'off', reason: `ELK layout timed out after ${LAYOUT_TIMEOUT_MS / 1000}s` }]);
+    expect(outcomes).toEqual([{ step: 'grid', grouping: 'none', bands: 'off', reason: `ELK layout timed out after ${LAYOUT_TIMEOUT_MS / 1000}s`, failure: 'timeout' }]);
     expect(worker.terminate).toHaveBeenCalled();
 
     // A fresh instance is built for the next run
@@ -182,7 +183,7 @@ describe('runElkLayout worker guard', () => {
     expect(await runElkLayout([node], [], undefined, 'auto', { onOutcome: (o) => outcomes.push(o), onFallbackRung: (r) => rungs.push(r) }))
       .toEqual({ a: { x: 0, y: 0 } });
     expect(calls).toBe(3);
-    expect(outcomes).toEqual([{ step: 'grid', grouping: 'none', bands: 'off', reason: 'Maximum call stack size exceeded' }]);
+    expect(outcomes).toEqual([{ step: 'grid', grouping: 'none', bands: 'off', reason: 'Maximum call stack size exceeded', failure: 'stack' }]);
     // Telemetry has no key for the grid yet: it is told as the deepest rung.
     expect(rungs).toEqual([3]);
   });
@@ -437,7 +438,7 @@ describe('runElkLayout grouping, the grouping-off step and the grid', () => {
     expect(graphs[3].children.every((c) => c.layoutOptions === undefined)).toBe(true);
     expect(graphs[3].layoutOptions['elk.layered.nodePlacement.strategy']).toBe(STACK_SAFE_NODE_PLACEMENT);
     expect(graphs[3].layoutOptions['elk.layered.compaction.postCompaction.strategy']).toBe('NONE');
-    expect(outcomes).toEqual([{ step: 'ungrouped', grouping: 'depth', bands: 'off', reason: 'Maximum call stack size exceeded' }]);
+    expect(outcomes).toEqual([{ step: 'ungrouped', grouping: 'depth', bands: 'off', reason: 'Maximum call stack size exceeded', failure: 'stack' }]);
     expect(rungs).toEqual([3]);
   });
 
@@ -464,7 +465,8 @@ describe('runElkLayout grouping, the grouping-off step and the grid', () => {
     const outcomes: LayoutOutcome[] = [];
     fakes.state.layoutImpl = (graph) => { calls++; return placeAll(graph); };
     const many = Array.from({ length: GRID_LAYOUT_MIN_TABLES }, (_, i) => table(`t${i}`));
-    const positions = await runElkLayout(many, [], undefined, 'auto', { onOutcome: (o) => outcomes.push(o) });
+    // #294: with the first-open layout's own options, as the canvas passes them.
+    const positions = await runElkLayout(many, [], firstOpenLayoutOptions(many.length), 'auto', { onOutcome: (o) => outcomes.push(o) });
     expect(calls).toBe(0);
     expect(Object.keys(positions)).toHaveLength(GRID_LAYOUT_MIN_TABLES);
     expect(outcomes).toEqual([{ step: 'grid', grouping: 'none', bands: 'off', reason: 'size' }]);
@@ -477,9 +479,12 @@ describe('runElkLayout grouping, the grouping-off step and the grid', () => {
   it('says what a degraded layout did, for the user and for the log', () => {
     expect(layoutOutcomeNotice({ step: 'default', grouping: 'depth', bands: 'partitioned' }, 130)).toBeUndefined();
     expect(layoutOutcomeNotice({ step: 'brandesKoepf', grouping: 'depth', bands: 'partitioned', reason: 'x' }, 130)).toBeUndefined();
-    expect(layoutOutcomeNotice({ step: 'ungrouped', grouping: 'depth', bands: 'off', reason: 'x' }, 130)).toMatch(/Grouping by Join depth failed .* no grouping/);
-    expect(layoutOutcomeNotice({ step: 'grid', grouping: 'none', bands: 'off', reason: 'size' }, 2400)).toMatch(/This diagram \(2400 tables\) is too large/);
-    expect(layoutOutcomeNotice({ step: 'grid', grouping: 'none', bands: 'off', reason: 'boom' }, 12)).toMatch(/full auto layout failed/);
+    expect(layoutOutcomeNotice({ step: 'ungrouped', grouping: 'depth', bands: 'off', reason: 'x' }, 130)).toEqual({ message: expect.stringMatching(/Grouping by Join depth failed .* no grouping/), actions: [] });
+    expect(layoutOutcomeNotice({ step: 'grid', grouping: 'none', bands: 'off', reason: 'size' }, 2400)).toEqual({ message: expect.stringMatching(/This diagram \(2400 tables\) is too large/), actions: [] });
+    // A grid after a failure (#294): the failure class's plain words, never the error's text.
+    expect(layoutOutcomeNotice({ step: 'grid', grouping: 'none', bands: 'off', reason: 'ELK layout timed out after 30s', failure: 'timeout' }, 300))
+      .toEqual(layoutFailureNotice('timeout', true));
+    expect(layoutOutcomeNotice({ step: 'grid', grouping: 'none', bands: 'off', reason: 'boom' }, 12)).toEqual(layoutFailureNotice('other', true));
     expect(layoutOutcomeLogMessage({ step: 'default', grouping: 'depth', bands: 'partitioned' })).toBeUndefined();
     expect(layoutOutcomeLogMessage({ step: 'default', grouping: 'depth', bands: 'direction' })).toMatch(/relationship direction only/);
     expect(layoutOutcomeLogMessage({ step: 'ungrouped', grouping: 'depth', bands: 'off', reason: 'RangeError: Maximum call stack size exceeded' }))

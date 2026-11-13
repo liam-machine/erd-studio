@@ -46,8 +46,75 @@ export function activationFailureCodes(phase: ActivationPhase): TelemetryErrorCo
 /** Project read later than this into activation counts `activationOver10s`. */
 export const SLOW_ACTIVATION_MS = 10_000;
 
-/** How the host's own search for dbt_project.yml ended. */
-export type DbtSearchOutcome = 'ok' | 'timeout' | 'error';
+/**
+ * The stretches of activation before the project is read (the
+ * `activationOver10s` measurement), in milliseconds: `dbtSearch`, the wait
+ * on the host's dbt_project.yml search (bounded by
+ * `ACTIVATION_DBT_SEARCH_MS`, so a long one means the shared extension host
+ * thread was busy, not that the search was slow); `walk`, the synchronous
+ * folder walk that finds the project (`resolveWorkspaceProject`, timed on
+ * its own); `discovery`, the rest of the Discovery phase (the globalState
+ * writes before the search and, after an update, the save-and-reload
+ * prompt, which waits for the user); `services`, from the Services phase to
+ * the project read. The later phases (Watchers, Views, Commands, Prompts)
+ * start after the measurement, so they have no key.
+ */
+export interface ActivationSpans {
+  dbtSearch: number;
+  walk: number;
+  discovery: number;
+  services: number;
+}
+
+/** Each stretch's key, in tie order (the first listed wins a tie). */
+export const ACTIVATION_SLOW: Record<keyof ActivationSpans, TelemetryFeature> = {
+  dbtSearch: 'activationSlowDbtSearch',
+  walk: 'activationSlowWalk',
+  discovery: 'activationSlowDiscovery',
+  services: 'activationSlowServices',
+};
+
+/**
+ * Which stretch held the longest share of an activation that read its project
+ * after more than {@link SLOW_ACTIVATION_MS} (`totalMs`); undefined for a
+ * quicker one.
+ */
+export function slowActivationFeature(spans: ActivationSpans, totalMs: number): TelemetryFeature | undefined {
+  if (!(totalMs > SLOW_ACTIVATION_MS)) return undefined;
+  let longest: keyof ActivationSpans = 'dbtSearch';
+  for (const span of Object.keys(ACTIVATION_SLOW) as (keyof ActivationSpans)[]) {
+    if (spans[span] > spans[longest]) longest = span;
+  }
+  return ACTIVATION_SLOW[longest];
+}
+
+/**
+ * Why a search that ended in `error` failed (#304): `findFiles` rejected,
+ * the code that sorts what it returned threw, or `findFiles` threw before
+ * returning a promise.
+ */
+export type DbtSearchFailure = 'rejected' | 'sort' | 'threw';
+
+/**
+ * What `findHostDbtProjects` returns, by how the host's own search for
+ * dbt_project.yml ended: paths only when it answered (`ok`), a reason only
+ * when it failed (`error`).
+ */
+export type DbtSearchResult =
+  | { paths: string[]; outcome: 'ok' }
+  | { paths?: undefined; outcome: 'timeout' }
+  | { paths?: undefined; outcome: 'error'; reason: DbtSearchFailure };
+
+export const DBT_SEARCH_FAILED: Record<DbtSearchFailure, TelemetryErrorCode> = {
+  rejected: 'dbtSearchFailedRejected',
+  sort: 'dbtSearchFailedSort',
+  threw: 'dbtSearchFailedThrew',
+};
+
+/** `dbtSearchFailed` (the total) and why, for a search that ended in `error`. */
+export function dbtSearchFailureCodes(reason: DbtSearchFailure): TelemetryErrorCode[] {
+  return ['dbtSearchFailed', DBT_SEARCH_FAILED[reason]];
+}
 
 // ---------------------------------------------------------------------------
 // B10 and B16: a write the environment refused
@@ -119,6 +186,7 @@ export const HANDLER_GROUP: Record<WebviewMessageType, HandlerGroup> = {
   analyzeFeedback: 'other',
   setFeedbackProvider: 'other',
   setLineStyle: 'other',
+  convertProjectToDbml: 'other',
   submitFeedback: 'other',
   copyFeedbackReport: 'other',
   openFeedbackLink: 'other',
@@ -128,6 +196,7 @@ export const HANDLER_GROUP: Record<WebviewMessageType, HandlerGroup> = {
   openAnotherDomain: 'other',
   openGettingStarted: 'other',
   showLogs: 'other',
+  dropShown: 'other',
   exportDiagram: 'other',
   generateSyncPlan: 'compare',
   runDbtCompile: 'other',
@@ -307,6 +376,7 @@ const LOGGED_ERROR_CODES: Record<LoggedErrorArea, TelemetryErrorCode> = {
 export const LOGGED_ERROR_AREAS: Readonly<Record<string, LoggedErrorArea>> = {
   // createLogger scopes
   Canvas: 'Canvas',
+  'Drop timing': 'Canvas',
   'Convert to DBML': 'Other',
   dbml: 'Other',
   Draft: 'Draft',

@@ -976,6 +976,21 @@ export function validateReloadFromDiskPayload(value: unknown): string | null {
 }
 
 /**
+ * Validate a `convertProjectToDbml` payload (the canvas information button's
+ * Convert to DBML…). It carries nothing: the command's panel lists every
+ * change first. Only an absent payload or an empty object passes.
+ */
+export function validateConvertProjectToDbmlPayload(value: unknown): string | null {
+  if (value === undefined) {
+    return null;
+  }
+  if (typeof value !== 'object' || value === null || Array.isArray(value) || Object.keys(value).length > 0) {
+    return 'Converting the project to DBML takes no payload.';
+  }
+  return null;
+}
+
+/**
  * Validate an `exportDiagram` payload. It carries nothing — the host asks for
  * the format and the action — so only an absent payload or an empty object
  * passes, like `addModelsFromDbt`.
@@ -1039,6 +1054,22 @@ export function validateLayoutFinishedPayload(value: unknown): value is LayoutFi
     && (fallback === undefined || fallback === true)
     && (rung === undefined || isLayoutFallbackRung(rung))
     && readLayoutFailureDetail(value) !== undefined;
+}
+
+/** The longest `renderMs` a `dropShown` may carry (ten minutes): anything longer is not a render time. */
+export const DROP_SHOWN_MAX_RENDER_MS = 600_000;
+
+/**
+ * `dropShown` (a timed drop's tables are on screen; timing only): `trace`, a
+ * whole number from 1, and an optional `renderMs`, a whole or fractional
+ * number of milliseconds from 0 to {@link DROP_SHOWN_MAX_RENDER_MS}. Nothing
+ * else is read.
+ */
+export function validateDropShownPayload(value: unknown): value is { trace: number; renderMs?: number } {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const { trace, renderMs } = value as { trace?: unknown; renderMs?: unknown };
+  return typeof trace === 'number' && Number.isSafeInteger(trace) && trace >= 1
+    && (renderMs === undefined || (typeof renderMs === 'number' && Number.isFinite(renderMs) && renderMs >= 0 && renderMs <= DROP_SHOWN_MAX_RENDER_MS));
 }
 
 /** `webviewError` (usage telemetry only, 2.0 B13): a `kind` and an `area` from their fixed lists, nothing else read. */

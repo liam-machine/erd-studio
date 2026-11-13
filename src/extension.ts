@@ -33,8 +33,10 @@ import { MigrationFailed, MigrationService, migrateLegacySemanticDir } from './s
 import {
   DRAW_FROM_DBT_NEEDS_DBT_MESSAGE,
   hasErdStudioData,
+  hostSearchCannotChangeRoot,
   resolveDbtProject,
   samePath,
+  withHostCandidates,
   type DbtProjectResolution,
 } from './services/projectDiscovery';
 import { YmlParserService, emptyYmlData } from './services/ymlParserService';
@@ -83,10 +85,12 @@ import {
   REFRESH_FAILED,
   SLOW_ACTIVATION_MS,
   activationFailureCodes,
+  dbtSearchFailureCodes,
   harnessFailureKeys,
   loggedErrorCodes,
+  slowActivationFeature,
   type ActivationPhase,
-  type DbtSearchOutcome,
+  type DbtSearchResult,
   type RefreshKind,
 } from './services/runtimeTelemetry';
 import { setErrorHook } from './services/logger';
@@ -253,14 +257,19 @@ import {
   START_SUGGESTIONS_SETTING,
   START_SUGGESTIONS_SETTING_OFF_MESSAGE,
   UNDO_BUTTON,
+  START_SUGGESTION_MACHINE_KEY,
   START_SUGGESTION_STATE_KEY,
+  START_SUGGESTIONS_UNDO_ARG,
   TURN_OFF_START_SUGGESTIONS_COMMAND,
   TURN_ON_START_SUGGESTIONS_COMMAND,
   dbtProjectAboveOpenFolders,
+  isStartSuggestionsUndo,
+  readStartSuggestionMachine,
   readStartSuggestionState,
   runStartSuggestion,
   startSuggestionDue,
   startSuggestionsOff,
+  type StartSuggestionMachine,
   type StartSuggestionState,
 } from './services/startSuggestion';
 
@@ -413,12 +422,16 @@ function workspaceFolderPaths(): string[] {
  * ({@link findHostDbtProjects}), merged with the bounded walk.
  */
 function resolveWorkspaceProject(context: vscode.ExtensionContext, hostCandidates?: readonly string[]): DbtProjectResolution {
-  return resolveDbtProject(workspaceFolderPaths(), {
+  return resolveDbtProject(workspaceFolderPaths(), { ...workspaceProjectChoice(context), hostCandidates });
+}
+
+/** The user's own say in the project: `erdStudio.projectPath`, the picked project, and where ERD data lives. */
+function workspaceProjectChoice(context: vscode.ExtensionContext): { projectPath: string; picked: string | undefined; semanticDir: string } {
+  return {
     projectPath: getErdStudioSetting('projectPath', ''),
     picked: context.workspaceState.get<string>(SELECTED_PROJECT_KEY),
     semanticDir: getErdStudioSetting('semanticDir', '.erd-studio'),
-    hostCandidates,
-  });
+  };
 }
 
 /** How long activation waits for the host's dbt_project.yml search before the walk alone decides. */
@@ -432,9 +445,13 @@ const HOST_DBT_SEARCH_MAX = 50;
  * the `workspaceContains` activation event looks), skipping the folders the
  * walk skips (`DBT_SEARCH_EXCLUDE_GLOB`), shallowest first. No `paths` when
  * it does not answer within `timeoutMs` (`timeout`) or fails (`error`): the
- * walk alone decides. The outcome is for usage telemetry (B4).
+ * walk alone decides. The outcome is for usage telemetry (B4), and a failure
+ * says which step failed (#304): `rejected` (findFiles rejected), `sort`
+ * (reading or sorting what it returned threw) or `threw` (findFiles threw
+ * before returning a promise). Nothing is recorded here: a rejection that
+ * arrives after the timeout (the `finally` cancels the search) is ignored.
  */
-export async function findHostDbtProjects(timeoutMs: number): Promise<{ paths?: string[]; outcome: DbtSearchOutcome }> {
+export async function findHostDbtProjects(timeoutMs: number): Promise<DbtSearchResult> {
   const folders = workspaceFolderPaths();
   if (folders.length === 0) return { paths: [], outcome: 'ok' };
   const source = new vscode.CancellationTokenSource();
@@ -442,13 +459,19 @@ export async function findHostDbtProjects(timeoutMs: number): Promise<{ paths?: 
   try {
     const search = Promise.resolve(vscode.workspace.findFiles('**/dbt_project.yml', DBT_SEARCH_EXCLUDE_GLOB, HOST_DBT_SEARCH_MAX, source.token))
       .then(
-        (uris): { paths?: string[]; outcome: DbtSearchOutcome } => ({ paths: sortDbtCandidates((uris ?? []).map((u) => u.fsPath), folders), outcome: 'ok' }),
-        (): { outcome: DbtSearchOutcome } => ({ outcome: 'error' }),
+        (uris): DbtSearchResult => {
+          try {
+            return { paths: sortDbtCandidates((uris ?? []).map((u) => u.fsPath), folders), outcome: 'ok' };
+          } catch {
+            return { outcome: 'error', reason: 'sort' };
+          }
+        },
+        (): DbtSearchResult => ({ outcome: 'error', reason: 'rejected' }),
       );
-    const timedOut = new Promise<{ outcome: DbtSearchOutcome }>((resolve) => { timer = setTimeout(() => resolve({ outcome: 'timeout' }), timeoutMs); });
+    const timedOut = new Promise<DbtSearchResult>((resolve) => { timer = setTimeout(() => resolve({ outcome: 'timeout' }), timeoutMs); });
     return await Promise.race([search, timedOut]);
   } catch {
-    return { outcome: 'error' };
+    return { outcome: 'error', reason: 'threw' };
   } finally {
     if (timer) clearTimeout(timer);
     source.cancel();
@@ -511,7 +534,7 @@ async function selectDbtProject(
 ): Promise<void> {
   // The host's whole search, so a project deeper than the walk is listed too.
   const search = await findHostDbtProjects(5000);
-  if (search.outcome === 'error') telemetry.error('dbtSearchFailed');
+  if (search.outcome === 'error') for (const code of dbtSearchFailureCodes(search.reason)) telemetry.error(code);
   const resolution = resolveWorkspaceProject(context, search.paths);
   if (resolution.candidates.length === 0) {
     // A window always has a root here (the command is registered only then),
@@ -1385,6 +1408,14 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
   const freshInstall = previousVersion === undefined && !context.globalState.get<boolean>(GETTING_STARTED_SHOWN_KEY);
   if (freshInstall) {
     await context.globalState.update(GETTING_STARTED_PENDING_KEY, true);
+    // The start suggestion's own record that this install was new here (#305): this
+    // activation is the only one that can tell, and telemetry (which may be off) is
+    // never asked. A later window's start suggestion keeps once per folder for it;
+    // every install without it is an upgrader, asked once per machine.
+    await context.globalState.update(START_SUGGESTION_MACHINE_KEY, {
+      ...readStartSuggestionMachine(context.globalState.get(START_SUGGESTION_MACHINE_KEY)),
+      newInstall: true,
+    } satisfies StartSuggestionMachine);
   }
   if (previousVersion && previousVersion !== currentVersion && hasOpenSubjectAreaCanvas()) {
     // If the user cancels the reload (unsaved files), keep activating so
@@ -1606,12 +1637,43 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
   const glassSidebar = registerGlassSidebar(context);
 
   // The host's own search for dbt_project.yml (every depth), bounded so it
-  // never holds activation up; the walk alone decides when it is late.
-  const hostDbtSearch = await findHostDbtProjects(ACTIVATION_DBT_SEARCH_MS);
-  const hostDbtProjects = hostDbtSearch.paths;
-  if (hostDbtSearch.outcome === 'timeout') telemetry.feature('dbtSearchTimedOut');
-  else if (hostDbtSearch.outcome === 'error') telemetry.error('dbtSearchFailed');
+  // never holds activation up; the walk alone decides when it is late. Not
+  // waited for at all when nothing it finds can change the project that
+  // opens (#295: the first dbt workspace folder already holds ERD data): it
+  // then runs on, off activation's path, only to count the workspace's dbt
+  // projects for the Select dbt Project button (below, with the project row).
+  const dbtSearchStart = Date.now();
+  // Undefined when activation did not wait for the search (dbtSearchSkipped).
+  let hostDbtSearch: DbtSearchResult | undefined;
+  let lateHostDbtSearch: Promise<string[] | undefined> | undefined;
+  if (hostSearchCannotChangeRoot(workspaceFolderPaths(), workspaceProjectChoice(context))) {
+    // What activation found, not something the user did: off the onboarding trail.
+    telemetry.featureQuiet('dbtSearchSkipped');
+    lateHostDbtSearch = findHostDbtProjects(60_000).then((late) => {
+      if (late.outcome === 'error') {
+        for (const code of dbtSearchFailureCodes(late.reason)) telemetry.error(code);
+        // No projectPath, no pick, and the walk found the dbt project that
+        // opens (hostSearchCannotChangeRoot), so this failure lost nothing.
+        telemetry.feature('dbtSearchFailedWalkFound');
+      }
+      return late.paths;
+    });
+  } else {
+    hostDbtSearch = await findHostDbtProjects(ACTIVATION_DBT_SEARCH_MS);
+    if (hostDbtSearch.outcome === 'timeout') telemetry.feature('dbtSearchTimedOut');
+    else if (hostDbtSearch.outcome === 'error') for (const code of dbtSearchFailureCodes(hostDbtSearch.reason)) telemetry.error(code);
+  }
+  const hostDbtProjects = hostDbtSearch?.paths;
+  // Activation's stretches, for a slow one (slowActivationFeature, below).
+  const dbtSearchMs = elapsedMs(dbtSearchStart);
+  const walkStart = Date.now();
   const projectResolution = resolveWorkspaceProject(context, hostDbtProjects);
+  const walkMs = elapsedMs(walkStart);
+  // The search failed and the walk alone still found a dbt project (#304):
+  // a failure without this is one that may have cost the user their project.
+  // `autoRoot` is what the walk resolves (a projectPath setting or a pick does
+  // not make it), so a setting or a pick says nothing either way.
+  if (hostDbtSearch?.outcome === 'error' && projectResolution.autoRoot !== undefined) telemetry.feature('dbtSearchFailedWalkFound');
   const workspaceRoot = projectResolution.root;
   // Logical-only mode: a root without dbt_project.yml (any folder now opens).
   // No Physical stage, no dbt services or watchers, nothing written unasked.
@@ -1694,6 +1756,7 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
   }
 
   activationPhase = 'Services';
+  const servicesStartMs = elapsedMs(activationStart);
   log.info(hasDbt
     ? `ERD Studio: Found dbt project at ${workspaceRoot}`
     : `ERD Studio: Opened ${workspaceRoot} (no dbt_project.yml: logical-only)`);
@@ -2205,6 +2268,14 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     activationMs: projectReadMs,
   });
   if (projectReadMs > SLOW_ACTIVATION_MS) telemetry.featureOnce('activationOver10s');
+  // Which stretch held a slow one (#295): the later phases start after this point.
+  const slowStretch = slowActivationFeature({
+    dbtSearch: dbtSearchMs,
+    walk: walkMs,
+    discovery: servicesStartMs - dbtSearchMs - walkMs,
+    services: projectReadMs - servicesStartMs,
+  }, projectReadMs);
+  if (slowStretch) telemetry.featureOnce(slowStretch);
 
   // A diagram in a picker: its layer and table count, and its tables as the
   // detail line, so typing a table's name finds every diagram that shows it.
@@ -2271,10 +2342,14 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     if (unused) {
       noteUnusedDbtProject(workspaceRoot, unused, projectResolution.source === 'setting' ? 'setting' : 'discovery');
     } else if (hostDbtProjects === undefined) {
-      // The host's search was late: let it finish, off activation's path.
-      void findHostDbtProjects(60_000).then(({ paths: late, outcome }) => {
-        if (outcome === 'error') telemetry.error('dbtSearchFailed');
-        const found = late?.find((dir) => !samePath(dir, workspaceRoot));
+      // The host's search was late or failed: let it finish (or try once
+      // more), off activation's path. A failure is counted once per window
+      // (#304): only when activation's own search timed out and so counted none.
+      void findHostDbtProjects(60_000).then((late) => {
+        if (late.outcome === 'error' && hostDbtSearch?.outcome === 'timeout') {
+          for (const code of dbtSearchFailureCodes(late.reason)) telemetry.error(code);
+        }
+        const found = late.paths?.find((dir) => !samePath(dir, workspaceRoot));
         if (found) noteUnusedDbtProject(workspaceRoot, found, 'search');
       });
     }
@@ -3344,12 +3419,25 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
           : undefined);
       };
       showProjectName();
+      // The host's search that activation did not wait for (#295): a dbt project
+      // only it found (deeper than the walk goes) reveals the button and the
+      // row, as it would have had activation waited. The open project stays.
+      let lateSearchSettled = false;
+      void lateHostDbtSearch?.then((paths) => {
+        if (lateSearchSettled || !paths || !hasDbt || hasMultipleProjects) return;
+        if (withHostCandidates(projectResolution.candidates, paths).length <= 1) return;
+        hasMultipleProjects = true;
+        void vscode.commands.executeCommand('setContext', 'erdStudio.hasMultipleDbtProjects', true);
+        showProjectName();
+      });
       const foldersChanged = vscode.workspace.onDidChangeWorkspaceFolders(() => {
+        // The late search answered for the old folders: these are counted afresh.
+        lateSearchSettled = true;
         hasMultipleProjects = hasDbt && resolveWorkspaceProject(context).candidates.length > 1;
         void vscode.commands.executeCommand('setContext', 'erdStudio.hasMultipleDbtProjects', hasMultipleProjects);
         showProjectName();
       });
-      return vscode.Disposable.from(domainTreeView!, domainTreeData!, foldersChanged);
+      return vscode.Disposable.from(domainTreeView!, domainTreeData!, foldersChanged, { dispose: () => { lateSearchSettled = true; } });
     })(),
     vscode.window.registerCustomEditorProvider(SUBJECT_AREA_EDITOR_VIEW_TYPE, editorProvider, {
       // Keep the webview (React tree, ELK worker, in-progress discrepancy /
@@ -3432,6 +3520,8 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
           } else {
             await vscode.commands.executeCommand('erdStudio.openDomain', filePath);
           }
+          // A timed drop (a Diagrams row, a missed canvas drop): the diagram is in front.
+          editorProvider.noteDropDiagramOpened(filePath);
           return editorProvider.addTablesToDiagram(vscode.Uri.file(filePath), tables, files);
         },
         // The diagram in front of the user (or the only one on screen) takes the tables without a pick.
@@ -3448,6 +3538,7 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
           ...(remembered ? { remembered } : {}),
         });
         if (!found) return false;
+        editorProvider.noteDropSeen('diagramsRow', filePath);
         await addToDiagramDeps.addTables(filePath, found.names, found.files);
         return true;
       });
@@ -3531,6 +3622,7 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
           diagramName: (filePath) => deps.listSubjectAreas().find((s) => samePath(s.filePath, filePath))?.domain
             ?? path.basename(filePath, path.extname(filePath)),
           addTables: (filePath, tables, files) => addToDiagramDeps.addTables(filePath, tables, files),
+          dropSeen: (filePath) => editorProvider.noteDropSeen('missedDrop', filePath),
         }),
         vscode.commands.registerCommand(GO_TO_TABLE_COMMAND, (query?: unknown) =>
           goToTableCommand(goToTableDeps, typeof query === 'string' ? query : undefined)),
@@ -4632,7 +4724,11 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
       if (await runMigrateToV5Command()) await migrateNaming();
     }),
     vscode.commands.registerCommand('erdStudio.migrateToTableNaming', async () => { await migrateNaming(); }),
-    vscode.commands.registerCommand('erdStudio.convertProjectToDbml', async () => { await convertToDbml(); }),
+    vscode.commands.registerCommand('erdStudio.convertProjectToDbml', async () => {
+      await convertToDbml();
+      // Converted, refused or cancelled: each canvas's Convert information button follows.
+      editorProvider.refreshConvertOffer();
+    }),
 
     // F408: Set up semantic directory for new projects
     vscode.commands.registerCommand(
@@ -5210,12 +5306,18 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
 
   // The start suggestion (src/services/startSuggestion.ts): a folder with no
   // diagram whose start is obvious gets one notification offering it. Its
-  // state is workspace state (machine-local: nothing goes into the repo);
+  // state is workspace state (machine-local: nothing goes into the repo), plus
+  // one global-state record for the machine (new install or upgrader, and the
+  // showings in every folder: an upgrader is asked once per machine);
   // erdStudio.startSuggestions can be committed to turn it off for a team.
   const startSuggestionState = (): StartSuggestionState =>
     readStartSuggestionState(context.workspaceState.get(START_SUGGESTION_STATE_KEY));
   const saveStartSuggestionState = (state: StartSuggestionState): Thenable<void> =>
     context.workspaceState.update(START_SUGGESTION_STATE_KEY, state);
+  const startSuggestionMachine = (): StartSuggestionMachine =>
+    readStartSuggestionMachine(context.globalState.get(START_SUGGESTION_MACHINE_KEY));
+  const saveStartSuggestionMachine = (machine: StartSuggestionMachine): Thenable<void> =>
+    context.globalState.update(START_SUGGESTION_MACHINE_KEY, machine);
   const startSuggestionsSettingOn = (): boolean => getErdStudioSetting<boolean>(START_SUGGESTIONS_SETTING, true) !== false;
   // The palette shows Turn Off… or Turn On… (package.json gates them on this key).
   const publishStartSuggestionsOff = (): void => {
@@ -5232,12 +5334,20 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
       telemetry.feature('startSuggestionsOff');
       publishStartSuggestionsOff();
       void vscode.window.showInformationMessage(START_SUGGESTIONS_OFF_MESSAGE, UNDO_BUTTON).then((choice) => {
-        if (choice === UNDO_BUTTON) void vscode.commands.executeCommand(TURN_ON_START_SUGGESTIONS_COMMAND);
+        if (choice === UNDO_BUTTON) void vscode.commands.executeCommand(TURN_ON_START_SUGGESTIONS_COMMAND, START_SUGGESTIONS_UNDO_ARG);
       });
     }),
-    vscode.commands.registerCommand(TURN_ON_START_SUGGESTIONS_COMMAND, async () => {
-      // A fresh start: the count and an earlier answer are forgotten too.
-      await saveStartSuggestionState({ shown: 0 });
+    vscode.commands.registerCommand(TURN_ON_START_SUGGESTIONS_COMMAND, async (arg?: unknown) => {
+      // A fresh start: the count and an earlier answer are forgotten too. From the
+      // palette it is asked for here, so an upgrader's once-per-machine limit does not
+      // hold this folder back. An Undo (#305) only takes the off back: it keeps an
+      // earlier Turn On's `on` but never sets it, so Off then Undo cannot lift the
+      // machine limit in a folder it held back.
+      const undo = isStartSuggestionsUndo(arg);
+      const next: StartSuggestionState = undo
+        ? { shown: 0, ...(startSuggestionState().on === true ? { on: true } : {}) }
+        : { shown: 0, on: true };
+      await saveStartSuggestionState(next);
       publishStartSuggestionsOff();
       if (!startSuggestionsSettingOn()) {
         const choice = await vscode.window.showInformationMessage(START_SUGGESTIONS_SETTING_OFF_MESSAGE, OPEN_SETTINGS_BUTTON);
@@ -5246,7 +5356,11 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
         }
         return;
       }
-      void vscode.window.showInformationMessage(START_SUGGESTIONS_ON_MESSAGE);
+      // The message promises a suggestion next time: an Undo the machine limit still
+      // holds back (an upgrader already asked elsewhere) says nothing rather than promise it.
+      if (startSuggestionDue({ settingOn: true, state: next, machine: startSuggestionMachine(), hasDiagrams: false })) {
+        void vscode.window.showInformationMessage(START_SUGGESTIONS_ON_MESSAGE);
+      }
     }),
   );
   activationPhase = 'Prompts';
@@ -5543,7 +5657,7 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
   // place, and the walkthrough stays owed.
   if (!afterOpenFolder && existingDiagrams.length === 0 && !hasOpenSubjectAreaCanvas()) {
     const settingOn = startSuggestionsSettingOn();
-    if (startSuggestionDue({ settingOn, state: startSuggestionState(), hasDiagrams: false })) {
+    if (startSuggestionDue({ settingOn, state: startSuggestionState(), machine: startSuggestionMachine(), hasDiagrams: false })) {
       const walkthroughOwed = (): boolean => activationPrompts.has('walkthrough');
       activationPrompts.set('startSuggestion', () => {
         setTimeout(() => {
@@ -5561,6 +5675,8 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
             }),
             state: startSuggestionState,
             saveState: saveStartSuggestionState,
+            machine: startSuggestionMachine,
+            saveMachine: saveStartSuggestionMachine,
             show: (message, ...buttons) => vscode.window.showInformationMessage(message, ...buttons),
             info: (message, ...buttons) => vscode.window.showInformationMessage(message, ...buttons),
             executeCommand: (command, ...args) => vscode.commands.executeCommand(command, ...args),

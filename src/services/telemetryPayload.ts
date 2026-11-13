@@ -740,6 +740,54 @@ export const FEATURES = [
   // placement (rung 2), or that with post-compaction left out (rung 3).
   'layoutFallbackRung2',
   'layoutFallbackRung3',
+  // #304: the host's search for dbt_project.yml failed (dbtSearchFailed) and
+  // the bounded walk alone still found a dbt project. Not an error: the user
+  // lost nothing. Activation only, never Select dbt Project….
+  'dbtSearchFailedWalkFound',
+  // Also added after 2.0.4 (#295). An activation that read its project after more
+  // than 10 s (beside activationOver10s): which stretch held the longest
+  // share, the wait on the host's dbt search, the rest of Discovery, or
+  // Services. A retry of the start look after a timeout turned the blank
+  // suggestion into an import. The host's dbt search was not waited for: the
+  // first dbt workspace folder already holds ERD data, so it cannot change
+  // the project that opens.
+  'activationSlowDbtSearch',
+  'activationSlowDiscovery',
+  'activationSlowServices',
+  'startLookLateSuggestion',
+  'dbtSearchSkipped',
+  // Also #295: the synchronous folder walk that finds the project held the
+  // longest share of a slow activation (activationSlowDiscovery is then the
+  // rest of Discovery, without the walk).
+  'activationSlowWalk',
+  // #305: the start suggestion showed on a machine where it had already been
+  // shown (another folder, or this one after Turn On): the repeat cost.
+  'suggestPromptShownAgain',
+  // #305: Convert to DBML… pressed in the canvas's information button (a project
+  // from before 2.0), counted beside the command's own convertToDbml.
+  'convertToDbmlFromCanvasInfo',
+  // Added after 2.0.5: a table drop from the Table Library, timed from the
+  // moment the host learned of it (src/services/dropTiming.ts). How it
+  // arrived (always); how long until the canvas painted the table, as a range
+  // (a drop that wrote), or that it never said so; and, for a drop that took
+  // a second or more, its slowest stage. Never a name, a path or a count.
+  'dropRouteCanvas',
+  'dropRouteAfterDrag',
+  'dropRouteMissedDrop',
+  'dropRouteDiagramsRow',
+  'dropShownUnder1s',
+  'dropShown1to5s',
+  'dropShown5to15s',
+  'dropShownOver15s',
+  'dropShownNever',
+  'dropSlowOpen',
+  'dropSlowWait',
+  'dropSlowPrepare',
+  'dropSlowPlan',
+  'dropSlowEdit',
+  'dropSlowSave',
+  'dropSlowRedraw',
+  'dropSlowCanvas',
 ] as const;
 export type TelemetryFeature = (typeof FEATURES)[number];
 
@@ -1039,6 +1087,12 @@ export const ERROR_CODES = [
   'layoutFailedLastRungTimeout',
   'layoutFailedLastRungWorker',
   'layoutFailedLastRungMemory',
+  // #304: why the host's search for dbt_project.yml failed, one beside each
+  // dbtSearchFailed (the total): findFiles rejected, reading or sorting what
+  // it returned threw, or findFiles threw before returning a promise.
+  'dbtSearchFailedRejected',
+  'dbtSearchFailedSort',
+  'dbtSearchFailedThrew',
 ] as const;
 export type TelemetryErrorCode = (typeof ERROR_CODES)[number];
 

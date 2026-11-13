@@ -561,7 +561,7 @@ appended after the native DBML keys:
 | A true first run | `firstRun` (at most 1: the first activation on this machine, the one that owes the walkthrough; from the 2.0 release on). `tenure = '0'` alone is **not** a new install: see below |
 | Saw a start screen | `walkthroughOpened` (opened by ERD Studio on first run), `gettingStartedOpened`, `sidebarStartShown` (once a day: the empty Diagrams view, with its starts, was drawn), `diagramsNudgeShown` (a project that already had diagrams got "This project has N ERD Studio diagrams" instead: a teammate's clone's start screen; `firstRunHasDiagrams` marks such a first run; in a project from before 2.0 the notice leads with **Convert to DBML** and also counts `convertToDbmlOffered`, and closing it `convertToDbmlNotNow`; its **Show Me Around** button is `diagramsNudgeShowMeAround`) |
 | Owed but waited | `walkthroughWaited` (at most 1: the walkthrough was owed, but another prompt had this window. Since 2.0 that includes the start suggestion taking the walkthrough's place on a first run with an obvious start, so read it beside `suggestPromptShown`; without one it is expected near 0) |
-| Offered its start | `suggestPromptShown` (the **start suggestion**, `src/services/startSuggestion.ts`: one notification in a folder with no diagram whose start is obvious, "ERD Studio found CREATE TABLE scripts in this folder (24 tables). Show them as a diagram? Nothing is saved until you keep it.", once per folder (at most three times before the Simplify release); counts as having seen a start). Its answer: `suggestPromptShowMe` (Show Me: the draft opens; from Draft-first on), `suggestPromptAccepted` (Convert to DBML…; before Draft-first also Create Diagram; counts as having chosen a start), `suggestPromptMore` (More Options…; no longer sent since Draft-first, whose draft has Other Ways to Start), `suggestPromptOff` (Don't Ask Again for This Folder), `suggestPromptDismissed` (closed: asked again in a later window). `startSuggestionsOff`: **Turn Off Start Suggestions for This Folder** was run, or (once a day) a folder with no diagram opened with `erdStudio.startSuggestions` false. What the look found, and the count it shows, never leave the machine: `startSuggested<Intent>` says which start it was |
+| Offered its start | `suggestPromptShown` (the **start suggestion**, `src/services/startSuggestion.ts`: one notification in a folder with no diagram whose start is obvious, "ERD Studio found CREATE TABLE scripts in this folder (24 tables). Show them as a diagram? Nothing is saved until you keep it.", once per folder (at most three times before the Simplify release); from #305 an upgrader, an install that was not new on its machine, is asked once per machine in all, unless Turn On asked for it in a folder; counts as having seen a start). `suggestPromptShownAgain`: a showing on a machine where it was already shown (another folder, or the same one after Turn On), counted beside `suggestPromptShown`. Its answer: `suggestPromptShowMe` (Show Me: the draft opens; from Draft-first on), `suggestPromptAccepted` (Convert to DBML…; before Draft-first also Create Diagram; counts as having chosen a start), `suggestPromptMore` (More Options…; no longer sent since Draft-first, whose draft has Other Ways to Start), `suggestPromptOff` (Don't Ask Again for This Folder), `suggestPromptDismissed` (closed without a choice; asked again in a later window only before the Simplify release). `startSuggestionsOff`: **Turn Off Start Suggestions for This Folder** was run, or (once a day) a folder with no diagram opened with `erdStudio.startSuggestions` false. What the look found, and the count it shows, never leave the machine: `startSuggested<Intent>` says which start it was |
 | Draft | the **Draft-first** start (`docs/dev/draft-first.md`): a read-only draft of the folder's logical model in an editor tab, nothing written until **Keep**. `draftShown` (a draft was shown, any source and trigger; a redraw of the page on show is not another), `draftShownAuto` (opened by the ERD Studio icon alone: the empty Diagrams view, once per folder for a find, once per machine for the example), `draftExampleShown` (an example: the coffee shop or a bundled project), `draftSourceSqlDdl` `draftSourceSemanticModel` `draftSourceDbml` `draftSourceDbt` (which kind of find, never a name, path or count). Its answer: `draftKept` (Keep wrote it, beside the source's own `importSqlDdl` / `importSemanticModel` / `importDbml` / `drawFromDbt` / `exampleDiagram` / `exampleOpened`; counts as having chosen a start), `draftChangeOptions` (Change options…: the step-by-step flow, ending in a draft again), `draftDiscarded` (Discard), `draftClosed` (the tab was closed without a choice), `draftOtherStart` (one of Other Ways to Start; the start's own key says which), `draftScopeChanged` (the Folder / Model / Example switcher), `draftDetailsOpened` (the schema panel or details drawer), `draftRefreshed` (Keep found the project's files changed and redrew). `draftAfterOpenFolder`: a draft's **Open Folder…** (the no-folder example's primary, the guide's *Open your folder*) reloaded the window into a folder and that folder's draft showed at once, in place of its start suggestion (the guide carries on, without More ways to start; with diagrams there, the guide carries on on the newest instead and this is not counted). `draftUnavailable`: the automatic draft could not be built (several dialects, nothing readable after all) and was dropped quietly, leaving the sidebar's starts; a quiet run never counts the import's `*Cancelled` or `*Invalid` keys. Errors: `draftBuildFailed` (building a draft threw: ours), `draftLayoutFailed` (the page's ELK layout failed; the fallback placement was drawn) |
 | Guide | the onboarding guide, **Show Me Around** (`src/types/onboardingGuide.ts`): coach marks on the first draft (phase A: the banner, More ways to start, Keep) and then on the first diagram opened after it (phase B: a table, a relationship, the toolbar, Logical / Physical in a dbt project, the sidebar, the files and the AI helper, a finish with Star on GitHub). `guideStarted` (it began: once per run), `guideStartedFromCommand` (the **Show Me Around** command started it, beside `guideStarted`), `guideDraftDone` (phase A ended with Keep), `guideCanvasStarted` (phase B began), `guideCompleted` (Done or Star on GitHub on the last step), `guideSkippedOnDraft` / `guideSkippedOnCanvas` (Skip guide or Esc: it ends for good on that machine), `guideStarClicked` (Star on GitHub; the host opens the repository's page), `guideAiHelperClicked` (the files step's Set Up My AI Helper, beside the command's own `setupAiHelper`). Where people stop, step by step: `guideStepDraftBanner` `guideStepDraftMoreWays` `guideStepDraftKeep` `guideStepCanvasTable` `guideStepCanvasRelationship` `guideStepCanvasToolbar` `guideStepCanvasStages` `guideStepCanvasSidebar` `guideStepCanvasFiles` `guideStepCanvasFinish` (each the first time that step showed in a run; Back and Next never count a step twice), `guideBack` (Back was pressed: a step was read twice), `guideLeftDraft` (the draft was discarded or its tab closed while the guide ran on it: left without Keep or Skip). `diagramsNudgeShowMeAround` (the existing-diagrams notice's **Show Me Around**: a project that already has diagrams shows no draft, so phase A never runs there; the button opens the newest diagram and runs phase B on it, counted beside `guideStarted`, `guideStartedFromCommand` and `guideCanvasStarted`). `majorUpdateNoticeShowMeAround` (the major update notice's **Show Me Around**, "Keys added after 2.0.0" below: the first window after a major update says the new version has a guide, once per machine per major; the button runs the command, so it too is counted beside `guideStarted` and `guideStartedFromCommand`; `majorUpdateNoticeShown` is how many were offered it). Read `guideCompleted / guideCanvasStarted` for how many finish, and `guideDraftDone / guideStarted` beside `draftKept / draftShown` for whether the guide helps a draft become a diagram. Read the step keys in order as a funnel (installs per key): the biggest fall from one step to the next is the step people stop at; the skip keys say whether they chose to (Skip guide or Esc), `guideLeftDraft` that they left the draft, and the rest closed the tab or the window. `guideStepCanvasRelationship` is missing for a diagram with no relationship and `guideStepCanvasStages` outside a dbt project, `guideStepDraftMoreWays` when the draft offers no other start: compare each with the step before it only on installs that can see it |
 | Trail | the **onboarding trail** (`trail` and `trailDropped`, migrations/0004; not `features`): an install's first 7 days (`TRAIL_DAYS`), the 7 days from the first start after a major update (2.0: `extUpdatedMajor`, the same window from `erdStudio.telemetry.majorSeenDay`; never a minor or patch update), and any later day from `guideStarted` on, send the day's events **in order**, at most 100 (`trailDropped` counts the rest; from 2.0 the last 10 places, past `TRAIL_GENERAL_MAX` = 90, take only `!code` errors and the `windowClosed` / `canvasClosed` markers, so a busy day still shows what broke and how it ended), each `[event, gap, window, repeat]`. `event` is any `features` key, any `errors` code written `!code` (`layoutFailed` is both a feature and an error), or a marker: `windowOpened` (an activation), `windowClosed` (best effort: VS Code may not wait for it, so a trail can simply stop), `windowAway` / `windowBack` (the window lost and regained the focus for 5 s or more: another app or another VS Code window), `canvasOpened`, `canvasClosed`, `canvasHidden` / `canvasShown` (a diagram went behind another tab for 5 s or more), `dayContinued` (2.0: the day's first entry when its window was activated on an earlier UTC day). `gap` is whole seconds since the previous entry (0 first, capped at 3600 = an hour or more), `window` numbers that day's windows 1, 2, … in the order they joined, `repeat` folds the same event straight after (a run of `editLayout`). **Time on a guide step** is the `gap` of the entry after its `guideStep*`; **what happened next** is that entry: `windowAway` (went to another app), `canvasHidden` (another tab: often their own files), `!code` (something broke), an edit (they did what the step said), `canvasClosed` / `windowClosed` or nothing at all (they left). Read trails per install and day with the query under *Reading trails* |
@@ -657,7 +657,14 @@ first run that saw no start is a real miss.
 Read the start suggestion on its own: `suggestPromptAccepted / suggestPromptShown`
 is how often an obvious start was taken at once; a high `suggestPromptOff` or
 `quickImportChangeOptions` next to it says the folder look or the quick
-defaults guess wrong.
+defaults guess wrong. `suggestPromptShownAgain / suggestPromptShown` is the
+share of showings that were repeats on one machine, for new installs (split by
+`firstRun`, taken as each install's MAX over all its days: it is sent only on
+the first day). For upgraders it is near 0 **by construction** (#305 lets the
+machine's count reach 1 and no further, and the first repeat after the update
+is not marked), so a 0 there is not evidence that the change worked: read the
+upgraders' repeat cost from D1 instead, as `suggestPromptShown` summed per
+install across days (installs with more than one showing).
 
 Read the draft on its own: `draftKept / draftShown` is how often a draft became a
 diagram, and `draftShownAuto` against `draftKept`, `draftDiscarded` and
@@ -1023,7 +1030,7 @@ a message or a count of tables. A sum over `features` excludes
 **B4 — activation timing, the host dbt search, and why activation failed (by phase).**
 
 - `activationOver10s` — activation took more than 10 s up to the project summary (once a day).
-- `dbtSearchTimedOut` — the host search for a dbt_project.yml timed out.
+- `dbtSearchTimedOut` — the host search for a dbt_project.yml timed out. Since `dbtSearchSkipped` ("Keys added after 2.0.0"), a window whose dbt project already holds ERD data does not wait for the search and never records this key, so its share falls without any search getting faster: read it beside `dbtSearchSkipped`, and judge speed by `activationOver10s`.
 - `activationFailed` (error) — activation threw (the total; one phase code beside it).
 - `activationFailedDiscovery` (error) — activation threw while finding the project.
 - `activationFailedServices` (error) — activation threw while creating the services.
@@ -1032,7 +1039,7 @@ a message or a count of tables. A sum over `features` excludes
 - `activationFailedCommands` (error) — activation threw while registering the commands.
 - `activationFailedPrompts` (error) — activation threw while running the start prompts.
 - `activationPromptFailed` (error) — the start suggestion or the automatic draft failed after activation.
-- `dbtSearchFailed` (error) — the host search for a dbt_project.yml threw (an error, not a feature: only layoutFailed may end in Failed among the features).
+- `dbtSearchFailed` (error) — the host search for a dbt_project.yml failed: it was refused or threw, not a timeout (the total; from the release after 2.0.4 one reason beside it, under Keys added after 2.0.0; an error, not a feature: only layoutFailed may end in Failed among the features).
 
 A day whose activation threw before it recorded its outcome is still sent (it would otherwise be lost); its `activation` field then reads `no_project`, the fallback. Leave out rows whose `errors` hold `activationFailed` when counting the no-project funnel.
 
@@ -1448,8 +1455,8 @@ Appended to `FEATURES` after the 2.0.0 list above (in
 the same terms: fixed keys, never a name, a path, a message or a count of
 tables (a failed layout's size is one of four fixed ranges, below). Deploy the
 Worker before the extension release that records them, or their counts are
-dropped. The failed-layout codes at the end of this section are appended to
-`ERROR_CODES` in the same way.
+dropped. The failed-layout codes and the dbt search failure reasons in this
+section are appended to `ERROR_CODES` in the same way.
 
 **The import guide's Microsoft Fabric card.** A Warehouse or a Lakehouse's SQL
 analytics endpoint is read as SQL Server, so without these a Fabric import
@@ -1554,6 +1561,141 @@ that already take both).
 # Failed layouts by class, size and how far the fallbacks got (installs and failures, last 28 days)
 npx wrangler d1 execute erd-studio-telemetry --remote --command \
   "SELECT h.os, j.key AS code, COUNT(DISTINCT h.install_id) AS installs, SUM(j.value) AS failures FROM heartbeats h, json_each(h.errors) j WHERE h.day >= date('now','-28 days') AND h.day < date('now') AND COALESCE(h.dev, 0) = 0 AND (j.key LIKE 'layoutFailed%' OR j.key IN ('firstLayoutFailed', 'draftLayoutFailed')) GROUP BY h.os, j.key ORDER BY h.os, installs DESC"
+```
+
+**Why the host's dbt project search failed** (#304; added after 2.0.4). Every
+window, activation asks VS Code's own search (`workspace.findFiles`) for a
+`dbt_project.yml` at any depth, and gives it 1 s before the bounded folder walk
+alone decides (`findHostDbtProjects` in `src/extension.ts`). A search that
+failed (not one that timed out, `dbtSearchTimedOut`) was counted only as
+`dbtSearchFailed`. It now also says which step failed, decided on the device
+from where the failure was caught, never from the error's text. Exactly one
+reason is counted beside each `dbtSearchFailed`, so the three sum to the total
+on every version that has them; an older version sends the total alone.
+
+- `dbtSearchFailedRejected` (error) — VS Code's search refused it (`findFiles` rejected): a host or folder without file search, or an exclude pattern it would not take.
+- `dbtSearchFailedSort` (error) — the search answered, and reading or sorting the folders it returned threw (`sortDbtCandidates`, or a result that is not a list of file URIs): ours.
+- `dbtSearchFailedThrew` (error) — `findFiles` threw before it returned a promise.
+
+And one feature, recorded at activation only:
+
+- `dbtSearchFailedWalkFound` — the search failed and the bounded walk still found a dbt project (it alone would have opened one), so nothing was lost. A project chosen by `erdStudio.projectPath` or **Select dbt Project…** does not count: only what the walk found. Since #295, also when activation did not wait for the search (`dbtSearchSkipped`) and the search it left running then failed: that window opened the dbt project the walk found, so nothing was lost there either.
+
+Where `dbtSearchFailed` is counted: at activation; when activation did not wait
+for the search (`dbtSearchSkipped`, #295) and the search it left running fails
+(with `dbtSearchFailedWalkFound` beside it, since that window's project came
+from the walk); once more when activation's
+search timed out and the late retry (a window that opened without dbt lets the
+search finish, for up to 60 s, to point out a deeper project) then failed — a
+window whose activation search already failed retries but never counts twice
+(versions up to 2.0.4 counted it twice: such a window without dbt recorded
+`dbtSearchFailed` at activation and again when the late retry failed, so
+compare the total per install across that release with care); and each time **Select dbt Project…** runs its own search (no key tells that
+command's failures apart). So `dbtSearchFailed` above
+`dbtSearchFailedWalkFound` means "may have cost the user their project" only
+roughly: the excess also holds a picker's failures, and a late failure belongs
+to a window without dbt, where the walk had found nothing (exactly the window
+in which a project deeper than the walk would be missed).
+
+```bash
+# Why the dbt project search failed, and whether the walk saved the day (installs and counts, last 14 days)
+npx wrangler d1 execute erd-studio-telemetry --remote --command \
+  "SELECT 'errors' AS kind, e.key, COUNT(DISTINCT h.install_id) AS installs, SUM(e.value) AS total FROM heartbeats h, json_each(h.errors) e WHERE COALESCE(h.dev, 0) = 0 AND e.key LIKE 'dbtSearchFailed%' AND h.day >= date('now','-14 days') GROUP BY e.key UNION ALL SELECT 'features', f.key, COUNT(DISTINCT h.install_id), SUM(f.value) FROM heartbeats h, json_each(h.features) f WHERE COALESCE(h.dev, 0) = 0 AND f.key = 'dbtSearchFailedWalkFound' AND h.day >= date('now','-14 days') GROUP BY f.key"
+```
+
+**What a slow start was waiting for** (#295, also added after 2.0.4). About a
+quarter of Windows installs on 2.x recorded `activationOver10s`, and the first
+six of them all recorded `dbtSearchTimedOut` too, which could not tell the
+reasons apart: the host's dbt search is capped at 1 s, so it cannot be the 10 s
+itself. These name the stretch that held the longest share of such an
+activation, once a day, beside `activationOver10s`. Only the stretches before
+the measurement can be named: the Watchers, Views, Commands and Prompts phases
+(the `activationFailed*` phases after Services) start after it, so they have
+no key. The search's own stretch is the time spent *waiting* on it; with its
+1 s cap, a long one means the shared extension host thread was busy (another
+extension's start, or our own synchronous work), so its timer ran late too.
+
+- `activationSlowDbtSearch` — the longest stretch of a start over 10 s was the wait on the host's search for a dbt_project.yml: the extension host thread was busy.
+- `activationSlowDiscovery` — the longest stretch was the rest of finding the project, without the folder walk (`activationSlowWalk`) and without the wait on the search: the globalState writes before the search and, after an update with a diagram open, the save-and-reload prompt (it waits for the user, so a slow answer counts here).
+- `activationSlowServices` — the longest stretch was creating the services, up to the project read (reading a large ERD folder).
+
+What the start screen's first timeout cost, and the search activation no
+longer waits for:
+
+- `startLookLateSuggestion` — the start screen's look at the folder ran out of time, the blank-diagram suggestion was shown, and the retry (the next look that answered, with twice the time) found something to import, so the suggestion changed to an import. Decided on that one look only: a later look that finds a file added after it does not count. The retry runs at the next refresh, so a file saved between the timeout and the retry can still count; that should be rare. Read beside `startLookTimeout` (the installs whose first look ran out of time) and `startLookGaveUp`.
+- `dbtSearchSkipped` — activation did not wait for the host's search for a dbt_project.yml: no `erdStudio.projectPath`, no picked project, and the first dbt workspace folder already holds ERD data, so nothing the search could find changes the project that opens (`hostSearchCannotChangeRoot`). The search still runs, off activation's path, to count the workspace's dbt projects for **Select dbt Project**; if it fails, `dbtSearchFailed` and its reason are still recorded (with `dbtSearchFailedWalkFound`), but a timeout is not.
+- `activationSlowWalk` — the longest stretch of a start over 10 s was the synchronous walk of the workspace folders that finds the dbt project (up to 5,000 folders; `resolveWorkspaceProject`, timed on its own). `activationSlowDiscovery` is then the rest of Discovery, without the walk.
+
+```bash
+# What held starts over 10 s, per OS (installs, last 28 days)
+npx wrangler d1 execute erd-studio-telemetry --remote --command \
+  "SELECT h.os, j.key, COUNT(DISTINCT h.install_id) AS installs FROM heartbeats h, json_each(h.features) j WHERE h.day >= date('now','-28 days') AND h.day < date('now') AND COALESCE(h.dev, 0) = 0 AND (j.key LIKE 'activationSlow%' OR j.key IN ('activationOver10s', 'dbtSearchTimedOut', 'dbtSearchSkipped')) GROUP BY h.os, j.key ORDER BY h.os, installs DESC"
+```
+
+**The start suggestion's repeat cost** (#305). The start suggestion is asked
+once per folder; an install that upgraded (it was not new on its machine) is
+asked once per machine in all, so it is not asked again in the next folder.
+Whether an install was new is recorded on its first activation in the
+machine's own global state, never from telemetry (which may be off); installs
+that were new before the record existed count as upgraders. The machine's
+count starts at 0 on the release that adds it, so each upgrader can be asked
+once more and its first repeat is not marked.
+
+- `suggestPromptShownAgain` — the start suggestion showed on a machine where it had already been shown (in another folder, or in this one after **Turn On Start Suggestions for This Folder**), counted beside `suggestPromptShown`.
+
+**The canvas keeps offering Convert** (#305). A canvas of a project from
+before 2.0 shows an information button ("i") beside the diagram's name for as
+long as the Convert offer's own checks pass, after the once-a-session offer
+has been answered **Not Now**. It is not a prompt, so nothing is counted when
+it shows; only its button press is. Read it beside `convertToDbml`: the share
+of conversions that started from the canvas rather than the offer, the
+opening notice, the sidebar row or the palette.
+
+- `convertToDbmlFromCanvasInfo` — **Convert to DBML…** was pressed in the canvas's information button (the command then runs and counts its own `convertToDbml`, `convertToDbmlCancelled` or `convertToDbmlRefused`).
+
+**How long a table drop takes to show** (added after 2.0.5). On a large
+library a drop from the Table Library can take many seconds to show its
+table on a user's machine, while the same add takes tens of milliseconds in
+our tests, so the slow part is somewhere only their machine can tell us. A
+drop is timed from the moment ERD Studio learns of it to the moment the
+diagram has painted the table (the canvas answers `dropTrace` with
+`dropShown` after its next paint), in eight stages
+(`src/services/dropTiming.ts`): `open` (bringing the diagram forward, for a
+drop that missed the canvas or landed on a Diagrams row), `wait` (the
+diagram's edit queue, a stage switch, a diagram still loading), `prepare`
+(dbt data, which tables, their relationships), `plan` (the files the edit
+writes: the library plan and every other diagram it updates), `edit` (the WorkspaceEdit),
+`save` (saving what it touched), `redraw` (rebuilding the diagram and posting
+it), `canvas` (the message's trip and the canvas's render). The drag itself
+(the user's hand) is never a stage. The time of every stage, the canvas's
+own render time and how long the host stayed busy after posting go to the
+ERD Studio log only (one `[Drop timing]` line per drop, which Send
+Feedback's "Include recent ERD Studio log" carries); telemetry gets fixed
+keys, each counted once per drop. Read `dropShownOver15s` against the
+heartbeat's `os`, and `dropSlow*` for where the time went.
+
+- `dropRouteCanvas` — a drop event reached the diagram (a Shift-drop, or a table file from the Explorer).
+- `dropRouteAfterDrag` — no drop event came: the diagram's first pointer event after the drag said it ended over the diagram.
+- `dropRouteMissedDrop` — the editor group took the drop and opened the table's file; ERD Studio added the table from that tab.
+- `dropRouteDiagramsRow` — the drop landed on a diagram's row in the Diagrams view.
+- `dropShownUnder1s` — a drop that wrote showed its table in under 1 s.
+- `dropShown1to5s` — it showed after 1 to 5 s.
+- `dropShown5to15s` — it showed after 5 to 15 s.
+- `dropShownOver15s` — it showed after 15 s or more.
+- `dropShownNever` — it was written, but the diagram never said it showed it within a minute (or the add itself had not finished by then).
+- `dropSlowOpen` — beside a drop of 1 s or more: bringing the diagram forward was the slowest stage.
+- `dropSlowWait` — waiting for the diagram (its edit queue, a stage switch, a load) was the slowest stage.
+- `dropSlowPrepare` — working out what to add (dbt data, relationships) was the slowest stage.
+- `dropSlowPlan` — planning the files the edit writes (the library plan, every other diagram it updates) was the slowest stage.
+- `dropSlowEdit` — making the edit (opening files, `applyEdit`) was the slowest stage.
+- `dropSlowSave` — saving the files the edit touched was the slowest stage.
+- `dropSlowRedraw` — rebuilding the diagram and posting it was the slowest stage.
+- `dropSlowCanvas` — the trip to the diagram and its render was the slowest stage.
+
+```bash
+# How long drops took to show, and where the time went, per OS (installs and drops, last 28 days)
+npx wrangler d1 execute erd-studio-telemetry --remote --command \
+  "SELECT h.os, j.key, COUNT(DISTINCT h.install_id) AS installs, SUM(j.value) AS drops FROM heartbeats h, json_each(h.features) j WHERE h.day >= date('now','-28 days') AND h.day < date('now') AND COALESCE(h.dev, 0) = 0 AND j.key LIKE 'drop%' GROUP BY h.os, j.key ORDER BY h.os, j.key"
 ```
 
 ## The local archive

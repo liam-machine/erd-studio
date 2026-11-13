@@ -134,6 +134,23 @@ describe('watchMissedCanvasDrops', () => {
     expect(info).not.toHaveBeenCalled();
   });
 
+  it('tells drop timing the drop was seen, aimed at that diagram, before the add starts; a timing failure never stops the add', async () => {
+    const order: string[] = [];
+    deps.dropSeen = vi.fn((file: string) => { order.push(`seen ${file}`); });
+    deps.addTables = vi.fn(async () => { order.push('add'); return ['dim_location']; });
+    dropOpensFile();
+    await vi.waitFor(() => expect(order).toEqual([`seen ${SHOWCASE}`, 'add']));
+    // A dropSeen that throws: the add still runs.
+    drag = { tables: ['dim_location'], at: T0 };
+    deps.dropSeen = vi.fn(() => { throw new Error('timing broke'); });
+    deps.addTables = vi.fn(async () => ['dim_location']);
+    group.tabs = group.tabs.slice(0, 1);
+    group.activeTab = group.tabs[0];
+    vscode._fireDidChangeTabGroups({});
+    dropOpensFile();
+    await vi.waitFor(() => expect(deps.addTables).toHaveBeenCalledTimes(1));
+  });
+
   it('passes the drag\'s files on; says nothing in the status bar when nothing was added (already there: the canvas says so)', async () => {
     drag = { tables: ['dim_location'], files: [DIM_LOCATION], at: T0 };
     deps.addTables = vi.fn(async () => []);

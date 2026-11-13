@@ -122,7 +122,7 @@ An automatic draft is due when all hold: `erdStudio.startSuggestions` is on; the
 
 ### 3.3 The start suggestion (the one popup)
 
-Still the window's activation prompt (`startSuggestion`, after `diagramsNudge`), once per folder (Simplify: it was three times), shown only after the bounded look. New text and buttons:
+Still the window's activation prompt (`startSuggestion`, after `diagramsNudge`), once per folder (Simplify: it was three times), shown only after the bounded look. From #305 an install that upgraded (no fresh-install record in the globalState `erdStudio.startSuggestion.machine`, written once by `activate()`'s fresh-install branch, never from telemetry) is asked **once per machine** in all; a new install keeps once per folder. The palette's **Turn On Start Suggestions for This Folder** sets the folder's `on`, which lifts that limit there; Undo after an off never sets it (`docs/dev/onboarding-and-cli.md` → The start suggestion). New text and buttons:
 
 - `ERD Studio found CREATE TABLE scripts in this folder (24 tables). Show them as a diagram? Nothing is saved until you keep it.` (no count: `…in this folder. Show them as a diagram? …`)
 - `ERD Studio found a Power BI or Fabric semantic model in this folder. Show it as a diagram? Nothing is saved until you keep it.`
