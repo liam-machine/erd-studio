@@ -157,11 +157,14 @@ describe('#296 row 1: the placeholder profile could not be saved', () => {
     const pick = vi.spyOn(vscode.window, 'showQuickPick')
       .mockImplementation((async (items: Array<{ adapter: string }>) => items.find((i) => i.adapter === 'snowflake')) as never);
     let failOnce = true;
+    let heldDuringRetry: boolean | undefined;
     const d = deps({
       identify: async () => ({ flavour: 'core-v1', adapters: ['snowflake', 'bigquery'], via: 'stat' }),
       fs: {
         writeFileSync: (p: string, data: string) => {
           if (failOnce) { failOnce = false; throw errno('ENOSPC'); }
+          // The retry's pre-run steps hold the project (through followUp), so a click meanwhile is told dbt is busy.
+          heldDuringRetry = isDbtFlowStarting(root);
           fs.writeFileSync(p, data);
         },
       } as Partial<DbtParseFs>,
@@ -172,8 +175,10 @@ describe('#296 row 1: the placeholder profile could not be saved', () => {
     expect(d.calls[1].mode).toBe('noCreds');
     expect(d.calls[1].plan.args[2]).toBe(path.join(storage, 'dbt-parse-profile', 'snowflake'));
     expect(pick).toHaveBeenCalledTimes(1);
-    // One click of Parse without your credentials, counted once.
+    // One click of Parse without your credentials, counted once, and its adapter once.
     expect(feature.mock.calls.filter(([k]) => k === 'dbtParseNoCreds')).toHaveLength(1);
+    expect(feature.mock.calls.filter(([k]) => k === 'dbtNoCredsSnowflake')).toHaveLength(1);
+    expect(heldDuringRetry).toBe(true);
   });
 
   it('Try Again does not ask Replace again when the manifest is the one the user agreed to replace', async () => {
@@ -213,6 +218,34 @@ describe('#296 row 1: the placeholder profile could not be saved', () => {
     // Not answered: nothing runs, and the user's manifest stays.
     expect(d.calls).toHaveLength(1);
   });
+  it('Try Again asks Replace again when the manifest the user agreed to replace was rewritten since', async () => {
+    const manifest = path.join(root, 'target', 'manifest.json');
+    fs.mkdirSync(path.join(root, 'target'));
+    fs.writeFileSync(manifest, '{"metadata": {"adapter_type": "duckdb"}}');
+    fs.utimesSync(manifest, new Date(1_000_000), new Date(1_000_000));
+    let tryAgain!: () => void;
+    const clicked = new Promise<string>((r) => { tryAgain = () => r(TRY_AGAIN_BUTTON); });
+    const shown = answer({ [NEEDS_PROFILE]: NO_CREDS_ACTION, 'Replace ': REPLACE_MANIFEST_ACTION });
+    vi.mocked(vscode.window.showErrorMessage).mockImplementation((async (message: string, ...items: string[]) => {
+      shown.push({ kind: 'error', message, items });
+      return message.startsWith(NOT_SAVED) ? clicked : undefined;
+    }) as never);
+    let failOnce = true;
+    const d = deps({
+      fs: { writeFileSync: (p: string, data: string) => { if (failOnce) { failOnce = false; throw errno('ENOSPC'); } fs.writeFileSync(p, data); } } as Partial<DbtParseFs>,
+    });
+    const s = await runDbtParse(root, {}, d);
+    d.calls[0].finish({ exitCode: 2, tail: OUT.B_profilename });
+    await s.settled;
+    await vi.waitFor(() => expect(shown.some((m) => m.message.startsWith(NOT_SAVED))).toBe(true));
+    expect(shown.filter((m) => m.message.startsWith('Replace '))).toHaveLength(1);
+    // Meanwhile, dbt parsed again with the user's own profile: a new manifest, not the one agreed to.
+    fs.writeFileSync(manifest, '{"metadata": {"adapter_type": "duckdb"}, "nodes": {}}');
+    fs.utimesSync(manifest, new Date(2_000_000), new Date(2_000_000));
+    tryAgain();
+    await vi.waitFor(() => expect(d.calls).toHaveLength(2), { timeout: 500 });
+    expect(shown.filter((m) => m.message.startsWith('Replace '))).toHaveLength(2);
+  });
 });
 
 describe('#296 rows 2-3: dbt did not start', () => {
@@ -237,7 +270,31 @@ describe('#296 rows 2-3: dbt did not start', () => {
     const s = await runDbtParse(root, {}, d);
     d.calls[0].finish({ outcome: 'notStarted', exitCode: null, startError: 'ENOENT' });
     await s.settled;
-    expect(shown.at(-1)!.message).toMatch(/the file is there, but the Python it runs with is missing/);
+    expect(shown.at(-1)!.message).toMatch(/the file is there, but something it needs to run is missing/);
+  });
+
+  it('Try Again after a start error is not counted as another Run dbt parse click', async () => {
+    const feature = vi.spyOn(telemetry, 'feature');
+    answer({ 'ERD Studio couldn\'t start': TRY_AGAIN_BUTTON });
+    const d = deps();
+    const s = await runDbtParse(root, {}, d);
+    d.calls[0].finish({ outcome: 'notStarted', exitCode: null, startError: 'ENOENT' });
+    await s.settled;
+    await vi.waitFor(() => expect(d.calls).toHaveLength(2), { timeout: 500 });
+    expect(feature.mock.calls.filter(([k]) => k === 'dbtParse')).toHaveLength(1);
+    expect(feature.mock.calls.filter(([k]) => k === 'dbtParseNoStart')).toHaveLength(1);
+  });
+
+  it('ENOENT because the project folder is gone says so, not that Python or dbt is missing', async () => {
+    const shown = answer();
+    const d = deps({ fs: { isFile: () => true } });
+    const s = await runDbtParse(root, {}, d);
+    fs.rmSync(root, { recursive: true, force: true }); // a branch switch removed the nested dbt project
+    d.calls[0].finish({ outcome: 'notStarted', exitCode: null, startError: 'ENOENT' });
+    await s.settled;
+    expect(shown.at(-1)!.message).toMatch(/: the dbt project folder \(.*\) is no longer there\./);
+    expect(shown.at(-1)!.message).not.toMatch(/Python|virtual environment/);
+    expect(shown.at(-1)!.items).toEqual([TRY_AGAIN_BUTTON]);
   });
 
   it('an unexplained start error offers Send Feedback, whose report carries the code', async () => {

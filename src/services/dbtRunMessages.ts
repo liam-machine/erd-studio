@@ -36,12 +36,18 @@ function listChars(chars: readonly string[]): string {
  * error's code (`dbtProcess.ts` reduces it to a code or `'unknown'`).
  *
  * - `refused`: names the characters the refused path really holds, and which
- *   path it is. The project folder is only the working directory and is never
- *   refused; the placeholder profile folder (VS Code's storage, `profilesDir`)
- *   is, and moving the project cannot fix that.
- * - `ENOENT`: the file is gone (dbt is looked for again on every run, so Try
- *   Again is enough), or it is there and the Python it runs with is missing
- *   (a broken venv), where saying "no longer there" would be false.
+ *   path it is, shown in full: `displayPath`'s `~` or project-relative form
+ *   can hide the very folder that holds the character (a Windows user name
+ *   with `!` is in both dbt's pyenv shim and VS Code's storage). The project
+ *   folder is only the working directory and is never refused; the
+ *   placeholder profile folder (VS Code's storage, `profilesDir`) is, and
+ *   moving the project cannot fix that. When both are refused, both fixes
+ *   are named: moving dbt alone would only lead to the second refusal.
+ * - `ENOENT`: the project folder (the working directory) is gone, which
+ *   Node also reports as `ENOENT`; else dbt's file is gone (dbt is looked
+ *   for again on every run, so Try Again is enough); else it is there and
+ *   something it runs with is missing (a venv whose Python went), where
+ *   saying "no longer there" would be false.
  * - `EACCES` / `EPERM`: this account may not run it.
  * - anything else: Try Again, then a report.
  */
@@ -53,10 +59,12 @@ export function couldNotStartNotice(
     executable: string;
     /** The placeholder profile folder, for a Parse without your credentials run. */
     profilesDir?: string;
-    /** The same folder as shown. */
-    profilesDirShown?: string;
     /** Whether dbt's file is still there (read for `ENOENT` only). */
     executableExists: boolean;
+    /** The dbt project folder (the run's working directory) is gone (read for `ENOENT` only). */
+    projectMissing?: boolean;
+    /** The dbt project folder as shown, for `projectMissing`. */
+    projectShown?: string;
   },
 ): DbtNotice {
   const { shown } = ctx;
@@ -66,23 +74,37 @@ export function couldNotStartNotice(
     if (inExecutable.length === 0 && inProfilesDir.length > 0) {
       const chars = listChars(inProfilesDir);
       return {
-        message: `Parse without your credentials can't run on this machine: the folder where VS Code keeps ERD Studio's files (${ctx.profilesDirShown ?? ctx.profilesDir}) contains ${chars}, ` +
+        message: `Parse without your credentials can't run on this machine: the folder where VS Code keeps ERD Studio's files (${ctx.profilesDir}) contains ${chars}, ` +
           `which Windows can't pass safely to ${shown}. Nothing in your project is wrong. Set up a dbt profile, then run dbt parse with it instead.`,
         actions: ['profileDocs'],
       };
     }
     const chars = listChars(inExecutable.length > 0 ? inExecutable : ['"', '%', '!']);
+    const start = `ERD Studio couldn't start ${ctx.executable}: its path contains ${chars}, which Windows can't pass safely to a .cmd or .bat file. `;
+    if (inProfilesDir.length > 0) {
+      return {
+        message: start + `Parse without your credentials can't run on this machine either: the folder where VS Code keeps ERD Studio's files (${ctx.profilesDir}) contains ${listChars(inProfilesDir)}. ` +
+          `Install dbt in a folder whose path doesn't contain ${chars} and set up a dbt profile, then run dbt parse with it.`,
+        actions: ['installDocs', 'profileDocs'],
+      };
+    }
     return {
-      message: `ERD Studio couldn't start ${shown}: its path contains ${chars}, which Windows can't pass safely to a .cmd or .bat file. ` +
-        `Install dbt in a folder whose path doesn't contain ${chars}, then try again.`,
+      message: start + `Install dbt in a folder whose path doesn't contain ${chars}, then try again.`,
       actions: ['installDocs'],
     };
   }
   if (cause === 'ENOENT') {
+    if (ctx.projectMissing) {
+      return {
+        message: `ERD Studio couldn't start ${shown}: the dbt project folder${ctx.projectShown ? ` (${ctx.projectShown})` : ''} is no longer there. ` +
+          'If it was moved, renamed or removed by a branch switch, put it back or open it where it is now, then try again.',
+        actions: ['tryAgain'],
+      };
+    }
     if (ctx.executableExists) {
       return {
-        message: `ERD Studio couldn't start ${shown}: the file is there, but the Python it runs with is missing. ` +
-          'If Python was upgraded or removed, rebuild dbt\'s virtual environment or reinstall dbt, then try again.',
+        message: `ERD Studio couldn't start ${shown}: the file is there, but something it needs to run is missing. ` +
+          'If it is in a virtual environment whose Python was upgraded or removed, rebuild that environment or reinstall dbt, then try again.',
         actions: ['tryAgain', 'installDocs'],
       };
     }

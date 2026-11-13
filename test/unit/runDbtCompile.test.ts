@@ -10,7 +10,7 @@ import * as vscode from 'vscode';
 import { _resetDbtFlowsForTests } from '../../src/commands/dbtCandidate';
 import { _resetDbtRunsForTests, type runDbtInTerminal } from '../../src/commands/dbtTerminal';
 import { COMPILE_OK_MESSAGE, DBT_COMPILE_NOT_FOUND_MESSAGE, runDbtCompile, type RunDbtCompileDeps } from '../../src/commands/runDbtCompile';
-import { DBT_BUSY_MESSAGE, DBT_INSTALL_ACTION, RUN_DBT_DEPS_ACTION } from '../../src/commands/runDbtParse';
+import { DBT_BUSY_MESSAGE, RUN_DBT_DEPS_ACTION } from '../../src/commands/runDbtParse';
 import { TRY_AGAIN_BUTTON } from '../../src/services/commandErrors';
 import { couldNotStartNotice } from '../../src/services/dbtRunMessages';
 import { displayPath, type DbtCandidate } from '../../src/services/dbtEnv';
@@ -154,12 +154,16 @@ describe('runDbtCompile', () => {
   it('#296: compile and its dbt deps say why dbt did not start in the same words as parse, and Try Again runs compile again', async () => {
     const shown = answer({ 'This project uses dbt packages': RUN_DBT_DEPS_ACTION, 'ERD Studio couldn\'t start': TRY_AGAIN_BUTTON });
     const d = deps({ candidates: () => [onPath] });
-    const expected = couldNotStartNotice('ENOENT', { shown: displayPath(onPath.executable, ROOT), executable: onPath.executable, executableExists: false });
+    // ROOT is not on disk, so the start error is put down to the missing project folder (Node reports a missing cwd as ENOENT).
+    const expected = couldNotStartNotice('ENOENT', {
+      shown: displayPath(onPath.executable, ROOT), executable: onPath.executable, executableExists: false,
+      projectMissing: true, projectShown: displayPath(ROOT, ROOT),
+    });
 
     const start = await runDbtCompile(ROOT, d);
     d.calls[0].finish({ outcome: 'notStarted', exitCode: null, startError: 'ENOENT' });
     await start.settled;
-    expect(shown.at(-1)).toEqual({ message: expected.message, items: [TRY_AGAIN_BUTTON, DBT_INSTALL_ACTION] });
+    expect(shown.at(-1)).toEqual({ message: expected.message, items: [TRY_AGAIN_BUTTON] });
     await vi.waitFor(() => expect(d.calls).toHaveLength(2), { timeout: 500 });
     expect(d.calls[1].kind).toBe('compile');
 

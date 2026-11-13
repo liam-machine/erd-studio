@@ -252,6 +252,12 @@ export interface CouldNotStartContext {
   profilesDir?: string;
   /** Test seam: the file is there. */
   isFile?: (p: string) => boolean;
+  /** Test seam: the folder is there. */
+  isDirectory?: (p: string) => boolean;
+}
+
+function isDirectory(p: string): boolean {
+  try { return fs.statSync(p).isDirectory(); } catch { return false; }
 }
 
 /**
@@ -262,12 +268,15 @@ export interface CouldNotStartContext {
  */
 export function showCouldNotStart(executable: string, root: string, startError: string | 'refused', ctx: CouldNotStartContext): void {
   const isFile = ctx.isFile ?? defaultFs.isFile;
+  // Node's spawn reports a missing working directory (the project) as ENOENT too.
+  const projectMissing = startError === 'ENOENT' && !(ctx.isDirectory ?? isDirectory)(root);
   const notice = couldNotStartNotice(startError, {
     shown: displayPath(executable, root),
     executable,
     profilesDir: ctx.profilesDir,
-    profilesDirShown: ctx.profilesDir === undefined ? undefined : displayPath(ctx.profilesDir, root),
-    executableExists: startError === 'ENOENT' && isFile(executable),
+    executableExists: startError === 'ENOENT' && !projectMissing && isFile(executable),
+    projectMissing,
+    projectShown: projectMissing ? displayPath(root, root) : undefined,
   });
   const title = `Run dbt ${ctx.kind}`;
   showDbtNotice(notice, {
@@ -297,7 +306,7 @@ interface ParseFlow {
   platform: NodeJS.Platform;
   homeDir: string;
   fs: DbtParseFs;
-  /** Run dbt parse again from the click (Try Again after dbt did not start). */
+  /** Run dbt parse again from the top, not counted as a click (Try Again after dbt did not start). */
   again: () => Promise<unknown>;
 }
 
@@ -314,6 +323,11 @@ interface NoCredsRetry {
  */
 export async function runDbtParse(root: string, opts: RunDbtParseOptions = {}, deps: RunDbtParseDeps = {}): Promise<DbtParseStart> {
   telemetry.feature('dbtParse'); // the click (#113 continuity)
+  return startDbtParse(root, opts, deps);
+}
+
+/** Run dbt parse from the top without counting a click: the click itself, or a notice's Try Again (#296). */
+async function startDbtParse(root: string, opts: RunDbtParseOptions, deps: RunDbtParseDeps): Promise<DbtParseStart> {
   if (isDbtRunActive(root) || isDbtFlowStarting(root)) {
     showDbtBusy(root);
     return NOT_STARTED;
@@ -397,7 +411,8 @@ async function parseFlow(root: string, opts: RunDbtParseOptions, deps: RunDbtPar
     platform: deps.platform ?? process.platform,
     homeDir: deps.homeDir ?? os.homedir(),
     fs: { ...defaultFs, ...deps.fs },
-    again: () => runDbtParse(root, opts, deps),
+    // Not `runDbtParse`: `dbtParse` is the button click, and a Try Again is not one.
+    again: () => startDbtParse(root, opts, deps),
   };
   // Only when a supported adapter is installed: otherwise the offer would end at "needs one of these adapters".
   flow.noCredsAvailable = !!host && identity.flavour === 'core-v1'

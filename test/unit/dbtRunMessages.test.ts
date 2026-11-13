@@ -31,7 +31,7 @@ describe('couldNotStartNotice', () => {
       'ERD Studio couldn\'t start .venv/bin/dbt: the file is no longer there. If you moved or rebuilt dbt\'s virtual environment, try again: ERD Studio looks for dbt again each time.',
       ['tryAgain', 'installDocs']],
     ['ENOENT, file still there (a broken venv)', 'ENOENT', true,
-      'ERD Studio couldn\'t start .venv/bin/dbt: the file is there, but the Python it runs with is missing. If Python was upgraded or removed, rebuild dbt\'s virtual environment or reinstall dbt, then try again.',
+      'ERD Studio couldn\'t start .venv/bin/dbt: the file is there, but something it needs to run is missing. If it is in a virtual environment whose Python was upgraded or removed, rebuild that environment or reinstall dbt, then try again.',
       ['tryAgain', 'installDocs']],
     ['EACCES', 'EACCES', false,
       'ERD Studio couldn\'t start .venv/bin/dbt: this account isn\'t allowed to run it. Check the file\'s permissions, then try again.',
@@ -57,39 +57,64 @@ describe('couldNotStartNotice', () => {
       .toBe(couldNotStartNotice('EACCES', { ...base, executableExists: false }).message);
   });
 
-  it('refused by dbt\'s own path: names only the characters that path holds, never cmd.exe', () => {
+  it('refused by dbt\'s own path: names only the characters that path holds, shows the full path, never cmd.exe', () => {
     const executable = 'C:\\R&D ^ 100%\\pyenv\\shims\\dbt.bat';
     const n = couldNotStartNotice('refused', { shown: '~/R&D ^ 100%/pyenv/shims/dbt.bat', executable, executableExists: true });
     expect(n.message).toBe(
-      'ERD Studio couldn\'t start ~/R&D ^ 100%/pyenv/shims/dbt.bat: its path contains %, which Windows can\'t pass safely to a .cmd or .bat file. ' +
+      'ERD Studio couldn\'t start C:\\R&D ^ 100%\\pyenv\\shims\\dbt.bat: its path contains %, which Windows can\'t pass safely to a .cmd or .bat file. ' +
         'Install dbt in a folder whose path doesn\'t contain %, then try again.',
     );
     expect(n.actions).toEqual(['installDocs']);
     expect(n.message).not.toMatch(/cmd\.exe|project/);
   });
 
-  it('refused by the placeholder profile folder: names VS Code\'s storage, never the project or dbt\'s folder', () => {
+  it('refused by a character that displayPath hid (the Windows user name): the shown path holds it', () => {
+    const executable = 'C:\\Users\\jo!smith\\.pyenv\\pyenv-win\\shims\\dbt.bat';
+    const n = couldNotStartNotice('refused', { shown: '~/.pyenv/pyenv-win/shims/dbt.bat', executable, executableExists: true });
+    expect(n.message).toContain(`couldn't start ${executable}: its path contains !,`);
+    expect(n.message).not.toContain('~/');
+  });
+
+  it('refused by the placeholder profile folder: names VS Code\'s storage in full, never the project or dbt\'s folder', () => {
+    const profilesDir = 'C:\\Users\\Bob!\\AppData\\Roaming\\Code\\User\\globalStorage\\x\\dbt-parse-profile\\duckdb';
     const n = couldNotStartNotice('refused', {
-      shown: '~/pyenv/shims/dbt.bat',
-      executable: 'C:\\Users\\Bob\\pyenv\\shims\\dbt.bat',
-      profilesDir: 'C:\\Users\\Bob!\\AppData\\Roaming\\Code\\User\\globalStorage\\x\\dbt-parse-profile\\duckdb',
-      profilesDirShown: '~/AppData/Roaming/Code/User/globalStorage/x/dbt-parse-profile/duckdb',
+      shown: 'C:/tools/dbt.bat',
+      executable: 'C:\\tools\\dbt.bat',
+      profilesDir,
       executableExists: true,
     });
     expect(n.message).toBe(
-      'Parse without your credentials can\'t run on this machine: the folder where VS Code keeps ERD Studio\'s files ' +
-        '(~/AppData/Roaming/Code/User/globalStorage/x/dbt-parse-profile/duckdb) contains !, which Windows can\'t pass safely to ~/pyenv/shims/dbt.bat. ' +
-        'Nothing in your project is wrong. Set up a dbt profile, then run dbt parse with it instead.',
+      `Parse without your credentials can't run on this machine: the folder where VS Code keeps ERD Studio's files (${profilesDir}) contains !, ` +
+        'which Windows can\'t pass safely to C:/tools/dbt.bat. Nothing in your project is wrong. Set up a dbt profile, then run dbt parse with it instead.',
     );
+    expect(n.message).toContain('Bob!');
     expect(n.actions).toEqual(['profileDocs']);
     expect(n.message).not.toMatch(/cmd\.exe|Move the project|Install dbt in a folder/);
   });
 
-  it('refused with a bad character in both: dbt\'s path is named first (moving dbt is the fix the user can make)', () => {
+  it('refused with a bad character in both: names both paths and both fixes (moving dbt alone would be refused again)', () => {
     const n = couldNotStartNotice('refused', {
-      shown: 'C:/a%/dbt.cmd', executable: 'C:\\a%\\dbt.cmd', profilesDir: 'C:\\b!', profilesDirShown: 'C:/b!', executableExists: true,
+      shown: '~/.pyenv/shims/dbt.bat', executable: 'C:\\Users\\jo!\\.pyenv\\shims\\dbt.bat',
+      profilesDir: 'C:\\Users\\jo!\\AppData\\x', executableExists: true,
     });
-    expect(n.message).toMatch(/^ERD Studio couldn't start C:\/a%\/dbt\.cmd: its path contains %,/);
+    expect(n.message).toBe(
+      'ERD Studio couldn\'t start C:\\Users\\jo!\\.pyenv\\shims\\dbt.bat: its path contains !, which Windows can\'t pass safely to a .cmd or .bat file. ' +
+        'Parse without your credentials can\'t run on this machine either: the folder where VS Code keeps ERD Studio\'s files (C:\\Users\\jo!\\AppData\\x) contains !. ' +
+        'Install dbt in a folder whose path doesn\'t contain ! and set up a dbt profile, then run dbt parse with it.',
+    );
+    expect(n.actions).toEqual(['installDocs', 'profileDocs']);
+  });
+
+  it('ENOENT when the project folder (the working directory) is gone: says so, never blames Python or dbt\'s file', () => {
+    for (const exists of [true, false]) {
+      const n = couldNotStartNotice('ENOENT', { ...base, executableExists: exists, projectMissing: true, projectShown: '~/code/proj' });
+      expect(n.message).toBe(
+        'ERD Studio couldn\'t start .venv/bin/dbt: the dbt project folder (~/code/proj) is no longer there. ' +
+          'If it was moved, renamed or removed by a branch switch, put it back or open it where it is now, then try again.',
+      );
+      expect(n.message).not.toMatch(/Python|virtual environment/);
+      expect(n.actions).toEqual(['tryAgain']);
+    }
   });
 
   it('no notice ever offers Show output (a refused run has no terminal; a start error\'s shows only the code)', () => {
