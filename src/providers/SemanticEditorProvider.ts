@@ -2512,7 +2512,10 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
         // Usage telemetry: one edit request of this kind (EDIT_FEATURES).
         const editFeature = EDIT_FEATURES[message.type];
-        if (editFeature) telemetry.feature(editFeature);
+        if (editFeature) {
+          telemetry.feature(editFeature);
+          telemetry.diagramUsed(document.uri.toString(), 'edit');
+        }
 
         // Mutations always target the logical stage (physical is already guarded above)
         const activeStage = 'logical' as const;
@@ -6431,6 +6434,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       }
     }
     telemetry.canvasOpened(stage, format, modelCount);
+    telemetry.diagramUsed(document.uri.toString(), 'open');
     // Without dbt the manifest service is disabled and reports neither missing
     // nor stale: recording that as 'ok' would count a plain folder as a fresh
     // manifest. The day's manifest state stays 'unknown' instead.

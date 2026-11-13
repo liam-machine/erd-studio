@@ -347,7 +347,7 @@ Ad hoc, from this directory:
 
 ```bash
 npx wrangler d1 execute erd-studio-telemetry --remote --command \
-  "SELECT day, COUNT(*) AS active, SUM(canvas_opens > 0) AS with_canvas FROM heartbeats GROUP BY day ORDER BY day DESC LIMIT 14"
+  "SELECT day, SUM(canvas_opens > 0) AS active, COUNT(*) AS reporting FROM heartbeats WHERE COALESCE(dev, 0) = 0 GROUP BY day ORDER BY day DESC LIMIT 14"
 
 # Feature adoption (features is a JSON object of counts)
 npx wrangler d1 execute erd-studio-telemetry --remote --command \
@@ -370,6 +370,56 @@ npx wrangler d1 execute erd-studio-telemetry --remote --command \
 
 Prefer aggregates. There is rarely a reason to look at individual rows, and
 none to copy `install_id` anywhere.
+
+### What "active" means
+
+**An install is active on a day it opened a diagram** (`canvas_opens > 0`),
+and over a period when it did so on any day in it. A heartbeat alone is not
+use: the extension activates in any folder with a `dbt_project.yml`, a `.sql`
+or a `.dbml` file, so most rows come from an editor that was merely opened
+there. Those rows are **reporting** installs; keep the two names apart in
+every readout, and give the onboarding funnel its own base (installed, by
+first day seen), which is unchanged.
+
+```bash
+# Rolling 7-day active installs (opened a diagram), beside those that only reported
+npx wrangler d1 execute erd-studio-telemetry --remote --command \
+  "WITH days AS (SELECT DISTINCT day FROM heartbeats WHERE day >= date('now','-21 days') AND day < date('now')) SELECT d.day AS end_day, COUNT(DISTINCT CASE WHEN h.canvas_opens > 0 THEN h.install_id END) AS active_7d, COUNT(DISTINCT h.install_id) AS reporting_7d FROM days d JOIN heartbeats h ON h.day > date(d.day, '-7 days') AND h.day <= d.day AND COALESCE(h.dev, 0) = 0 GROUP BY d.day ORDER BY d.day"
+```
+
+### Use per diagram (migrations/0006)
+
+`diagrams` is the day's use per diagram: a JSON array of `[id, opens, edits]`,
+at most 30, plus one entry with id `0` that adds up any further diagrams that
+day. `opens` is canvas opens (the entries add up to `canvas_opens` from the
+release that sends them); `edits` is edit requests on that canvas (the
+`edit*` feature keys, per diagram, capped at 1000).
+
+`id` is a random number from 1 to 65535 that the extension makes up the first
+time an install opens a diagram and keeps in `globalState`
+(`erdStudio.telemetry.diagramIds`, keyed by a SHA-256 fingerprint of the
+file's URI that never leaves the device). It is not derived from the
+diagram's name, path, layer or contents, so it carries nothing about the
+diagram: it only joins one install's days. It means nothing across installs
+(two installs can hold the same number), so always group by `install_id`
+with it. A renamed or moved file gets a new number; a number unused for 90
+days is forgotten, as D1's rows are; turning telemetry off clears them all.
+
+```bash
+# Per install over 28 days: how many diagrams it used, and how often
+npx wrangler d1 execute erd-studio-telemetry --remote --command \
+  "WITH d AS (SELECT h.install_id, h.day, json_extract(j.value, '\$[0]') AS id, json_extract(j.value, '\$[1]') AS opens, json_extract(j.value, '\$[2]') AS edits FROM heartbeats h, json_each(h.diagrams) j WHERE h.day >= date('now','-28 days') AND COALESCE(h.dev, 0) = 0), per AS (SELECT install_id, COUNT(DISTINCT CASE WHEN id > 0 THEN id END) AS diagrams, COUNT(DISTINCT day) AS days, SUM(opens) AS opens, SUM(edits) AS edits FROM d GROUP BY install_id) SELECT diagrams, COUNT(*) AS installs, ROUND(AVG(days), 1) AS avg_days, ROUND(AVG(opens), 1) AS avg_opens, ROUND(AVG(edits), 1) AS avg_edits FROM per GROUP BY diagrams ORDER BY diagrams"
+
+# Per diagram over 28 days: on how many days it was opened, and whether it was edited
+npx wrangler d1 execute erd-studio-telemetry --remote --command \
+  "WITH d AS (SELECT h.install_id, h.day, json_extract(j.value, '\$[0]') AS id, json_extract(j.value, '\$[1]') AS opens, json_extract(j.value, '\$[2]') AS edits FROM heartbeats h, json_each(h.diagrams) j WHERE h.day >= date('now','-28 days') AND COALESCE(h.dev, 0) = 0), per AS (SELECT install_id, id, COUNT(DISTINCT day) AS days, SUM(opens) AS opens, SUM(edits) AS edits FROM d WHERE id > 0 GROUP BY install_id, id) SELECT CASE WHEN days = 1 THEN '1' WHEN days <= 3 THEN '2-3' WHEN days <= 7 THEN '4-7' ELSE '8+' END AS days_opened, COUNT(*) AS diagrams, SUM(edits > 0) AS edited, ROUND(AVG(opens), 1) AS avg_opens, ROUND(AVG(edits), 1) AS avg_edits FROM per GROUP BY 1 ORDER BY MIN(days)"
+```
+
+Read the output as counts of diagrams, never as a list of them: there is
+nothing to look up a number in, and no reason to copy one anywhere. A row
+with `diagrams` NULL is a day without a diagram, or a client from before the
+field; the Worker that predates migration 0006 drops the field, so deploy
+the Worker before the extension release that sends it.
 
 ### Native DBML storage (2.0)
 
@@ -1578,6 +1628,7 @@ One anonymous heartbeat per UTC day, describing the **previous** day, plus (2.0)
 
 - **`src/services/telemetryPayload.ts`** is pure (no `vscode`, no Node built-ins): `FEATURES` and `ERROR_CODES` (typed unions — an unlisted key cannot be recorded; as with the getting-started funnel keys, user cancels and routes such as `drawCancelScope` / `setupHelperCancelled` / `openClaudeCli` are FEATURES, and only something that broke (`drawWriteFailed`, `firstLayoutFailed`, `launcherRuntimeUnverified`, …) is an ERROR_CODE, which a test enforces; and a test fails if the Worker's lists in `telemetry/src/index.js` differ key for key or in order — a new key is harmless to an old Worker, which drops unknown `features` keys one at a time, but redeploy it before the extension ships or the new counts are lost), the bucket helpers, `DailyCounters`, the `record*` reducers (caps: activations 50, canvasOpens 200, each feature/error 100), `heartbeatDue()` (skips a day with nothing counted and a day older than the Worker's 7-day window) and `buildHeartbeat()`, which rebuilds the body field by field from the allowlists so nothing stray in stored state reaches the wire. There is no field that can hold a name, path or message — keep it that way; `test/unit/telemetryPayload.test.ts` feeds real-looking names and paths through every recorder and asserts none appear in the JSON.
 - **`src/services/telemetryService.ts`** owns globalState (counters, the random `installId` — `crypto.randomUUID()`, minted once per VS Code profile and **never rotated** (it was, every 30 days, until 1.6.2), **never** `vscode.env.machineId` — the first-seen day for `tenure`, and the on-device retention state: recent active / canvas days (`rememberDay`, 28-day window) and the first canvas day, sent only as buckets and cleared by `discard()`). Every `update()` stamps the counters with the running `CounterEnv` (`stampEnv`: ext / VS Code version, `hostBucket(appName)`, `remoteBucket(remoteName, uiKind)`, `dev` from `extensionMode`), so a day is labelled with the build that counted it, the day rollover (on activation and an hourly `setInterval`, cleared on dispose), and the send: `vscode.env.createTelemetryLogger(sender, { ignoreBuiltInCommonProperties: true })` → `logUsage('heartbeat', …)`. VS Code's logger prefixes the event name and clones/scrubs the data, so the sender posts the body `buildHeartbeat()` produced (held in `outgoing`) rather than what arrives through it; `sendErrorData` is a no-op. POST to `TELEMETRY_ENDPOINT` with a 5 s `AbortController`; every failure is swallowed — no retry, toast or log (a retry for the final is deferred to after 2.0). Bodies wait in an in-order queue (`outgoing`) and are queued only while `logger.isUsageEnabled`, so an interim copy never replaces a final waiting to be posted and nothing is posted on its own later. The URL passes through `safeBaseUrl()` (exported from `feedbackAnalysisService`) — one https rule for every outbound base URL. `setTelemetryEndpointForTests()` is the test seam.
+- **Use per diagram.** `telemetry.diagramUsed(uri, 'open' | 'edit')` is called beside `canvasOpened` and beside each `EDIT_FEATURES` count in `SemanticEditorProvider`. It is the one call site that takes something other than a fixed key: the URI goes no further than `TelemetryService.diagramId`, which swaps it for the diagram's random number (`planDiagramIds`: looked up by a SHA-256 fingerprint in `erdStudio.telemetry.diagramIds`, or made up with `crypto.randomInt`; written at most once a day per diagram; entries unused for 90 days dropped, at most 500 kept; nothing kept while telemetry is off; cleared by `discard()`). `recordDiagramUse` keeps `[id, opens, edits]` per diagram in the day's counters (at most `MAX_DIAGRAMS` = 30, the rest under id 0) and `buildHeartbeat` rebuilds the list number by number (`sentDiagrams`), so nothing but whole numbers in range can reach the wire. Never send the fingerprint, and never derive the number from the file. `test/unit/telemetryDiagrams.test.ts` holds this.
 - **Switches.** Nothing is recorded or sent unless `vscode.env.isTelemetryEnabled` **and** `erdStudio.telemetry.enabled` (read via `getErdStudioSetting`, user scope only) allow it; switching either off (`onDidChangeTelemetryEnabled`, `onDidChangeConfiguration`) discards the day's counters so they are never sent later. The service is constructed at the top of `activate()`, before the no-project return, so `no_project` activations count.
 - **Interim copies (2.0, B2).** `TelemetryService.update()` compares the counters before and after each change (`provisionalTrigger`): a new error code today (on any tenure — `relationshipInvariants` goes through `update` too) or an onboarding end-point (`PROVISIONAL_ONBOARDING_FEATURES`: a draft answered, the guide skipped or left, a fast rejection) or the day's first diagram with tables schedules `sendProvisional` 30 s later (debounced, an error outranks onboarding); a first-week day also gets one look 2 min after `start()`. `provisionalDue` sends only today's counters, fewer than 3 a day (`erdStudio.telemetry.provisional` = `{ day, sent, hash }` in globalState, shared by every window), when the body's `heartbeatHash` (FNV-1a of the JSON, `heartbeatProvisional` left out; it never leaves the device) differs from the last one, with something counted and an activation (unless `activationFailed`). Onboarding and settle copies need an onboarding day (`onboardingWindowDay`): a first-week day of an install whose first counted start was not an update (`erdStudio.telemetry.upgradedInstall`), or any day in the 7 after a major update (`majorSeenDay`); otherwise only error copies are sent. The body is the final's plus `features.heartbeatProvisional = 1`, never in the stored counters; it goes through the same `logUsage` path. Timers are unref'd and cleared on dispose and on opt-out; there is no send on deactivate (it is synchronous and also runs on reload).
 - **Size guard (2.0, B3).** Every body passes `trimHeartbeat()` before `logUsage`: over `HEARTBEAT_SOFT_LIMIT` = 15,000 bytes (under the Worker's old 16,384 cap as well as the new 32,768), it loses `trail` and `trailDropped` together (the Worker refuses one without the other), then feature keys counted once, then other feature keys, then error codes, each newest first, until it fits, and gains `heartbeatTrimmed`. The flag is set in the body only: today's counters describe a different day from the one trimmed.

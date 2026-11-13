@@ -18,6 +18,7 @@ heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that
 
 ### Changed
 
+- The anonymous daily usage report now also says how many times each diagram was opened and edited that day. A diagram is a random number that ERD Studio makes up and keeps on your computer: never its name, its path, its layer or anything in it. Turning telemetry off clears the numbers.
 - **The other ERD Studio pages have the glass look too:** the ERD Studio Tour, the import guide (**Bring In Your Data Model…**), the import report, the **Convert to DBML** review and the draft of your data model. Buttons, cards, notices and code blocks look the same on every page and follow your VS Code theme, including high contrast. Nothing they say or do has changed, apart from these touches: a finished step in the Tour shows a tick; the import guide's sources open from anywhere on their row, and a source with no logo shows a table icon; the import report shows its counts as badges ("Imported" with a 5 beside it, where it read "Imported (5)"); and on the draft, closing **Show details** puts the keyboard focus back on its button.
 - **The "Drop to add … to this diagram" hint no longer covers the Logical / Physical tabs**, and the highlight over the diagram while you drag tables is lighter, so you can still read the tables under it.
 - **The Layout settings panel's notes each sit on their own line**, and "Press Re-apply Layout to use these choices." has the same amber dot as the Re-apply button.
