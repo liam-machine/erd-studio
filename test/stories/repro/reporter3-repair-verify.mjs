@@ -1,5 +1,5 @@
-// REPAIR check (gerhard-feedback-3, stage 4): the Breaker's findings, in real VS Code.
-//   npm run build && node test/stories/repro/gerhard3-repair-verify.mjs <evidence dir>
+// REPAIR check (reporter-feedback-3, stage 4): the Breaker's findings, in real VS Code.
+//   npm run build && node test/stories/repro/reporter3-repair-verify.mjs <evidence dir>
 // R1  Breaker S4: the only diagram on screen in a non-active group; the inline + adds there with no second tab.
 // R2  A Table Library drag let go over the canvas WITHOUT Shift (a drop inside the workbench, replayed over CDP):
 //     VS Code opens the file; the notice says so and its "Add to showcase" button adds the table.

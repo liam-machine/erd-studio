@@ -3,7 +3,7 @@
   "domain": "sap",
   "layer": "bronze",
   "stage": "logical",
-  "description": "Gerhard photo-2: two unqualified Table adresse files, imported side by side as ERD Studio 2.0.4 wrote them",
+  "description": "The reporter's photo-2: two unqualified Table adresse files, imported side by side as ERD Studio 2.0.4 wrote them",
   "models": [
     {
       "name": "bqs__v_sap_prod_unit2",

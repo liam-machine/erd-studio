@@ -53,8 +53,8 @@ function everyFileParses(): string[] {
   return Object.keys(dbmlFiles()).filter((f) => !f.includes('/tables/')).flatMap(officialParser);
 }
 
-/** Gerhard's shape: unqualified headers (photo-2's use lines) or, for the control, qualified ones. */
-function gerhardProject(qualified: boolean): void {
+/** the reporter's shape: unqualified headers (photo-2's use lines) or, for the control, qualified ones. */
+function reporterProject(qualified: boolean): void {
   const q = (s: string): string => (qualified ? `${s}.` : '');
   write('layers.json', JSON.stringify({ schemaVersion: 1, layers: [{ id: 'bronze', label: 'Bronze', color: '#cd7f32', creatable: true, order: 1 }] }, null, 2));
   write('bronze/tables/bqs/adresse.dbml', `Table ${q('bqs')}adresse {\n  id INT [pk]\n  strasse VARCHAR\n  ort VARCHAR\n}\n`);
@@ -89,9 +89,9 @@ const WRITTEN_BY_2_0_4 = [
   '',
 ].join('\n');
 
-/** Gerhard's project as 2.0.4 left it: both adresse on the diagram (photo-2's lines), Refs to each and between them. */
+/** the reporter's project as 2.0.4 left it: both adresse on the diagram (photo-2's lines), Refs to each and between them. */
 function writtenBy204(relationships = WRITTEN_BY_2_0_4): void {
-  gerhardProject(false);
+  reporterProject(false);
   write('bronze/diagrams/sap.dbml', [
     'Project sap {',
     "  erd_schema_version: '8'",
@@ -178,7 +178,7 @@ function buttonsOf(text: string): unknown[] {
 
 beforeEach(() => {
   _resetMockWorkspace();
-  root = fs.mkdtempSync(path.join(os.tmpdir(), 'erd-gerhard-adresse-'));
+  root = fs.mkdtempSync(path.join(os.tmpdir(), 'erd-reporter-adresse-'));
   warnings = [];
   answer = undefined;
   vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -243,7 +243,7 @@ function answerWhichTable(): string[] {
 }
 
 /*
- * Breaker for ba2770aa (Gerhard photo-2). The fix decides a Ref end spelled
+ * Breaker for ba2770aa (the reporter's photo-2). The fix decides a Ref end spelled
  * `adresse` by columns. When BOTH address tables have the column the Ref
  * names (`id`, the usual case), nothing decides it. These tests fail today.
  */

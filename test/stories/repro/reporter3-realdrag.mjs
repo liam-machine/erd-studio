@@ -1,11 +1,11 @@
-// REPRO (gerhard-feedback-3, stage 1 diagnosis): REAL OS drags (macOS only) from
+// REPRO (reporter-feedback-3, stage 1 diagnosis): REAL OS drags (macOS only) from
 // the Table Library onto the canvas and onto a Diagrams row, with Shift pressed
 // at different moments. CDP's Input.dispatchDragEvent never reaches the canvas
 // webview (an out-of-process iframe), so this posts real HID events with
 // realdrag.swift: it MOVES THE REAL POINTER for a few seconds per drag.
 //
-//   node test/stories/repro/gerhard3-dragdrop.mjs --only X --keep   # prints the CDP port
-//   node test/stories/repro/gerhard3-realdrag.mjs --port <port> [--modes before,after,early,none] [--table dim_location] [--target canvas|row:ttt] [--repeat 3] [--out dir]
+//   node test/stories/repro/reporter3-dragdrop.mjs --only X --keep   # prints the CDP port
+//   node test/stories/repro/reporter3-realdrag.mjs --port <port> [--modes before,after,early,none] [--table dim_location] [--target canvas|row:ttt] [--repeat 3] [--out dir]
 //
 // For each drag it records: the drag events the canvas page saw (and whether
 // they were preventDefault-ed), the webview element's pointer-events and VS

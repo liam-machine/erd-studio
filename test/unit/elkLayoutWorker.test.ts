@@ -171,7 +171,7 @@ describe('runElkLayout worker guard', () => {
     expect(stackSafeFallbacks({ 'elk.layered.nodePlacement.strategy': STACK_SAFE_NODE_PLACEMENT, 'elk.layered.compaction.postCompaction.strategy': 'NONE' })).toEqual([]);
   });
 
-  // Gerhard (2026-11-12): every ELK step overflowed and the canvas showed
+  // the reporter (2026-11-12): every ELK step overflowed and the canvas showed
   // "Auto layout failed: Maximum call stack size exceeded". The grid, which
   // needs no ELK, now lays the diagram out instead.
   it('an overflow of every ELK step is laid out by the grid', async () => {
@@ -383,7 +383,7 @@ describe('runElkLayout fallback rungs and failure reports', () => {
 });
 
 
-// Gerhard (2026-11-12): grouping by Join depth or Table type failed on every
+// the reporter (2026-11-12): grouping by Join depth or Table type failed on every
 // ELK step. What ELK is handed when grouping, and the steps after rung 3.
 describe('runElkLayout grouping, the grouping-off step and the grid', () => {
   type Graph = {

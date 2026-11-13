@@ -1,6 +1,6 @@
-// REPRO helper (gerhard-feedback-3, stage 1): a REAL macOS drag with the Shift key
+// REPRO helper (reporter-feedback-3, stage 1): a REAL macOS drag with the Shift key
 // pressed at a chosen moment. Posts HID events, so it moves the real pointer:
-// run it only against a scripted VS Code window (gerhard3-realdrag.mjs).
+// run it only against a scripted VS Code window (reporter3-realdrag.mjs).
 //
 //   swiftc -O realdrag.swift -o /tmp/realdrag
 //   /tmp/realdrag <pid> <fromX> <fromY> <toX> <toY> <mode>

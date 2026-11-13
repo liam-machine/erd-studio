@@ -1,4 +1,4 @@
-// REPRO (Gerhard, 2026-11-12): run ONE raw ELK layout (no fallbacks) with the
+// REPRO (the reporter, 2026-11-12): run ONE raw ELK layout (no fallbacks) with the
 // toolbar's options and print the frames of a stack overflow, grouped by
 // function, to show which ELK step recursed.
 //   node --stack-size=120 scripts/repro-layout-stack/frames.cjs <shape> <tables> <rels> <strategy> [seed] [rung]
@@ -10,7 +10,7 @@ const { generate } = require('./run.cjs');
 const ELK = require('./elkShim.cjs');
 
 (async () => {
-  const [shape = 'gerhard', n = '130', m = '80', strategy = 'auto', seed = '1', rung = '1'] = process.argv.slice(2);
+  const [shape = 'reporter', n = '130', m = '80', strategy = 'auto', seed = '1', rung = '1'] = process.argv.slice(2);
   const { nodes, edges } = generate(shape, Number(n), Number(m), Number(seed));
   const options = layout.buildLayoutOptions({ partitionStrategy: strategy, layerBound: 5, direction: 'RIGHT', spacing: 'M' }, nodes.length);
   const resolved = strategy === 'auto' ? layout.detectStrategy(nodes, edges) : strategy;

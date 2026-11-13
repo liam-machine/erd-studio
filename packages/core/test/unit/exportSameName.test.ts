@@ -154,7 +154,7 @@ describe('payloads built by hand', () => {
   });
 
   it('two tables of one name whose files name no schema are declared in the schema folders the diagram names them by, both read', async () => {
-    // An unqualified `Table addresse` in tables/bqs/ and tables/ccc/ (Gerhard, photo-2): the diagram calls them
+    // An unqualified `Table addresse` in tables/bqs/ and tables/ccc/ (the reporter, photo-2): the diagram calls them
     // bqs.addresse and ccc.addresse, and those folders are their schemas. Before, they were written as two
     // public tables whose names hold a dot (`Table "bqs.addresse"`), which other tools read as one schema.
     const area = twins({ schema: '' });

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /*
- * REPRO (Gerhard, 2026-11-12): "Auto layout failed: Maximum call stack size
+ * REPRO (the reporter, 2026-11-12): "Auto layout failed: Maximum call stack size
  * exceeded" with Grouping Auto / Join depth on ~130 tables / ~80 relationships.
  *
  * Runs the real `runElkLayout` (webview/lib/elkLayout.ts, bundled by
@@ -12,7 +12,7 @@
  *   node scripts/repro-layout-stack/build.mjs
  *   node --stack-size=400 scripts/repro-layout-stack/run.cjs <shape> <tables> <rels> <strategy> [seed]
  *
- * shapes: random | chain | star | cycles | islands | parallel | selfref | gerhard | twoway
+ * shapes: random | chain | star | cycles | islands | parallel | selfref | reporter | twoway
  * strategy: auto | role | depth | none | all
  * REPRO_ELK=full uses elk-worker.js (unminified) for readable frames.
  * REPRO_JSON=1 prints one JSON line per run.
@@ -88,7 +88,7 @@ function generate(shape, n, m, seed) {
       for (let i = 0; i < n && edges.length < m; i += 3) add(i, i);
       while (edges.length < m) add(Math.floor(rand() * n), Math.floor(rand() * n));
       break;
-    case 'gerhard': {
+    case 'reporter': {
       // An imported SAP-ish warehouse: ~1/3 of tables isolated, the rest in
       // a few loosely connected subject areas with DAG-ish FKs (fact -> dim),
       // a couple of two-way pairs and a self-reference.
@@ -178,7 +178,7 @@ function print(r) {
 }
 
 async function main() {
-  const [shape = 'gerhard', n = '130', m = '80', strategy = 'all', seed = '1'] = process.argv.slice(2);
+  const [shape = 'reporter', n = '130', m = '80', strategy = 'all', seed = '1'] = process.argv.slice(2);
   const strategies = strategy === 'all' ? ['auto', 'role', 'depth', 'none'] : [strategy];
   for (const s of strategies) print(await runOne(shape, Number(n), Number(m), s, Number(seed)));
 }

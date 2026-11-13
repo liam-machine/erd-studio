@@ -1,4 +1,4 @@
-// BREAKER (gerhard-feedback-3, stage 3): real VS Code scenarios the fixer did not run.
+// BREAKER (reporter-feedback-3, stage 3): real VS Code scenarios the fixer did not run.
 //   npm run build && node test/stories/repro/breaker-g3-dragdrop.mjs <evidence dir>
 // S4 shows a DEFECT: with the only diagram on screen in a non-active editor group (README active in
 // group 1, showcase in group 2), the inline + (Add to Open Diagram) adds to showcase but opens a SECOND

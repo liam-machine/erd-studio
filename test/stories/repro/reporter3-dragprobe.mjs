@@ -1,11 +1,11 @@
-// PROBE (gerhard-feedback-3, Shift-drop): REAL OS drags (macOS only) from the
+// PROBE (reporter-feedback-3, Shift-drop): REAL OS drags (macOS only) from the
 // Table Library onto the canvas, with every drag event recorded in all three
 // frames on one clock: the workbench page, the webview's outer page (VS Code's
 // index.html, an out-of-process iframe target) and the canvas page inside it
 // (iframe#active-frame). Uses realdrag2.swift, which MOVES THE REAL POINTER.
 //
-//   node test/stories/repro/gerhard3-dragdrop.mjs --only X --keep [--ext <built extension dir>]   # prints the CDP port
-//   node test/stories/repro/gerhard3-dragprobe.mjs --port <port> [--modes before,after,...] [--table dim_location] [--repeat 1] [--out dir] [--verbose]
+//   node test/stories/repro/reporter3-dragdrop.mjs --only X --keep [--ext <built extension dir>]   # prints the CDP port
+//   node test/stories/repro/reporter3-dragprobe.mjs --port <port> [--modes before,after,...] [--table dim_location] [--repeat 1] [--out dir] [--verbose]
 //
 // Modes are realdrag2.swift's (before, before-still, after, after-still,
 // after-wiggle, after-out-in, early, none). Per drag it records: the helper's

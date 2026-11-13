@@ -90,7 +90,7 @@ function twinFiles(root: string): Record<string, string> {
 const TWINS_DIR = path.resolve(__dirname, '../fixtures/dbml');
 // missing-model's twin holds a table file that does not parse and use lines
 // for tables with no file, on purpose: it is the tolerance case.
-// same-name-unqualified is Gerhard's photo-2 as 2.0.4 wrote it: two unqualified
+// same-name-unqualified is the reporter's photo-2 as 2.0.4 wrote it: two unqualified
 // `Table adresse` files imported under one spelling, which every parser refuses ([3003]).
 const UNCLEAN_TWINS = new Set(['missing-model', 'same-name-unqualified']);
 const CLEAN_TWINS = fs.readdirSync(TWINS_DIR).filter((name) => !UNCLEAN_TWINS.has(name));

@@ -225,11 +225,11 @@ describe('tablesOfTreeDrop (Table Library rows dropped on a Diagrams row)', () =
   // an encoded, lower-case drive letter; joined with CRLF in text/uri-list.
   it('reads a Windows drag: encoded or plain drive letter, any case, CRLF-joined lines', () => {
     const win = [
-      { name: 'addresse', filePath: 'C:\\Users\\gerhard\\proj\\.erd-studio\\bronze\\tables\\bqs\\addresse.dbml' },
-      { name: 'addresse', filePath: 'C:\\Users\\gerhard\\proj\\.erd-studio\\bronze\\tables\\ccc\\addresse.dbml' },
-      { name: 'kunde', filePath: 'C:\\Users\\gerhard\\proj\\.erd-studio\\bronze\\tables\\ccc\\kunde.dbml' },
+      { name: 'addresse', filePath: 'C:\\Users\\reporter\\proj\\.erd-studio\\bronze\\tables\\bqs\\addresse.dbml' },
+      { name: 'addresse', filePath: 'C:\\Users\\reporter\\proj\\.erd-studio\\bronze\\tables\\ccc\\addresse.dbml' },
+      { name: 'kunde', filePath: 'C:\\Users\\reporter\\proj\\.erd-studio\\bronze\\tables\\ccc\\kunde.dbml' },
     ];
-    const lines = 'file:///c%3A/Users/gerhard/proj/.erd-studio/bronze/tables/ccc/addresse.dbml\r\nfile:///C:/users/GERHARD/proj/.erd-studio/bronze/tables/ccc/KUNDE.dbml';
+    const lines = 'file:///c%3A/Users/reporter/proj/.erd-studio/bronze/tables/ccc/addresse.dbml\r\nfile:///C:/users/REPORTER/proj/.erd-studio/bronze/tables/ccc/KUNDE.dbml';
     const uris = lines.split(/\r?\n/);
     expect(tablesOfTreeDrop({ tables: [], uris }, win, { byFile: true }, 'win32')).toEqual({
       names: ['addresse', 'kunde'], files: [win[1].filePath, win[2].filePath],

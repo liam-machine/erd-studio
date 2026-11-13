@@ -2,7 +2,7 @@
  * `loadDisplaySubjectArea` on two tables of one name whose files declare it
  * with no schema (packages/core/test/fixtures/dbml/same-name-unqualified:
  * `Table adresse` in tables/bqs/ and in tables/ccc/), imported side by side
- * under one spelling as ERD Studio 2.0.4 wrote them (Gerhard, photo-2):
+ * under one spelling as ERD Studio 2.0.4 wrote them (the reporter, photo-2):
  *
  *   use { table adresse } from '../tables/bqs/adresse.dbml'
  *   use { table adresse } from '../tables/ccc/adresse.dbml'

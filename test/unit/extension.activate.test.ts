@@ -384,7 +384,7 @@ describe('activate() with a dbt project', () => {
   // #167: a click in the Domains tree (and the picker, the status bar, the
   // Welcome panel) opens a preview tab, so browsing diagrams reuses one tab
   // until an edit pins it, as a single click in the Explorer does.
-  // Breaker (gerhard-3): the only diagram on screen sat in a group that was not active, and the add opened a second tab of it.
+  // Breaker (reporter-3): the only diagram on screen sat in a group that was not active, and the add opened a second tab of it.
   it('Add to Open Diagram brings the diagram forward in the group that shows it, never a second tab in the active group', async () => {
     await activate(context);
     const ttt = path.join(root, '.erd-studio', 'silver', 'ttt.json');

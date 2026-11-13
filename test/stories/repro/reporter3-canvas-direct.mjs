@@ -1,8 +1,8 @@
-// REPRO (gerhard-feedback-3, stage 1): a real Table Library drag (started in the workbench, intercepted)
+// REPRO (reporter-feedback-3, stage 1): a real Table Library drag (started in the workbench, intercepted)
 // replayed on the canvas webview's OWN CDP target, which skips VS Code's Shift gating. Shows what
 // the canvas and host do once a drop does arrive: 'already on this diagram' (VS Code notification),
-// or the table added. Usage: node gerhard3-canvas-direct.mjs <cdp port> <table[,table]> <screenshot.jpg>
-// (port from: node test/stories/repro/gerhard3-dragdrop.mjs --only X --keep). Run on a FRESH window:
+// or the table added. Usage: node reporter3-canvas-direct.mjs <cdp port> <table[,table]> <screenshot.jpg>
+// (port from: node test/stories/repro/reporter3-dragdrop.mjs --only X --keep). Run on a FRESH window:
 // a drop sent to the webview target leaves the workbench's intercepted drag open, so a second drag will not start.
 const L='../lib/';
 const { Workbench, Webview, sleep } = await import(L+'act.mjs');
