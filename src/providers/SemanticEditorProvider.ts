@@ -656,6 +656,7 @@ import {
   validateAddRelationshipsImportsPayload,
   validateReloadFromDiskPayload,
   validateExportDiagramPayload,
+  validateConvertProjectToDbmlPayload,
   validateGuidePayload,
   validateAnnotationUpdate,
   validateTableNameSafety,
@@ -2608,6 +2609,26 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             await vscode.commands.executeCommand(IMPORT_DBML_COMMAND, document.uri);
             break;
           }
+          case 'convertProjectToDbml': {
+            // The canvas's information button: the same hook as the Convert
+            // offer's Convert…, whose panel lists every change before anything
+            // is written. Logical only: not in NON_MUTATION_TYPES.
+            const payloadError = validateConvertProjectToDbmlPayload((message as { payload?: unknown }).payload);
+            if (payloadError) {
+              this.post(webviewPanel.webview, { type: 'error', payload: { message: payloadError } });
+              break;
+            }
+            // Not wired: the button never showed (convertInfoShows), so there is nothing to run.
+            const hooks = this.dbmlConversion;
+            if (!hooks) break;
+            telemetry.feature('convertToDbmlFromCanvasInfo');
+            // The user has seen the offer in full: no modal on a later canvas this session.
+            this.dbmlConversionOffered = true;
+            await hooks.run();
+            // Converted, refused or cancelled: every canvas's button follows.
+            this.refreshConvertOffer();
+            break;
+          }
           case 'openNotedFile': {
             // A "not shown" note's file link. Writes nothing, so it is on the physical allowlist.
             const payload = (message as { payload?: unknown }).payload;
@@ -3512,6 +3533,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     // The line style is the reader's setting: every open canvas follows a change, wherever it was made.
     const lineStyleSubscription = vscode.workspace.onDidChangeConfiguration((e) => {
       if (affectsLineStyle(e)) this.postLineStyle(webviewPanel.webview);
+      // erdStudio.dbml.offerConvert turned on or off: the Convert information button follows.
+      if (e.affectsConfiguration(`erdStudio.${DBML_OFFER_CONVERT_SETTING}`)) void this.sendConvertOffer(panelKey);
     });
     webviewPanel.onDidDispose(() => {
       messageSubscription.dispose();
@@ -4138,6 +4161,66 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   }
 
   /**
+   * Whether the canvas's information button about converting shows
+   * (`convertOffer`): exactly the Convert offer's checks
+   * (`convertOfferApplies`): YAML or mixed, not declined with Don't Ask Again
+   * here, `erdStudio.dbml.offerConvert` on, something to convert, no layer
+   * called `tables`, and not a run that was refused or left only files to fix
+   * with nothing changed since (its button would only lead to the same
+   * refusal; the sidebar row still offers it, and the button comes back once a
+   * file changes). Never the once-a-session flag or the window's one prompt:
+   * the button is not a prompt. False when Convert is not wired, or on a
+   * failure (the canvas works without it).
+   */
+  private convertInfoShows(): boolean {
+    const hooks = this.dbmlConversion;
+    if (!hooks) return false;
+    try {
+      return convertOfferApplies({
+        storage: this.tableLibraryService.projectStorage(),
+        declined: this.context.workspaceState?.get<boolean>(DBML_CONVERSION_DECLINED_KEY) === true,
+        offerSetting: getErdStudioSetting<boolean>(DBML_OFFER_CONVERT_SETTING, true) !== false,
+        candidates: hooks.candidates,
+        goesNowhere: () => hooks.goesNowhere?.() === true,
+      });
+    } catch (err) {
+      log.warn(`[SemanticEditorProvider] The Convert information button skipped: ${err instanceof Error ? err.message : String(err)}`);
+      return false;
+    }
+  }
+
+  /** Post `convertOffer` to one canvas on the logical stage (never the physical one). */
+  private postConvertOffer(panelKey: string, show: boolean): void {
+    const entry = this.openPanels.get(panelKey);
+    if (!entry || entry.activeStage !== 'logical' || this.disposedWebviews.has(entry.webview)) return;
+    this.post(entry.webview, { type: 'convertOffer', payload: { show } });
+  }
+
+  /**
+   * After a logical-stage diagram has gone out: tell the canvas whether to
+   * show the Convert information button, off the paint's path (the answer
+   * may list the project's files). Nothing when Convert is not wired.
+   */
+  private async sendConvertOffer(panelKey: string): Promise<void> {
+    if (!this.dbmlConversion) return;
+    await yieldToEventLoop();
+    this.postConvertOffer(panelKey, this.convertInfoShows());
+  }
+
+  /**
+   * Work the Convert information button's answer out again and post it to
+   * every open canvas on the logical stage: after a Convert run (from the
+   * canvas, the sidebar or the palette), after Don't Ask Again, and when
+   * `erdStudio.dbml.offerConvert` changes. Reads only; writes nothing.
+   */
+  refreshConvertOffer(): void {
+    if (!this.dbmlConversion || this.openPanels.size === 0) return;
+    const show = this.convertInfoShows();
+    // A canvas still loading gets its answer after its diagram, as every canvas does.
+    for (const [panelKey, entry] of this.openPanels) if (entry.loaded) this.postConvertOffer(panelKey, show);
+  }
+
+  /**
    * Offer, once a session, to convert a YAML or mixed project to DBML
    * (§6.4), in a modal dialog. Nothing is written without the user's choice:
    * Convert… runs the command, whose panel lists the whole plan. It decides
@@ -4182,9 +4265,13 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       );
       if (choice === DBML_CONVERSION_OFFER_CONVERT) {
         await hooks.run();
+        // Converted, refused or cancelled: the information button follows.
+        this.refreshConvertOffer();
       } else if (choice === DBML_CONVERSION_OFFER_DECLINE) {
         telemetry.feature('convertToDbmlDeclined');
         await this.context.workspaceState?.update(DBML_CONVERSION_DECLINED_KEY, true);
+        // Don't Ask Again takes the canvas's information button away too.
+        this.refreshConvertOffer();
       } else {
         telemetry.feature('convertToDbmlNotNow');
       }
@@ -6335,6 +6422,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         // What the files hold that this picture does not show ("not shown" notes), worked out after it has gone out.
         this.noteDrawn(key, displayDomain.models.map((m) => m.name));
         void this.sendFilesNotShown(webview, key, document, displayDomain.models.map((m) => m.name));
+        // Whether this project can still be converted to DBML: the information button.
+        void this.sendConvertOffer(key);
         if (subjectAreaStorageOf(document.uri.fsPath) === 'dbml' && this.holdsOwnTables(document)) {
           // A single-file DBML dropped into a layer folder (§2.5): offer Import.
           this.post(webview, { type: 'dbmlEmbeddedTables' });
@@ -10170,6 +10259,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         void this.sendCanvasContext(webview, displayDomain.models.map((m) => m.name), unifiedDomain.layer, document);
         this.noteDrawn(panelKey, displayDomain.models.map((m) => m.name));
         void this.sendFilesNotShown(webview, panelKey, document, displayDomain.models.map((m) => m.name));
+        void this.sendConvertOffer(panelKey);
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

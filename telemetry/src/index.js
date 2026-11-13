@@ -870,6 +870,8 @@ const FEATURES = [
   'activationSlowWalk',
   // #305: the start suggestion showed again on a machine where it had been shown before.
   'suggestPromptShownAgain',
+  // #305: Convert to DBML… pressed in the canvas's information button.
+  'convertToDbmlFromCanvasInfo',
 ];
 
 /** The only keys `errors` may carry; anything else is dropped. */

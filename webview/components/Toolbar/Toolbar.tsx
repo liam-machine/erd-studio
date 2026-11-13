@@ -52,6 +52,7 @@ import {
   IconMinus, IconMore, IconPlus, IconRedo, IconRefresh, IconRelayout, IconUndo, IconView,
 } from './toolbarIcons';
 import { StageTabs } from './StageTabs';
+import { ConvertInfo } from './ConvertInfo';
 import { LineStyleSwitch } from './LineStyleSwitch';
 import { TableDetailSwitch } from './TableDetailSwitch';
 import { FIT_MAX_ZOOM, fitViewPadding, measureTopInsetFrom } from '../../lib/fitViewPadding';
@@ -796,6 +797,8 @@ export function Toolbar({ nodes, edges }: ToolbarProps) {
               {layerLabel} layer
             </span>
           )}
+          {/* A project from before 2.0: "i", with Convert to DBML… (logical stage only). */}
+          <ConvertInfo />
         </div>
         </div>
 

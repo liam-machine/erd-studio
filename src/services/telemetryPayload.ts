@@ -763,6 +763,9 @@ export const FEATURES = [
   // #305: the start suggestion showed on a machine where it had already been
   // shown (another folder, or this one after Turn On): the repeat cost.
   'suggestPromptShownAgain',
+  // #305: Convert to DBML… pressed in the canvas's information button (a project
+  // from before 2.0), counted beside the command's own convertToDbml.
+  'convertToDbmlFromCanvasInfo',
 ] as const;
 export type TelemetryFeature = (typeof FEATURES)[number];
 

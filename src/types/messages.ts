@@ -511,9 +511,28 @@ export interface LineStyleMessage {
   };
 }
 
+/**
+ * Whether the canvas shows its information button about converting this
+ * project to DBML (`webview/components/Toolbar/ConvertInfo.tsx`): the
+ * Convert offer's own checks (`convertOfferApplies`,
+ * `src/services/convertOffer.ts`), never the once-a-session flag or the
+ * window's one prompt, since the button is not a prompt. Posted after each
+ * logical-stage `domainLoaded` / `stageData`, and to every open canvas when
+ * the answer may have changed (a Convert run, `erdStudio.dbml.offerConvert`
+ * changed, Don't Ask Again). Never on the physical stage; the webview also
+ * hides the button there. A canvas that never gets one shows no button.
+ */
+export interface ConvertOfferMessage {
+  type: 'convertOffer';
+  payload: {
+    show: boolean;
+  };
+}
+
 export type ExtensionMessage =
   | GuideStartMessage
   | LineStyleMessage
+  | ConvertOfferMessage
   | LoadingMessage
   | ExistingTablesMessage
   | NewRelationshipFilesMessage
@@ -1247,10 +1266,23 @@ export interface SetLineStyleMessage {
   };
 }
 
+/**
+ * The canvas's information button's **Convert to DBML…** (it shows while the
+ * host's `convertOffer` says so): run Convert Project to DBML, the same hook
+ * as the Convert offer's **Convert…**, whose panel lists every change before
+ * anything is written. No payload. Logical stage only: not on the physical
+ * allowlist (`NON_MUTATION_TYPES`).
+ */
+export interface ConvertProjectToDbmlMessage {
+  type: 'convertProjectToDbml';
+  payload?: Record<string, never>;
+}
+
 /** Union of all messages the webview can send to the extension. */
 export type WebviewMessage =
   | ReadyMessage
   | SetLineStyleMessage
+  | ConvertProjectToDbmlMessage
   | GuideMessage
   | RequestExistingTablesMessage
   | RequestNewRelationshipFilesMessage

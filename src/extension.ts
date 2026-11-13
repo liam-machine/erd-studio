@@ -4623,7 +4623,11 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
       if (await runMigrateToV5Command()) await migrateNaming();
     }),
     vscode.commands.registerCommand('erdStudio.migrateToTableNaming', async () => { await migrateNaming(); }),
-    vscode.commands.registerCommand('erdStudio.convertProjectToDbml', async () => { await convertToDbml(); }),
+    vscode.commands.registerCommand('erdStudio.convertProjectToDbml', async () => {
+      await convertToDbml();
+      // Converted, refused or cancelled: each canvas's Convert information button follows.
+      editorProvider.refreshConvertOffer();
+    }),
 
     // F408: Set up semantic directory for new projects
     vscode.commands.registerCommand(

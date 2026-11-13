@@ -1643,6 +1643,16 @@ once more and its first repeat is not marked.
 
 - `suggestPromptShownAgain` — the start suggestion showed on a machine where it had already been shown (in another folder, or in this one after **Turn On Start Suggestions for This Folder**), counted beside `suggestPromptShown`.
 
+**The canvas keeps offering Convert** (#305). A canvas of a project from
+before 2.0 shows an information button ("i") beside the diagram's name for as
+long as the Convert offer's own checks pass, after the once-a-session offer
+has been answered **Not Now**. It is not a prompt, so nothing is counted when
+it shows; only its button press is. Read it beside `convertToDbml`: the share
+of conversions that started from the canvas rather than the offer, the
+opening notice, the sidebar row or the palette.
+
+- `convertToDbmlFromCanvasInfo` — **Convert to DBML…** was pressed in the canvas's information button (the command then runs and counts its own `convertToDbml`, `convertToDbmlCancelled` or `convertToDbmlRefused`).
+
 ## The local archive
 
 Because D1 keeps raw rows for only 90 days, the operator's machine keeps

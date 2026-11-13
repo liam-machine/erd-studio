@@ -932,6 +932,21 @@ export function validateReloadFromDiskPayload(value: unknown): string | null {
 }
 
 /**
+ * Validate a `convertProjectToDbml` payload (the canvas information button's
+ * Convert to DBML…). It carries nothing: the command's panel lists every
+ * change first. Only an absent payload or an empty object passes.
+ */
+export function validateConvertProjectToDbmlPayload(value: unknown): string | null {
+  if (value === undefined) {
+    return null;
+  }
+  if (typeof value !== 'object' || value === null || Array.isArray(value) || Object.keys(value).length > 0) {
+    return 'Converting the project to DBML takes no payload.';
+  }
+  return null;
+}
+
+/**
  * Validate an `exportDiagram` payload. It carries nothing — the host asks for
  * the format and the action — so only an absent payload or an empty object
  * passes, like `addModelsFromDbt`.

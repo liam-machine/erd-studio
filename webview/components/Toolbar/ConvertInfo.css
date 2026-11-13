@@ -1,0 +1,149 @@
+/* ---------------------------------------------------------------------------
+   ConvertInfo: the "i" beside the diagram's name (a project from before 2.0),
+   and its card, a raised glass popover like the layout panel's (.toolbar__lp).
+   Colours only from the theme tokens (packages/renderer/src/styles/theme.css),
+   which redefine them for light, dark and high-contrast themes.
+   --------------------------------------------------------------------------- */
+
+.convert-info {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+/* The identity island ends with the "i" (when there is no layer chip after
+   it), so it sits concentric in the island, like the chip. */
+.toolbar__domain:has(.convert-info):not(:has(.toolbar__layer-badge)) {
+  padding-right: 0;
+}
+
+/* An island with the card open sits above its neighbours and the stage tabs. */
+.toolbar__island:has(.convert-info__card) {
+  z-index: 1;
+}
+
+/* A quiet toolbar button (.toolbar__button): round, icon only. */
+.toolbar__island .convert-info__button {
+  min-width: var(--control-height);
+  padding: 0;
+}
+
+.toolbar__island .convert-info__button--open {
+  background: var(--control-fill-active);
+  color: var(--text-primary);
+}
+
+.convert-info__card {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: var(--z-popover);
+  display: flex;
+  flex-direction: column;
+  width: 300px;
+  margin-top: var(--space-5);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+  background: var(--glass-surface-3);
+  -webkit-backdrop-filter: var(--glass-backdrop);
+  backdrop-filter: var(--glass-backdrop);
+  box-shadow: var(--glass-elevation-3);
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+  white-space: normal;
+  transform-origin: top left;
+  animation: toolbar-pop var(--duration-base) var(--ease-spring);
+}
+
+.convert-info__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-5) var(--space-5) var(--space-3) var(--space-6);
+}
+
+.convert-info__title {
+  color: var(--text-primary);
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-tight);
+}
+
+.convert-info__close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--control-height);
+  height: var(--control-height);
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard);
+}
+
+.convert-info__close:hover {
+  background: var(--control-fill-hover);
+  border-color: var(--control-border-hover);
+  color: var(--text-primary);
+}
+
+.convert-info__close:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: var(--focus-offset);
+}
+
+.convert-info__text {
+  margin: 0;
+  padding: 0 var(--space-6);
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+}
+
+/* The card's one action: the layout panel's primary button. */
+.convert-info__convert {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: var(--control-height-lg);
+  margin: var(--space-6);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  background: var(--accent);
+  color: var(--text-on-accent);
+  font-family: inherit;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  cursor: pointer;
+  box-shadow: var(--glass-highlight);
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
+    transform var(--duration-instant) var(--ease-standard);
+}
+
+.convert-info__convert:hover {
+  background: var(--accent-hover);
+  border-color: var(--control-border-hover);
+}
+
+.convert-info__convert:active {
+  transform: scale(0.98);
+}
+
+.convert-info__convert:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: var(--focus-offset);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .convert-info__card {
+    animation: none;
+  }
+}
