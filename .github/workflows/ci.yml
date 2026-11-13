@@ -23,12 +23,23 @@ jobs:
       - run: npm ci
       - name: Diagnose the hanging test file
         run: |
-          mkdir -p /tmp/reports
-          export NODE_OPTIONS="--report-on-signal --report-signal=SIGUSR2 --report-directory=/tmp/reports"
-          (npx vitest run test/unit/slowFolderLooks.test.ts --reporter verbose --pool forks > /tmp/vitest.log 2>&1; echo "vitest exit $?" >> /tmp/vitest.log) &
-          sleep 150
-          echo "=== vitest output"; sed 's/\x1b\[[0-9;]*m//g' /tmp/vitest.log | tail -80
-          pkill -USR2 node || true
-          sleep 8
-          for f in /tmp/reports/*.json; do echo "=== $f"; node -e "const r=require('$f'); console.log(r.header.commandLine.join(' ').slice(0,200)); console.log(JSON.stringify(r.javascriptStack,null,1).slice(0,6000))"; done
-          pkill -9 node || true
+          probe() {
+            name="$1"; shift
+            rm -rf /tmp/reports; mkdir -p /tmp/reports
+            (NODE_OPTIONS="--report-on-signal --report-signal=SIGUSR2 --report-directory=/tmp/reports" npx vitest run test/unit/slowFolderLooks.test.ts --reporter verbose --pool forks "$@" > /tmp/vitest.log 2>&1; echo "vitest exit $?" >> /tmp/vitest.log) &
+            sleep 45
+            echo "=================== $name: vitest output"; sed 's/\x1b\[[0-9;]*m//g' /tmp/vitest.log | tail -12
+            pkill -USR2 node || true
+            sleep 6
+            for f in /tmp/reports/*.json; do node -e "
+              const r=require('$f'); const cmd=r.header.commandLine.join(' ');
+              if(!/tinypool/.test(cmd)) process.exit(0);
+              console.log('--- worker', r.header.processId, 'js:', JSON.stringify(r.javascriptStack).slice(0,1500));
+              console.log('native:', (r.nativeStack||[]).slice(0,12).map(x=>x.symbol).join(' | ').slice(0,1500));
+              for (const h of r.libuv) if (h.type!=='loop' || true) console.log('  uv', JSON.stringify(h).slice(0,300));
+            "; done
+            pkill -9 node || true; sleep 2
+          }
+          probe "whole file"
+          probe "only the bounded-wait test" -t "still waits, bounded"
+          probe "only the busy-loop test" -t "event loop was busy"
