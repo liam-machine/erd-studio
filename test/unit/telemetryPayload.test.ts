@@ -680,7 +680,7 @@ describe('allowlists agree with the Worker', () => {
     // The automatic draft's time-limit drop is appended after them.
     expect(FEATURES.indexOf('draftDropTimeLimit')).toBe(FEATURES.indexOf('importCauseOther') + 1);
     // It closes the 2.0.0 list: what follows was appended later (the Fabric card's keys, then the
-    // major update notice's, the layout fallbacks', then the start suggestion's repeat, #305), never put before it.
+    // major update notice's, the layout fallbacks', then the start suggestion's repeat and the canvas's Convert button, #305), never put before it.
     expect(FEATURES.slice(FEATURES.indexOf('draftDropTimeLimit') + 1)).toEqual([
       'importGuideActionFabricCatalog', 'importGuideCopiedFabricCatalog',
       'importFabricOutcomeClean', 'importFabricOutcomeRepaired', 'importFabricOutcomePartial',
@@ -691,6 +691,7 @@ describe('allowlists agree with the Worker', () => {
       'activationSlowDbtSearch', 'activationSlowDiscovery', 'activationSlowServices',
       'startLookLateSuggestion', 'dbtSearchSkipped', 'activationSlowWalk',
       'suggestPromptShownAgain',
+      'convertToDbmlFromCanvasInfo',
       'dropRouteCanvas', 'dropRouteAfterDrag', 'dropRouteMissedDrop', 'dropRouteDiagramsRow',
       'dropShownUnder1s', 'dropShown1to5s', 'dropShown5to15s', 'dropShownOver15s', 'dropShownNever',
       'dropSlowOpen', 'dropSlowWait', 'dropSlowPrepare', 'dropSlowPlan', 'dropSlowEdit', 'dropSlowSave', 'dropSlowRedraw', 'dropSlowCanvas',
@@ -745,6 +746,7 @@ describe('allowlists agree with the Worker', () => {
       'activationSlowDbtSearch', 'activationSlowDiscovery', 'activationSlowServices',
       'startLookLateSuggestion', 'dbtSearchSkipped', 'activationSlowWalk',
       'suggestPromptShownAgain',
+      'convertToDbmlFromCanvasInfo',
       'dropRouteCanvas', 'dropRouteAfterDrag', 'dropRouteMissedDrop', 'dropRouteDiagramsRow',
       'dropShownUnder1s', 'dropShown1to5s', 'dropShown5to15s', 'dropShownOver15s', 'dropShownNever',
       'dropSlowOpen', 'dropSlowWait', 'dropSlowPrepare', 'dropSlowPlan', 'dropSlowEdit', 'dropSlowSave', 'dropSlowRedraw', 'dropSlowCanvas',

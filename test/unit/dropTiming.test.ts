@@ -208,7 +208,7 @@ describe('drop timing keys', () => {
     expect(Object.keys(DROP_SLOWEST_FEATURES)).toEqual([...DROP_STAGES]);
     // The drop keys are appended as one run, in this order, after #305's.
     const at = FEATURES.indexOf('dropRouteCanvas');
-    expect(at).toBe(FEATURES.indexOf('suggestPromptShownAgain') + 1);
+    expect(at).toBe(FEATURES.indexOf('convertToDbmlFromCanvasInfo') + 1);
     expect(FEATURES.slice(at, at + 17)).toEqual([
       'dropRouteCanvas', 'dropRouteAfterDrag', 'dropRouteMissedDrop', 'dropRouteDiagramsRow',
       'dropShownUnder1s', 'dropShown1to5s', 'dropShown5to15s', 'dropShownOver15s', 'dropShownNever',

@@ -870,6 +870,8 @@ const FEATURES = [
   'activationSlowWalk',
   // #305: the start suggestion showed again on a machine where it had been shown before.
   'suggestPromptShownAgain',
+  // #305: Convert to DBML… pressed in the canvas's information button.
+  'convertToDbmlFromCanvasInfo',
   // Added after 2.0.5: a timed table drop: its route, how long until it showed (a range), its slowest stage.
   'dropRouteCanvas',
   'dropRouteAfterDrag',

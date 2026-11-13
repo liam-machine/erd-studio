@@ -149,3 +149,19 @@ export const IconView = (p: IconProps) => (
     <circle cx="10.5" cy="11" r="1.6" />
   </Svg>
 );
+
+/** Information: a circle with an "i" (the Convert to DBML information button). */
+export const IconInfo = (p: IconProps) => (
+  <Svg {...p} name="info">
+    <circle cx="8" cy="8" r="5.75" />
+    <path d="M8 7.25v3.75" />
+    <circle cx="8" cy="5.1" r="0.55" fill="currentColor" />
+  </Svg>
+);
+
+/** Close: a small cross. */
+export const IconClose = (p: IconProps) => (
+  <Svg {...p} name="close">
+    <path d="M4.5 4.5l7 7M11.5 4.5l-7 7" />
+  </Svg>
+);

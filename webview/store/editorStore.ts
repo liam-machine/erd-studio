@@ -192,6 +192,13 @@ export interface EditorState extends CanvasState {
    */
   pendingTableReveal: string | null;
   /**
+   * Tables the host asked to select after a drop on the canvas
+   * (`selectTables`): `useSelectTables` marks them selected once the canvas
+   * draws them, without moving the view or opening the detail panel, then
+   * clears it. Not persisted.
+   */
+  pendingTableSelection: string[] | null;
+  /**
    * Whether the "no compiled dbt artifacts" strip has been dismissed.
    *
    * Session state only — deliberately not persisted. If dbt still has not been
@@ -235,6 +242,13 @@ export interface EditorState extends CanvasState {
    * takes it back.
    */
   filesNotShown: FileNote[];
+  /**
+   * The host said this project can still be converted to DBML
+   * (`convertOffer`): the toolbar shows its information button on the
+   * logical stage. Posted after every logical-stage load and whenever the
+   * answer changes, so it is deliberately NOT touched by `setDomain`.
+   */
+  convertOffer: boolean;
 }
 
 export interface EditorActions extends CanvasActions {
@@ -261,6 +275,8 @@ export interface EditorActions extends CanvasActions {
   setEmbeddedTables: (embedded: boolean) => void;
   /** Replace the "not shown" notes with the host's latest list. */
   setFilesNotShown: (items: FileNote[]) => void;
+  /** Store the host's `convertOffer` answer (the Convert information button). */
+  setConvertOffer: (show: boolean) => void;
   /** Hide the logical "Run dbt parse" hint at once (the host persists it). */
   dismissManifestHint: () => void;
   /**
@@ -344,6 +360,8 @@ export interface EditorActions extends CanvasActions {
   setToastMessage: (message: string | null, actions?: ToastAction[]) => void;
   /** Set / clear the relationship to show (see `pendingReveal`). */
   setPendingReveal: (target: RevealRelationshipMessage['payload'] | null) => void;
+  /** Set / clear the tables to select (see `pendingTableSelection`). */
+  setPendingTableSelection: (modelNames: string[] | null) => void;
   /** Set / clear the table to show (see `pendingTableReveal`). */
   setPendingTableReveal: (modelName: string | null) => void;
 }
@@ -418,6 +436,7 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   toastActions: null,
   pendingReveal: null,
   pendingTableReveal: null,
+  pendingTableSelection: null,
   physicalSourceNoticeDismissed: false,
   manifestMissing: false,
   manifestHintDismissed: false,
@@ -425,6 +444,7 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   logicalOnly: false,
   embeddedTables: false,
   filesNotShown: [],
+  convertOffer: false,
 
   // Actions
   setViewport: (viewport) => set({ viewport }),
@@ -443,6 +463,7 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   setManifestMissing: (missing) => set({ manifestMissing: missing }),
   setEmbeddedTables: (embedded) => set({ embeddedTables: embedded }),
   setFilesNotShown: (items) => set({ filesNotShown: items }),
+  setConvertOffer: (show) => set({ convertOffer: show }),
   dismissManifestHint: () => set({ manifestHintDismissed: true }),
   setLogicalOnly: (logicalOnly) => set(
     logicalOnly
@@ -588,6 +609,7 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   }),
   setPendingReveal: (target) => set({ pendingReveal: target }),
   setPendingTableReveal: (modelName) => set({ pendingTableReveal: modelName }),
+  setPendingTableSelection: (modelNames) => set({ pendingTableSelection: modelNames }),
 
   // Full editor reset on a new domain payload. Overrides the canvas slice's
   // setDomain (which only clears the column selection) and must stay last.

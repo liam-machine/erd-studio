@@ -155,7 +155,7 @@ import { RelationshipsTreeProvider, type RelationshipsGrouping, type Relationshi
 import { registerSidebarFilters } from './providers/sidebarFilter';
 import { registerRowDetails } from './providers/rowDetails';
 import { installContextKeyRecorder } from './providers/glassSidebar/contextKeys';
-import { TOGGLE_GLASS_SIDEBAR_COMMAND, glassSidebarEnabled, registerGlassSidebar } from './providers/glassSidebar/GlassSidebarProvider';
+import { FOCUS_GLASS_SEARCH_COMMAND, TOGGLE_GLASS_SIDEBAR_COMMAND, glassSidebarEnabled, registerGlassSidebar } from './providers/glassSidebar/GlassSidebarProvider';
 import { openInDiagram, openRelationshipSource, type RelationshipsViewDeps } from './commands/relationshipsView';
 import {
   ADD_TO_DIAGRAM_COMMAND,
@@ -903,6 +903,7 @@ export const NO_LEGACY_ALIAS = new Set([
   'erdStudio.showImportReport',
   'erdStudio.suggestRelationships',
   TOGGLE_GLASS_SIDEBAR_COMMAND,
+  FOCUS_GLASS_SEARCH_COMMAND,
 ]);
 
 /**
@@ -922,8 +923,9 @@ export const PRE_REGISTERED_COMMANDS = new Set([
   'erdStudio.showImportGuide',
   // Show Me Around: the onboarding guide (an empty window gets the example's draft).
   'erdStudio.showMeAround',
-  // The glass sidebar (prototype) shows in an empty window too.
+  // The glass sidebar (prototype) shows in an empty window too, and so does its search field.
   TOGGLE_GLASS_SIDEBAR_COMMAND,
+  FOCUS_GLASS_SEARCH_COMMAND,
 ]);
 
 /**
@@ -1961,6 +1963,40 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
   // (the nothing-found notification's one trigger, set up with the start suggestion below).
   let emptyDiagramsViewShown = false;
   let onEmptyDiagramsViewShown: () => void = () => {};
+  // A root listing found no rows, and the empty view it means has not yet been
+  // counted as on screen (see emptyDiagramsOnScreen): `undefined` when none is waiting,
+  // else who listed it.
+  let emptyDiagramsListed: 'native' | 'glass' | undefined;
+  /**
+   * The empty Diagrams view is on screen: the funnel's sidebar step, and the
+   * automatic draft's one trigger. VS Code lists a native view only to draw
+   * it, so a native listing with no rows is the signal. The glass sidebar
+   * lists every section as soon as its page loads, folded or not, so its
+   * listing waits until its Diagrams card is drawn open in a visible view
+   * (`sectionShown`). Once per listing that found the tree empty.
+   *
+   * A glass listing still waiting when the user turns the glass sidebar off
+   * (Toggle Glass Sidebar fires onDidChangeShownSections) counts as the
+   * native view's: the standard Diagrams view now draws that same empty
+   * tree, and its provider lists nothing again to say so (it reports only a
+   * change of its loading state).
+   */
+  const emptyDiagramsOnScreen = (): void => {
+    if (!emptyDiagramsListed) return;
+    if (emptyDiagramsListed === 'glass' && glassSidebarEnabled(context.globalState) && !glassSidebar.sectionShown('diagrams')) return;
+    emptyDiagramsListed = undefined;
+    telemetry.featureOnce('sidebarStartShown');
+    emptyDiagramsViewShown = true;
+    // Its start variants follow the suggestion, so look now (deferred: this
+    // can be the first listing, still inside activation) and count what it shows.
+    setTimeout(() => {
+      void startIntent.refresh().then((intent) => {
+        if (intent) recordStartSuggested(intent);
+        onEmptyDiagramsViewShown();
+      });
+    }, 0);
+  };
+  context.subscriptions.push(glassSidebar.onDidChangeShownSections(emptyDiagramsOnScreen));
   const treeProvider = new SubjectAreaTreeProvider(
     subjectAreaService,
     layerService,
@@ -1968,20 +2004,9 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     semanticDir,
     (loading) => {
       void vscode.commands.executeCommand('setContext', 'erdStudio.diagramsLoading', loading);
-      // VS Code lists a view only to draw it: a listing with no rows means the
-      // empty view, with its start buttons, is on screen (the funnel's sidebar step).
-      // Its start variants follow the suggestion, so look now (deferred: this
-      // can be the first listing, still inside activation) and count what it shows.
-      if (!loading) {
-        telemetry.featureOnce('sidebarStartShown');
-        emptyDiagramsViewShown = true;
-        setTimeout(() => {
-          void startIntent.refresh().then((intent) => {
-            if (intent) recordStartSuggested(intent);
-            onEmptyDiagramsViewShown();
-          });
-        }, 0);
-      }
+      // A listing with no rows: the empty view, with its start buttons (counted once it is on screen).
+      emptyDiagramsListed = loading ? undefined : glassSidebar.listingNow ? 'glass' : 'native';
+      emptyDiagramsOnScreen();
     },
     (kind) => dbmlFileIcon(context.extensionUri, kind),
     tableHomes,
@@ -2024,6 +2049,8 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     diagramMembers,
   );
   tableLibraryProvider.setHasDbtProject(hasDbt);
+  // Reading table files for a col: filter shows progress on the native view and the glass Table Library section.
+  tableLibraryProvider.setProgress((task) => glassSidebar.withSectionProgress('tables', task));
   // Held while Convert Project to DBML writes: one refresh of each view after, not one per file.
   const viewRefreshes = new RefreshGate();
   viewRefreshes.gateMethod(treeProvider, 'refresh', 'subjectAreas');
@@ -3436,6 +3463,8 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
         controller: tableLibraryDrag!,
         // A row that carries at least one table: a table (not an ignored duplicate), or a schema or layer with one.
         dragKind: (row) => (tablesOfDraggedRows([row], 1).names.length > 0 ? 'tables' : undefined),
+        // Let go outside the sidebar: the canvas under that point adds the drag at once (not at the pointer's next move).
+        released: (at) => editorProvider.libraryDragReleased(at),
       });
       glassSidebar.setSource('relationships', relationshipsProvider);
       glassSidebar.setSource('help', helpProvider);
@@ -3517,6 +3546,8 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
         relationships: { view: relationshipsView!, tree: relationshipsProvider },
       });
       context.subscriptions.push(...sidebarFilters.disposables);
+      // The glass sidebar's search field drives the same three filters (all at once).
+      glassSidebar.setFilters(sidebarFilters.filters);
       // Show / Hide Row Details (each view's … menu): `erdStudio.sidebar.rowDetails`, applied to the three trees now and on change.
       context.subscriptions.push(...registerRowDetails([treeProvider, tableLibraryProvider, relationshipsProvider]));
       // A Go to Table row's table: by its file where one is given (told apart by identity), else by its name.
@@ -3543,7 +3574,9 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
           let node = await relationshipsProvider.findTableNode(name);
           // Hidden by the view's filter: clear it, then show the table.
           if (!node && sidebarFilters.filters.relationships.isFiltered()) {
-            sidebarFilters.filters.relationships.clear();
+            // In the glass sidebar the filter may be the search field's: that clears the field.
+            if (glassSidebarEnabled(context.globalState)) glassSidebar.clearFilter('relationships');
+            else sidebarFilters.filters.relationships.clear();
             node = await relationshipsProvider.findTableNode(name);
           }
           if (!node) {
@@ -3551,7 +3584,8 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
             return;
           }
           // With the glass sidebar on, the native view is hidden (its `when`): reveal the row there instead.
-          if (glassSidebarEnabled(context.globalState)) await glassSidebar.reveal('relationships', node, { focus: true });
+          // Both open the table's row on its relationships (`expand`).
+          if (glassSidebarEnabled(context.globalState)) await glassSidebar.reveal('relationships', node, { focus: true, expand: true });
           else await relationshipsView?.reveal(node, { select: true, focus: true, expand: true });
         },
       };
@@ -3580,7 +3614,9 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
           let node = typeof name === 'string' ? tableLibraryProvider.findTableNode(name, file) : undefined;
           // Hidden by the view's filter: clear it, then reveal the table.
           if (!node && typeof name === 'string' && sidebarFilters.filters.tableLibrary.isFiltered()) {
-            sidebarFilters.filters.tableLibrary.clear();
+            // In the glass sidebar the filter may be the search field's: that clears the field.
+            if (glassSidebarEnabled(context.globalState)) glassSidebar.clearFilter('tables');
+            else sidebarFilters.filters.tableLibrary.clear();
             node = tableLibraryProvider.findTableNode(name, file);
           }
           if (!node) {
@@ -4627,7 +4663,11 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
       if (await runMigrateToV5Command()) await migrateNaming();
     }),
     vscode.commands.registerCommand('erdStudio.migrateToTableNaming', async () => { await migrateNaming(); }),
-    vscode.commands.registerCommand('erdStudio.convertProjectToDbml', async () => { await convertToDbml(); }),
+    vscode.commands.registerCommand('erdStudio.convertProjectToDbml', async () => {
+      await convertToDbml();
+      // Converted, refused or cancelled: each canvas's Convert information button follows.
+      editorProvider.refreshConvertOffer();
+    }),
 
     // F408: Set up semantic directory for new projects
     vscode.commands.registerCommand(
@@ -5322,7 +5362,8 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
           log.warn('[ERD Studio] The automatic draft failed:', err);
         })
         .finally(() => markShown());
-      void vscode.window.withProgress({ location: { viewId: 'erdStudio.domainTree' } }, () => firstShown);
+      // Both sidebars show it: the native view's bar, and the glass Diagrams section's header.
+      void glassSidebar.withSectionProgress('diagrams', () => firstShown);
       await firstShown;
       onDraftAsk = () => {};
       if (!shown) {
@@ -5578,6 +5619,8 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
             show: (message, ...buttons) => vscode.window.showInformationMessage(message, ...buttons),
             info: (message, ...buttons) => vscode.window.showInformationMessage(message, ...buttons),
             executeCommand: (command, ...args) => vscode.commands.executeCommand(command, ...args),
+            // The glass sidebar's Diagrams section while it is on, else the native view.
+            showDiagramsView: () => glassSidebar.focusView('diagrams'),
             recordSuggested: recordStartSuggested,
             feature: (key) => telemetry.feature(key),
             setOffContext: (off) => { void vscode.commands.executeCommand('setContext', START_SUGGESTIONS_OFF_CONTEXT_KEY, off); },

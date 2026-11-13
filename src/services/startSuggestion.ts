@@ -80,7 +80,11 @@ export const DONT_ASK_AGAIN_FOLDER_BUTTON = "Don't Ask Again for This Folder";
 /** Convert creates no diagram: its button says what it does (the opening notice's own). */
 export const CONVERT_BUTTON = 'Convert to DBML…';
 
-/** VS Code's own focus command for the Diagrams view (`erdStudio.domainTree`, contributed in package.json). */
+/**
+ * VS Code's own focus command for the native Diagrams view (`erdStudio.domainTree`,
+ * contributed in package.json). Hidden while the glass sidebar is on: the
+ * extension passes `showDiagramsView` (GlassSidebarProvider.focusView), which picks.
+ */
 export const DIAGRAMS_VIEW_FOCUS_COMMAND = 'erdStudio.domainTree.focus';
 /**
  * A late Show Me, after a diagram was kept meanwhile (from the sidebar, the
@@ -278,6 +282,12 @@ export interface StartSuggestionDeps {
   /** A short non-modal message with optional buttons; resolves with the one chosen. */
   info(message: string, ...buttons: string[]): PromiseLike<string | undefined> | void;
   executeCommand(command: string, ...args: unknown[]): PromiseLike<unknown>;
+  /**
+   * Show the Diagrams view wherever it is drawn now (the glass sidebar's
+   * Diagrams section while it is on: the native view is hidden then).
+   * Optional: without it, VS Code's own {@link DIAGRAMS_VIEW_FOCUS_COMMAND}.
+   */
+  showDiagramsView?(): PromiseLike<unknown>;
   /** The start-screen count for a shown suggestion (`startSuggested<Intent>`). */
   recordSuggested(intent: StartIntent): void;
   feature(key: TelemetryFeature): void;
@@ -332,7 +342,8 @@ export async function runStartSuggestion(deps: StartSuggestionDeps): Promise<Sta
         // finally pressed: a folder that has a diagram now gets the Diagrams view, not a second draft.
         // Convert is unaffected: it converts the project, whatever diagrams it has.
         if (start !== 'convert' && deps.hasDiagrams()) {
-          await deps.executeCommand(DIAGRAMS_VIEW_FOCUS_COMMAND);
+          if (deps.showDiagramsView) await deps.showDiagramsView();
+          else await deps.executeCommand(DIAGRAMS_VIEW_FOCUS_COMMAND);
           await deps.info(START_SUGGESTION_ALREADY_KEPT_MESSAGE);
           return;
         }
