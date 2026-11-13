@@ -1572,9 +1572,12 @@ on every version that has them; an older version sends the total alone.
 
 And one feature, recorded at activation only:
 
-- `dbtSearchFailedWalkFound` — the search failed and the bounded walk still found a dbt project (it alone would have opened one), so nothing was lost. A project chosen by `erdStudio.projectPath` or **Select dbt Project…** does not count: only what the walk found.
+- `dbtSearchFailedWalkFound` — the search failed and the bounded walk still found a dbt project (it alone would have opened one), so nothing was lost. A project chosen by `erdStudio.projectPath` or **Select dbt Project…** does not count: only what the walk found. Since #295, also when activation did not wait for the search (`dbtSearchSkipped`) and the search it left running then failed: that window opened the dbt project the walk found, so nothing was lost there either.
 
-Where `dbtSearchFailed` is counted: at activation; once more when activation's
+Where `dbtSearchFailed` is counted: at activation; when activation did not wait
+for the search (`dbtSearchSkipped`, #295) and the search it left running fails
+(with `dbtSearchFailedWalkFound` beside it, since that window's project came
+from the walk); once more when activation's
 search timed out and the late retry (a window that opened without dbt lets the
 search finish, for up to 60 s, to point out a deeper project) then failed — a
 window whose activation search already failed retries but never counts twice
@@ -1613,7 +1616,7 @@ What the start screen's first timeout cost, and the search activation no
 longer waits for:
 
 - `startLookLateSuggestion` — the start screen's look at the folder ran out of time, the blank-diagram suggestion was shown, and the retry (the next look that answered, with twice the time) found something to import, so the suggestion changed to an import. Decided on that one look only: a later look that finds a file added after it does not count. The retry runs at the next refresh, so a file saved between the timeout and the retry can still count; that should be rare. Read beside `startLookTimeout` (the installs whose first look ran out of time) and `startLookGaveUp`.
-- `dbtSearchSkipped` — activation did not wait for the host's search for a dbt_project.yml: no `erdStudio.projectPath`, no picked project, and the first dbt workspace folder already holds ERD data, so nothing the search could find changes the project that opens (`hostSearchCannotChangeRoot`). The search still runs, off activation's path, to count the workspace's dbt projects for **Select dbt Project**; if it fails, `dbtSearchFailed` is still recorded, but a timeout is not.
+- `dbtSearchSkipped` — activation did not wait for the host's search for a dbt_project.yml: no `erdStudio.projectPath`, no picked project, and the first dbt workspace folder already holds ERD data, so nothing the search could find changes the project that opens (`hostSearchCannotChangeRoot`). The search still runs, off activation's path, to count the workspace's dbt projects for **Select dbt Project**; if it fails, `dbtSearchFailed` and its reason are still recorded (with `dbtSearchFailedWalkFound`), but a timeout is not.
 - `activationSlowWalk` — the longest stretch of a start over 10 s was the synchronous walk of the workspace folders that finds the dbt project (up to 5,000 folders; `resolveWorkspaceProject`, timed on its own). `activationSlowDiscovery` is then the rest of Discovery, without the walk.
 
 ```bash

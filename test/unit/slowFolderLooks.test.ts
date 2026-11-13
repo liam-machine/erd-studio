@@ -399,14 +399,19 @@ describe('#295: the host search is not waited for when it cannot change the proj
     expect(lastContext(exec, 'erdStudio.hasDbtProject')).toBe(true);
   });
 
-  it('a late search that fails is still counted (dbtSearchFailed)', async () => {
+  it('a late search that fails is still counted (dbtSearchFailed, its #304 reason, and that the walk found the project)', async () => {
     fs.cpSync(FIXTURE_ROOT, root, { recursive: true });
     openRoot();
     vi.spyOn(vscode.workspace, 'findFiles').mockImplementation(((include: unknown) =>
       (include === '**/dbt_project.yml' ? Promise.reject(new Error('search broke')) : Promise.resolve([]))) as never);
     const error = vi.spyOn(telemetry, 'error');
+    const feature = vi.spyOn(telemetry, 'feature');
     await activate(context);
     await vi.waitFor(() => expect(keys(error)).toContain('dbtSearchFailed'));
+    // Exactly one reason beside the total, as #304's contract says.
+    expect(keys(error).filter((k) => k.startsWith('dbtSearchFailed'))).toEqual(['dbtSearchFailed', 'dbtSearchFailedRejected']);
+    // The window opened the project the walk found, so the failure lost nothing.
+    expect(keys(feature).filter((k) => k === 'dbtSearchFailedWalkFound')).toHaveLength(1);
   });
 
   it('a root dbt project without ERD data still waits, bounded by ACTIVATION_DBT_SEARCH_MS, and records the timeout', async () => {

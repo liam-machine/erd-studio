@@ -201,6 +201,9 @@ describe('#304: activation records the reason, and whether the walk saved the da
 
   it('a dbt project the walk finds while the search never answers (timeout): dbtSearchTimedOut, no failure codes and no WalkFound', async () => {
     fs.cpSync(FIXTURE_ROOT, root, { recursive: true });
+    // Without ERD data, so activation waits for the search (#295 skips the wait,
+    // and never counts a timeout, in a dbt project that already holds some).
+    fs.rmSync(path.join(root, '.erd-studio'), { recursive: true, force: true });
     vi.spyOn(vscode.workspace, 'findFiles').mockImplementation((() => new Promise(() => {})) as never);
     const error = vi.spyOn(telemetry, 'error');
     const feature = vi.spyOn(telemetry, 'feature');
