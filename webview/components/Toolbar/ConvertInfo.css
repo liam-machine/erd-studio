@@ -28,9 +28,17 @@
   padding: 0;
 }
 
+/* Red, in every state: the one toolbar control that asks for an action
+   (converting an older project). The theme's error colour, so it follows
+   light, dark and high-contrast themes. */
+.toolbar__island .convert-info__button,
+.toolbar__island .convert-info__button:hover {
+  color: var(--error-fg);
+}
+
 .toolbar__island .convert-info__button--open {
   background: var(--control-fill-active);
-  color: var(--text-primary);
+  color: var(--error-fg);
 }
 
 .convert-info__card {
