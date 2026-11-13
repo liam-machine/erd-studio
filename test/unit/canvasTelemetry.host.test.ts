@@ -273,6 +273,18 @@ describe('why a DBML diagram did not load (B14)', () => {
     expect(featureOnce.mock.calls.map(([k]) => k)).not.toContain('dbmlDiagramReadOnly');
   });
 
+  it('counts an open and each edit against the diagram, and a view-only message against nothing', async () => {
+    const used = vi.spyOn(telemetry, 'diagramUsed');
+    const file = diagramPath(root, 'dbml', 'silver', 'showcase');
+    const { panel } = await open(file);
+    const uri = vscode.Uri.file(file).toString();
+    expect(used.mock.calls).toEqual([[uri, 'open']]);
+    await panel._simulateMessage({ type: 'updatePositions', payload: { positions: { dim_customer: { x: 10, y: 20 } } } });
+    expect(used.mock.calls).toEqual([[uri, 'open'], [uri, 'edit']]);
+    await panel._simulateMessage({ type: 'setLineStyle', payload: { style: 'curved' } });
+    expect(used.mock.calls).toHaveLength(2);
+  });
+
   it('does no telemetry-only reading when usage telemetry is off', async () => {
     const file = diagramPath(root, 'dbml', 'silver', 'showcase');
     fs.writeFileSync(file, fs.readFileSync(file, 'utf-8').replace('    dim_customer 40 60\n', '    dim_customer 40 60\n    this is not a layout line\n'));

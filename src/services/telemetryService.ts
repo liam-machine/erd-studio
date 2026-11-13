@@ -20,7 +20,7 @@
  * without one (tests, the no-project fallback) needs no guard.
  */
 
-import { randomUUID } from 'crypto';
+import { createHash, randomInt, randomUUID } from 'crypto';
 import * as vscode from 'vscode';
 
 import { getErdStudioSetting } from './configService';
@@ -49,6 +49,9 @@ import {
   nextDay,
   recordActivation,
   recordCanvasOpen,
+  recordDiagramUse,
+  daysBetween,
+  MAX_DIAGRAM_ID,
   recordCatalog,
   recordError,
   recordFeature,
@@ -96,6 +99,15 @@ const FIRST_SEEN_KEY = 'erdStudio.telemetry.firstSeenDay';
 const ACTIVE_DAYS_KEY = 'erdStudio.telemetry.activeDays';
 const CANVAS_DAYS_KEY = 'erdStudio.telemetry.canvasDays';
 const FIRST_CANVAS_KEY = 'erdStudio.telemetry.firstCanvasDay';
+/**
+ * The number made up for each diagram this install has opened:
+ * `{ [fingerprint]: [id, last day used] }`. The fingerprint (a SHA-256 of the
+ * file's URI) and the day stay on the device; only the random `id` is sent.
+ */
+const DIAGRAM_IDS_KEY = 'erdStudio.telemetry.diagramIds';
+/** A diagram not used for this long is forgotten (the Worker keeps 90 days, so its number means nothing after that). */
+const DIAGRAM_ID_KEEP_DAYS = 90;
+const MAX_DIAGRAM_IDS = 500;
 /** B2: today's interim copies — `{ day, sent, hash }`. Never sent. */
 const PROVISIONAL_KEY = 'erdStudio.telemetry.provisional';
 /**
@@ -319,6 +331,21 @@ export class TelemetryService implements vscode.Disposable {
     }
   }
 
+  /**
+   * The number that stands for the diagram at `uri`: looked up, or made up at
+   * random the first time it is seen. `undefined` while telemetry is off, so
+   * nothing is kept then.
+   */
+  diagramId(uri: string): number | undefined {
+    if (!this.enabled()) return undefined;
+    const today = utcDay(new Date());
+    const fingerprint = createHash('sha256').update(uri).digest('hex').slice(0, 24);
+    const stored = this.context.globalState.get<Record<string, [number, string]>>(DIAGRAM_IDS_KEY);
+    const ids = planDiagramIds(stored, fingerprint, today, () => randomInt(1, MAX_DIAGRAM_ID + 1));
+    if (ids.changed) void this.context.globalState.update(DIAGRAM_IDS_KEY, ids.map);
+    return ids.id;
+  }
+
   private send(state: DailyCounters, today: string): void {
     if (!telemetryEndpoint()) return;
     this.post(buildHeartbeat(state, this.heartbeatEnv(state, today)));
@@ -509,6 +536,7 @@ export class TelemetryService implements vscode.Disposable {
     void this.context.globalState.update(ACTIVE_DAYS_KEY, undefined);
     void this.context.globalState.update(CANVAS_DAYS_KEY, undefined);
     void this.context.globalState.update(FIRST_CANVAS_KEY, undefined);
+    void this.context.globalState.update(DIAGRAM_IDS_KEY, undefined);
     void this.context.globalState.update(PROVISIONAL_KEY, undefined);
     void this.context.globalState.update(PENDING_UPDATE_KEY, undefined);
     void this.context.globalState.update(MAJOR_SEEN_KEY, undefined);
@@ -516,6 +544,48 @@ export class TelemetryService implements vscode.Disposable {
     void this.context.globalState.update(FIRST_DRAFT_DONE_KEY, undefined);
     void this.context.globalState.update(FIRST_DIAGRAM_DONE_KEY, undefined);
   }
+}
+
+/**
+ * The stored diagram numbers after one use of `fingerprint` on `today`: its
+ * number (a new random one, different from every number kept, when it is
+ * new), entries unused for {@link DIAGRAM_ID_KEEP_DAYS} days dropped, and the
+ * least recently used dropped past {@link MAX_DIAGRAM_IDS}. `changed` is false
+ * when the diagram was already used today, so a busy canvas writes once a day.
+ */
+export function planDiagramIds(
+  stored: unknown,
+  fingerprint: string,
+  today: string,
+  random: () => number,
+): { id: number; map: Record<string, [number, string]>; changed: boolean } {
+  const map: Record<string, [number, string]> = {};
+  if (stored && typeof stored === 'object' && !Array.isArray(stored)) {
+    for (const [key, value] of Object.entries(stored as Record<string, unknown>)) {
+      if (!Array.isArray(value) || value.length !== 2) continue;
+      const [id, day] = value as [unknown, unknown];
+      if (typeof id !== 'number' || !Number.isInteger(id) || id < 1 || id > MAX_DIAGRAM_ID) continue;
+      if (typeof day !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(day)) continue;
+      map[key] = [id, day];
+    }
+  }
+  const known = map[fingerprint];
+  if (known && known[1] === today) return { id: known[0], map, changed: false };
+  for (const [key, [, day]] of Object.entries(map)) {
+    if (key !== fingerprint && daysBetween(day, today) >= DIAGRAM_ID_KEEP_DAYS) delete map[key];
+  }
+  let id = known?.[0];
+  if (id === undefined) {
+    const used = new Set(Object.values(map).map(([n]) => n));
+    do id = random(); while (used.has(id));
+  }
+  map[fingerprint] = [id, today];
+  const keys = Object.keys(map);
+  if (keys.length > MAX_DIAGRAM_IDS) {
+    const oldest = keys.filter(k => k !== fingerprint).sort((a, b) => map[a][1].localeCompare(map[b][1]));
+    for (const key of oldest.slice(0, keys.length - MAX_DIAGRAM_IDS)) delete map[key];
+  }
+  return { id, map, changed: true };
 }
 
 /** POST the body; every failure — offline, timeout, 4xx, 5xx — is dropped. */
@@ -595,7 +665,8 @@ function errorRecorded(code: TelemetryErrorCode): void {
 
 /**
  * One-line call sites. Each takes only fixed keys, booleans and counts, so a
- * name, path or message cannot be passed. Safe before a service exists.
+ * name, path or message cannot be passed — except `diagramUsed`, whose URI is
+ * swapped for a random number on the device. Safe before a service exists.
  */
 export const telemetry = {
   activation(outcome: ActivationOutcome, hasSemanticDir: boolean, domainCount: number): void {
@@ -606,6 +677,16 @@ export const telemetry = {
     active?.record(s => recordCanvasOpen(s, { stage, format, modelCount }), 'canvasOpened');
     active?.markDay('canvas');
     if (modelCount > 0) active?.firstOf('diagram');
+  },
+  /**
+   * One open (`open`) or one edit request (`edit`) on the diagram at `uri`.
+   * The URI goes no further than {@link TelemetryService.diagramId}, which
+   * swaps it for a random number kept on the device; only that number and the
+   * two counts are recorded.
+   */
+  diagramUsed(uri: string, kind: 'open' | 'edit'): void {
+    const id = active?.diagramId(uri);
+    if (id !== undefined) active?.update(s => recordDiagramUse(s, id, kind));
   },
   /** AI assistants detected on this machine (`detectAssistants()` ids). */
   assistants(found: readonly TelemetryAssistant[]): void {
