@@ -747,7 +747,7 @@ function EditorCanvas() {
             <p className="editor-message__detail editor-message__detail--dim">{error}</p>
           </>
         ) : (
-          <p style={{ color: 'var(--error-fg)' }}>Error: {error}</p>
+          <p className="editor-message__detail editor-message__detail--error">Error: {error}</p>
         )}
         {canRetry && (
           <button

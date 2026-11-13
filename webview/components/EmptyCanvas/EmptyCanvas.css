@@ -193,7 +193,7 @@
   background: none;
   font: inherit;
   font-weight: var(--weight-medium);
-  color: var(--vscode-textLink-foreground, var(--focus-border));
+  color: var(--text-link);
   cursor: pointer;
   text-decoration: underline;
   text-decoration-color: color-mix(in srgb, currentColor 40%, transparent);

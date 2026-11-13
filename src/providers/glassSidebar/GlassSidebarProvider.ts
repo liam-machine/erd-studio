@@ -11,7 +11,9 @@
  * element. Row menus, inline buttons, title actions, section visibility and
  * empty states come from this extension's own package.json, decided by the
  * native views' `when` clauses over a mirror of the `erdStudio.*` context
- * keys ({@link ContributionIndex}, {@link evaluateWhen}, contextKeys.ts).
+ * keys ({@link ContributionIndex}, {@link evaluateWhen}, contextKeys.ts), then
+ * put in one shape for every section: headers by titleActions.ts, rows (one
+ * hover button, menus in one verb order) by rowActions.ts.
  *
  * The webview never names a command or a URL: it sends a row id and a menu
  * entry index, and the host looks both up and re-checks the entry's `when`.
@@ -31,6 +33,7 @@ import {
 } from './contributions';
 import { buildGlassSidebarHtml } from './html';
 import type { GlassHostMessage, GlassMenuEntry, GlassSection, GlassSectionKey, GlassWebviewMessage, SerialisedNode } from './protocol';
+import { consistentRowActions, type RowActions } from './rowActions';
 import { nodeId, serialiseTreeItem } from './serialise';
 import { consistentTitleActions } from './titleActions';
 import { evaluateWhen, type ContextLookup } from './whenClause';
@@ -346,6 +349,14 @@ export class GlassSidebarProvider implements vscode.WebviewViewProvider, vscode.
     };
   }
 
+  /** A row's hover button and menu: package.json's `view/item/context` for it, in the one shape every section shares. */
+  private rowActions(viewId: string, viewItem: string | undefined): RowActions {
+    return consistentRowActions(
+      this.index.resolve('view/item/context', this.context(viewId, viewItem)),
+      (a) => (a.submenu ? undefined : this.index.menu(a.menu)[a.index]?.command),
+    );
+  }
+
   private viewContribution(section: SectionState) {
     return this.index.views().find((v) => v.id === section.viewId);
   }
@@ -373,18 +384,19 @@ export class GlassSidebarProvider implements vscode.WebviewViewProvider, vscode.
       // The native view's own clause, without the `!erdStudio.glassSidebar` that hides it while this view shows.
       const visible = evaluateWhen(withoutGlassClause(contribution?.when), base);
       // Rows share a handful of contextValues: resolve each one's menu once per snapshot.
-      const menus = new Map<string | undefined, ReturnType<ContributionIndex['resolve']>>();
+      const menus = new Map<string | undefined, RowActions>();
       const menuOf = (viewItem: string | undefined) => {
         let menu = menus.get(viewItem);
-        if (!menu) { menu = this.index.resolve('view/item/context', this.context(section.viewId, viewItem)); menus.set(viewItem, menu); }
+        if (!menu) { menu = this.rowActions(section.viewId, viewItem); menus.set(viewItem, menu); }
         return menu;
       };
       const decorate = (nodes: SerialisedNode[]): SerialisedNode[] => nodes.map((n) => {
         const menu = menuOf(n.contextValue);
         const out: SerialisedNode = { ...n };
+        // One hover button at most, then `…` (rowActions.ts).
         if (menu.inline.length) out.inline = menu.inline.map((a) => ({ index: a.index, menu: a.menu, title: a.title, ...(a.icon ? { icon: a.icon } : {}) }));
         else delete out.inline;
-        out.hasMenu = menu.navigation.length + menu.groups.reduce((sum, g) => sum + g.length, 0) > 0;
+        out.hasMenu = menu.groups.length > 0;
         if (n.children) out.children = decorate(n.children);
         return out;
       });
@@ -469,8 +481,7 @@ export class GlassSidebarProvider implements vscode.WebviewViewProvider, vscode.
       case 'itemMenu': {
         const item = section.items.get(msg.id);
         if (!item) return;
-        const menu = this.index.resolve('view/item/context', this.context(section.viewId, item.contextValue));
-        const groups: GlassMenuEntry[][] = [menu.navigation, ...menu.groups].filter((g) => g.length > 0);
+        const groups: GlassMenuEntry[][] = this.rowActions(section.viewId, item.contextValue).groups;
         this.send({ type: 'itemMenu', section: section.key, id: msg.id, groups });
         return;
       }

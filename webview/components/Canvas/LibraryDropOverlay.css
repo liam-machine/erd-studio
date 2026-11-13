@@ -17,9 +17,11 @@
   pointer-events: none;
   border: 2px dashed var(--control-border-selected);
   border-radius: var(--radius-xl);
+  /* A light veil, brighter at the top under the hint: the tables under it
+     stay readable while the drag is held over them. */
   background:
     radial-gradient(80% 60% at 50% 0%, var(--glass-tint-accent), transparent 75%),
-    var(--glass-tint-accent);
+    color-mix(in srgb, var(--glass-tint-accent) 40%, transparent);
   box-shadow: inset 0 0 0 4px var(--glass-tint-accent);
   animation: library-drop-fade var(--duration-fast) var(--ease-standard);
 }
@@ -29,14 +31,25 @@
   to { opacity: 1; }
 }
 
+/* Under the floating toolbar, one --shell-gap below it, and below the
+   Logical / Physical tabs when they show (a dbt project): 56px put the hint
+   over the tabs. The tabs are a 24px control plus 3px padding each side and a
+   1px border (StageTabs.css), hung --space-3 under the bar. */
 .library-drop__hint-region {
   position: absolute;
-  top: 56px;
+  top: calc(var(--shell-inset) + var(--shell-corner-height) + var(--shell-gap));
   left: 50%;
   z-index: var(--z-chrome-raised);
   transform: translateX(-50%);
-  max-width: min(520px, calc(100% - 32px));
+  max-width: min(520px, calc(100% - 2 * var(--shell-inset)));
   pointer-events: none;
+}
+
+.react-flow:has(.stage-tabs) .library-drop__hint-region {
+  top: calc(
+    var(--shell-inset) + var(--shell-corner-height) + var(--space-3)
+    + var(--control-height-sm) + 8px + var(--shell-gap)
+  );
 }
 
 .library-drop__hint {

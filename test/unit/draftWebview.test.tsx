@@ -178,6 +178,16 @@ describe('small (a SQL find)', () => {
     fireEvent.keyDown(drawer, { key: 'Escape' });
     expect(screen.queryByRole('complementary', { name: 'Details' })).toBeNull();
   });
+
+  it('moves focus into the drawer and back to Show details when it closes', () => {
+    renderPage(fixture('small'));
+    const opener = screen.getByRole('button', { name: 'Show details' });
+    opener.focus();
+    fireEvent.click(opener);
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Close details' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Close details' }));
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Show details' }));
+  });
 });
 
 describe('large (several schemas)', () => {

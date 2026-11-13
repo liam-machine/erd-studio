@@ -70,10 +70,27 @@
   gap: var(--space-4);
 }
 
+/* Each line of text takes a whole row, so the buttons always wrap under the
+   text. A 560px max-width let a short line (the dim error text) share a row
+   with the buttons; instead the row is full width and the text is held to
+   560px by the inline padding (a padding percentage is of the row). */
 .editor-message--error > p {
-  flex-basis: 100%;
-  max-width: 560px;
-  margin: 0 auto;
+  box-sizing: border-box;
+  flex: 0 0 100%;
+  max-width: none;
+  margin: 0;
+  padding-inline: max(0px, calc((100% - 560px) / 2));
+}
+
+/* The generic "Error: …" line: the theme's error colour, wrapping long text. */
+.editor-message__detail--error {
+  color: var(--error-fg);
+  overflow-wrap: anywhere;
+}
+
+/* A little air between the text and the row of buttons under it. */
+.editor-message--error > p:has(+ :not(p)) {
+  margin-bottom: var(--space-4);
 }
 
 .editor-message__retry,

@@ -30,13 +30,15 @@
  * and name only; and a huge ledger lists at most {@link MAX_ITEMS_LISTED}
  * entries on the page, counting the rest exactly.
  *
- * Nonce-only CSP, no remote resource, `--vscode-*` colours only, BEM class
- * names. Every string from the ledger is cut to one short line
+ * Nonce-only CSP, no remote resource, the glass look (`glassPageStyle.ts`:
+ * its tokens and `gp-` kit, then this page's own `ir` BEM classes), colours
+ * from the glass tokens and `--vscode-*` only. Every string from the ledger is cut to one short line
  * (`ledgerText`) and escaped. Pure and vscode-free; the host half is
  * `src/providers/ImportReportPanel.ts`.
  */
 
 import { escapeHtml } from './dbmlConversionReview';
+import { GLASS_PAGE_STYLE } from '../types/glassPageStyle';
 import {
   LEDGER_CAUSE_PHRASES,
   LEDGER_OUTCOME_PHRASES,
@@ -506,53 +508,66 @@ export function buildImportReportCsp(nonce: string): string {
   return ["default-src 'none'", `style-src 'nonce-${nonce}'`, `script-src 'nonce-${nonce}'`].join('; ') + ';';
 }
 
-export const IMPORT_REPORT_STYLE = `
-:root { color-scheme: light dark; }
-* { box-sizing: border-box; }
-body {
-  margin: 0; padding: 0;
-  color: var(--vscode-foreground);
-  background: var(--vscode-editor-background);
-  font-family: var(--vscode-font-family);
-  font-size: var(--vscode-font-size);
+/**
+ * The page's own CSS, after {@link GLASS_PAGE_STYLE} (the glass tokens and
+ * the `gp-` kit the markup uses beside these `ir` classes): layout and the
+ * report's own pieces only, colours from the glass tokens only.
+ */
+export const IMPORT_REPORT_STYLE = String.raw`
+.ir { padding-bottom: var(--space-9); }
+.ir__header { margin: 0 0 var(--space-5); }
+.ir__heading { margin: 0 0 var(--space-4); }
+.ir__headline { margin: 0 0 var(--space-2); font-size: var(--text-lg); font-weight: var(--weight-semibold); letter-spacing: var(--tracking-tight); overflow-wrap: anywhere; }
+.ir__status { margin: 0; color: var(--text-secondary); }
+.ir__note { margin: 0 0 var(--space-5); }
+.ir__totals { display: flex; flex-wrap: wrap; gap: var(--space-3); margin: 0 0 var(--space-7); padding: 0; list-style: none; }
+.ir__total-count { color: var(--text-primary); font-weight: var(--weight-semibold); font-variant-numeric: tabular-nums; }
+.ir__empty { margin: 0; }
+
+.ir-section { margin: 0 0 var(--space-5); padding: var(--space-6) var(--space-6) var(--space-5); }
+.ir-section--notImported { border-color: var(--glass-tint-warning-edge); }
+body.vscode-high-contrast .ir-section--notImported,
+body.vscode-high-contrast-light .ir-section--notImported { border-color: var(--warning-fg); }
+.ir-section__title { display: flex; align-items: center; gap: var(--space-4); margin: 0 0 var(--space-3); }
+.ir-section__summary { margin: 0 0 var(--space-3); }
+.ir-section__hint { margin: 0 0 var(--space-5); line-height: var(--leading-normal); }
+
+/* A cause: a disclosure row (chevron, heading, count at the trailing edge)
+   over a sunken list of its entries. */
+.ir-group + .ir-group { margin-top: var(--space-2); }
+.ir-group__summary {
+  display: flex; align-items: center; gap: var(--space-4);
+  min-height: var(--control-height); padding: 0 var(--space-4);
+  border-radius: var(--radius-md);
+  color: var(--text-primary); font-weight: var(--weight-medium);
+  list-style: none; cursor: pointer; user-select: none; -webkit-user-select: none;
+  transition: background-color var(--duration-fast) var(--ease-standard);
 }
-.ir { max-width: 960px; margin: 0 auto; padding: 24px 24px 48px; }
-.ir__heading { margin: 0 0 6px; font-size: 1.5em; font-weight: 600; }
-.ir__headline { margin: 0 0 4px; font-weight: 600; }
-.ir__status { margin: 0 0 4px; line-height: 1.5; }
-.ir__note { margin: 0 0 14px; line-height: 1.5; color: var(--vscode-descriptionForeground); }
-.ir__totals { display: flex; flex-wrap: wrap; gap: 6px 18px; margin: 0 0 18px; padding: 0; list-style: none; }
-.ir__total { color: var(--vscode-descriptionForeground); }
-.ir__total-count { color: var(--vscode-foreground); font-weight: 600; }
-.ir__empty { margin: 0; color: var(--vscode-descriptionForeground); }
-.ir-section {
-  margin: 0 0 16px; padding: 12px 16px; border-radius: 4px;
-  border: 1px solid var(--vscode-panel-border, var(--vscode-widget-border));
-  background: var(--vscode-sideBar-background, var(--vscode-editor-background));
+.ir-group__summary::-webkit-details-marker { display: none; }
+.ir-group__summary::before {
+  content: ''; flex: none; width: 6px; height: 6px; margin: 0 var(--space-1) 0 0;
+  border-right: 1.5px solid var(--text-tertiary); border-bottom: 1.5px solid var(--text-tertiary);
+  transform: rotate(-45deg);
+  transition: transform var(--duration-base) var(--ease-standard);
 }
-.ir-section--notImported { border-color: var(--vscode-editorWarning-foreground, var(--vscode-focusBorder)); }
-.ir-section__title { margin: 0 0 4px; font-size: 1.1em; font-weight: 600; }
-.ir-section__count { color: var(--vscode-descriptionForeground); font-weight: normal; }
-.ir-section__hint, .ir-section__summary { margin: 0 0 8px; line-height: 1.5; }
-.ir-section__hint { color: var(--vscode-descriptionForeground); }
-.ir-group { margin: 0 0 6px; }
-.ir-group__summary { cursor: pointer; padding: 2px 0; }
-.ir-group__summary:focus { outline: 1px solid var(--vscode-focusBorder); outline-offset: 2px; }
-.ir-group__count { color: var(--vscode-descriptionForeground); }
-.ir-items { margin: 4px 0 8px; padding: 0 0 0 20px; }
-.ir-item { margin: 0 0 4px; line-height: 1.5; }
-.ir-item__units { color: var(--vscode-descriptionForeground); }
-.ir-item__name, .ir-item__what {
-  font-family: var(--vscode-editor-font-family); font-size: var(--vscode-editor-font-size);
+.ir-group[open] > .ir-group__summary::before { transform: rotate(45deg); }
+.ir-group__summary:hover { background: var(--control-fill-hover); }
+.ir-group__summary:focus-visible { outline: var(--focus-outline); outline-offset: 0; }
+.ir-group__count { margin-left: auto; color: var(--text-tertiary); font-size: var(--text-sm); font-weight: var(--weight-regular); font-variant-numeric: tabular-nums; }
+.ir-items { margin: var(--space-2) 0 var(--space-4); padding: var(--space-1) var(--space-5); list-style: none; }
+.ir-item { padding: var(--space-3) 0; line-height: var(--leading-normal); overflow-wrap: anywhere; }
+.ir-item + .ir-item { border-top: 1px solid var(--glass-divider); }
+.ir-item__units { color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
+.ir-item__name { font-family: var(--font-mono); font-size: 0.92em; color: var(--text-primary); }
+.ir-item__place { color: var(--text-tertiary); }
+.ir-item__link { margin-left: var(--space-1); }
+.ir-group__more { margin: 0 0 var(--space-4) var(--space-5); }
+body.vscode-high-contrast .ir-group__summary:hover,
+body.vscode-high-contrast-light .ir-group__summary:hover { outline: 1px dashed var(--control-border-hover); outline-offset: -1px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .ir-group__summary, .ir-group__summary::before { transition: none; }
 }
-.ir-item__place { color: var(--vscode-descriptionForeground); }
-.ir-item__link {
-  padding: 0; border: none; background: none; cursor: pointer; font: inherit;
-  color: var(--vscode-textLink-foreground);
-}
-.ir-item__link:hover { color: var(--vscode-textLink-activeForeground); text-decoration: underline; }
-.ir-item__link:focus { outline: 1px solid var(--vscode-focusBorder); outline-offset: 2px; }
-.ir-group__more { margin: 0 0 8px 20px; color: var(--vscode-descriptionForeground); }
 `;
 
 const SCRIPT = `
@@ -571,24 +586,24 @@ const SCRIPT = `
 
 function renderItem(item: ImportReportItem): string {
   const name = item.name ? ` <span class="ir-item__name">${escapeHtml(item.name)}</span>:` : ':';
-  const what = item.what ? ` <span class="ir-item__what">${escapeHtml(item.what)}</span>` : '';
+  const what = item.what ? ` <span class="ir-item__what gp-code-inline">${escapeHtml(item.what)}</span>` : '';
   const detail = item.detail ? ` ${item.what ? '– ' : ''}${escapeHtml(item.detail)}` : '';
   const place = item.place === undefined
     ? ''
     : item.link !== undefined
-      ? ` <button class="ir-item__link" type="button" data-link="${item.link}" title="Open the file at this line">${escapeHtml(item.place)}</button>`
+      ? ` <button class="ir-item__link gp-link" type="button" data-link="${item.link}" title="Open the file at this line">${escapeHtml(item.place)}</button>`
       : ` <span class="ir-item__place">(${escapeHtml(item.place)})</span>`;
   return `<li class="ir-item ir-item--${escapeHtml(item.outcome)}"><span class="ir-item__units">${escapeHtml(item.units)}</span>${name}${what}${detail}${place}</li>`;
 }
 
 function renderGroup(group: ImportReportGroup, open: boolean): string {
   const more = group.more > 0
-    ? `<p class="ir-group__more">And ${fmt(group.more)} more: ERD Studio: Show Logs lists every one.</p>`
+    ? `<p class="ir-group__more gp-hint">And ${fmt(group.more)} more: ERD Studio: Show Logs lists every one.</p>`
     : '';
   return `
       <details class="ir-group" data-cause="${escapeHtml(group.cause)}"${open ? ' open' : ''}>
-        <summary class="ir-group__summary">${escapeHtml(group.heading)} <span class="ir-group__count">(${fmt(group.count)})</span></summary>
-        <ul class="ir-items">${group.items.map(renderItem).join('')}</ul>${more}
+        <summary class="ir-group__summary">${escapeHtml(group.heading)} <span class="ir-group__count">${fmt(group.count)}</span></summary>
+        <ul class="ir-items gp-card gp-card--well">${group.items.map(renderItem).join('')}</ul>${more}
       </details>`;
 }
 
@@ -596,19 +611,20 @@ function renderSection(section: ImportReportSection): string {
   // A short section opens its causes; a long one lists them closed, to be opened one at a time.
   const open = section.groups.length <= 3;
   const summary = section.summary ? `<p class="ir-section__summary">${escapeHtml(section.summary)}</p>` : '';
-  const hint = section.groups.length ? `<p class="ir-section__hint">${escapeHtml(section.hint)}</p>` : '';
+  const hint = section.groups.length ? `<p class="ir-section__hint gp-hint">${escapeHtml(section.hint)}</p>` : '';
   return `
-    <section class="ir-section ir-section--${section.id}" data-section="${section.id}">
-      <h2 class="ir-section__title">${escapeHtml(section.title)}${section.groups.length ? ` <span class="ir-section__count">(${fmt(section.count)})</span>` : ''}</h2>
+    <section class="ir-section ir-section--${section.id} gp-card" data-section="${section.id}">
+      <h2 class="ir-section__title gp-heading">${escapeHtml(section.title)}${section.groups.length ? ` <span class="ir-section__count gp-badge">${fmt(section.count)}</span>` : ''}</h2>
       ${summary}${hint}${section.groups.map((g) => renderGroup(g, open)).join('')}
     </section>`;
 }
 
 function renderTotals(view: ImportReportView): string {
   const counts = importReportCounts(view);
+  // Something left out reads as a warning at a glance; the other totals stay neutral.
   const items = IMPORT_REPORT_SECTIONS
     .filter((id) => id !== 'imported')
-    .map((id) => `<li class="ir__total" data-total="${id}">${escapeHtml(SECTION_TITLES[id])}: <span class="ir__total-count">${fmt(counts[id])}</span></li>`);
+    .map((id) => `<li class="ir__total gp-pill${id === 'notImported' && counts[id] > 0 ? ' gp-pill--warning' : ''}" data-total="${id}">${escapeHtml(SECTION_TITLES[id])}: <span class="ir__total-count">${fmt(counts[id])}</span></li>`);
   return `<ul class="ir__totals">${items.join('')}</ul>`;
 }
 
@@ -623,16 +639,19 @@ export const IMPORT_REPORT_NOTHING_RECORDED = 'The import recorded nothing more 
 export function buildImportReportHtml(view: ImportReportView | undefined, nonce: string, viewToken = ''): string {
   const n = escapeHtml(nonce);
   const listed = view ? view.sections.some((sec) => sec.groups.length > 0) : false;
+  const header = view
+    ? `
+    <p class="ir__headline">${escapeHtml(view.headline)}</p>
+    <p class="ir__status">${escapeHtml(view.status)}</p>`
+    : '';
   const body = view
     ? `
-  <p class="ir__headline">${escapeHtml(view.headline)}</p>
-  <p class="ir__status">${escapeHtml(view.status)}</p>
-  <p class="ir__note">${escapeHtml(IMPORT_REPORT_NOTE)}</p>
+  <p class="ir__note gp-hint">${escapeHtml(IMPORT_REPORT_NOTE)}</p>
   ${renderTotals(view)}${view.sections.map(renderSection).join('')}${listed ? '' : view.complete ? `
-  <p class="ir__empty">Nothing to report: everything was brought across as written.</p>` : `
-  <p class="ir__empty">${escapeHtml(IMPORT_REPORT_NOTHING_RECORDED)}</p>`}`
+  <p class="ir__empty gp-notice gp-notice--ok">Nothing to report: everything was brought across as written.</p>` : `
+  <p class="ir__empty gp-notice">${escapeHtml(IMPORT_REPORT_NOTHING_RECORDED)}</p>`}`
     : `
-  <p class="ir__empty">${escapeHtml(NO_IMPORT_REPORT_MESSAGE)}</p>`;
+  <p class="ir__empty gp-notice">${escapeHtml(NO_IMPORT_REPORT_MESSAGE)}</p>`;
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -640,11 +659,13 @@ export function buildImportReportHtml(view: ImportReportView | undefined, nonce:
 <meta http-equiv="Content-Security-Policy" content="${escapeHtml(buildImportReportCsp(nonce))}">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>${escapeHtml(IMPORT_REPORT_TITLE)}</title>
-<style nonce="${n}">${IMPORT_REPORT_STYLE}</style>
+<style nonce="${n}">${GLASS_PAGE_STYLE}${IMPORT_REPORT_STYLE}</style>
 </head>
 <body>
-<main class="ir" data-view="${escapeHtml(viewToken)}">
-  <h1 class="ir__heading">${escapeHtml(IMPORT_REPORT_TITLE)}</h1>${body}
+<main class="ir gp-page" data-view="${escapeHtml(viewToken)}">
+  <header class="ir__header">
+    <h1 class="ir__heading gp-title">${escapeHtml(IMPORT_REPORT_TITLE)}</h1>${header}
+  </header>${body}
 </main>
 <script nonce="${n}">${SCRIPT}</script>
 </body>

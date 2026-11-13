@@ -11,6 +11,11 @@
   --stage-tabs-pad: 3px;
 
   position: relative;
+  /* Its own stacking context, so the tabs' z-index (above the thumb) stays
+     inside it. backdrop-filter made one by accident; without it (high
+     contrast, reduced transparency) the tabs painted over the Auto Layout
+     and menu popovers hanging from the bar above. */
+  isolation: isolate;
   display: inline-grid;
   grid-auto-flow: column;
   grid-auto-columns: 1fr;

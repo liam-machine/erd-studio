@@ -7,9 +7,10 @@
  * and handler" invariant for a different webview and host class. The only
  * canvas-side addition is `openGettingStarted` in `messages.ts`.
  *
- * Pure: no `vscode`, no DOM types, nothing from `src/services/**`. The panel
- * HTML is a self-contained string (inline nonce'd `<style>` + `<script>`) and
- * does not load the React bundle.
+ * Pure: no `vscode`, no DOM types, nothing from `src/services/**` (the
+ * glass look is the import-free `glassPageStyle.ts` beside this file). The
+ * panel HTML is a self-contained string (inline nonce'd `<style>` +
+ * `<script>`) and does not load the React bundle.
  */
 
 import type { FileState } from './harness';
@@ -33,6 +34,9 @@ import {
   type StartStorage,
 } from './startActions';
 import { SHOW_ME_AROUND_COMMAND, SHOW_ME_AROUND_LABEL } from './onboardingGuide';
+// The glass tokens and kit shared by the standalone pages: plain strings, no
+// imports of its own, so this module stays pure (nothing vscode, no DOM types).
+import { GLASS_PAGE_STYLE } from './glassPageStyle';
 
 // ---------------------------------------------------------------------------
 // Protocol
@@ -599,186 +603,525 @@ const ICON_CHAT = '<svg class="gs-icon" viewBox="0 0 16 16" aria-hidden="true"><
 const ICON_PLAY = '<svg class="gs-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2.5v11l9-5.5z"/></svg>';
 const ICON_TERMINAL = '<svg class="gs-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M1 2h14v12H1zm1 1v10h12V3zm1.6 2.3.7-.7L7.7 8l-3.4 3.4-.7-.7L6.3 8zM8 10h4v1H8z"/></svg>';
 
-const STYLE = `
-:root { color-scheme: light dark; }
-* { box-sizing: border-box; }
+/**
+ * The page's own CSS, after GLASS_PAGE_STYLE (the glass tokens, the page
+ * chrome and the gp- kit). Colours come only from those tokens, the VS Code
+ * theme variables or the --gs-* tokens declared on body below, so dark, light,
+ * both high-contrast themes, reduced transparency and reduced motion are
+ * handled by the tokens. Buttons and links use the kit (gp-button, gp-link);
+ * the gs- classes name the parts the script and tests find.
+ */
+const PAGE_STYLE = String.raw`
 body {
-  margin: 0;
-  background: var(--vscode-editor-background);
-  color: var(--vscode-foreground, var(--vscode-editor-foreground));
-  font-family: var(--vscode-font-family);
-  font-size: var(--vscode-font-size, 13px);
-  line-height: 1.5;
+  /* The video stage stays dark in every theme: it frames dark footage. */
+  --gs-stage: color-mix(in srgb, black 90%, var(--editor-bg));
+  --gs-cue-fg: white;
+  --gs-cue-bg: color-mix(in srgb, black 72%, transparent);
+  --gs-scrim: color-mix(in srgb, black 38%, transparent);
+  --gs-ok-edge: color-mix(in srgb, var(--ok-fg) 40%, transparent);
+  --gs-display: 26px;
 }
-.gs { max-width: 920px; margin: 0 auto; padding: 36px 28px 40px; }
-.gs-icon { width: 14px; height: 14px; fill: currentColor; flex: none; }
 
-.gs-hero { margin-bottom: 22px; }
-.gs-hero__kicker {
-  margin: 0 0 6px; font-size: 11px; font-weight: 700; letter-spacing: .16em; text-transform: uppercase;
-  color: var(--vscode-descriptionForeground);
+.gs {
+  max-width: calc(880px + 2 * var(--space-8));
+  margin: 0 auto;
+  padding: var(--space-9) var(--space-8) var(--space-9);
+  animation: gs-in var(--duration-slow) var(--ease-out) both;
 }
-.gs-hero__title { margin: 0; font-size: 28px; font-weight: 700; letter-spacing: -.01em; line-height: 1.2; }
-.gs-hero__sub { margin: 8px 0 0; font-size: 15px; color: var(--vscode-descriptionForeground); }
+@keyframes gs-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+.gs-icon { width: 14px; height: 14px; fill: currentColor; flex: none; }
+[hidden] { display: none !important; }
+
+/* --- Hero ------------------------------------------------------------------ */
+
+.gs-hero { margin-bottom: var(--space-7); }
+.gs-hero__kicker {
+  margin: 0 0 var(--space-3);
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+}
+.gs-hero__title {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: var(--gs-display);
+  font-weight: var(--weight-semibold);
+  letter-spacing: -0.02em;
+  line-height: var(--leading-tight);
+}
+.gs-hero__sub {
+  margin: var(--space-3) 0 0;
+  max-width: 64ch;
+  color: var(--text-secondary);
+  font-size: var(--text-lg);
+}
+
+/* --- The tour (video) ------------------------------------------------------ */
 
 .gs-video {
-  position: relative; aspect-ratio: 16 / 9; border-radius: 10px; overflow: hidden;
-  background: #0f1114; border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border, transparent));
+  position: relative;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+  background: var(--gs-stage);
+  /* The hairline sits over the page, not over the dark stage. */
+  background-clip: padding-box;
+  box-shadow: var(--glass-elevation-2);
 }
-.gs-video__player { display: block; width: 100%; height: 100%; background: #0f1114; }
+/* Before the first play: a soft scrim so the one button reads over the poster. */
+.gs-video:has(.gs-video__tour:not([hidden]))::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(60% 60% at 50% 50%, var(--gs-scrim), transparent 100%);
+}
+.gs-video__player { display: block; width: 100%; height: 100%; background: var(--gs-stage); }
 .gs-video__player::cue {
-  font-family: var(--vscode-font-family); font-size: clamp(13px, 2.1vw, 20px); line-height: 1.35;
-  color: #fff; background: rgba(0, 0, 0, .72);
+  font-family: var(--font-ui);
+  font-size: clamp(13px, 2.1vw, 20px);
+  line-height: 1.35;
+  color: var(--gs-cue-fg);
+  background: var(--gs-cue-bg);
 }
-.gs-video__sound, .gs-video__tour {
-  position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
-  display: inline-flex; align-items: center; gap: 9px;
-  padding: 12px 22px; border: 0; border-radius: 999px; cursor: pointer;
-  background: var(--vscode-button-background); color: var(--vscode-button-foreground);
-  font: inherit; font-size: 15px; font-weight: 600; box-shadow: 0 6px 28px rgba(0, 0, 0, .55);
+.gs-video__sound,
+.gs-video__tour {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 1;
+  transform: translate(-50%, -50%);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-4);
+  min-height: 40px;
+  padding: 0 var(--space-7);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+  color: var(--text-on-accent);
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  box-shadow: var(--glass-elevation-3);
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    transform var(--duration-instant) var(--ease-standard);
 }
-.gs-video__sound[hidden], .gs-video__tour[hidden] { display: none; }
-.gs-video__sound:hover, .gs-video__tour:hover { background: var(--vscode-button-hoverBackground); }
-.gs-video__sound .gs-icon, .gs-video__tour .gs-icon { width: 16px; height: 16px; }
+.gs-video__sound:hover,
+.gs-video__tour:hover { background: var(--accent-hover); }
+.gs-video__sound:active,
+.gs-video__tour:active { transform: translate(-50%, -50%) scale(0.97); }
+.gs-video__sound:focus-visible,
+.gs-video__tour:focus-visible { outline: var(--focus-outline); outline-offset: 3px; }
+.gs-video__sound .gs-icon,
+.gs-video__tour .gs-icon { width: 16px; height: 16px; }
 .gs-video__fallback {
-  position: absolute; inset: 0; display: none; flex-direction: column; align-items: center; justify-content: center;
-  gap: 12px; padding: 24px; text-align: center; color: #e9ecef;
+  position: absolute;
+  inset: 0;
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-8);
+  text-align: center;
 }
 .gs-video__poster { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: .45; filter: blur(3px); }
 .gs-video__fallback-card {
-  position: relative; display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 20px 28px;
-  border-radius: 10px; background: rgba(15, 17, 20, .86); box-shadow: 0 10px 40px rgba(0, 0, 0, .5);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-5);
+  max-width: 100%;
+  padding: var(--space-7) var(--space-8);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-xl);
+  background: var(--glass-surface-3);
+  -webkit-backdrop-filter: var(--glass-backdrop);
+  backdrop-filter: var(--glass-backdrop);
+  box-shadow: var(--glass-elevation-3);
+  color: var(--text-primary);
 }
-.gs-video__fallback-text { margin: 0; font-size: 15px; font-weight: 600; }
+.gs-video__fallback-text { margin: 0; font-size: var(--text-lg); font-weight: var(--weight-semibold); }
 .gs-video--fallback .gs-video__player,
 .gs-video--fallback .gs-video__sound,
 .gs-video--fallback .gs-video__tour { display: none; }
 .gs-video--fallback .gs-video__fallback { display: flex; }
 
-.gs-transcript { margin: 10px 2px 0; color: var(--vscode-descriptionForeground); }
-.gs-transcript summary { cursor: pointer; width: max-content; }
-.gs-transcript summary:hover { color: var(--vscode-foreground); }
-.gs-transcript__text { margin: 8px 0 0; white-space: pre-line; max-width: 72ch; }
+/* The transcript: a quiet disclosure under the video. */
+.gs-transcript { margin: var(--space-4) 0 0; }
+.gs-transcript summary {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: var(--control-height);
+  padding: 0 var(--space-4);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  list-style: none;
+  cursor: pointer;
+  transition: background-color var(--duration-fast) var(--ease-standard), color var(--duration-fast) var(--ease-standard);
+}
+.gs-transcript summary::-webkit-details-marker { display: none; }
+.gs-transcript summary::before {
+  content: '';
+  width: 0;
+  height: 0;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  border-left: 5px solid currentColor;
+  transition: transform var(--duration-fast) var(--ease-standard);
+}
+.gs-transcript[open] summary::before { transform: rotate(90deg); }
+.gs-transcript summary:hover { background: var(--control-fill-hover); color: var(--text-primary); }
+.gs-transcript__text {
+  margin: var(--space-3) 0 0;
+  max-width: 72ch;
+  padding: var(--space-5) var(--space-6);
+  border: 1px solid var(--glass-divider);
+  border-radius: var(--radius-md);
+  background: var(--glass-well);
+  color: var(--text-secondary);
+  white-space: pre-line;
+}
 
-.gs-section-title { margin: 30px 0 12px; font-size: 13px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--vscode-descriptionForeground); }
-.gs-steps { display: flex; flex-direction: column; gap: 12px; }
+/* --- Sections and the three steps ----------------------------------------- */
+
+.gs-steps-wrap { padding-top: var(--space-4); }
+.gs-section-title {
+  margin: var(--space-8) 0 var(--space-2);
+  color: var(--text-primary);
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-tight);
+  line-height: var(--leading-tight);
+}
+.gs-section-intro { margin: 0 0 var(--space-6); max-width: 72ch; color: var(--text-secondary); }
+.gs-summary {
+  display: flex;
+  width: fit-content;
+  max-width: 100%;
+  margin: var(--space-8) 0 0;
+  padding: var(--space-1) var(--space-5);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-pill);
+  background: var(--control-fill);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+.gs-sample-link { margin: var(--space-5) 0 0; color: var(--text-secondary); font-size: var(--text-sm); }
+.gs-sample__note { color: var(--text-tertiary); font-size: var(--text-sm); }
+
+.gs-steps { display: flex; flex-direction: column; gap: var(--space-5); }
 .gs-step {
-  display: flex; gap: 14px; padding: 16px 18px; border-radius: 8px;
-  background: var(--vscode-sideBar-background, var(--vscode-editorWidget-background));
-  border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border, transparent));
+  display: flex;
+  gap: var(--space-6);
+  padding: var(--space-6) var(--space-7) var(--space-7) var(--space-6);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+  background: var(--glass-surface-2);
+  -webkit-backdrop-filter: var(--glass-backdrop);
+  backdrop-filter: var(--glass-backdrop);
+  box-shadow: var(--glass-elevation-1);
 }
 .gs-step__num {
-  flex: none; width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center;
-  font-weight: 700; font-size: 12px;
-  background: var(--vscode-badge-background); color: var(--vscode-badge-foreground);
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  margin-top: 1px;
+  border: 1px solid var(--control-border-selected);
+  border-radius: var(--radius-pill);
+  background: var(--glass-tint-accent);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
 }
-.gs-step[data-done="true"] .gs-step__num { background: var(--vscode-testing-iconPassed, #2f8a48); color: var(--vscode-editor-background); }
+/* A finished step shows a tick in place of its number (the number stays in the text). */
+.gs-step[data-done="true"] .gs-step__num {
+  border-color: var(--gs-ok-edge);
+  background: var(--glass-tint-ok);
+  color: var(--ok-fg);
+  font-size: 0;
+}
+.gs-step[data-done="true"] .gs-step__num::after {
+  content: '';
+  width: 9px;
+  height: 5px;
+  border-left: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: translateY(-1px) rotate(-45deg);
+}
 .gs-step__body { flex: 1; min-width: 0; }
-.gs-step__title { margin: 2px 0 4px; font-size: 14px; font-weight: 600; }
-.gs-step__text { margin: 0 0 12px; max-width: 72ch; color: var(--vscode-descriptionForeground); }
-.gs-step__actions { display: flex; flex-wrap: wrap; gap: 8px; }
-.gs-step__status { display: flex; align-items: center; gap: 6px; margin: 10px 0 0; font-size: 12px; color: var(--vscode-descriptionForeground); }
-.gs-step__status--ok { color: var(--vscode-testing-iconPassed, #2f8a48); }
-.gs-step__status--warn { color: var(--vscode-editorWarning-foreground); }
-.gs-step__hint { margin: 10px 0 0; font-size: 12px; color: var(--vscode-descriptionForeground); }
-.gs-step__hint code, .gs-step__text code, .gs-result code, .gs-noproject code, .gs-sample__text code {
-  font-family: var(--vscode-editor-font-family); font-size: .95em; padding: 1px 5px; border-radius: 3px;
-  background: var(--vscode-textCodeBlock-background, rgba(127, 127, 127, .15));
+.gs-step__title {
+  margin: 2px 0 var(--space-2);
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: var(--weight-semibold);
+  line-height: var(--leading-tight);
 }
-
-.gs-btn {
-  display: inline-flex; align-items: center; gap: 6px; padding: 6px 14px; border-radius: 4px; cursor: pointer;
-  font: inherit; line-height: 18px; border: 1px solid var(--vscode-button-border, transparent);
-  background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground);
+.gs-step__text { margin: 0 0 var(--space-5); max-width: 72ch; color: var(--text-secondary); }
+.gs-step__text strong { color: var(--text-primary); font-weight: var(--weight-semibold); }
+.gs-step__actions { display: flex; flex-wrap: wrap; gap: var(--space-4); }
+.gs-step__hint { margin: var(--space-5) 0 0; max-width: 72ch; color: var(--text-secondary); font-size: var(--text-sm); }
+.gs-step__hint strong { color: var(--text-primary); font-weight: var(--weight-semibold); }
+.gs-step__hint code,
+.gs-step__text code,
+.gs-result code,
+.gs-noproject code,
+.gs-sample__text code {
+  padding: 0 var(--space-2);
+  border: 1px solid var(--glass-divider);
+  border-radius: var(--radius-xs);
+  background: var(--glass-well);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+  overflow-wrap: anywhere;
 }
-.gs-btn:hover { background: var(--vscode-button-secondaryHoverBackground); }
-.gs-btn--primary { background: var(--vscode-button-background); color: var(--vscode-button-foreground); font-weight: 600; }
-.gs-btn--primary:hover { background: var(--vscode-button-hoverBackground); }
-.gs-btn:disabled { opacity: .6; cursor: default; }
-.gs-btn:focus-visible, .gs-link:focus-visible, .gs-transcript summary:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 2px; }
-.gs-link {
-  display: inline-flex; align-items: center; gap: 4px; padding: 0; border: 0; background: none; cursor: pointer;
-  font: inherit; color: var(--vscode-textLink-foreground);
+/* Statuses: a capsule, tinted by what it means. */
+.gs-step__status {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: fit-content;
+  max-width: 100%;
+  margin: var(--space-5) 0 0;
+  padding: var(--space-1) var(--space-5);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-pill);
+  background: var(--control-fill);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
 }
-.gs-link:hover { color: var(--vscode-textLink-activeForeground); text-decoration: underline; }
-
-[hidden] { display: none !important; }
-
-.gs-result {
-  margin: 12px 0 0; padding: 10px 12px; border-radius: 6px; font-size: 12px;
-  background: var(--vscode-textBlockQuote-background, rgba(127, 127, 127, .1));
-  border-left: 3px solid var(--vscode-testing-iconPassed, #2f8a48);
+.gs-step__status--ok { border-color: var(--gs-ok-edge); background: var(--glass-tint-ok); }
+.gs-step__status--ok .gs-icon { color: var(--ok-fg); }
+.gs-step__status--warn {
+  border-color: var(--glass-tint-warning-edge);
+  border-radius: var(--radius-md);
+  background: var(--glass-tint-warning);
 }
-.gs-result--error { border-left-color: var(--vscode-errorForeground); }
-.gs-result__message { margin: 0 0 6px; font-weight: 600; color: var(--vscode-foreground); }
-.gs-result__list { margin: 0; padding: 0; list-style: none; }
-.gs-result__item { margin: 6px 0 0; color: var(--vscode-descriptionForeground); }
-.gs-result__item strong { color: var(--vscode-foreground); font-weight: 600; }
-.gs-result__paths { display: flex; flex-wrap: wrap; gap: 4px 6px; margin-top: 3px; }
+.gs-get,
+.gs-recheck {
+  margin: var(--space-5) 0 0;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+.gs-get { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-6); }
+.gs-recheck em,
+.gs-footer em { font-style: normal; color: var(--text-primary); }
 
-.gs-chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 12px; padding: 0; list-style: none; }
+/* Links are kit gp-link buttons; an icon sits beside the text. */
+.gs-link { display: inline-flex; align-items: center; gap: var(--space-2); }
+/* While the setup runs, its button says "Setting up…" and shows it is busy. */
+.gs-btn[data-action="setupAiHelper"]:disabled { cursor: progress; opacity: 0.7; }
+
+/* Assistants found: one capsule each. */
+.gs-chips { display: flex; flex-wrap: wrap; gap: var(--space-3); margin: 0 0 var(--space-5); padding: 0; list-style: none; }
 .gs-chip {
-  display: inline-flex; align-items: center; gap: 6px; padding: 4px 11px 4px 9px; border-radius: 999px;
-  font-size: 12px; font-weight: 600; color: var(--vscode-foreground);
-  background: var(--vscode-badge-background, rgba(127, 127, 127, .2));
-  border: 1px solid var(--vscode-widget-border, transparent);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-1) var(--space-5) var(--space-1) var(--space-4);
+  border: 1px solid var(--gs-ok-edge);
+  border-radius: var(--radius-pill);
+  background: var(--glass-tint-ok);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
 }
-.gs-chip .gs-icon { color: var(--vscode-testing-iconPassed, #2f8a48); }
-.gs-get {
-  display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; margin: 12px 0 0;
-  font-size: 12px; color: var(--vscode-descriptionForeground);
-}
-.gs-recheck { margin: 10px 0 0; font-size: 12px; color: var(--vscode-descriptionForeground); }
+.gs-chip .gs-icon { color: var(--ok-fg); }
 
-.gs-launch { display: flex; flex-direction: column; gap: 8px; margin: 0 0 4px; }
+/* The setup's result: a notice strip, green when it worked, red when not. */
+.gs-result {
+  margin: var(--space-5) 0 0;
+  padding: var(--space-5) var(--space-6);
+  border: 1px solid var(--gs-ok-edge);
+  border-radius: var(--radius-md);
+  background: var(--glass-tint-ok);
+  font-size: var(--text-sm);
+}
+.gs-result--error { border-color: var(--glass-tint-error-edge); background: var(--glass-tint-error); }
+.gs-result__message { margin: 0 0 var(--space-3); color: var(--text-primary); font-weight: var(--weight-semibold); }
+.gs-result__message:last-child { margin-bottom: 0; }
+.gs-result__list { margin: 0; padding: 0; list-style: none; }
+.gs-result__item { margin: var(--space-4) 0 0; color: var(--text-secondary); }
+.gs-result__item strong { color: var(--text-primary); font-weight: var(--weight-semibold); }
+.gs-result__paths { display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-3); margin-top: var(--space-2); }
+
+/* Step 3: one row per assistant, sunk into the card. */
+.gs-launch { display: flex; flex-direction: column; gap: var(--space-4); margin: 0 0 var(--space-2); }
 .gs-launch__row {
-  display: grid; grid-template-columns: 124px minmax(0, 1fr) auto; align-items: center; gap: 4px 12px;
-  padding: 10px 12px; border-radius: 6px;
-  background: var(--vscode-editor-background);
-  border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border, transparent));
+  display: grid;
+  grid-template-columns: 124px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-2) var(--space-5);
+  padding: var(--space-4) var(--space-4) var(--space-4) var(--space-5);
+  border: 1px solid var(--glass-divider);
+  border-radius: var(--radius-md);
+  background: var(--glass-well);
 }
-.gs-launch__name { font-weight: 600; }
+.gs-launch__name { color: var(--text-primary); font-weight: var(--weight-semibold); }
 .gs-launch__prompt {
-  justify-self: start; max-width: 100%; overflow-wrap: anywhere;
-  font-family: var(--vscode-editor-font-family); font-size: 13px; padding: 3px 8px; border-radius: 4px;
-  background: var(--vscode-textCodeBlock-background, rgba(127, 127, 127, .15));
+  justify-self: start;
+  max-width: 100%;
+  padding: var(--space-1) var(--space-4);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  background: var(--control-fill);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
 }
-.gs-launch__actions { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
-.gs-launch__where { grid-column: 2 / -1; margin: 0; font-size: 12px; color: var(--vscode-descriptionForeground); }
-@media (max-width: 620px) {
-  .gs-launch__row { grid-template-columns: minmax(0, 1fr); }
-  .gs-launch__where { grid-column: auto; }
-  .gs-launch__actions { justify-content: flex-start; }
-}
+.gs-launch__actions { display: flex; flex-wrap: wrap; gap: var(--space-3); justify-content: flex-end; }
+.gs-launch__where { grid-column: 2 / -1; margin: 0; color: var(--text-tertiary); font-size: var(--text-sm); }
+
+/* --- No folder open -------------------------------------------------------- */
 
 .gs-noproject {
-  margin: 14px 0 0; padding: 16px 18px; border-radius: 8px;
-  background: var(--vscode-sideBar-background, var(--vscode-editorWidget-background));
-  border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border, transparent));
+  margin: var(--space-8) 0 0;
+  padding: var(--space-7) var(--space-8);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-xl);
+  background: var(--glass-surface-3);
+  -webkit-backdrop-filter: var(--glass-backdrop);
+  backdrop-filter: var(--glass-backdrop);
+  box-shadow: var(--glass-elevation-2);
 }
-.gs-noproject { margin-top: 26px; }
-.gs-sample__title { margin: 0 0 4px; font-size: 14px; font-weight: 600; color: var(--vscode-foreground); }
-.gs-sample__text { margin: 0 0 12px; max-width: 72ch; color: var(--vscode-descriptionForeground); }
-.gs-start-more__links { display: inline-flex; flex-wrap: wrap; gap: 4px 14px; margin-left: 6px; vertical-align: top; }
-.gs-noproject__example { margin: 14px 0 0; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; color: var(--vscode-descriptionForeground); }
-.gs-sample-link { margin: 0 0 12px; font-size: 12px; color: var(--vscode-descriptionForeground); }
-.gs-sample__note { font-size: 12px; color: var(--vscode-descriptionForeground); }
-.gs-summary { margin: 26px 0 0; font-size: 13px; color: var(--vscode-foreground); }
-.gs-step__reason { margin: -4px 0 12px; max-width: 72ch; font-weight: 600; color: var(--vscode-foreground); }
-.gs-around { margin: 26px 0 0; }
-.gs-section-intro { margin: -6px 0 12px; max-width: 72ch; color: var(--vscode-descriptionForeground); }
-.gs-steps + .gs-section-title { margin-top: 26px; }
+.gs-sample__title {
+  margin: 0 0 var(--space-2);
+  color: var(--text-primary);
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-tight);
+  line-height: var(--leading-tight);
+}
+.gs-sample__text { margin: 0 0 var(--space-6); max-width: 72ch; color: var(--text-secondary); }
+.gs-noproject__example {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-4) var(--space-5);
+  margin: var(--space-6) 0 0;
+  padding-top: var(--space-6);
+  border-top: 1px solid var(--glass-divider);
+  color: var(--text-secondary);
+}
+
+/* --- Show Me Around: a card with its one button at the end ----------------- */
+
+.gs-around {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: var(--space-7);
+  margin: var(--space-8) 0 0;
+  padding: var(--space-6) var(--space-7);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+  background: var(--glass-surface-2);
+  -webkit-backdrop-filter: var(--glass-backdrop);
+  backdrop-filter: var(--glass-backdrop);
+  box-shadow: var(--glass-elevation-1);
+}
+.gs-around .gs-section-title { grid-column: 1; margin: 0 0 var(--space-2); }
+.gs-around .gs-section-intro { grid-column: 1; margin: 0; }
+.gs-around > .gs-btn { grid-column: 2; grid-row: 1 / span 2; }
+
 .gs-footer {
-  display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 20px; margin-top: 28px; padding-top: 14px;
-  border-top: 1px solid var(--vscode-widget-border, var(--vscode-panel-border, rgba(127, 127, 127, .3)));
-  font-size: 12px; color: var(--vscode-descriptionForeground);
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: var(--space-4) var(--space-7);
+  margin-top: var(--space-9);
+  padding-top: var(--space-6);
+  border-top: 1px solid var(--glass-divider);
+  color: var(--text-tertiary);
+  font-size: var(--text-sm);
 }
-.gs-footer em { font-style: normal; color: var(--vscode-foreground); }
+
+/* --- Page states (the script flips data-project / data-mode) --------------- */
+
 .gs[data-project="false"] .gs-steps-wrap { display: none; }
 .gs[data-project="true"] .gs-noproject { display: none; }
 .gs[data-project="unknown"] .gs-noproject { display: none; }
 .gs[data-project="unknown"] .gs-step__actions { visibility: hidden; }
+
+/* --- Narrow ---------------------------------------------------------------- */
+
+@media (max-width: 620px) {
+  .gs-launch__row { grid-template-columns: minmax(0, 1fr); }
+  .gs-launch__where { grid-column: auto; }
+  .gs-launch__actions { justify-content: flex-start; }
+  .gs-around { grid-template-columns: minmax(0, 1fr); }
+  .gs-around > .gs-btn { grid-column: 1; grid-row: auto; justify-self: start; margin-top: var(--space-5); }
+}
+@media (max-width: 480px) {
+  .gs { padding: var(--space-8) var(--space-6) var(--space-8); }
+  body { --gs-display: 22px; }
+  .gs-summary { border-radius: var(--radius-md); }
+  .gs-hero__sub { font-size: var(--text-md); }
+  .gs-step { gap: var(--space-5); padding: var(--space-5); }
+  .gs-noproject { padding: var(--space-6); }
+  .gs-video__sound,
+  .gs-video__tour { min-height: 34px; padding: 0 var(--space-6); font-size: var(--text-md); }
+}
+
+/* --- High contrast: the tints are off, so meaning moves to the border ----- */
+
+body.vscode-high-contrast .gs-step__num,
+body.vscode-high-contrast-light .gs-step__num { border-color: var(--glass-border-strong); }
+body.vscode-high-contrast .gs-step[data-done="true"] .gs-step__num,
+body.vscode-high-contrast-light .gs-step[data-done="true"] .gs-step__num,
+body.vscode-high-contrast .gs-chip,
+body.vscode-high-contrast-light .gs-chip,
+body.vscode-high-contrast .gs-step__status--ok,
+body.vscode-high-contrast-light .gs-step__status--ok,
+body.vscode-high-contrast .gs-result,
+body.vscode-high-contrast-light .gs-result { border-color: var(--ok-fg); }
+body.vscode-high-contrast .gs-step__status--warn,
+body.vscode-high-contrast-light .gs-step__status--warn { border-color: var(--warning-fg); }
+body.vscode-high-contrast .gs-result--error,
+body.vscode-high-contrast-light .gs-result--error { border-color: var(--error-fg); }
+body.vscode-high-contrast .gs-video__sound,
+body.vscode-high-contrast .gs-video__tour,
+body.vscode-high-contrast-light .gs-video__sound,
+body.vscode-high-contrast-light .gs-video__tour { border-color: var(--vscode-button-border, var(--glass-border)); }
+body.vscode-high-contrast .gs-video__sound:hover,
+body.vscode-high-contrast .gs-video__tour:hover,
+body.vscode-high-contrast-light .gs-video__sound:hover,
+body.vscode-high-contrast-light .gs-video__tour:hover,
+body.vscode-high-contrast .gs-transcript summary:hover,
+body.vscode-high-contrast-light .gs-transcript summary:hover {
+  border-color: var(--control-border-hover);
+  border-style: dashed;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gs { animation: none; }
+  .gs-video__sound:active,
+  .gs-video__tour:active { transform: translate(-50%, -50%); }
+}
 `;
+
+const STYLE = GLASS_PAGE_STYLE + PAGE_STYLE;
 
 // Plain ES5-style JS so it runs untranspiled in any webview. Talks only in
 // GettingStartedToHost / GettingStartedToWebview shapes.
@@ -1079,14 +1422,14 @@ function launchRow(id: AiAssistantId): string {
   const a = assistantInfo(id);
   const copyLabel = id === 'claude' ? 'gs-copy-label gs-copy-label--claude' : 'gs-copy-label';
   const open = id === 'claude'
-    ? `<button class="gs-btn gs-btn--primary" type="button" data-action="openClaude">${ICON_TERMINAL}Open Claude Code</button>`
+    ? `<button class="gs-btn gs-btn--primary gp-button gp-button--primary" type="button" data-action="openClaude">${ICON_TERMINAL}Open Claude Code</button>`
     : id === 'copilot'
-      ? `<button class="gs-btn gs-btn--primary" type="button" data-action="openCopilotChat">${ICON_CHAT}Open Copilot Chat</button>`
+      ? `<button class="gs-btn gs-btn--primary gp-button gp-button--primary" type="button" data-action="openCopilotChat">${ICON_CHAT}Open Copilot Chat</button>`
       : '';
   return `<div class="gs-launch__row" data-assistant-row="${id}" hidden>
               <span class="gs-launch__name">${escapeHtml(a.name)}</span>
               <code class="gs-launch__prompt">${escapeHtml(a.prompt)}</code>
-              <span class="gs-launch__actions">${open}<button class="gs-btn" type="button" data-action="copyPrompt" data-assistant="${id}">${ICON_COPY}<span class="${copyLabel}">Copy</span></button></span>
+              <span class="gs-launch__actions">${open}<button class="gs-btn gp-button" type="button" data-action="copyPrompt" data-assistant="${id}">${ICON_COPY}<span class="${copyLabel}">Copy</span></button></span>
               <p class="gs-launch__where">${escapeHtml(a.where)}</p>
             </div>`;
 }
@@ -1117,7 +1460,7 @@ export function buildGettingStartedHtml(input: GettingStartedHtmlInput): string 
   const initialProject = mode === 'nofolder' ? 'false' : 'unknown';
   // The sample is a dbt project, so it is offered on the dbt page only (never in an empty window).
   const codespacesButton = (input.codespaces ?? SAMPLE_CODESPACES_LIVE)
-    ? ` <button class="gs-link" type="button" data-action="openExternal" data-target="sampleCodespaces">Open it in Codespaces</button>
+    ? ` <button class="gs-link gp-link" type="button" data-action="openExternal" data-target="sampleCodespaces">Open it in Codespaces</button>
       <span class="gs-sample__note">Runs in your browser &mdash; nothing to install.</span>`
     : '';
   const n = escapeHtml(nonce);
@@ -1135,14 +1478,14 @@ export function buildGettingStartedHtml(input: GettingStartedHtmlInput): string 
   const chips = AI_ASSISTANTS.map((a) =>
     `<li class="gs-chip" data-assistant-row="${a.id}" hidden>${ICON_CHECK}${escapeHtml(a.name)}</li>`).join('\n            ');
   const otherLinks = AI_ASSISTANTS.filter((a) => a.id !== 'claude').map((a) =>
-    `<button class="gs-link" type="button" data-action="openExternal" data-target="${ASSISTANT_INSTALL_TARGETS[a.id]}">${escapeHtml(a.name)}</button>`,
+    `<button class="gs-link gp-link" type="button" data-action="openExternal" data-target="${ASSISTANT_INSTALL_TARGETS[a.id]}">${escapeHtml(a.name)}</button>`,
   ).join('\n              ');
   const launchRows = AI_ASSISTANTS.map((a) => launchRow(a.id)).join('\n            ');
   // Show Me Around (every page): the interactive guide replaces the short per-start videos.
   const aroundSection = `<section class="gs-around" aria-label="${escapeHtml(SHOW_ME_AROUND_SECTION_TITLE)}">
     <h2 class="gs-section-title">${escapeHtml(SHOW_ME_AROUND_SECTION_TITLE)}</h2>
     <p class="gs-section-intro">${escapeHtml(SHOW_ME_AROUND_SECTION_INTRO)}</p>
-    <button class="gs-btn" type="button" data-action="showMeAround">${escapeHtml(SHOW_ME_AROUND_LABEL)}</button>
+    <button class="gs-btn gp-button" type="button" data-action="showMeAround">${escapeHtml(SHOW_ME_AROUND_LABEL)}</button>
   </section>`;
 
   return `<!DOCTYPE html>
@@ -1169,7 +1512,7 @@ export function buildGettingStartedHtml(input: GettingStartedHtmlInput): string 
       ${fallbackPoster}
       <div class="gs-video__fallback-card">
         <p class="gs-video__fallback-text">This editor can't play the video here.</p>
-        <button class="gs-btn gs-btn--primary" type="button" data-action="openExternal" data-target="${videoOnlineTarget}">${ICON_EXTERNAL}Watch in your browser</button>
+        <button class="gs-btn gs-btn--primary gp-button gp-button--primary gp-button--lg" type="button" data-action="openExternal" data-target="${videoOnlineTarget}">${ICON_EXTERNAL}Watch in your browser</button>
       </div>
     </div>
   </section>
@@ -1181,13 +1524,13 @@ export function buildGettingStartedHtml(input: GettingStartedHtmlInput): string 
   <section class="gs-noproject" aria-label="Open a folder">
     <h2 class="gs-sample__title">Open the folder your data model lives in</h2>
     <p class="gs-sample__text">Any folder works: ERD Studio keeps your design in <code>.erd-studio/</code>, next to your code.</p>
-    <button class="gs-btn gs-btn--primary" type="button" data-action="openFolder">${escapeHtml(OPEN_FOLDER_LABEL)}</button>
-    <p class="gs-noproject__example">Or see a finished data model first: ${startButton('example', 'gs-btn', false)}</p>
+    <button class="gs-btn gs-btn--primary gp-button gp-button--primary gp-button--lg" type="button" data-action="openFolder">${escapeHtml(OPEN_FOLDER_LABEL)}</button>
+    <p class="gs-noproject__example">Or see a finished data model first: ${startButton('example', 'gs-btn gp-button', false)}</p>
   </section>
 
   <div class="gs-steps-wrap">
     <p class="gs-summary" role="status" hidden></p>
-    <p class="gs-sample-link" ${only('unknown', 'dbt')}><button class="gs-link" type="button" data-action="trySample">New to this? Try it on the sample project first</button>${codespacesButton}</p>
+    <p class="gs-sample-link" ${only('unknown', 'dbt')}><button class="gs-link gp-link" type="button" data-action="trySample">New to this? Try it on the sample project first</button>${codespacesButton}</p>
 
     <h2 class="gs-section-title">Enrich with your AI assistant (optional)</h2>
     <p class="gs-section-intro" ${only('unknown', 'nofolder', 'dbt')}>Your assistant adds what dbt doesn't record: keys, grain, rationale and your team's modelling style.</p>
@@ -1203,11 +1546,11 @@ export function buildGettingStartedHtml(input: GettingStartedHtmlInput): string 
           </ul>
           <p class="gs-step__text" data-when="none" hidden><span ${only('unknown', 'nofolder', 'dbt')}>The guided setup runs inside an AI coding assistant, and none</span><span ${only('logical')}>ERD Studio works with the AI coding assistant you already use, and none</span> was found on this computer. Install one, then press Re-check.<span ${only('unknown', 'nofolder', 'dbt')}> Claude Code is recommended: it's the one the guide is tested with.</span></p>
           <div class="gs-step__actions" data-when="none" hidden>
-            <button class="gs-btn gs-btn--primary" type="button" data-action="openExternal" data-target="claudeCodeDocs">${ICON_EXTERNAL}Get Claude Code</button>
-            <button class="gs-btn" type="button" data-action="refreshStatus">Re-check</button>
+            <button class="gs-btn gs-btn--primary gp-button gp-button--primary" type="button" data-action="openExternal" data-target="claudeCodeDocs">${ICON_EXTERNAL}Get Claude Code</button>
+            <button class="gs-btn gp-button" type="button" data-action="refreshStatus">Re-check</button>
           </div>
           <p class="gs-get" data-when="none" hidden>Also supported: ${otherLinks}</p>
-          <p class="gs-recheck" data-when="found" hidden>Use another one? Install it, then <button class="gs-link" type="button" data-action="refreshStatus">Re-check</button>. Already installed but not listed? Command Palette &rarr; <em>ERD Studio: Install AI Helper Files…</em> &rarr; <em>Agent Skills</em>.</p>
+          <p class="gs-recheck" data-when="found" hidden>Use another one? Install it, then <button class="gs-link gp-link" type="button" data-action="refreshStatus">Re-check</button>. Already installed but not listed? Command Palette &rarr; <em>ERD Studio: Install AI Helper Files…</em> &rarr; <em>Agent Skills</em>.</p>
         </div>
       </section>
 
@@ -1217,7 +1560,7 @@ export function buildGettingStartedHtml(input: GettingStartedHtmlInput): string 
           <h3 class="gs-step__title">Set up my AI helper</h3>
           <p class="gs-step__text" data-when="missing ready update unmanaged" hidden><span ${only('unknown', 'nofolder', 'dbt')}>Adds the <code>/erd-studio-setup</code> guide and ERD Studio's file-format rules for </span><span ${only('logical')}>Adds ERD Studio's file-format rules for </span><strong class="gs-helper-for"></strong><span class="gs-helper-later" hidden> (so it's ready whichever you install)</span><span ${only('unknown', 'nofolder', 'dbt')}>, plus a small checking tool your assistant uses behind the scenes.</span><span ${only('logical')}>, so what your assistant writes opens on the canvas. It also adds the <code>/erd-studio-setup</code> guide and a small checking tool your assistant uses behind the scenes.</span></p>
           <div class="gs-step__actions" data-when="missing ready update unmanaged" hidden>
-            <button class="gs-btn gs-btn--primary" type="button" data-action="setupAiHelper"><span class="gs-setup-label">Set up my AI helper</span></button>
+            <button class="gs-btn gs-btn--primary gp-button gp-button--primary" type="button" data-action="setupAiHelper"><span class="gs-setup-label">Set up my AI helper</span></button>
           </div>
           <p class="gs-step__status gs-step__status--ok" data-when="ready" hidden>${ICON_CHECK}<span>Installed</span></p>
           <p class="gs-step__status gs-step__status--warn" data-when="update" hidden>Update available</p>
@@ -1247,7 +1590,7 @@ export function buildGettingStartedHtml(input: GettingStartedHtmlInput): string 
 
   <footer class="gs-footer">
     <span>Rewatch any time: ERD Studio sidebar &#9654; button, or Command Palette &rarr; <em>ERD Studio: ${escapeHtml(TOUR_LABEL)}</em>.</span>
-    <button class="gs-link" type="button" data-action="openExternal" data-target="dbtInstallDocs" ${only('unknown', 'dbt')}>New to dbt? How to install it${ICON_EXTERNAL}</button>
+    <button class="gs-link gp-link" type="button" data-action="openExternal" data-target="dbtInstallDocs" ${only('unknown', 'dbt')}>New to dbt? How to install it${ICON_EXTERNAL}</button>
   </footer>
 </main>
 <script type="application/json" id="gs-data" nonce="${n}">${inlineJson({

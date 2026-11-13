@@ -376,7 +376,8 @@ describe('huge and empty ledgers', () => {
   it('a stopped or failed import that recorded nothing says so, not just zeros', () => {
     for (const status of ['failed', 'cancelled', 'timedOut'] as const) {
       const html = buildImportReportHtml(buildImportReportView(record({ status, ledger: [], imported: undefined })), 'n');
-      expect(html, status).toContain('<p class="ir__empty">');
+      // A neutral notice (the glass kit's gp-notice), not the all-clear's ok tint.
+      expect(html, status).toContain('<p class="ir__empty gp-notice">');
     }
   });
 

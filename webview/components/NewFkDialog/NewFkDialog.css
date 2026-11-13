@@ -724,9 +724,8 @@
  */
 .new-fk-dialog__stored-in {
   flex-shrink: 0;
-  padding: 10px var(--space-7);
-  border-top: 1px solid var(--panel-border);
-  border-top-color: var(--glass-divider);
+  padding: var(--space-5) var(--space-7);
+  border-top: 1px solid var(--glass-divider);
   background: var(--glass-well);
   font-family: var(--font-mono);
   font-size: var(--text-2xs);

@@ -31,7 +31,7 @@
      layouts) never show each other's text through. High contrast resolves to
      an opaque --editor-bg anyway. */
   background:
-    linear-gradient(180deg, color-mix(in srgb, white 4%, transparent), transparent 40%),
+    var(--glass-sheen),
     linear-gradient(var(--glass-surface-3), var(--glass-surface-3)),
     var(--editor-bg);
   border: 1px solid var(--glass-border);

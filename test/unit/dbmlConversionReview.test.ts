@@ -22,8 +22,10 @@ import {
   isConvertPanelToHost,
   locateDbmlRefusal,
   MIGRATE_TO_V5_COMMAND_TITLE,
+  REVIEW_PANEL_STYLE,
   UNSAVED_TAG,
 } from '../../src/services/dbmlConversionReview';
+import { GLASS_PAGE_STYLE } from '../../src/types/glassPageStyle';
 
 function plan(overrides: Partial<DbmlConversionPlan> = {}): DbmlConversionPlan {
   return {
@@ -148,7 +150,7 @@ describe('buildConvertReview', () => {
     });
     expect(view.sections[0].items[0].tag).toBe(UNSAVED_TAG);
     expect(view.sections[0].items[1].tag).toBeUndefined();
-    expect(buildConvertPanelHtml(view, 'n')).toContain(`<span class="cdb-item__tag">${UNSAVED_TAG}</span>`);
+    expect(buildConvertPanelHtml(view, 'n')).toContain(`<span class="cdb-item__tag gp-pill gp-pill--warning">${UNSAVED_TAG}</span>`);
   });
 
   it('a v4 diagram names the migration command, and says when that command already ran', () => {
@@ -194,7 +196,11 @@ describe('buildConvertPanelHtml', () => {
       creates: [{ path: 'gold/tables/gold/<b>&.dbml', text: '' }],
       summary: { tables: 1, diagrams: 0, relationshipsFiles: 0, relationships: 0 },
     }), { display, introLines: ['Commit your work first.'] });
-    const html = buildConvertPanelHtml(view, 'abc123');
+    const full = buildConvertPanelHtml(view, 'abc123');
+    // The shared glass foundation comes first in the one <style>; its token definitions
+    // may hold literals (fallbacks), so the colour check reads everything else.
+    expect(full).toContain(`<style nonce="abc123">${GLASS_PAGE_STYLE}${REVIEW_PANEL_STYLE}</style>`);
+    const html = full.replace(GLASS_PAGE_STYLE, '');
     expect(buildConvertPanelCsp('abc123')).toBe("default-src 'none'; style-src 'nonce-abc123'; script-src 'nonce-abc123';");
     expect(html).toContain('content="default-src &#39;none&#39;; style-src &#39;nonce-abc123&#39;; script-src &#39;nonce-abc123&#39;;"');
     expect(html).toContain('<style nonce="abc123">');
@@ -206,12 +212,12 @@ describe('buildConvertPanelHtml', () => {
     expect(html).not.toContain('<b>&');
     // A scrollable list of collapsible sections, with the buttons outside it.
     expect(html).toMatch(/\.cdb__list \{[^}]*overflow-y: auto/);
-    expect(html).toContain('<details class="cdb-section" data-section="tables" open>');
+    expect(html).toContain('<details class="cdb-section gp-card" data-section="tables" open>');
     expect(html.indexOf('class="cdb__actions"')).toBeGreaterThan(html.indexOf('</section>'));
     // Bottom-left, away from the notifications VS Code stacks at the bottom right (onboarding story 08).
     expect(html).toMatch(/\.cdb__actions \{[^}]*justify-content: flex-start/);
     expect(html).toMatch(/\.cdb__status \{[^}]*order: 1/);
-    expect(html).toContain('data-action="cancel">Cancel</button><button type="button" class="cdb__button" data-action="convert">Convert</button>');
+    expect(html).toContain('data-action="cancel">Cancel</button><button type="button" class="cdb__button gp-button gp-button--lg gp-button--primary" data-action="convert">Convert</button>');
     expect(html).toContain(`<title>${CONVERT_PANEL_TITLE}</title>`);
   });
 
@@ -224,7 +230,7 @@ describe('buildConvertPanelHtml', () => {
     const html = buildConvertPanelHtml(view, 'n');
     expect(html).toContain('<span class="cdb__count-value">1,100</span> tables');
     expect(html).toContain('<span class="cdb__count-value">2,266</span> relationships');
-    expect(html).toContain('<span class="cdb-section__count">1,100</span>');
+    expect(html).toContain('<span class="cdb-section__count gp-badge">1,100</span>');
     expect(view.summary).toContain('1,100 tables and 21 diagrams convert to DBML');
   });
 });
@@ -358,9 +364,9 @@ describe('buildConvertReview: what Convert handles, leaves and keeps missing (D2
     expect(section('missing').hint).toBe('These tables have no table file. They stay on their diagram, drawn as missing exactly as before. Create them later with Add from dbt.');
     const html = buildConvertPanelHtml(view, 'n');
     // Each badge counts what its title names: one file left, two missing tables.
-    expect(html).toContain('Left as YAML until fixed<span class="cdb-section__count">1</span>');
-    expect(html).toContain('Kept as missing on their diagrams<span class="cdb-section__count">2</span>');
-    expect(html).toContain('<p class="cdb-section__hint">This file stays exactly as it is');
+    expect(html).toContain('Left as YAML until fixed<span class="cdb-section__count gp-badge">1</span>');
+    expect(html).toContain('Kept as missing on their diagrams<span class="cdb-section__count gp-badge">2</span>');
+    expect(html).toContain('<p class="cdb-section__hint gp-hint">This file stays exactly as it is');
     expect(html).toContain('data-action="convert"');
     expect(html).toContain('data-action="open" data-index="0"');
     expect(html).toContain('<p class="cdb__summary">1 table and 1 diagram convert to DBML;');

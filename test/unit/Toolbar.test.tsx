@@ -338,7 +338,9 @@ describe('Toolbar layout-dirty button', () => {
     openOptionsPanel();
     expect(screen.queryByText(/Press Re-apply Layout/)).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'None' }));
-    expect(screen.getByText(/No grouping\. Tables are placed freely to reduce line crossings\..*Press Re-apply Layout to use these choices\./)).toBeTruthy();
+    // The reminder is its own line under the description (glass restyle).
+    expect(screen.getByText('No grouping. Tables are placed freely to reduce line crossings.')).toBeTruthy();
+    expect(screen.getByText('Press Re-apply Layout to use these choices.').className).toContain('toolbar__lp-desc--reminder');
   });
 
   // Real-app check (2026-11-12): Table type -> None -> Re-apply moved nothing

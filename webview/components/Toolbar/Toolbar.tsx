@@ -923,12 +923,21 @@ export function Toolbar({ nodes, edges }: ToolbarProps) {
                     : partitionStrategy === 'depth'
                     ? 'Arranges tables so that relationship lines flow in one direction, reducing crossings.'
                     : 'No grouping. Tables are placed freely to reduce line crossings.'}
-                    {(partitionStrategy === 'role' || partitionStrategy === 'none')
-                      && tableTypeBandCount(nodes.filter((n): n is TableFlowNode => n.type === 'model')) < 2
-                      ? ' These tables have no table types to group by, so Table type and None arrange them the same way.'
-                      : ''}
-                    {layoutDirty ? ' Press Re-apply Layout to use these choices.' : ''}
                   </span>
+                  {/* Each note on a line of its own, so the description never
+                      runs into one paragraph; the reminder carries the amber
+                      dot of the dirty Layout / Re-apply buttons. */}
+                  {(partitionStrategy === 'role' || partitionStrategy === 'none')
+                    && tableTypeBandCount(nodes.filter((n): n is TableFlowNode => n.type === 'model')) < 2 && (
+                    <span className="toolbar__lp-desc toolbar__lp-desc--note">
+                      These tables have no table types to group by, so Table type and None arrange them the same way.
+                    </span>
+                  )}
+                  {layoutDirty && (
+                    <span className="toolbar__lp-desc toolbar__lp-desc--reminder">
+                      Press Re-apply Layout to use these choices.
+                    </span>
+                  )}
                 </div>
 
                 {/* Direction + Spacing side by side */}

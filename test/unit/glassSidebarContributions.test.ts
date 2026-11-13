@@ -85,22 +85,21 @@ describe('real package.json: row context menus', () => {
     expect(contextMenu(DIAGRAMS, 'layer')).toEqual([['Edit Layer', 'Remove Layer']]);
   });
 
-  it('a table in the Table Library: Open in Diagram inline, then Open / Reveal / Add, then Move / Delete', () => {
+  it('a table in the Table Library: Add to Open Diagram and Open in Diagram inline, then Open / Reveal / Add, then Move / Delete', () => {
     const dbml = { 'erdStudio.storage': 'dbml' };
     const row = index.resolve('view/item/context', ctx(TABLES, 'logicalModel', dbml));
-    expect(titles(row.inline)).toEqual(['Open in Diagram…']);
-    expect(row.inline[0].icon).toBe('open-preview');
-    expect(titles(row.navigation)).toEqual(['Open in Diagram…', 'Reveal in Explorer', 'Add to Diagram…']);
+    // The native tree's hover buttons (the glass sidebar shows only the first: rowActions.ts).
+    expect(titles(row.inline)).toEqual(['Add to Open Diagram', 'Open in Diagram…']);
+    expect(row.inline.map((a) => a.icon)).toEqual(['add', 'open-preview']);
+    expect(titles(row.navigation)).toEqual(['Open in Diagram…', 'Reveal in Explorer', 'Add to Open Diagram', 'Add to Diagram…']);
     expect(groupTitles(row.groups)).toEqual([['Move Table…', 'Delete Table']]);
 
-    // The glass sidebar adds Add to Diagram as a second hover button (its own `inline@1` entry).
+    // Nothing in the row menus depends on the glass sidebar being on.
     const glass = index.resolve('view/item/context', ctx(TABLES, 'logicalModel', { ...dbml, 'erdStudio.glassSidebar': true }));
-    expect(titles(glass.inline)).toEqual(['Open in Diagram…', 'Add to Diagram…']);
-    expect(glass.inline.map((a) => a.icon)).toEqual(['open-preview', 'diff-added']);
-    expect(titles(glass.navigation)).toEqual(titles(row.navigation));
+    expect(glass).toEqual(row);
 
     expect(contextMenu(TABLES, 'logicalModel', { 'erdStudio.storage': 'yaml' })).toEqual([
-      ['Open in Diagram…', 'Reveal in Explorer', 'Add to Diagram…'],
+      ['Open in Diagram…', 'Reveal in Explorer', 'Add to Open Diagram', 'Add to Diagram…'],
       ['Delete Table'],
     ]);
   });

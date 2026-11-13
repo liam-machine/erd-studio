@@ -861,13 +861,42 @@
   line-height: var(--leading-normal);
 }
 
+/* A second line under the description: why two groupings give one layout. */
+.toolbar__lp-desc--note {
+  color: var(--text-tertiary);
+}
+
+/* "Press Re-apply Layout…": the amber dot of the dirty Layout and Re-apply
+   buttons, so the reminder and the button it points at read as one state. */
+.toolbar__lp-desc--reminder {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  color: var(--text-primary);
+  font-weight: var(--weight-medium);
+}
+
+.toolbar__lp-desc--reminder::before {
+  content: '';
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--warning-fg);
+  box-shadow: 0 0 0 3px var(--glass-tint-warning);
+  /* Sits on the text's x-height rather than its baseline. */
+  transform: translateY(-1px);
+}
+
 /* ---- Body (padded area below header) ---- */
 .toolbar__lp > .toolbar__lp-section,
 .toolbar__lp > .toolbar__lp-columns {
   padding: 0 var(--space-6);
 }
 
-.toolbar__lp > .toolbar__lp-section:first-of-type {
+/* The first section after the header (the header is the first div, so
+   :first-of-type never matched a section). */
+.toolbar__lp > .toolbar__lp-header + .toolbar__lp-section {
   padding-top: var(--space-5);
 }
 

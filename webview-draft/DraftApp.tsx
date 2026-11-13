@@ -16,8 +16,12 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ErdCanvas } from '@erd-studio/renderer';
+// React Flow's base CSS first, so the renderer's own rules (bundled in import
+// order, after it) win ties with it, as in the editor (webview/App.tsx) and the
+// renderer's styles.css. After ErdCanvas, its `.react-flow__panel { margin }`
+// beat the status bar's margin-left and the legend's ? button covered the counts.
 import '@xyflow/react/dist/style.css';
+import { ErdCanvas } from '@erd-studio/renderer';
 
 import { isDraftToWebview, type DraftOtherStart, type DraftView } from '../src/types/draft';
 import type { DisplaySubjectArea } from '../src/types/display';

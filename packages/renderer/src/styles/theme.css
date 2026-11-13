@@ -283,6 +283,9 @@ body {
   --glass-border-strong: color-mix(in srgb, var(--editor-fg) 22%, transparent);
   --glass-divider: color-mix(in srgb, var(--editor-fg) 9%, transparent);
   --glass-highlight: inset 0 1px 0 0 color-mix(in srgb, white 7%, transparent);
+  /* The soft top sheen of a table card or note (a background layer, inside
+     the viewport where there is no backdrop-filter). */
+  --glass-sheen: linear-gradient(180deg, color-mix(in srgb, white 4%, transparent), transparent 40%);
 
   /* Soft layered shadows. "None" is written as a transparent shadow so a
      token can always sit in a comma-separated box-shadow list. */
@@ -355,6 +358,8 @@ body {
   --text-tertiary: color-mix(in srgb, var(--editor-fg) 60%, transparent);
   --text-quaternary: color-mix(in srgb, var(--editor-fg) 36%, transparent);  /* placeholders, disabled */
   --text-on-accent: var(--accent-fg);
+  /* Links in notices and cards. */
+  --text-link: var(--vscode-textLink-foreground, var(--focus-border));
 
   /* Focus halo (a soft ring, paired with the outline for keyboard focus). */
   --focus-halo: 0 0 0 3px color-mix(in srgb, var(--focus-ring-color) 35%, transparent);
@@ -462,6 +467,7 @@ body.vscode-high-contrast-light {
   --glass-border-strong: var(--vscode-contrastActiveBorder, var(--vscode-contrastBorder, var(--panel-border)));
   --glass-divider: var(--vscode-contrastBorder, var(--panel-border));
   --glass-highlight: 0 0 0 0 transparent;
+  --glass-sheen: none;
   --glass-shadow-sm: 0 0 0 0 transparent;
   --glass-shadow-md: 0 0 0 0 transparent;
   --glass-shadow-lg: 0 0 0 0 transparent;
@@ -719,7 +725,7 @@ body.vscode-high-contrast-light {
    Translucent fill, hairline, highlight and shadow; no backdrop-filter. */
 :where(.glass-node-surface) {
   background:
-    linear-gradient(180deg, color-mix(in srgb, white 4%, transparent), transparent 40%),
+    var(--glass-sheen),
     var(--glass-surface-3);
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-lg);

@@ -122,8 +122,11 @@ describe('the glass sidebar bridge', () => {
     // The Diagrams title: the + submenu as an icon, Export All… under the … menu only when its key holds.
     expect(d.actions.navigation.map((a) => a.title)).toContain('New…');
     expect(d.actions.navigation.find((a) => a.title === 'New…')!.submenu!.flat().map((a) => a.title)).toContain('New Diagram…');
-    // Table rows get Add to Diagram as a hover button: the drag the native tree offers cannot leave a webview.
-    expect(section(posted, 'tables').nodes[0].inline?.map((a) => a.title)).toEqual(['Open in Diagram…', 'Add to Diagram…']);
+    // Table rows: one hover button, the + that adds the table to the open diagram (rowActions.ts), then the menu.
+    const table = section(posted, 'tables').nodes[0];
+    expect(table.inline?.map((a) => a.title)).toEqual(['Add to Open Diagram']);
+    expect(table.inline?.[0].icon).toBe('add');
+    expect(table.hasMenu).toBe(true);
   });
 
   it('follows each native view\'s original when: no Table Library without a library folder', async () => {
@@ -150,10 +153,25 @@ describe('the glass sidebar bridge', () => {
     expect(exec).toHaveBeenCalledWith('erdStudio.renameDomain', diagrams[0].children![0]);
 
     // The Table Library selects many natively: (element, selection).
-    const add = section(posted, 'tables').nodes[0].inline!.find((a) => a.title === 'Add to Diagram…')!;
+    const add = section(posted, 'tables').nodes[0].inline!.find((a) => a.title === 'Add to Open Diagram')!;
     send({ type: 'invoke', section: 'tables', id: 'tables:table:dim_customer', menu: add.menu, index: add.index });
     await flush();
-    expect(exec).toHaveBeenCalledWith('erdStudio.addToDiagram', tables[0], [tables[0]]);
+    expect(exec).toHaveBeenCalledWith('erdStudio.addToOpenDiagram', tables[0], [tables[0]]);
+
+    // Open in Diagram… left the hover buttons: the table's menu still has it, first.
+    send({ type: 'itemMenu', section: 'tables', id: 'tables:table:dim_customer' });
+    await flush();
+    const tableMenu = posted.filter((m): m is Extract<GlassHostMessage, { type: 'itemMenu' }> => m.type === 'itemMenu').pop()!;
+    expect(tableMenu.groups.map((g) => g.map((a) => a.title))).toEqual([
+      ['Open in Diagram…', 'Reveal in Explorer'],
+      ['Add to Open Diagram', 'Add to Diagram…'],
+      ['Move Table…'],
+      ['Delete Table'],
+    ]);
+    const open = tableMenu.groups[0][0];
+    send({ type: 'invoke', section: 'tables', id: 'tables:table:dim_customer', menu: open.menu, index: open.index });
+    await flush();
+    expect(exec).toHaveBeenCalledWith('erdStudio.openInDiagram', tables[0], [tables[0]]);
   });
 
   it('refuses what it did not offer: unknown rows, entries whose when fails, menus a row cannot reach', async () => {
