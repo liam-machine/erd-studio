@@ -18,7 +18,10 @@
  * repo), and the folder then gets no automatic draft and no walkthrough.
  * It is shown once per folder ({@link MAX_START_SUGGESTION_SHOWS}): closing it
  * leaves the sidebar's button and the automatic draft on the ERD Studio icon,
- * never another notification. It is the window's one activation prompt
+ * never another notification. An install that was not new on this machine
+ * (an upgrader) is asked once per machine in all
+ * ({@link MAX_UPGRADER_START_SUGGESTION_SHOWS}, issue #305), unless Turn On
+ * asked for it in a folder. It is the window's one activation prompt
  * (`SessionPromptGate`, kind `startSuggestion`).
  *
  * Turned off by the button, by **ERD Studio: Turn Off Start Suggestions for
@@ -56,6 +59,20 @@ export const TURN_ON_START_SUGGESTIONS_TITLE = 'ERD Studio: Turn On Start Sugges
 
 /** Shown at most this many times per folder in all: once. Closing it never brings it back in a later window. */
 export const MAX_START_SUGGESTION_SHOWS = 1;
+
+/**
+ * Global state (machine-local; never synced: nothing calls `setKeysForSync`
+ * for it, so one machine's showing never silences another's): whether this
+ * install was new on this machine, and how often the suggestion was shown on
+ * it in all folders together.
+ */
+export const START_SUGGESTION_MACHINE_KEY = 'erdStudio.startSuggestion.machine';
+/**
+ * An upgrader (an install that was not new on this machine) is shown it at
+ * most this many times on the machine, whatever the folder: once. A new
+ * install keeps once per folder. Turn On for a folder lifts it there.
+ */
+export const MAX_UPGRADER_START_SUGGESTION_SHOWS = 1;
 
 /** Opens the start's draft (nothing is written until Keep). */
 export const SHOW_ME_BUTTON = 'Show Me';
@@ -104,6 +121,20 @@ export interface StartSuggestionState {
   answered?: boolean;
   /** The automatic draft (the ERD Studio icon) was shown in this folder: it is never shown automatically again. */
   draftShown?: boolean;
+  /** Turn On Start Suggestions for This Folder (or Undo after Don't Ask Again): asked for here, so an upgrader's machine-wide limit does not apply. */
+  on?: boolean;
+}
+
+/** What the global state holds ({@link START_SUGGESTION_MACHINE_KEY}). */
+export interface StartSuggestionMachine {
+  /** How many times it was shown on this machine, in every folder. */
+  shown: number;
+  /**
+   * Written once, on the activation that was a fresh install on this machine
+   * (activate()'s `freshInstall`; never from telemetry, which may be off).
+   * Absent: an upgrader, including installs fresh before this key existed.
+   */
+  newInstall?: boolean;
 }
 
 function count(value: unknown): number {
@@ -119,6 +150,17 @@ export function readStartSuggestionState(raw: unknown): StartSuggestionState {
     ...(r.off === true ? { off: true } : {}),
     ...(r.answered === true ? { answered: true } : {}),
     ...(r.draftShown === true ? { draftShown: true } : {}),
+    ...(r.on === true ? { on: true } : {}),
+  };
+}
+
+/** The machine's record as stored, or a fresh one (an upgrader shown nothing yet) for anything else. */
+export function readStartSuggestionMachine(raw: unknown): StartSuggestionMachine {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return { shown: 0 };
+  const r = raw as Record<string, unknown>;
+  return {
+    shown: count(r.shown),
+    ...(r.newInstall === true ? { newInstall: true } : {}),
   };
 }
 
@@ -127,10 +169,20 @@ export function startSuggestionsOff(state: StartSuggestionState, settingOn: bool
   return state.off === true || !settingOn;
 }
 
-/** Whether the notification may still be shown in this folder (cheap: no look at the files). */
-export function startSuggestionDue(input: { settingOn: boolean; state: StartSuggestionState; hasDiagrams: boolean }): boolean {
-  const { settingOn, state, hasDiagrams } = input;
-  return settingOn && !state.off && !state.answered && !hasDiagrams && state.shown < MAX_START_SUGGESTION_SHOWS;
+/**
+ * Whether the notification may still be shown in this folder (cheap: no look
+ * at the files): once per folder, and for an upgrader once per machine unless
+ * Turn On asked for it in this folder.
+ */
+export function startSuggestionDue(input: {
+  settingOn: boolean;
+  state: StartSuggestionState;
+  machine: StartSuggestionMachine;
+  hasDiagrams: boolean;
+}): boolean {
+  const { settingOn, state, machine, hasDiagrams } = input;
+  const machineAllows = machine.newInstall === true || state.on === true || machine.shown < MAX_UPGRADER_START_SUGGESTION_SHOWS;
+  return settingOn && !state.off && !state.answered && !hasDiagrams && state.shown < MAX_START_SUGGESTION_SHOWS && machineAllows;
 }
 
 /** Every suggestion but Convert's ends on this: Show Me writes nothing. */
@@ -182,6 +234,8 @@ export function startSuggestionPrimary(intent: SuggestedStart): string {
 /** The funnel keys (`telemetry/README.md` → Onboarding funnel): user choices, never what was found. */
 export const START_SUGGESTION_FEATURES = {
   shown: 'suggestPromptShown',
+  /** A showing on a machine where it was already shown (another folder, or this one after Turn On): the repeat cost. */
+  shownAgain: 'suggestPromptShownAgain',
   /** Show Me: the draft. */
   showMe: 'suggestPromptShowMe',
   /** Convert to DBML… (Convert's own; `suggestPromptMore`, More Options…, is no longer sent). */
@@ -205,6 +259,9 @@ export interface StartSuggestionDeps {
   convertApplies(): boolean;
   state(): StartSuggestionState;
   saveState(state: StartSuggestionState): PromiseLike<unknown>;
+  /** The machine's record (global state): new install or upgrader, and showings in every folder. */
+  machine(): StartSuggestionMachine;
+  saveMachine(machine: StartSuggestionMachine): PromiseLike<unknown>;
   /** The notification (non-modal); resolves with the button chosen, undefined when closed. */
   show(message: string, ...buttons: string[]): PromiseLike<string | undefined>;
   /** A short non-modal message with optional buttons; resolves with the one chosen. */
@@ -240,11 +297,15 @@ export async function runStartSuggestion(deps: StartSuggestionDeps): Promise<Sta
   if (!isConcreteSuggestion(intent)) return nothing;
   if (intent === 'convert' && !deps.convertApplies()) return nothing;
   const state = deps.state();
+  // Read after the look, as late as it can be: another window on this machine may have shown it meanwhile.
+  const machine = deps.machine();
   // Checked again after the look: a diagram made meanwhile, a setting or a command since activation.
-  if (!startSuggestionDue({ settingOn: deps.settingOn(), state, hasDiagrams: deps.hasDiagrams() })) return nothing;
+  if (!startSuggestionDue({ settingOn: deps.settingOn(), state, machine, hasDiagrams: deps.hasDiagrams() })) return nothing;
 
   await deps.saveState({ ...state, shown: state.shown + 1 });
+  await deps.saveMachine({ ...machine, shown: machine.shown + 1 });
   deps.feature(START_SUGGESTION_FEATURES.shown);
+  if (machine.shown > 0) deps.feature(START_SUGGESTION_FEATURES.shownAgain);
   deps.recordSuggested(intent);
   const primary = startSuggestionPrimary(intent);
   const start: StartAction = intent;

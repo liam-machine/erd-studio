@@ -760,6 +760,9 @@ export const FEATURES = [
   // longest share of a slow activation (activationSlowDiscovery is then the
   // rest of Discovery, without the walk).
   'activationSlowWalk',
+  // #305: the start suggestion showed on a machine where it had already been
+  // shown (another folder, or this one after Turn On): the repeat cost.
+  'suggestPromptShownAgain',
 ] as const;
 export type TelemetryFeature = (typeof FEATURES)[number];
 

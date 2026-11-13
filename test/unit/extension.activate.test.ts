@@ -3950,10 +3950,11 @@ describe('the start suggestion (a folder with no diagram whose start is obvious)
     await activateAndLook();
     expect(shown()).toEqual([]);
 
-    // Turn On…: the count and the answer forgotten, the key cleared; the next window asks again.
+    // Turn On…: the count and the answer forgotten, the key cleared; the next window asks again
+    // (`on`: asked for here, so an upgrader's once-per-machine limit does not hold it back, #305).
     exec.mockClear();
     await vscode.commands.executeCommand('erdStudio.turnOnStartSuggestions');
-    expect(workspaceState.get(STATE_KEY)).toEqual({ shown: 0 });
+    expect(workspaceState.get(STATE_KEY)).toEqual({ shown: 0, on: true });
     expect(exec).toHaveBeenCalledWith('setContext', 'erdStudio.startSuggestionsOff', false);
     tearDownActivation();
     info.mockClear();

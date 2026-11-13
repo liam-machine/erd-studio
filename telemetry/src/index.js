@@ -868,6 +868,8 @@ const FEATURES = [
   'startLookLateSuggestion',
   'dbtSearchSkipped',
   'activationSlowWalk',
+  // #305: the start suggestion showed again on a machine where it had been shown before.
+  'suggestPromptShownAgain',
 ];
 
 /** The only keys `errors` may carry; anything else is dropped. */
