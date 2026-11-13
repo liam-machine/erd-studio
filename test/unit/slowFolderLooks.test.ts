@@ -435,13 +435,15 @@ describe('#295: facts the rule keeps in mind', () => {
     // The search answers through I/O (as the host's IPC reply does), within a few ms of real work.
     vi.spyOn(vscode.workspace, 'findFiles').mockImplementation((() =>
       new Promise((resolve) => fs.stat(file, () => resolve([vscode.Uri.file(file)])))) as never);
+    // Start from the loop's check phase, so that what follows is the same on every Node version:
+    // the next turn of the loop runs its timers before it polls the reply.
+    await new Promise<void>((resolve) => { setImmediate(resolve); });
     const pending = findHostDbtProjects(1000);
-    // Another extension's synchronous activation holds the shared host thread for 1.2 s
-    // (here from the check phase; the loop then runs timers before it polls the reply).
-    setImmediate(() => {
-      const until = Date.now() + 1200;
-      while (Date.now() < until) { /* busy */ }
-    });
+    // Another extension's synchronous activation holds the shared host thread for 1.2 s.
+    // It runs here, inside the test: left queued (a setImmediate), a reply that came first
+    // ended the test early, and the loop then span for ever under the next test's fake clock.
+    const until = Date.now() + 1200;
+    while (Date.now() < until) { /* busy */ }
     expect(await pending).toEqual({ outcome: 'timeout' });
   });
 
