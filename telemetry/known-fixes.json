@@ -31,5 +31,11 @@
     "code": "layoutFailedStack",
     "fixedIn": "2.0.4",
     "summary": "Auto Layout on a large diagram with many relationships now arranges it instead of failing with a call stack error."
+  },
+  {
+    "code": "layoutFailedTimeout",
+    "fixedIn": "2.0.5",
+    "summary": "A diagram too large to arrange in 30 seconds is now laid out in tidy columns in relationship order instead of being left unarranged.",
+    "issue": 294
   }
 ]
