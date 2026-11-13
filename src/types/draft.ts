@@ -36,6 +36,10 @@ import {
   type CrashFallbackAction,
   type FitZoomBucket,
   type WebviewErrorKind,
+  isLayoutFallbackRung,
+  readLayoutFailureDetail,
+  type LayoutFailureDetail,
+  type LayoutFallbackRung,
 } from './webviewError';
 
 // ---------------------------------------------------------------------------
@@ -299,14 +303,19 @@ export type DraftToHost =
    * `erdStudio.showImportReport`; it never closes the page or answers the flow.
    */
   | { type: 'importReport' }
-  /** Passive: ELK failed, the fallback placement is drawn (telemetry only). */
-  | { type: 'layoutFailed' }
+  /**
+   * Passive: ELK failed, the fallback placement is drawn (telemetry only).
+   * Optional, added after 2.0.4: how long it ran (`ms`) and the failure's fixed
+   * detail (`LayoutFailureDetail`: its class, the draft's size as buckets, how
+   * far the fallbacks got, and `log` for the extension's own log only).
+   */
+  | ({ type: 'layoutFailed'; ms?: number } & LayoutFailureDetail)
   /**
    * Passive (2.0 B17): ELK laid the draft out in `ms`, the canvas fitted it
    * at `fitZoom`, and `fallback` when it needed the stack-safe placement
    * (telemetry only).
    */
-  | { type: 'layoutFinished'; ms: number; fitZoom: FitZoomBucket; fallback?: true }
+  | { type: 'layoutFinished'; ms: number; fitZoom: FitZoomBucket; fallback?: true; rung?: LayoutFallbackRung }
   /**
    * Passive (2.0 B17): ELK finished laying out the draft `id`, posted as soon
    * as the positions arrive. `layoutFinished` waits for the canvas to fit
@@ -374,8 +383,16 @@ export function parseDraftToHost(raw: unknown, allowed: DraftMessageAllowance, c
     case 'ready':
     case 'discard':
     case 'detailsOpened':
-    case 'layoutFailed':
       return { type: raw.type };
+    case 'layoutFailed': {
+      // A page from before the detail sends the type alone. A field that is
+      // present and not one of its fixed values refuses the message.
+      const detail = readLayoutFailureDetail(raw);
+      if (!detail) return undefined;
+      const { ms } = raw;
+      if (ms !== undefined && (typeof ms !== 'number' || !Number.isFinite(ms) || ms < 0)) return undefined;
+      return { type: 'layoutFailed', ...(ms !== undefined ? { ms } : {}), ...detail };
+    }
     case 'keep':
       return allowed.keepable ? { type: 'keep' } : undefined;
     case 'changeOptions':
@@ -401,11 +418,16 @@ export function parseDraftToHost(raw: unknown, allowed: DraftMessageAllowance, c
       return action ? { type: 'guide', ...action } : undefined;
     }
     case 'layoutFinished': {
-      const { ms, fitZoom, fallback } = raw;
+      const { ms, fitZoom, fallback, rung } = raw;
       if (typeof ms !== 'number' || !Number.isFinite(ms) || ms < 0) return undefined;
       if (typeof fitZoom !== 'string' || !(FIT_ZOOM_BUCKETS as readonly string[]).includes(fitZoom)) return undefined;
       if (fallback !== undefined && fallback !== true) return undefined;
-      return { type: 'layoutFinished', ms, fitZoom: fitZoom as FitZoomBucket, ...(fallback ? { fallback: true as const } : {}) };
+      if (rung !== undefined && !isLayoutFallbackRung(rung)) return undefined;
+      return {
+        type: 'layoutFinished', ms, fitZoom: fitZoom as FitZoomBucket,
+        ...(fallback ? { fallback: true as const } : {}),
+        ...(rung !== undefined ? { rung } : {}),
+      };
     }
     case 'laidOut':
       return typeof raw.id === 'string' && raw.id.length > 0 && raw.id.length <= 200 ? { type: 'laidOut', id: raw.id } : undefined;
@@ -524,7 +546,8 @@ export interface DraftGuideStart {
 /** Passive events the preview reports to the host (the wiring counts them; the preview counts nothing itself). */
 export interface DraftPreviewEvents {
   detailsOpened(source: DraftSource): void;
-  layoutFailed(source: DraftSource): void;
+  /** ELK failed on the page; `failure` (optional: an older page sends none) is how long it ran and its fixed detail. */
+  layoutFailed(source: DraftSource, failure?: LayoutFailureDetail & { ms?: number }): void;
   /** The banner's Show Import Report link, with the draft's import (optional: older wiring has none). */
   importReport?(source: DraftSource, reportId?: number): void;
   /** The page said ready (`slow`: more than 10 s after it was shown; optional, 2.0 B13). */
@@ -547,7 +570,7 @@ export interface DraftPreviewEvents {
    */
   noReadyChoice?(source: DraftSource, action: CrashFallbackAction): void;
   /** ELK laid the draft out (optional, 2.0 B17). */
-  layoutFinished?(source: DraftSource, layout: { ms: number; fitZoom: FitZoomBucket; fallback?: true }): void;
+  layoutFinished?(source: DraftSource, layout: { ms: number; fitZoom: FitZoomBucket; fallback?: true; rung?: LayoutFallbackRung }): void;
   /** The page closed while the draft on show was still being laid out (optional, 2.0 B17). */
   closedWhileLayingOut?(source: DraftSource): void;
   /** The onboarding guide showed a step or was skipped on the page (optional: older wiring has none). */

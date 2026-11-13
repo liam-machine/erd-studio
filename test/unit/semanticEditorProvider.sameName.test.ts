@@ -851,7 +851,7 @@ describe('the sidebar names a table of a pair by its file (stage 9)', () => {
   it('Add to Diagram… (and a drop on the diagram\'s row) adds the table of the file given, beside its namesake, and selects it', async () => {
     const canvas = await open('bronze/diagrams/bqs.dbml');
     canvas.panel._postedMessages.length = 0;
-    await canvas.provider.addTablesToDiagram(vscode.Uri.file(at('bronze/diagrams/bqs.dbml')), ['addresse'], [at('bronze/tables/ccc/addresse.dbml')]);
+    expect(await canvas.provider.addTablesToDiagram(vscode.Uri.file(at('bronze/diagrams/bqs.dbml')), ['addresse'], [at('bronze/tables/ccc/addresse.dbml')])).toEqual(['addresse']);
     const after = read('bronze/diagrams/bqs.dbml');
     expect(after).toContain('bqs.addresse 10 20');
     expect(after).toMatch(/^use \{ table ccc\.addresse \} +from '\.\.\/tables\/ccc\/addresse\.dbml'$/m);
@@ -864,10 +864,24 @@ describe('the sidebar names a table of a pair by its file (stage 9)', () => {
     const canvas = await open('bronze/diagrams/kunden.dbml');
     const before = snapshot();
     canvas.panel._postedMessages.length = 0;
-    await canvas.provider.addTablesToDiagram(vscode.Uri.file(at('bronze/diagrams/kunden.dbml')), ['addresse'], [at('bronze/tables/ccc/addresse.dbml')]);
+    expect(await canvas.provider.addTablesToDiagram(vscode.Uri.file(at('bronze/diagrams/kunden.dbml')), ['addresse'], [at('bronze/tables/ccc/addresse.dbml')])).toEqual([]);
     expect(changed(before, snapshot())).toEqual([]);
     const reveals = canvas.panel._postedMessages.filter((m) => (m as { type: string }).type === 'revealTable') as Array<{ payload: { modelName: string } }>;
     expect(reveals.map((m) => m.payload.modelName)).toEqual(['ccc.addresse']);
+    // Said on the canvas, by what the diagram calls it.
+    expect(canvas.panel._postedMessages).toContainEqual({ type: 'canvasNotice', payload: { message: '"ccc.addresse" is already on this diagram.' } });
+  });
+
+  it('a Shift-drop of a table already there and a namesake that is not: the new one is added, the one there named', async () => {
+    const canvas = await open('bronze/diagrams/bqs.dbml');
+    canvas.provider.noteLibraryDrag(['addresse', 'kunde'], [at('bronze/tables/bqs/addresse.dbml'), at('bronze/tables/ccc/kunde.dbml')]);
+    const r = await canvas.send({ type: 'dropTables', payload: { position: { x: 0, y: 0 }, uris: [], fromLibrary: true } });
+    expect(r.errors).toEqual([]);
+    expect(read('bronze/diagrams/bqs.dbml')).toMatch(/^use \{ table ccc\.kunde \} +from '\.\.\/tables\/ccc\/kunde\.dbml'$/m);
+    const notices = canvas.panel._postedMessages
+      .filter((m) => (m as { type: string }).type === 'canvasNotice')
+      .map((m) => (m as { payload: { message: string } }).payload.message);
+    expect(notices).toEqual(['Added 1 table. Already on this diagram: addresse.']);
   });
 
   it('a JSON diagram (names alone) is never given the other table of a shared name: ccc\'s is refused, bqs\'s (the one the name reads) is added', async () => {
@@ -1086,12 +1100,11 @@ describe('a project where no two tables share a name is left as it was', () => {
     const byFile = await canvas.send({ type: 'addExistingModel', payload: { modelName: 'dim_date', sourcePath: '.erd-studio/silver/tables/calendar2/dim_date.dbml' } });
     expect(byFile.errors).toEqual(['Table "dim_date" already exists in this diagram.']);
     expect(changed(before, snapshot())).toEqual([]);
-    const info = vi.mocked(vscode.window.showInformationMessage);
-    info.mockClear();
     const dropped = await canvas.send({ type: 'dropTables', payload: { position: { x: 0, y: 0 }, uris: [pathToFileURL(at('silver/tables/calendar2/dim_date.dbml')).href] } });
     expect(dropped.errors).toEqual([]);
     expect(changed(before, snapshot())).toEqual([]);
-    expect(info).toHaveBeenCalledWith('ERD Studio: "dim_date" is already on this diagram.');
+    // Said on the canvas that took the drop.
+    expect(canvas.panel._postedMessages).toContainEqual({ type: 'canvasNotice', payload: { message: '"dim_date" is already on this diagram.' } });
   });
 
   it('a member whose file was moved by hand to another layer is not offered again either', async () => {

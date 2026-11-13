@@ -249,7 +249,8 @@ function formatLogicalInventory(r: InventoryResult, p: Paint): string {
   const lines = [`${plural(r.logicalTables.length, 'table')} in ${plural(r.domains.length, 'diagram')} (your ERD Studio files)`];
   for (const t of r.logicalTables) {
     const where = t.domains.length > 0 ? p.dim(` — in ${t.domains.join(', ')}`) : p.dim(' — in no diagram');
-    lines.push(`    ${t.name}  ${t.unreadable ? p.red('does not parse') : plural(t.columnCount, 'column')}${where}`);
+    // A name two schema folders share is shown with its schema folder, so the two rows can be told apart.
+    lines.push(`    ${t.schema !== undefined ? `${t.schema}.` : ''}${t.name}  ${t.unreadable ? p.red('does not parse') : plural(t.columnCount, 'column')}${where}`);
   }
   if (r.legacyDbmlTree) lines.push(`${p.red('✗')} ${r.legacyDbmlTree}`);
   return lines.join('\n') + '\n';

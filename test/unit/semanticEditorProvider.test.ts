@@ -403,7 +403,7 @@ describe('disposed panels (H24)', () => {
 
     panel._simulateDispose();
 
-    (provider as unknown as { post: (w: unknown, m: unknown) => void }).post(panel.webview, { type: 'error', payload: { message: 'x' } });
+    (provider as unknown as { post: (w: unknown, m: unknown) => void }).post(panel._webview, { type: 'error', payload: { message: 'x' } });
     await provider.refreshAllOpenSubjectAreas();
     await new Promise((r) => setTimeout(r, 30));
 
@@ -1760,7 +1760,6 @@ describe('addExistingModels (#160)', () => {
   });
 
   it('names a pick already in the diagram under another case instead of dropping it silently', async () => {
-    const info = vi.spyOn(vscode.window, 'showInformationMessage');
     const { panel, doc } = await openShowcase(root);
     const already = JSON.parse(doc.getText()).logical.models[0] as string;
     const loads = types(panel).filter((t) => t === 'domainLoaded').length;
@@ -1771,9 +1770,10 @@ describe('addExistingModels (#160)', () => {
     const models = JSON.parse(doc.getText()).logical.models as string[];
     expect(models).toContain('fct_sale');
     expect(models).not.toContain(already.toUpperCase());
-    await vi.waitFor(() => expect(info).toHaveBeenCalledWith(
-      `Added 1 table. Already in this diagram: ${already.toUpperCase()}.`,
-    ));
+    // Named on the canvas, where the user is looking.
+    await vi.waitFor(() => expect(panel._postedMessages).toContainEqual({
+      type: 'canvasNotice', payload: { message: `Added 1 table. Already on this diagram: ${already.toUpperCase()}.` },
+    }));
   });
 
   it('records the add as addModel, never as Add models from dbt', async () => {

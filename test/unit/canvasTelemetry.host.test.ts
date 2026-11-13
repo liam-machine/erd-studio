@@ -20,6 +20,7 @@ import { YmlParserService } from '../../src/services/ymlParserService';
 import { TemplateService } from '../../src/services/templateService';
 import { SelectorsService } from '../../src/services/selectorsService';
 import { telemetry } from '../../src/services/telemetryService';
+import { log } from '../../src/services/logger';
 import { READY_TIMEOUT_MS } from '../../src/services/readyWatch';
 import { dbtFixtureRoot, diagramPath, type DbtStorage } from './helpers/dbtFixtures';
 
@@ -133,9 +134,70 @@ describe('webviewError and layoutFinished (B13, B17)', () => {
     error.mockClear();
     feature.mockClear();
     await panel._simulateMessage({ type: 'layoutFinished', payload: { ms: 30000, ok: false, failure: 'timeout' } });
-    expect(errorCodes()).toEqual(['layoutFailed', 'layoutFailedTimeout']);
+    expect(errorCodes()).toEqual(['layoutFailed', 'layoutFailedTimeout', 'layoutFailedOver5s']);
     await panel._simulateMessage({ type: 'layoutFinished', payload: { ms: 7000, ok: true, firstOpen: true, fallback: true } });
     expect(featureKeys()).toEqual(expect.arrayContaining(['layoutOver5s', 'layoutStackFallback', 'firstLayoutOver5s']));
+  });
+
+  it('records what kind of diagram failed, how, and how far the fallbacks got; the counts and message go to the log only', async () => {
+    const { panel } = await open(diagramPath(root, 'yaml', 'silver', 'showcase'));
+    error.mockClear();
+    feature.mockClear();
+    const warn = vi.spyOn(log, 'warn').mockImplementation(() => {});
+    await panel._simulateMessage({
+      type: 'layoutFinished',
+      payload: {
+        ms: 64000, ok: false, firstOpen: true, failure: 'stack', tableBucket: '500plus', relBucket: '2000plus', exhausted: true, lastFailure: 'timeout',
+        log: { tables: 1134, relationships: 2417, message: 'RangeError: Maximum call stack size exceeded' },
+      },
+    });
+    expect(errorCodes()).toEqual([
+      'layoutFailed', 'firstLayoutFailed', 'layoutFailedStack', 'layoutFailedTables500Plus', 'layoutFailedRels2000Plus',
+      'layoutFailedOver5s', 'layoutFailedAllRungs', 'layoutFailedLastRungTimeout',
+    ]);
+    expect(featureKeys()).toEqual(['layoutFailed']);
+    // Nothing counted holds a count or the text.
+    expect(JSON.stringify([error.mock.calls, feature.mock.calls])).not.toMatch(/1134|2417|Maximum call stack/);
+    // The ERD Studio log (local) has both.
+    const lines = warn.mock.calls.map((c) => String(c[0]));
+    expect(lines.some((l) => /First-open auto layout failed \(class stack, .*1134 tables, 2417 relationships; after 64000 ms\): RangeError: Maximum call stack size exceeded/.test(l))).toBe(true);
+
+    // A fallback that worked: which rung.
+    feature.mockClear();
+    await panel._simulateMessage({ type: 'layoutFinished', payload: { ms: 900, ok: true, fallback: true, rung: 3 } });
+    expect(featureKeys()).toEqual(['layoutUnder1s', 'layoutStackFallback', 'layoutFallbackRung3']);
+
+    // A layout that worked but not as asked (the reporter, 2026-11-12): what the
+    // page says it did, with the counts, goes to the log as an info line;
+    // telemetry counts only the rung, never the text or the counts.
+    const info = vi.spyOn(log, 'info').mockImplementation(() => {});
+    feature.mockClear();
+    error.mockClear();
+    await panel._simulateMessage({
+      type: 'layoutFinished',
+      payload: {
+        ms: 1200, ok: true, fallback: true, rung: 3,
+        log: { tables: 130, relationships: 80, message: 'used the grid fallback (no ELK), grouping depth; the default layout failed: Maximum call stack size exceeded' },
+      },
+    });
+    expect(info.mock.calls.map((c) => String(c[0]))).toContain(
+      '[SemanticEditorProvider] Auto layout used the grid fallback (no ELK), grouping depth; the default layout failed: Maximum call stack size exceeded (130 tables, 80 relationships; after 1200 ms)',
+    );
+    expect(errorCodes()).toEqual([]);
+    expect(JSON.stringify(feature.mock.calls)).not.toMatch(/grid|Maximum call stack|130/);
+    // A layout that worked as asked writes no line.
+    info.mockClear();
+    await panel._simulateMessage({ type: 'layoutFinished', payload: { ms: 300, ok: true } });
+    expect(info.mock.calls.filter((c) => String(c[0]).includes('Auto layout'))).toEqual([]);
+    info.mockRestore();
+
+    // A field out of range: nothing is counted at all.
+    error.mockClear();
+    feature.mockClear();
+    await panel._simulateMessage({ type: 'layoutFinished', payload: { ms: 10, ok: false, failure: 'stack', tableBucket: 1134 } });
+    expect(errorCodes()).toEqual([]);
+    expect(featureKeys()).toEqual([]);
+    warn.mockRestore();
   });
 });
 

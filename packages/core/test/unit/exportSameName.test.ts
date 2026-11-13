@@ -153,14 +153,18 @@ describe('payloads built by hand', () => {
     }
   });
 
-  it('two tables of one name whose files name no schema are written under the names the diagram calls them, both read', async () => {
-    // An unqualified `Table addresse` in tables/bqs/ and tables/ccc/: the diagram names are the only unique ones.
+  it('two tables of one name whose files name no schema are declared in the schema folders the diagram names them by, both read', async () => {
+    // An unqualified `Table addresse` in tables/bqs/ and tables/ccc/ (the reporter, photo-2): the diagram calls them
+    // bqs.addresse and ccc.addresse, and those folders are their schemas. Before, they were written as two
+    // public tables whose names hold a dot (`Table "bqs.addresse"`), which other tools read as one schema.
     const area = twins({ schema: '' });
     const dbml = toDbml(area);
-    expect(dbml).toContain('Table "bqs.addresse" {');
-    expect(dbml).toContain('Ref: "ccc.addresse".id > "bqs.addresse".id');
-    expect(readDbmlEverywhere(dbml).tables.map((t) => t.name).sort()).toEqual(['bqs.addresse', 'ccc.addresse']);
-    expect(readDbmlRich(toDbmlRich(area)).tables.map((t) => t.name).sort()).toEqual(['bqs.addresse', 'ccc.addresse']);
+    expect(dbml).toContain('Table bqs.addresse {');
+    expect(dbml).toContain('Table ccc.addresse {');
+    expect(dbml).not.toContain('"bqs.addresse"');
+    expect(dbml).toContain('Ref: ccc.addresse.id > bqs.addresse.id');
+    expect(tableNames(readDbmlEverywhere(dbml).tables)).toEqual(['bqs.addresse', 'ccc.addresse']);
+    expect(tableNames(readDbmlRich(toDbmlRich(area)).tables)).toEqual(['bqs.addresse', 'ccc.addresse']);
     expect((await parseMermaid(toMermaid(area))).entities).toHaveLength(2);
   });
 

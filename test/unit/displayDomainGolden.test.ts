@@ -148,6 +148,11 @@ const EXPECTED_FILES = [
   'same-name-two-schemas.kunden.dbml',
   'same-name-two-schemas.kunden.mmd',
   'same-name-two-schemas.kunden.rich.dbml',
+  // Two unqualified `Table adresse` files imported under one spelling (the reporter, photo-2:
+  // packages/core/test/fixtures/dbml/same-name-unqualified); owned by
+  // packages/core/test/unit/loadDisplayDomain.sharedUseSpelling.test.ts.
+  'same-name-unqualified.bqs-only.display.json',
+  'same-name-unqualified.sap.display.json',
 ].sort();
 
 /**

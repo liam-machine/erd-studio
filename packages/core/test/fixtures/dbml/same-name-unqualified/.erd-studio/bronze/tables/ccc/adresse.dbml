@@ -1,0 +1,6 @@
+Table adresse {
+  adr_id INT [pk]
+  street VARCHAR
+  city VARCHAR
+  postcode VARCHAR
+}

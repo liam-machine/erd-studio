@@ -246,6 +246,13 @@ describe('large (several schemas)', () => {
     const nav = screen.getByRole('navigation', { name: 'Schemas' });
     await act(async () => { fireEvent.click(within(nav).getByRole('button', { name: 'hr, 15 tables' })); });
     expect(posts.filter((p) => p.type === 'layoutFailed')).toHaveLength(1);
+    // Its class and the draft's size as buckets; the counts and message in `log` only.
+    const failed = posts.find((p) => p.type === 'layoutFailed') as Record<string, unknown>;
+    expect(failed).toMatchObject({ failure: 'other', relBucket: expect.any(String), tableBucket: expect.any(String) });
+    expect(typeof failed.ms).toBe('number');
+    expect((failed.log as { message: string }).message).toBe('ELK layout worker crashed');
+    const { log: _log, ...telemetryBound } = failed;
+    expect(JSON.stringify(telemetryBound)).not.toContain('ELK layout worker crashed');
     spy.mockRestore();
   });
 

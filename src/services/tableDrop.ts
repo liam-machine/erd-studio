@@ -105,6 +105,86 @@ export function tableFilesOfDroppedUris<T extends DroppableTableFile>(
   return out;
 }
 
+/** The tables a drop on a diagram's row adds: names, and their files where they are added by file. */
+export interface TreeDropTables {
+  readonly names: string[];
+  readonly files?: string[];
+}
+
+/**
+ * Which tables Table Library rows dropped on a diagram's row in the Diagrams
+ * view add: by their files (`uris`) where the library tells tables apart by
+ * file (`byFile`: two schema folders share a name), else the dragged names;
+ * when the drop's names could not be read, the tables its files are; and
+ * when it carried neither, the drag the editor remembered (`remembered`).
+ * Undefined when nothing names a table, so the caller can say so.
+ */
+export function tablesOfTreeDrop<T extends DroppableTableFile>(
+  drop: { readonly tables: readonly string[]; readonly uris: readonly string[] },
+  library: readonly T[],
+  options: { readonly byFile: boolean; readonly remembered?: { readonly tables: readonly string[]; readonly files?: readonly string[] } },
+  platform: NodeJS.Platform = process.platform,
+): TreeDropTables | undefined {
+  const dropped = tableFilesOfDroppedUris(drop.uris, library, platform);
+  if (options.byFile && dropped.length > 0) return { names: dropped.map((f) => f.name), files: dropped.map((f) => f.filePath) };
+  if (drop.tables.length > 0) return { names: [...drop.tables] };
+  if (dropped.length > 0) return { names: tablesOfDroppedUris(drop.uris, library, platform) };
+  const remembered = options.remembered;
+  if (!remembered || remembered.tables.length === 0) return undefined;
+  return options.byFile && remembered.files && remembered.files.length === remembered.tables.length
+    ? { names: [...remembered.tables], files: [...remembered.files] }
+    : { names: [...remembered.tables] };
+}
+
+/** How long after a Table Library drag starts a file it carries may open and still count as its missed canvas drop. */
+export const MISSED_DROP_MS = 30_000;
+
+/** What a missed canvas drop was aiming at: the diagram, and the drag's tables (with their files where it knew them). */
+export interface MissedCanvasDrop {
+  readonly diagramPath: string;
+  readonly names: string[];
+  readonly files?: string[];
+}
+
+/**
+ * Whether a text tab that just opened is a Table Library drag that missed
+ * the canvas: let go over a diagram without Shift (or with Shift released a
+ * moment early), the editor group takes the drop and VS Code opens the
+ * dragged files there, pinned. It is when
+ * - a Table Library drag is remembered and started at most
+ *   {@link MISSED_DROP_MS} ago,
+ * - the tab opened pinned, or was already open and came to the front pinned
+ *   (VS Code pins dropped editors, and brings an open one forward instead of
+ *   opening it again; a single click on a Table Library row opens a preview),
+ * - its file is one of the drag's tables (by file where the drag knew them,
+ *   else by name through the library),
+ * - and the tab's editor group had a diagram in front just before
+ *   (`frontDiagram`): the one the drop was aimed at.
+ * Then the answer is that diagram and the whole drag; otherwise undefined.
+ */
+export function missedCanvasDrop<T extends DroppableTableFile>(input: {
+  readonly opened: { readonly filePath: string; readonly preview: boolean };
+  readonly drag: { readonly tables: readonly string[]; readonly files?: readonly string[]; readonly at: number } | undefined;
+  readonly now: number;
+  readonly frontDiagram: string | undefined;
+  readonly library: readonly T[];
+  readonly platform?: NodeJS.Platform;
+}): MissedCanvasDrop | undefined {
+  const { opened, drag, frontDiagram } = input;
+  const platform = input.platform ?? process.platform;
+  if (!drag || drag.tables.length === 0 || frontDiagram === undefined || opened.preview) return undefined;
+  if (input.now - drag.at > MISSED_DROP_MS || input.now < drag.at) return undefined;
+  const withFiles = drag.files !== undefined && drag.files.length === drag.tables.length;
+  const dragged = withFiles
+    ? drag.files!.some((f) => samePath(f, opened.filePath, platform))
+    : (() => {
+      const entry = input.library.find((e) => !e.shadowedBy && samePath(e.filePath, opened.filePath, platform));
+      return entry !== undefined && drag.tables.some((t) => normaliseName(t) === normaliseName(entry.name));
+    })();
+  if (!dragged) return undefined;
+  return { diagramPath: frontDiagram, names: [...drag.tables], ...(withFiles ? { files: [...drag.files!] } : {}) };
+}
+
 /**
  * Where dropped tables go: the first centred under the drop point with its
  * header under the pointer, the others in a grid to its right and below,

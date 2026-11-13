@@ -8,6 +8,36 @@ The `Unreleased` heading below is renamed to the released version by the deploy 
 Releases are patch bumps by default. To ship a minor or major version, write it into the
 heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that.
 
+## Unreleased
+
+### Added
+
+- **Add a table to the diagram you have open in one click.** Each table in the Table Library has a **+** button, and its right-click menu has **Add to Open Diagram**: both add the table straight to the diagram in front of you, without asking. The status bar names the tables that were added.
+- **Opening a DBML diagram that imports two tables under one name now warns you.** When two table files both declare `Table adresse` with no schema (one in `tables/bqs/`, one in `tables/ccc/`) and a diagram imports both, the warning names the line, says how many relationships cannot be drawn yet, and offers **Qualify Tables**. `erd-studio doctor` reports it as `sharedUseSpelling`, with the line to write, instead of the parser's bare [3003] error and the [4000] errors that followed from it.
+
+### Changed
+
+- The anonymous daily usage report now records more about an Auto Layout that failed: the diagram's size as a range (never a number), the kind of failure, and which fallback, if any, produced a layout. Never names, paths or messages.
+- **Add to Diagram… still asks which diagram**, so you can add tables to a different one. **Add to Open Diagram** is the one that adds without asking.
+- **The diagram's drop hint goes away on every open diagram as soon as the drag has been used.**
+- **Large diagrams lay out much faster.** A diagram of more than 150 tables starts with a lighter way of placing tables, so it may look a little different. A diagram of 1,000 tables or more (or 2,000 relationships or more) is arranged in tidy columns in relationship order, instead of running out of time or memory.
+- **When Auto Layout cannot keep its grouping, or falls back to tidy columns, the canvas says so** and the ERD Studio log records what happened, instead of showing an error. A layout that times out now also falls back to tidy columns.
+- **After you change a layout option, the Layout settings panel reminds you to press Re-apply Layout** to use it.
+- **A DBML table declared without a schema now carries its schema folder's name**, on the canvas as in Confluence. An export declares it as `Table <schema>.<name>`; before, the export left it unqualified, or wrote `"bqs.adresse"` as one name when two schema folders shared it. `erd-studio inventory` prints `bqs.adresse` and `ccc.adresse` for a name two schema folders share.
+
+### Fixed
+
+- **Auto Layout no longer saves a result that leaves a table without a position.** If the layout engine returns one, ERD Studio tries its lighter layouts and, if none works, says the layout failed and leaves the diagram as it was. The ERD Studio log now records why any layout failed, with the diagram's table and relationship counts.
+- **Auto Layout no longer fails with "Maximum call stack size exceeded" when grouping is Auto, Join depth or Table type.** A diagram with two-way or circular relationships could still fail this way, on any computer and at any size (eight tables were enough), because every lighter fallback layout failed the same way. Grouping by Table type or None was not affected.
+- **Join depth places tables in or after a loop of relationships by their real depth**, instead of putting them all in the first group.
+- **Dropping tables from the Table Library onto a diagram's name in the Diagrams view adds them again.** It did nothing and said nothing, on every platform.
+- **Adding a table to a diagram that is open in another editor group no longer opens a second tab** of that diagram.
+- **Dropping or adding a table that is already on the diagram says so on the diagram**, for one table, several, or a mix of new and existing tables.
+- **Two tables of one name with no schema in their files no longer break a DBML diagram.** When `tables/bqs/adresse.dbml` and `tables/ccc/adresse.dbml` both declare `Table adresse`, adding the second to a diagram wrote two `use { table adresse }` lines. Other DBML tools, dbdiagram.io among them, refuse the second line, so they showed only one adresse. ERD Studio now asks to **Qualify Tables** first: it declares them `Table bqs.adresse` and `Table ccc.adresse` and rewrites every `use` line and `Ref` to match, in one edit you can undo. **Cancel** changes nothing.
+- **A relationship to the second of two same-named tables is no longer drawn on the first**, or as a line from a table to itself. Each relationship goes to the table that has its columns. When both tables have them (both have `id`, say), it is not drawn until you say which table it means: **Qualify Tables** asks once for each such relationship.
+- **After you decline Qualify Tables, drawing a relationship to one of the two tables asks first** instead of writing another relationship other tools cannot place, and an unrelated edit no longer removes the diagram's `use *` line.
+- **Dragging a table from the Table Library onto an open diagram now adds it every time, with or without Shift.** On macOS the drop used to land only now and then: without Shift the table's file opened instead, and with Shift (pressed before or after reaching the diagram) the drop often did nothing at all and nothing said so. Now a drop without Shift adds the table and closes the file VS Code opened, and a Shift-drop adds it as soon as you move the mouse after letting go. A table that is already on the diagram is selected, and the diagram says so. The hint while you drag now reads "Drop to add … to this diagram".
+
 ## 2.0.4 — 2026-11-12
 
 - Release 2.0.4: same-named tables across schemas, Table Library New Table / New Schema, layout and drop fixes — develop → main (#298)

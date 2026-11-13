@@ -9,7 +9,7 @@ import { removedSubjectAreaPaths } from './services/removedSubjectAreas';
 import { WRITTEN_SCHEMA_VERSION, detectSubjectAreaFormat, getRawSubjectAreaTableNames, type SubjectAreaSummary, type Layer, type Stage, type UnifiedSubjectArea, type StageData } from './types/semantic';
 import { ManifestService, type ManifestLoadFailure } from './services/manifestService';
 import { TemplateService } from './services/templateService';
-import { LAYER_DRAG_MIME_TYPE, SubjectAreaTreeProvider, type TreeElement } from './providers/DomainTreeProvider';
+import { DIAGRAMS_DROP_MIME_TYPES, LAYER_DRAG_MIME_TYPE, SubjectAreaTreeProvider, type TreeElement } from './providers/DomainTreeProvider';
 import { DeferredTreeDataProvider } from './providers/deferredTreeDataProvider';
 import { DBML_CONVERSION_DECLINED_KEY, DBML_OFFER_CONVERT_SETTING, SemanticEditorProvider } from './providers/SemanticEditorProvider';
 import { SemanticFileDecorationProvider } from './providers/SemanticFileDecorationProvider';
@@ -17,7 +17,7 @@ import { DiagramMembers } from './services/diagramMembers';
 import { CodeOwnersReader } from './services/codeOwners';
 import { tableHomesById, tableHomesOf, type TableHome } from './services/tableHomes';
 import { tableUsageOf, type TableUsageKeys } from './services/sidebarTables';
-import { tableFilesOfDroppedUris } from './services/tableDrop';
+import { tablesOfTreeDrop } from './services/tableDrop';
 import { FileWatcherService } from './watchers/FileWatcherService';
 import { HarnessService, HARNESS_TARGETS, HARNESS_VERSION, extractHarnessVersion, recommendedHookAssistants, type HarnessInstallResult, type HarnessTarget } from './services/harnessService';
 import { SelectorsService } from './services/selectorsService';
@@ -56,7 +56,7 @@ import {
   type ManifestMissingReasonDeps,
 } from './services/manifestMissingReasons';
 import { TableLibraryTreeProvider, tableOwnerOf, type TableLibraryNode, type TableLibraryTableNode } from './providers/ModelLibraryTreeProvider';
-import { TableLibraryDragController, TABLE_LIBRARY_DRAG_MIME } from './providers/tableLibraryDrag';
+import { TableLibraryDragController } from './providers/tableLibraryDrag';
 import { describeOrganizePlan, planOrganizeByLayer, type SubjectAreaTableUsage } from './services/modelLibraryOrganizer';
 import { describeDuplicateFix, duplicateNamePrefix, duplicateNamePrompt, planDuplicateFix, repointSubjectAreaTable, suggestDuplicateName, type SubjectAreaReference } from './services/duplicateModelResolver';
 import { validateNewDbmlTableName, validateTableName } from './providers/payloadValidation';
@@ -70,7 +70,8 @@ import { countDbmlConversionCandidates } from './services/dbmlConversionFiles';
 import { CONVERT_NOTICE_BUTTON, convertNoticeMessage, convertOfferApplies, convertRowShows, type ConvertOfferState } from './services/convertOffer';
 import { RefreshGate } from './services/refreshGate';
 import { projectNamingOf } from './services/projectNaming';
-import { SUBJECT_AREA_EDITOR_VIEW_TYPE, activeSubjectAreaCanvasPath, hasOpenSubjectAreaCanvas, saveAllAndReload } from './services/recoveryService';
+import { SUBJECT_AREA_EDITOR_VIEW_TYPE, activeSubjectAreaCanvasPath, diagramViewColumn, hasOpenSubjectAreaCanvas, openDiagramPaths, saveAllAndReload } from './services/recoveryService';
+import { watchMissedCanvasDrops } from './providers/missedCanvasDrop';
 import { openFixedLink, submitFeedback } from './services/feedbackService';
 import { clearFeedbackApiKey, setFeedbackApiKey } from './services/feedbackAnalysisService';
 import { ReportTrackingService } from './services/reportTrackingService';
@@ -152,6 +153,7 @@ import { registerRowDetails } from './providers/rowDetails';
 import { openInDiagram, openRelationshipSource, type RelationshipsViewDeps } from './commands/relationshipsView';
 import {
   ADD_TO_DIAGRAM_COMMAND,
+  ADD_TO_OPEN_DIAGRAM_COMMAND,
   GO_TO_TABLE_COMMAND,
   REVEAL_IN_TABLE_LIBRARY_COMMAND,
   addToDiagramCommand,
@@ -851,6 +853,7 @@ export const NO_LEGACY_ALIAS = new Set([
   'erdStudio.groupRelationshipsByTable',
   'erdStudio.goToTable',
   'erdStudio.addToDiagram',
+  'erdStudio.addToOpenDiagram',
   'erdStudio.revealInTableLibrary',
   'erdStudio.reloadFromDisk',
   'erdStudio.filterDiagrams',
@@ -1601,7 +1604,7 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
   // and then a blank pane while activation and the first listing run. The
   // real provider is attached below; the view then lists once.
   const domainTreeData = workspaceRoot
-    ? new DeferredTreeDataProvider<TreeElement>([LAYER_DRAG_MIME_TYPE, TABLE_LIBRARY_DRAG_MIME], [LAYER_DRAG_MIME_TYPE])
+    ? new DeferredTreeDataProvider<TreeElement>(DIAGRAMS_DROP_MIME_TYPES, [LAYER_DRAG_MIME_TYPE])
     : undefined;
   const domainTreeView = domainTreeData
     ? vscode.window.createTreeView('erdStudio.domainTree', {
@@ -3293,7 +3296,7 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     (() => {
       tableLibraryView = vscode.window.createTreeView('erdStudio.modelLibrary', {
         treeDataProvider: tableLibraryProvider,
-        // Rows drag onto a diagram: a Shift-drop adds them where they land.
+        // Rows drag onto a diagram: a drop there adds them (with Shift where they land; see docs/dev/architecture.md).
         // Each dragged table's file goes with its name: a drop adds that file where two schema folders share the name.
         dragAndDropController: new TableLibraryDragController((tables, files) => editorProvider.noteLibraryDrag(tables, files), { withFiles: true }),
         // Move Table moves every selected table to one folder.
@@ -3333,19 +3336,31 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
         usage: tableUsage,
         layerLabel: deps.layerLabel,
         addTables: async (filePath, tables, files) => {
-          await vscode.commands.executeCommand('erdStudio.openDomain', filePath);
-          await editorProvider.addTablesToDiagram(vscode.Uri.file(filePath), tables, files);
+          // A group that shows the diagram already brings it forward: never a second tab of it in the active group.
+          const viewColumn = diagramViewColumn(filePath);
+          if (viewColumn !== undefined) {
+            await vscode.commands.executeCommand('vscode.openWith', vscode.Uri.file(filePath), SUBJECT_AREA_EDITOR_VIEW_TYPE, { preview: true, viewColumn });
+          } else {
+            await vscode.commands.executeCommand('erdStudio.openDomain', filePath);
+          }
+          return editorProvider.addTablesToDiagram(vscode.Uri.file(filePath), tables, files);
         },
-        // The diagram in front of the user is offered first.
+        // The diagram in front of the user (or the only one on screen) takes the tables without a pick.
         activeDiagramPath: activeSubjectAreaCanvasPath,
+        openDiagramPaths,
       };
       // Table Library rows dropped on a diagram's row in the Diagrams view: the same write as Add to Diagram….
       // Where two schema folders share a name, the dragged rows' files say which tables.
-      treeProvider.setTablesDropHandler((filePath, tables, uris) => {
-        const dropped = tableLibraryService.hasSharedNames() ? tableFilesOfDroppedUris(uris, tableLibraryService.listTableFiles()) : [];
-        return dropped.length > 0
-          ? addToDiagramDeps.addTables(filePath, dropped.map((f) => f.name), dropped.map((f) => f.filePath))
-          : addToDiagramDeps.addTables(filePath, tables);
+      // The drag is used up here, so a later canvas drop never adds it again; it is the fallback when the drop names nothing.
+      treeProvider.setTablesDropHandler(async (filePath, tables, uris) => {
+        const remembered = editorProvider.takeRememberedLibraryDrag();
+        const found = tablesOfTreeDrop({ tables, uris }, tableLibraryService.listTableFiles(), {
+          byFile: tableLibraryService.hasSharedNames(),
+          ...(remembered ? { remembered } : {}),
+        });
+        if (!found) return false;
+        await addToDiagramDeps.addTables(filePath, found.names, found.files);
+        return true;
       });
       // A table's warehouse name and owner, from the cached reading of a file
       // already read (`read` reads it first, with no copy or relationships
@@ -3412,9 +3427,22 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
         },
       };
       return vscode.Disposable.from(
+        // A Table Library drag let go over a diagram without Shift opens the file instead: add the tables there and close that tab.
+        watchMissedCanvasDrops({
+          peekDrag: () => editorProvider.peekRememberedLibraryDrag(),
+          takeDrag: () => editorProvider.takeRememberedLibraryDrag(),
+          listTableFiles: () => tableLibraryService.listTableFiles(),
+          diagramName: (filePath) => deps.listSubjectAreas().find((s) => samePath(s.filePath, filePath))?.domain
+            ?? path.basename(filePath, path.extname(filePath)),
+          addTables: (filePath, tables, files) => addToDiagramDeps.addTables(filePath, tables, files),
+        }),
         vscode.commands.registerCommand(GO_TO_TABLE_COMMAND, (query?: unknown) =>
           goToTableCommand(goToTableDeps, typeof query === 'string' ? query : undefined)),
+        // Add to Diagram… always asks which diagram (the open one first); Add to Open Diagram (the row's
+        // inline + and the right-click menu) adds to the diagram that is open, asking only with none or several.
         vscode.commands.registerCommand(ADD_TO_DIAGRAM_COMMAND, (arg?: unknown, selection?: unknown) =>
+          addToDiagramCommand(addToDiagramDeps, tableRowsFromTreeArgs(arg, selection), { ask: true })),
+        vscode.commands.registerCommand(ADD_TO_OPEN_DIAGRAM_COMMAND, (arg?: unknown, selection?: unknown) =>
           addToDiagramCommand(addToDiagramDeps, tableRowsFromTreeArgs(arg, selection))),
         // `filePath` (optional): the table's file, whose row is revealed (two schema folders may share the name).
         vscode.commands.registerCommand(REVEAL_IN_TABLE_LIBRARY_COMMAND, async (name?: unknown, filePath?: unknown) => {

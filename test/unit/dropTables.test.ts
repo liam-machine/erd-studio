@@ -19,12 +19,13 @@ import { _appliedEdits, _resetMockWorkspace, createMockTextDocument, createMockW
 import {
   DROP_TABLES_NOTHING_MESSAGE,
   PENDING_LIBRARY_DRAG_MS,
+  afterDragLands,
   PHYSICAL_READ_ONLY_MESSAGE,
   SemanticEditorProvider,
 } from '../../src/providers/SemanticEditorProvider';
-import { TABLE_LIBRARY_DRAG_MIME, TableLibraryDragController, tablesOfDraggedRows } from '../../src/providers/tableLibraryDrag';
+import { TABLE_LIBRARY_DRAG_MIME, TABLE_LIBRARY_NAMES_MIME, TableLibraryDragController, tablesOfDraggedRows } from '../../src/providers/tableLibraryDrag';
 import type { TableLibraryFolderNode, TableLibraryLayerNode, TableLibraryTableNode } from '../../src/providers/ModelLibraryTreeProvider';
-import { DROP_GRID_COLUMNS, dropGridPositions, tableFilesOfDroppedUris, tablesOfDroppedUris } from '../../src/services/tableDrop';
+import { DROP_GRID_COLUMNS, dropGridPositions, tableFilesOfDroppedUris, tablesOfDroppedUris, tablesOfTreeDrop } from '../../src/services/tableDrop';
 import { validateDropTablesPayload } from '../../src/providers/payloadValidation';
 import { ADD_EXISTING_TABLES_LIMIT, DROP_TABLES_URI_LIMIT, DROP_TABLES_URI_MAX_LENGTH } from '../../src/types/messages';
 import { NODE_HEIGHT, NODE_WIDTH, PADDING } from '../../src/services/positionService';
@@ -77,11 +78,15 @@ describe('tablesOfDraggedRows', () => {
 });
 
 describe('TableLibraryDragController', () => {
-  it('offers its tree mime type and text/uri-list, and accepts no drops', () => {
+  it('offers the names\' own type and text/uri-list (never the view\'s tree type, where VS Code writes its own data), and accepts no drops', () => {
     const controller = new TableLibraryDragController(() => {});
-    expect(controller.dragMimeTypes).toEqual([TABLE_LIBRARY_DRAG_MIME, 'text/uri-list']);
+    expect(controller.dragMimeTypes).toEqual([TABLE_LIBRARY_NAMES_MIME, 'text/uri-list']);
+    expect(controller.dragMimeTypes).not.toContain(TABLE_LIBRARY_DRAG_MIME);
     expect(controller.dropMimeTypes).toEqual([]);
     expect(TABLE_LIBRARY_DRAG_MIME).toBe('application/vnd.code.tree.erdstudio.modellibrary');
+    // Lower case: a browser DataTransfer lower-cases types, and VS Code matches them exactly.
+    expect(TABLE_LIBRARY_NAMES_MIME).toBe(TABLE_LIBRARY_NAMES_MIME.toLowerCase());
+    expect(TABLE_LIBRARY_NAMES_MIME.startsWith('application/vnd.code.tree.')).toBe(false);
   });
 
   it('puts the files in text/uri-list and the names under its mime type, then reports the drag', () => {
@@ -92,8 +97,17 @@ describe('TableLibraryDragController', () => {
       vscode.Uri.file('/p/.erd-studio/gold/tables/gold/fct_order.dbml').toString(),
       vscode.Uri.file('/p/.erd-studio/gold/tables/gold/dim_customer.dbml').toString(),
     ].join('\r\n'));
-    expect(transfer.get(TABLE_LIBRARY_DRAG_MIME)?.value).toEqual(['fct_order', 'dim_customer']);
+    expect(transfer.get(TABLE_LIBRARY_NAMES_MIME)?.value).toBe('["fct_order","dim_customer"]');
+    expect(transfer.get(TABLE_LIBRARY_DRAG_MIME)).toBeUndefined();
     expect(started).toHaveBeenCalledWith(['fct_order', 'dim_customer']);
+  });
+
+  it('a failure to note the drag keeps its DataTransfer and does not throw (VS Code would drop the whole drag)', () => {
+    const transfer = new vscode.DataTransfer();
+    const failing = new TableLibraryDragController(() => { throw new Error('Webview is disposed'); });
+    expect(() => failing.handleDrag([table('fct_order')], transfer)).not.toThrow();
+    expect(transfer.get(TABLE_LIBRARY_NAMES_MIME)?.value).toBe('["fct_order"]');
+    expect(transfer.get('text/uri-list')?.value).toBeTruthy();
   });
 
   it('a drag with no table (an ignored duplicate alone) sets nothing and reports nothing', () => {
@@ -184,6 +198,47 @@ describe('tableFilesOfDroppedUris', () => {
   });
 });
 
+describe('tablesOfTreeDrop (Table Library rows dropped on a Diagrams row)', () => {
+  const uri = (p: string): string => pathToFileURL(p).href;
+  const lib = [
+    { name: 'addresse', filePath: '/proj/.erd-studio/bronze/tables/bqs/addresse.dbml' },
+    { name: 'addresse', filePath: '/proj/.erd-studio/bronze/tables/ccc/addresse.dbml' },
+    { name: 'kunde', filePath: '/proj/.erd-studio/bronze/tables/ccc/kunde.dbml' },
+  ];
+
+  it('adds the dragged names; by their files where two schema folders share a name', () => {
+    const drop = { tables: ['addresse'], uris: [uri(lib[1].filePath)] };
+    expect(tablesOfTreeDrop(drop, lib, { byFile: false }, 'linux')).toEqual({ names: ['addresse'] });
+    expect(tablesOfTreeDrop(drop, lib, { byFile: true }, 'linux')).toEqual({ names: ['addresse'], files: [lib[1].filePath] });
+  });
+
+  it('with no names it could read, adds the tables its files are, then the remembered drag; else nothing', () => {
+    expect(tablesOfTreeDrop({ tables: [], uris: [uri(lib[2].filePath)] }, lib, { byFile: false }, 'linux')).toEqual({ names: ['kunde'] });
+    expect(tablesOfTreeDrop({ tables: [], uris: [] }, lib, { byFile: false, remembered: { tables: ['kunde'] } }, 'linux')).toEqual({ names: ['kunde'] });
+    expect(tablesOfTreeDrop({ tables: [], uris: [] }, lib, { byFile: true, remembered: { tables: ['addresse'], files: [lib[0].filePath] } }, 'linux'))
+      .toEqual({ names: ['addresse'], files: [lib[0].filePath] });
+    expect(tablesOfTreeDrop({ tables: [], uris: ['file:///proj/README.md'] }, lib, { byFile: false }, 'linux')).toBeUndefined();
+    expect(tablesOfTreeDrop({ tables: [], uris: [] }, lib, { byFile: false, remembered: { tables: [] } }, 'linux')).toBeUndefined();
+  });
+
+  // Windows, as VS Code writes a dragged row's file there (vscode.Uri.file(...).toString()):
+  // an encoded, lower-case drive letter; joined with CRLF in text/uri-list.
+  it('reads a Windows drag: encoded or plain drive letter, any case, CRLF-joined lines', () => {
+    const win = [
+      { name: 'addresse', filePath: 'C:\\Users\\reporter\\proj\\.erd-studio\\bronze\\tables\\bqs\\addresse.dbml' },
+      { name: 'addresse', filePath: 'C:\\Users\\reporter\\proj\\.erd-studio\\bronze\\tables\\ccc\\addresse.dbml' },
+      { name: 'kunde', filePath: 'C:\\Users\\reporter\\proj\\.erd-studio\\bronze\\tables\\ccc\\kunde.dbml' },
+    ];
+    const lines = 'file:///c%3A/Users/reporter/proj/.erd-studio/bronze/tables/ccc/addresse.dbml\r\nfile:///C:/users/REPORTER/proj/.erd-studio/bronze/tables/ccc/KUNDE.dbml';
+    const uris = lines.split(/\r?\n/);
+    expect(tablesOfTreeDrop({ tables: [], uris }, win, { byFile: true }, 'win32')).toEqual({
+      names: ['addresse', 'kunde'], files: [win[1].filePath, win[2].filePath],
+    });
+    // Names read: by name unless two schema folders share one.
+    expect(tablesOfTreeDrop({ tables: ['addresse', 'kunde'], uris }, win, { byFile: false }, 'win32')).toEqual({ names: ['addresse', 'kunde'] });
+  });
+});
+
 describe('dropGridPositions', () => {
   it('puts the first table under the pointer and the rest in rows of four', () => {
     const names = ['a', 'b', 'c', 'd', 'e'];
@@ -203,6 +258,7 @@ describe('validateDropTablesPayload', () => {
     expect(validateDropTablesPayload({ position: { x: 1, y: -2.5 }, uris: [] })).toBeNull();
     expect(validateDropTablesPayload({ position: { x: 1, y: 2 }, uris: [], fromLibrary: true })).toBeNull();
     expect(validateDropTablesPayload({ position: { x: 1, y: 2 }, uris: [], fromLibrary: false })).toBeNull();
+    expect(validateDropTablesPayload({ position: { x: 1, y: 2 }, uris: [], afterDrag: true })).toBeNull();
     expect(validateDropTablesPayload({ position: { x: 0, y: 0 }, uris: ['file:///a.dbml'] })).toBeNull();
   });
 
@@ -218,6 +274,7 @@ describe('validateDropTablesPayload', () => {
     [{ position: { x: 0, y: 0 }, uris: 'file:///a.dbml' }],
     [{ position: { x: 0, y: 0 }, uris: [42] }],
     [{ position: { x: 0, y: 0 }, uris: [], fromLibrary: 'yes' }],
+    [{ position: { x: 0, y: 0 }, uris: [], afterDrag: 1 }],
     [{ position: { x: 0, y: 0 }, uris: ['x'.repeat(DROP_TABLES_URI_MAX_LENGTH + 1)] }],
     [{ position: { x: 0, y: 0 }, uris: Array.from({ length: DROP_TABLES_URI_LIMIT + 1 }, () => 'file:///a.dbml') }],
   ])('refuses %j', (payload) => {
@@ -285,8 +342,28 @@ async function loaded(provider: SemanticEditorProvider, rel = STAGING) {
 type Panel = ReturnType<typeof createMockWebviewPanel>;
 const posted = (panel: Panel, type: string) => panel._postedMessages.filter((m) => (m as { type: string }).type === type);
 const errors = (panel: Panel): string[] => posted(panel, 'error').map((m) => (m as { payload: { message: string } }).payload.message);
+const notices = (panel: Panel): string[] => posted(panel, 'canvasNotice').map((m) => (m as { payload: { message: string } }).payload.message);
 const drop = (panel: Panel, uris: string[], position = { x: 500, y: 300 }, fromLibrary?: boolean) =>
   panel._simulateMessage({ type: 'dropTables', payload: { position, uris, ...(fromLibrary === undefined ? {} : { fromLibrary }) } });
+/** The webview saw a Table Library drag end over the canvas; no drop event arrived. */
+const dragEndedOver = (panel: Panel, position = { x: 500, y: 300 }) =>
+  panel._simulateMessage({ type: 'dropTables', payload: { position, uris: [], afterDrag: true } });
+
+describe('afterDragLands', () => {
+  const T = 1_000_000;
+  const pending = { at: T, onScreen: new Set(['a']) };
+  it('is the pending, fresh drag, for a canvas on screen when it started and still on screen', () => {
+    expect(afterDragLands(pending, 'a', true, T + 3_000)).toBe(true);
+  });
+  it('is nothing once the drag is used up or stale, for another canvas, or one not on screen (then or now)', () => {
+    expect(afterDragLands(undefined, 'a', true, T + 1)).toBe(false);
+    expect(afterDragLands(pending, 'a', true, T + PENDING_LIBRARY_DRAG_MS + 1)).toBe(false);
+    expect(afterDragLands(pending, 'a', true, T - 1)).toBe(false);
+    expect(afterDragLands(pending, 'b', true, T + 1)).toBe(false);
+    expect(afterDragLands(pending, 'a', false, T + 1)).toBe(false);
+    expect(afterDragLands({ at: T }, 'a', true, T + 1)).toBe(false);
+  });
+});
 
 beforeEach(() => {
   _resetMockWorkspace();
@@ -376,25 +453,93 @@ describe('dropTables', () => {
     expect(doc.getText()).not.toContain('dim_region');
   });
 
-  it('a table already on the diagram is selected and named, not added', async () => {
+  it('a table already on the diagram is selected and named on the canvas, not added', async () => {
     const provider = buildProvider(root);
     const { panel } = await loaded(provider);
     const info = vi.spyOn(vscode.window, 'showInformationMessage');
     await drop(panel, [fileUri(FCT_ORDER)]);
     expect(_appliedEdits).toHaveLength(0);
     expect(posted(panel, 'revealTable')).toEqual([{ type: 'revealTable', payload: { modelName: 'fct_order' } }]);
-    expect(info).toHaveBeenCalledWith('ERD Studio: "fct_order" is already on this diagram.');
+    expect(notices(panel)).toEqual(['"fct_order" is already on this diagram.']);
+    expect(info).not.toHaveBeenCalled();
+    expect(errors(panel)).toEqual([]);
   });
 
-  it('adds the new ones of a mix, names the one already there, and selects the first new one', async () => {
+  it('a Shift-drop of a Table Library row already there (the drag remembered, no file in the drop) says so too', async () => {
+    const provider = buildProvider(root);
+    const { panel } = await loaded(provider);
+    provider.noteLibraryDrag(['fct_order'], [at(FCT_ORDER)]);
+    await drop(panel, [], { x: 1, y: 1 }, true);
+    expect(_appliedEdits).toHaveLength(0);
+    expect(notices(panel)).toEqual(['"fct_order" is already on this diagram.']);
+  });
+
+  it('a drag that ended over the canvas with no drop event (afterDrag) adds the remembered drag at that point, once', async () => {
+    const provider = buildProvider(root);
+    const { panel, doc } = await loaded(provider);
+    provider.noteLibraryDrag(['dim_region'], [at(DIM_REGION)]);
+    await dragEndedOver(panel, { x: 500, y: 300 });
+    expect(errors(panel)).toEqual([]);
+    expect(_appliedEdits).toHaveLength(1);
+    expect(doc.getText()).toContain('use { table gold.dim_region }');
+    expect(doc.getText()).toMatch(new RegExp(`dim_region ${500 - NODE_WIDTH / 2} 280\\b`));
+    // Used up: a second one (or a real drop's echo) adds nothing and says nothing.
+    const info = vi.spyOn(vscode.window, 'showInformationMessage');
+    await dragEndedOver(panel);
+    expect(_appliedEdits).toHaveLength(1);
+    expect(info).not.toHaveBeenCalled();
+  });
+
+  it('afterDrag of a table already there says so on the canvas', async () => {
+    const provider = buildProvider(root);
+    const { panel } = await loaded(provider);
+    provider.noteLibraryDrag(['fct_order'], [at(FCT_ORDER)]);
+    await dragEndedOver(panel);
+    expect(_appliedEdits).toHaveLength(0);
+    expect(notices(panel)).toEqual(['"fct_order" is already on this diagram.']);
+  });
+
+  it('afterDrag with no drag waiting, a stale drag, or from a canvas that was not on screen when the drag started, does nothing and says nothing', async () => {
     const provider = buildProvider(root);
     const { panel, doc } = await loaded(provider);
     const info = vi.spyOn(vscode.window, 'showInformationMessage');
+    await dragEndedOver(panel);
+    const now = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(now);
+    provider.noteLibraryDrag(['dim_region']);
+    clock.mockReturnValue(now + PENDING_LIBRARY_DRAG_MS + 1);
+    await dragEndedOver(panel);
+    clock.mockRestore();
+    (panel as unknown as { visible: boolean }).visible = false;
+    provider.noteLibraryDrag(['dim_region']);
+    (panel as unknown as { visible: boolean }).visible = true;
+    await dragEndedOver(panel);
+    expect(_appliedEdits).toHaveLength(0);
+    expect(doc.getText()).not.toContain('dim_region');
+    expect(info).not.toHaveBeenCalled();
+    expect(errors(panel)).toEqual([]);
+    // That drag is still waiting for a real drop.
+    await drop(panel, [], { x: 1, y: 1 }, true);
+    expect(doc.getText()).toContain('use { table gold.dim_region }');
+  });
+
+  it('several tables all already there are named together', async () => {
+    const provider = buildProvider(root);
+    const { panel } = await loaded(provider, SALES);
+    await drop(panel, [fileUri(FCT_ORDER), fileUri(DIM_REGION)]);
+    expect(_appliedEdits).toHaveLength(0);
+    expect(notices(panel)).toEqual(['These 2 tables are already on this diagram.']);
+    expect(posted(panel, 'revealTable')).toEqual([{ type: 'revealTable', payload: { modelName: 'fct_order' } }]);
+  });
+
+  it('adds the new ones of a mix, names the one already there on the canvas, and selects the first new one', async () => {
+    const provider = buildProvider(root);
+    const { panel, doc } = await loaded(provider);
     await drop(panel, [fileUri(FCT_ORDER), fileUri(DIM_REGION)]);
     expect(_appliedEdits).toHaveLength(1);
     expect(doc.getText()).toContain('use { table gold.dim_region }');
     expect(posted(panel, 'revealTable')).toEqual([{ type: 'revealTable', payload: { modelName: 'dim_region' } }]);
-    expect(info.mock.calls.map((c) => c[0]).join('\n')).toContain('Already in this diagram: fct_order.');
+    expect(notices(panel)).toEqual(['Added 1 table. Already on this diagram: fct_order.']);
   });
 
   it('keeps the existing placement for a drop on a positioned diagram: only the new table moves in', async () => {
@@ -464,6 +609,56 @@ describe('noteLibraryDrag', () => {
     ]);
     expect(posted(sales.panel, 'libraryDragStarted')).toEqual([]);
     expect(posted(opening, 'libraryDragStarted')).toEqual([]);
+  });
+
+  it('once the drag is used up (a drop on a row or a canvas, or a missed drop), every loaded canvas is told it ended', async () => {
+    const provider = buildProvider(root);
+    const staging = await loaded(provider, STAGING);
+    const sales = await loaded(provider, SALES);
+    expect(provider.takeRememberedLibraryDrag()).toBeUndefined();
+    expect(posted(staging.panel, 'libraryDragEnded')).toEqual([]);
+    provider.noteLibraryDrag(['dim_customer'], [at('gold/tables/gold/dim_customer.dbml')]);
+    const peeked = provider.peekRememberedLibraryDrag();
+    expect(peeked).toMatchObject({ tables: ['dim_customer'], files: [at('gold/tables/gold/dim_customer.dbml')] });
+    expect(typeof peeked?.at).toBe('number');
+    // A peek does not use it up.
+    expect(provider.peekRememberedLibraryDrag()?.tables).toEqual(['dim_customer']);
+    expect(provider.takeRememberedLibraryDrag()?.tables).toEqual(['dim_customer']);
+    expect(posted(staging.panel, 'libraryDragEnded')).toEqual([{ type: 'libraryDragEnded' }]);
+    expect(posted(sales.panel, 'libraryDragEnded')).toEqual([{ type: 'libraryDragEnded' }]);
+    expect(provider.peekRememberedLibraryDrag()).toBeUndefined();
+  });
+
+  // Verifier's step J (real VS Code 1.145): once a diagram tab was closed, every later Table
+  // Library drag threw "Webview is disposed" here (the dispose handler read the disposed panel's
+  // `webview`, so the closed canvas stayed in openPanels, and its `visible` threw on the next drag).
+  // The drag was never remembered: a row drop did nothing again, and canvas Shift-drops raced.
+  it('still works after another diagram tab was closed (its panel throws once disposed, as in VS Code)', async () => {
+    const provider = buildProvider(root);
+    const closed = await loaded(provider, SALES);
+    const { panel, doc } = await loaded(provider, STAGING);
+    closed.panel.dispose();
+    const panels = (provider as unknown as { openPanels: Map<string, { webview: unknown }> }).openPanels;
+    expect(panels.size).toBe(1);
+    expect(() => provider.noteLibraryDrag(['dim_region'], [at(DIM_REGION)])).not.toThrow();
+    expect(posted(panel, 'libraryDragStarted')).toEqual([{ type: 'libraryDragStarted', payload: { tables: ['dim_region'] } }]);
+    // The drag is remembered: a drop that reached the canvas only as "the drag ended over it" lands.
+    await dragEndedOver(panel);
+    expect(doc.getText()).toContain('use { table gold.dim_region }');
+    expect(errors(panel)).toEqual([]);
+  });
+
+  it('a canvas whose dispose never reached us is skipped, not thrown on, by the next drag and drop', async () => {
+    const provider = buildProvider(root);
+    const gone = await loaded(provider, SALES);
+    const { panel, doc } = await loaded(provider, STAGING);
+    // Disposed without its onDidDispose (as when VS Code closes a tab under an Undo).
+    (gone.panel as unknown as { _disposed: boolean })._disposed = true;
+    expect(() => provider.noteLibraryDrag(['dim_region'], [at(DIM_REGION)])).not.toThrow();
+    await dragEndedOver(panel);
+    expect(doc.getText()).toContain('use { table gold.dim_region }');
+    const panels = (provider as unknown as { openPanels: Map<string, { webview: unknown }> }).openPanels;
+    expect(panels.size).toBe(1);
   });
 
   it('an empty drag tells no one', async () => {

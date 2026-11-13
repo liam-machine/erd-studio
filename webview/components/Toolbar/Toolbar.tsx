@@ -27,14 +27,21 @@ import { useRevealRelationship } from '../../hooks/useRevealRelationship';
 import { useRevealTable } from '../../hooks/useRevealTable';
 import { otherProjectMatches, searchElsewhereLabel } from './searchElsewhere';
 import { GO_TO_TABLE_QUERY_MAX } from '../../../src/types/messages';
+import { layoutFailureSummary, type LayoutFallbackRung } from '../../../src/types/webviewError';
 import {
   runElkLayout,
-  classifyLayoutFailure,
+  layoutFailureReport,
+  layoutOutcomeLogMessage,
+  layoutOutcomeNotice,
+  layoutLeftTablesInPlace,
+  layoutUnchangedNotice,
+  tableTypeBandCount,
   detectLayerBound,
   detectStrategy,
   type PartitionStrategy,
   type SpacingPreset,
   type LayoutDirection,
+  type LayoutOutcome,
 } from '../../lib/elkLayout';
 import { FIRST_OPEN_LAYOUT, buildLayoutOptions } from '../../lib/firstOpenLayout';
 import { StageTabs } from './StageTabs';
@@ -121,6 +128,7 @@ export function Toolbar({ nodes, edges }: ToolbarProps) {
   const registerSearchFocus = useEditorStore((s) => s.registerSearchFocus);
   const registerAutoLayout = useEditorStore((s) => s.registerAutoLayout);
   const setToastMessage = useEditorStore((s) => s.setToastMessage);
+  const recordError = useEditorStore((s) => s.recordError);
   const logicalOnly = useEditorStore((s) => s.logicalOnly);
   // Get current zoom level from React Flow store
   const zoom = useStore((s) => s.transform[2]);
@@ -476,27 +484,42 @@ export function Toolbar({ nodes, edges }: ToolbarProps) {
 
     setIsLayouting(true);
     const startedAt = performance.now();
-    // Usage telemetry (2.0 B17): the stack-safe fallback, and a failure's class (never its text).
+    // Usage telemetry (2.0 B17): the stack-safe fallback, the fallback that
+    // produced the layout, and a failure's class and size buckets (never its
+    // text; the counts and the message go to the extension's own log only).
     let fallback = false;
+    let rung: LayoutFallbackRung | undefined;
+    // How the layout that worked was produced: a fallback or the grid is
+    // written to the ERD Studio output, and the user is told when grouping
+    // was dropped or the grid was used.
+    let outcome: LayoutOutcome | undefined;
+    // Filter to model nodes/FK edges only — annotations are exempt from auto-layout.
+    const modelNodes = nodes.filter((n): n is import('@erd-studio/renderer/editor').TableFlowNode => n.type === 'model');
+    const fkEdges = edges.filter((e): e is import('@erd-studio/renderer/editor').FkFlowEdge => e.type === 'fk');
     const reportLayout = (ok: boolean, err?: unknown) => {
       const ms = Math.round(performance.now() - startedAt);
+      const failed = ok ? undefined : layoutFailureReport(err, { tables: modelNodes.length, relationships: fkEdges.length });
+      // A layout that worked but not as asked: the counts and what happened, for the extension's own log only.
+      const degraded = ok && outcome ? layoutOutcomeLogMessage(outcome) : undefined;
+      const degradedLog = degraded === undefined ? undefined : layoutFailureReport(new Error(degraded), { tables: modelNodes.length, relationships: fkEdges.length }).log;
       const done: WebviewMessage = {
         type: 'layoutFinished',
         payload: {
           ms,
           ok,
           ...(firstOpen ? { firstOpen } : {}),
-          ...(!ok ? { failure: classifyLayoutFailure(err) } : {}),
+          ...(failed ?? {}),
           ...(fallback ? { fallback: true as const } : {}),
+          ...(ok && rung !== undefined ? { rung } : {}),
+          ...(degradedLog ? { log: degradedLog } : {}),
         },
       };
       vscode.postMessage(done);
+      // The Send Feedback diagnostics' recent canvas errors: fixed words only.
+      if (failed) recordError('layout', `Auto layout failed (${layoutFailureSummary(failed, ms)})`);
     };
 
     try {
-      // Filter to model nodes/FK edges only — annotations are exempt from auto-layout.
-      const modelNodes = nodes.filter((n): n is import('@erd-studio/renderer/editor').TableFlowNode => n.type === 'model');
-      const fkEdges = edges.filter((e): e is import('@erd-studio/renderer/editor').FkFlowEdge => e.type === 'fk');
       const positions = await runElkLayout(
         modelNodes,
         fkEdges,
@@ -506,7 +529,7 @@ export function Toolbar({ nodes, edges }: ToolbarProps) {
           domain.viewConfig.layoutOptions,
         ),
         partitionStrategy,
-        { onStackFallback: () => { fallback = true; } },
+        { onStackFallback: () => { fallback = true; }, onFallbackRung: (r) => { rung = r; }, onOutcome: (o) => { outcome = o; } },
       );
 
       // Optimistic update: update domain in store so React Flow re-renders
@@ -532,6 +555,12 @@ export function Toolbar({ nodes, edges }: ToolbarProps) {
       vscode.postMessage(message);
       reportLayout(true);
       setLayoutDirty(false);
+      const notice = outcome ? layoutOutcomeNotice(outcome, modelNodes.length) : undefined;
+      if (notice) setToastMessage(notice);
+      // A re-applied layout that moved nothing would look like it never ran.
+      else if (!firstOpen && layoutLeftTablesInPlace(modelNodes, positions)) {
+        setToastMessage(layoutUnchangedNotice(outcome, tableTypeBandCount(modelNodes)));
+      }
     } catch (err) {
       reportLayout(false, err);
       console.error('[Toolbar] Auto layout failed:', err);
@@ -540,7 +569,7 @@ export function Toolbar({ nodes, edges }: ToolbarProps) {
     } finally {
       setIsLayouting(false);
     }
-  }, [domain, nodes, edges, isLayouting, partitionStrategy, layerBound, layoutDirection, spacingPreset, setDomain, fitView, vscode, setToastMessage]);
+  }, [domain, nodes, edges, isLayouting, partitionStrategy, layerBound, layoutDirection, spacingPreset, setDomain, fitView, vscode, setToastMessage, recordError]);
 
   const handleAutoLayout = useCallback(() => {
     if (!domain || nodes.length === 0 || isLayouting) {
@@ -804,6 +833,11 @@ export function Toolbar({ nodes, edges }: ToolbarProps) {
                     : partitionStrategy === 'depth'
                     ? 'Arranges tables so that relationship lines flow in one direction, reducing crossings.'
                     : 'No grouping. Tables are placed freely to reduce line crossings.'}
+                    {(partitionStrategy === 'role' || partitionStrategy === 'none')
+                      && tableTypeBandCount(nodes.filter((n): n is TableFlowNode => n.type === 'model')) < 2
+                      ? ' These tables have no table types to group by, so Table type and None arrange them the same way.'
+                      : ''}
+                    {layoutDirty ? ' Press Re-apply Layout to use these choices.' : ''}
                   </span>
                 </div>
 

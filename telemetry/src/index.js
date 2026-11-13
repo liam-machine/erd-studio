@@ -851,6 +851,9 @@ const FEATURES = [
   'majorUpdateNoticeShown',
   'majorUpdateNoticeShowMeAround',
   'majorUpdateNoticeWhatsNew',
+  // Added after 2.0.4: the fallback that produced an auto layout whose default attempt failed.
+  'layoutFallbackRung2',
+  'layoutFallbackRung3',
 ];
 
 /** The only keys `errors` may carry; anything else is dropped. */
@@ -1078,6 +1081,36 @@ const ERROR_CODES = [
   'domainLoadInternalPhysical',
   'domainLoadInternalDisplay',
   'domainLoadInternalOther',
+  // Added after 2.0.4 — what kind of diagram a failed auto layout (the
+  // canvas's, beside layoutFailed, or a draft page's, beside draftLayoutFailed)
+  // was, how it failed and how far the fallbacks got. Fixed keys: never a
+  // count, a name or the error's text.
+  // Its class, beside layoutFailedTimeout / Worker / Stack.
+  'layoutFailedMemory',
+  'layoutFailedUnsupported',
+  'layoutFailedInput',
+  'layoutFailedEngine',
+  'layoutFailedResult',
+  'layoutFailedOther',
+  // The diagram's tables and relationships, as buckets.
+  'layoutFailedTablesUnder50',
+  'layoutFailedTables50to199',
+  'layoutFailedTables200to499',
+  'layoutFailedTables500Plus',
+  'layoutFailedRelsUnder100',
+  'layoutFailedRels100to499',
+  'layoutFailedRels500to1999',
+  'layoutFailedRels2000Plus',
+  // How long it ran before it failed.
+  'layoutFailedUnder1s',
+  'layoutFailed1to5s',
+  'layoutFailedOver5s',
+  // Every fallback was tried and failed, and how the last one failed when
+  // that was a timeout, the worker dying or memory.
+  'layoutFailedAllRungs',
+  'layoutFailedLastRungTimeout',
+  'layoutFailedLastRungWorker',
+  'layoutFailedLastRungMemory',
 ];
 
 /** Every event the trail may carry: a marker, a feature key, or an error code written `!code`. */

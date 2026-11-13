@@ -13,18 +13,18 @@
 import type { Cardinality, ColumnDef, TableRole, Stage } from '../types/semantic';
 import { COLUMN_NAME_PATTERN, TABLE_NAME_PATTERN, TABLE_NAME_RULE, findDuplicateNames } from '../types/naming';
 import type { DuplicateMode, FeedbackKind } from '../types/feedback';
-import { ADD_EXISTING_TABLES_LIMIT, DROP_TABLES_URI_LIMIT, DROP_TABLES_URI_MAX_LENGTH, GO_TO_TABLE_QUERY_MAX } from '../types/messages';
+import { ADD_EXISTING_TABLES_LIMIT, DROP_TABLES_URI_LIMIT, DROP_TABLES_URI_MAX_LENGTH, GO_TO_TABLE_QUERY_MAX, type LayoutFinishedPayload } from '../types/messages';
 import { SCHEMA_FOLDER_RULE, isSchemaFolderName } from '../types/schemaFolder';
 import { parseGuideAction } from '../types/onboardingGuide';
 import { isCanvasLineStyle } from '../types/lineStyle';
 import {
   CRASH_DETAIL_MAX,
   isCrashFallbackAction,
-  isLayoutFailure,
+  isLayoutFallbackRung,
+  readLayoutFailureDetail,
   isWebviewErrorArea,
   isWebviewErrorKind,
   type CrashFallbackPayload,
-  type LayoutFailure,
   type WebviewErrorPayload,
 } from '../types/webviewError';
 import { MAX_COMPOSITE_PAIRS, TABLE_ALIAS_MAX_LENGTH, TABLE_ALIAS_RULE, TABLE_ROLE_VALUES, RELATIONSHIP_ROLE_MAX_LENGTH, classifySemanticFile, isRationaleFieldKey, isValidTableAlias, normalisePosix, rationaleKeyToFieldKey } from '@erd-studio/core';
@@ -820,18 +820,19 @@ export function validateAddExistingModelsPayload(value: unknown): string | null 
  * uris }`, the point finite, `uris` a list of at most
  * {@link DROP_TABLES_URI_LIMIT} strings of at most
  * {@link DROP_TABLES_URI_MAX_LENGTH} characters (possibly empty: a drag from
- * the Table Library may bring none), and `fromLibrary`, when present, a
- * boolean. The URIs are only compared with the library's file paths, never
+ * the Table Library may bring none), and `fromLibrary` / `afterDrag`, when
+ * present, booleans. The URIs are only compared with the library's file paths, never
  * opened.
  */
 export function validateDropTablesPayload(value: unknown): string | null {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     return 'A drop needs a position and a list of URIs.';
   }
-  const { position, uris, fromLibrary } = value as { position?: unknown; uris?: unknown; fromLibrary?: unknown };
+  const { position, uris, fromLibrary, afterDrag } = value as { position?: unknown; uris?: unknown; fromLibrary?: unknown; afterDrag?: unknown };
   const pointError = validatePoint(position);
   if (pointError) return pointError;
   if (fromLibrary !== undefined && typeof fromLibrary !== 'boolean') return 'fromLibrary must be true or false.';
+  if (afterDrag !== undefined && typeof afterDrag !== 'boolean') return 'afterDrag must be true or false.';
   if (!Array.isArray(uris)) return 'A drop needs a list of URIs.';
   if (uris.length > DROP_TABLES_URI_LIMIT) return `At most ${DROP_TABLES_URI_LIMIT} files can be dropped at once.`;
   for (const uri of uris) {
@@ -978,18 +979,22 @@ export function validateViewFilePayload(value: unknown): value is { line: number
 
 /**
  * `layoutFinished` (usage telemetry only): a non-negative finite duration, a
- * boolean, an optional `firstOpen` boolean, and (2.0) an optional `failure`
- * from `LAYOUT_FAILURES` and an optional `fallback: true`.
+ * boolean, an optional `firstOpen` boolean, (2.0) an optional `failure` from
+ * `LAYOUT_FAILURES` and an optional `fallback: true`, and (after 2.0.4) the rest of
+ * `LayoutFailureDetail` and an optional `rung`, each from its fixed list
+ * (`log`: two integers from 0 to `LAYOUT_LOG_COUNT_MAX` and a message of at
+ * most `LAYOUT_LOG_MESSAGE_MAX` characters). Every later field is optional,
+ * so an older webview's payload passes; one that is present and out of range
+ * fails the whole payload.
  */
-export function validateLayoutFinishedPayload(value: unknown): value is {
-  ms: number; ok: boolean; firstOpen?: boolean; failure?: LayoutFailure; fallback?: true;
-} {
+export function validateLayoutFinishedPayload(value: unknown): value is LayoutFinishedPayload {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
-  const { ms, ok, firstOpen, failure, fallback } = value as { ms?: unknown; ok?: unknown; firstOpen?: unknown; failure?: unknown; fallback?: unknown };
+  const { ms, ok, firstOpen, fallback, rung } = value as { ms?: unknown; ok?: unknown; firstOpen?: unknown; fallback?: unknown; rung?: unknown };
   return typeof ms === 'number' && Number.isFinite(ms) && ms >= 0 && typeof ok === 'boolean'
     && (firstOpen === undefined || typeof firstOpen === 'boolean')
-    && (failure === undefined || isLayoutFailure(failure))
-    && (fallback === undefined || fallback === true);
+    && (fallback === undefined || fallback === true)
+    && (rung === undefined || isLayoutFallbackRung(rung))
+    && readLayoutFailureDetail(value) !== undefined;
 }
 
 /** `webviewError` (usage telemetry only, 2.0 B13): a `kind` and an `area` from their fixed lists, nothing else read. */

@@ -1,0 +1,5 @@
+Table bqs__v_sap_prod_unit2 {
+  unit_id INT [pk]
+  bqs_adresse_id INT
+  ccc_adresse_id INT
+}

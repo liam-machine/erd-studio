@@ -367,6 +367,18 @@ export interface DbmlAttachTable {
 export interface DbmlRefEndHint {
   qualifier?: string;
   usePath?: string;
+  /**
+   * Set instead of `usePath` when the file's `use` lines give this exact
+   * spelling to two or more different table files (`use { table adresse }`
+   * from `tables/bqs/` and from `tables/ccc/`, which every DBML parser
+   * refuses with [3003]): each such file, resolved, in line order. No one
+   * line is the end's own, so the end is the one of those tables that has
+   * every column in `columns`, and none when that is not exactly one.
+   * Optional: absent from an older core.
+   */
+  usePaths?: readonly string[];
+  /** The end's columns as written, given with `usePaths`. */
+  columns?: readonly string[];
 }
 
 /** Where one Ref is, for the attach step's reports. */

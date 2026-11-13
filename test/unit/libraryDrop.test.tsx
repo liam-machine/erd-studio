@@ -2,8 +2,10 @@
 /**
  * Dropping tables on the canvas, webview side (`useLibraryDrop`,
  * `LibraryDropOverlay`, wired in App.tsx): the host's `libraryDragStarted`
- * shows "Hold Shift and drop to add … to this diagram" until the drop, a
- * pointer move or {@link LIBRARY_DRAG_HINT_MS}; an acceptable drag over an
+ * shows "Drop to add … to this diagram" until the drop, a
+ * pointer move, the diagram changing or {@link LIBRARY_DRAG_HINT_MS}, and
+ * "Let go to add …" while an acceptable drag is over the canvas (Shift
+ * pressed early or late); an acceptable drag over an
  * editable logical diagram is highlighted and its drop posts `dropTables`
  * with the flow position and the DataTransfer's URIs. Nothing of it on the
  * physical stage or in the viewer. The host side is `test/unit/dropTables.test.ts`.
@@ -28,8 +30,10 @@ vi.mock('../../webview/hooks/useVsCodeApi', () => ({
 import { App } from '../../webview/App';
 import { useEditorStore } from '../../webview/store/editorStore';
 import {
+  AFTER_DRAG_EDGE_PX,
   DROP_REFUSED_READ_ONLY,
   LIBRARY_DRAG_HINT_MS,
+  dragEndedOverCanvas,
   dropEffectFor,
   acceptsDrop,
   droppedUris,
@@ -65,7 +69,8 @@ function transfer(data: Record<string, string>) {
 const sent = () => mockVsCode.postMessage.mock.calls.map((c) => c[0] as { type: string; payload?: unknown });
 const drops = () => sent().filter((m) => m.type === 'dropTables');
 const canvas = (container: HTMLElement) => container.querySelector('.editor-canvas') as HTMLElement;
-const HINT = 'Hold Shift and drop to add dim_customer to this diagram';
+const HINT = 'Drop to add dim_customer to this diagram';
+const LET_GO = 'Let go to add dim_customer to this diagram';
 
 beforeAll(() => {
   // React Flow measures its container; jsdom has no ResizeObserver.
@@ -130,9 +135,41 @@ describe('acceptsDrop', () => {
     expect(isLibraryDrag(null)).toBe(false);
   });
 
-  it('words the hint for one table or several', () => {
+  it('words the hint for one table or several, and says "Let go" once the drag is over the canvas', () => {
     expect(libraryDragHintText(['dim_customer'])).toBe(HINT);
-    expect(libraryDragHintText(['a', 'b', 'c'])).toBe('Hold Shift and drop to add 3 tables to this diagram');
+    expect(libraryDragHintText(['a', 'b', 'c'])).toBe('Drop to add 3 tables to this diagram');
+    expect(libraryDragHintText(['dim_customer'], true)).toBe(LET_GO);
+    expect(libraryDragHintText(['a', 'b'], true)).toBe('Let go to add 2 tables to this diagram');
+  });
+});
+
+/** A pointer event at (x, y) on `target`, as the webview's first one after a drag; `movement` as a real mouse reports it. */
+function pointerAt(target: Element, type: 'pointermove' | 'pointerdown', x: number, y: number, movement = { x: 0, y: 0 }) {
+  const event = new MouseEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: y });
+  Object.defineProperty(event, 'movementX', { value: movement.x });
+  Object.defineProperty(event, 'movementY', { value: movement.y });
+  act(() => { target.dispatchEvent(event); });
+}
+
+describe('dragEndedOverCanvas', () => {
+  const viewport = { width: 1000, height: 700 };
+  it('is a pointer well inside the webview, on the diagram, whose last move started inside too: the drag ended there', () => {
+    expect(dragEndedOverCanvas({ x: 500, y: 400, movementX: 2, movementY: 1, onDiagram: true }, viewport)).toBe(true);
+    // No movement known (a click, or a mouse that does not report it): the point alone.
+    expect(dragEndedOverCanvas({ x: 500, y: 400, onDiagram: true }, viewport)).toBe(true);
+    expect(dragEndedOverCanvas({ x: AFTER_DRAG_EDGE_PX, y: AFTER_DRAG_EDGE_PX, onDiagram: true }, viewport)).toBe(true);
+  });
+  it('is not a pointer coming in from outside: near an edge, or its last move started outside', () => {
+    expect(dragEndedOverCanvas({ x: AFTER_DRAG_EDGE_PX - 1, y: 400, onDiagram: true }, viewport)).toBe(false);
+    expect(dragEndedOverCanvas({ x: 500, y: 10, onDiagram: true }, viewport)).toBe(false);
+    expect(dragEndedOverCanvas({ x: 990, y: 400, onDiagram: true }, viewport)).toBe(false);
+    expect(dragEndedOverCanvas({ x: 500, y: 690, onDiagram: true }, viewport)).toBe(false);
+    // A fast move in from the sidebar lands well inside, but it started outside.
+    expect(dragEndedOverCanvas({ x: 60, y: 400, movementX: 70, movementY: 0, onDiagram: true }, viewport)).toBe(false);
+  });
+  it('is not a pointer over a toolbar, a panel or a dialog, or one that cannot be read', () => {
+    expect(dragEndedOverCanvas({ x: 500, y: 400, onDiagram: false }, viewport)).toBe(false);
+    expect(dragEndedOverCanvas({ x: Number.NaN, y: 400, onDiagram: true }, viewport)).toBe(false);
   });
 });
 
@@ -147,14 +184,70 @@ describe('the canvas as a drop target', () => {
     expect(screen.queryByText(HINT)).toBeNull();
   });
 
+  it('hides the hint, and stops taking the drag, when the host says the drag was used up elsewhere (libraryDragEnded)', () => {
+    const { container } = render(<App />);
+    postFromHost({ type: 'domainLoaded', payload: subjectArea('logical') });
+    postFromHost({ type: 'libraryDragStarted', payload: { tables: ['dim_customer'] } });
+    expect(screen.getByText(HINT)).toBeTruthy();
+    // Dropped on another diagram's row, or missed this canvas and opened the file: no pointer move ever reaches this webview.
+    postFromHost({ type: 'libraryDragEnded' });
+    expect(screen.queryByText(HINT)).toBeNull();
+    // A later drag with nothing the canvas can read is no longer taken as the library drag.
+    const dataTransfer = transfer({});
+    expect(fireEvent.dragOver(canvas(container), { dataTransfer })).toBe(true);
+    expect(screen.queryByText(LET_GO)).toBeNull();
+  });
+
+  it('a drag that ended over the canvas with no drop event: the first pointer move there posts it as an afterDrag drop, once', () => {
+    const { container } = render(<App />);
+    postFromHost({ type: 'domainLoaded', payload: subjectArea('logical') });
+    postFromHost({ type: 'libraryDragStarted', payload: { tables: ['dim_customer'] } });
+    const pane = container.querySelector('.react-flow__pane') ?? container.querySelector('.react-flow');
+    expect(pane).toBeTruthy();
+    pointerAt(pane!, 'pointermove', 400, 300, { x: 2, y: 1 });
+    expect(drops()).toEqual([{
+      type: 'dropTables',
+      payload: { position: { x: 400, y: 300 }, uris: [], fromLibrary: true, afterDrag: true },
+    }]);
+    expect(screen.queryByText(HINT)).toBeNull();
+    // The drag is over: later moves post nothing.
+    pointerAt(pane!, 'pointermove', 420, 310, { x: 20, y: 10 });
+    expect(drops()).toHaveLength(1);
+  });
+
+  it('a pointer coming in from outside after the drag (at the edge, or moving in) ends the drag without a drop', () => {
+    const { container } = render(<App />);
+    postFromHost({ type: 'domainLoaded', payload: subjectArea('logical') });
+    const pane = container.querySelector('.react-flow__pane') ?? container.querySelector('.react-flow');
+    postFromHost({ type: 'libraryDragStarted', payload: { tables: ['dim_customer'] } });
+    pointerAt(pane!, 'pointermove', 5, 300, { x: 8, y: 0 });
+    postFromHost({ type: 'libraryDragStarted', payload: { tables: ['dim_customer'] } });
+    pointerAt(pane!, 'pointermove', 80, 300, { x: 90, y: 0 });
+    expect(drops()).toEqual([]);
+    expect(screen.queryByText(HINT)).toBeNull();
+  });
+
+  it('no afterDrag drop once a real drop, or the host, ended the drag', () => {
+    const { container } = render(<App />);
+    postFromHost({ type: 'domainLoaded', payload: subjectArea('logical') });
+    const pane = container.querySelector('.react-flow__pane') ?? container.querySelector('.react-flow');
+    postFromHost({ type: 'libraryDragStarted', payload: { tables: ['dim_customer'] } });
+    postFromHost({ type: 'libraryDragEnded' });
+    pointerAt(pane!, 'pointermove', 400, 300);
+    postFromHost({ type: 'libraryDragStarted', payload: { tables: ['dim_customer'] } });
+    fireEvent.drop(canvas(container), { dataTransfer: transfer({}), clientX: 10, clientY: 20 });
+    pointerAt(pane!, 'pointerdown', 400, 300);
+    expect(drops()).toEqual([{ type: 'dropTables', payload: { position: { x: 10, y: 20 }, uris: [] } }]);
+  });
+
   it('hides the hint after a while', () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     render(<App />);
     postFromHost({ type: 'domainLoaded', payload: subjectArea('logical') });
     postFromHost({ type: 'libraryDragStarted', payload: { tables: ['a', 'b'] } });
-    expect(screen.getByText('Hold Shift and drop to add 2 tables to this diagram')).toBeTruthy();
+    expect(screen.getByText(libraryDragHintText(['a', 'b']))).toBeTruthy();
     act(() => { vi.advanceTimersByTime(LIBRARY_DRAG_HINT_MS + 1); });
-    expect(screen.queryByText(/Hold Shift and drop/)).toBeNull();
+    expect(screen.queryByText(/^Drop to add/)).toBeNull();
   });
 
   it('highlights an acceptable drag, and its drop posts the flow position and the URIs, and ends the hint', () => {
@@ -169,6 +262,8 @@ describe('the canvas as a drop target', () => {
     expect(accepted).toBe(false); // preventDefault: the drop is allowed
     expect(dataTransfer.dropEffect).toBe('copy');
     expect(screen.getByTestId('library-drop-highlight')).toBeTruthy();
+    // Over the canvas, the hint says the drop will land.
+    expect(screen.getByText(LET_GO)).toBeTruthy();
 
     fireEvent.drop(target, { dataTransfer, clientX: 120, clientY: 80 });
     expect(drops()).toEqual([{
@@ -198,6 +293,8 @@ describe('the canvas as a drop target', () => {
       'text/uri-list': '',
       resourceurls: '',
       'application/vnd.code.tree.erdstudio.modellibrary': '{"id":"erdStudio.modelLibrary","itemHandles":["0/0:fct_order","0/1:sales"]}',
+      // The names' own type, declared in dragMimeTypes: blank here too (the real names stay in the workbench).
+      'application/vnd.erdstudio.tables+json': '',
       'application/vnd.code.uri-list': 'file:///c%3A/proj/.erd-studio/gold/tables/dbo/fct_order.dbml',
       codefiles: '["c:\\\\proj\\\\.erd-studio\\\\gold\\\\tables\\\\dbo\\\\fct_order.dbml"]',
     });
@@ -207,6 +304,60 @@ describe('the canvas as a drop target', () => {
       type: 'dropTables',
       payload: { position: { x: 10, y: 20 }, uris: ['file:///c%3A/proj/.erd-studio/gold/tables/dbo/fct_order.dbml'], fromLibrary: true },
     }]);
+  });
+
+  // Shift pressed late (after the hint has gone, or with the pointer already over
+  // the diagram): VS Code lets the drag reach the webview from its next drag
+  // event on, and the canvas takes it exactly as it takes an early-Shift drag.
+  it('Shift pressed late: a drag that reaches the canvas after the hint timed out is taken, named, and dropped', () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const { container } = render(<App />);
+    postFromHost({ type: 'domainLoaded', payload: subjectArea('logical') });
+    postFromHost({ type: 'libraryDragStarted', payload: { tables: ['dim_customer'] } });
+    act(() => { vi.advanceTimersByTime(LIBRARY_DRAG_HINT_MS + 1); });
+    expect(screen.queryByText(HINT)).toBeNull();
+    // What the webview sees once Shift is down: VS Code's tree types, blank, and the row's file.
+    const dataTransfer = transfer({
+      'application/vnd.code.tree.erdstudio.modellibrary': '',
+      'application/vnd.code.uri-list': 'file:///p/.erd-studio/gold/tables/gold/dim_customer.dbml',
+    });
+    fireEvent.dragEnter(canvas(container), { dataTransfer });
+    expect(fireEvent.dragOver(canvas(container), { dataTransfer, clientX: 5, clientY: 5 })).toBe(false);
+    expect(screen.getByText(LET_GO)).toBeTruthy();
+    fireEvent.drop(canvas(container), { dataTransfer, clientX: 5, clientY: 5 });
+    expect(drops()).toEqual([{
+      type: 'dropTables',
+      payload: { position: { x: 5, y: 5 }, uris: ['file:///p/.erd-studio/gold/tables/gold/dim_customer.dbml'], fromLibrary: true },
+    }]);
+    expect(screen.queryByText(LET_GO)).toBeNull();
+  });
+
+  it('Shift pressed early: the first event the canvas sees is a dragover (no dragenter), and the drop still lands', () => {
+    const { container } = render(<App />);
+    postFromHost({ type: 'domainLoaded', payload: subjectArea('logical') });
+    postFromHost({ type: 'libraryDragStarted', payload: { tables: ['dim_customer'] } });
+    const dataTransfer = transfer({ 'application/vnd.code.tree.erdstudio.modellibrary': '' });
+    expect(fireEvent.dragOver(canvas(container), { dataTransfer })).toBe(false);
+    fireEvent.drop(canvas(container), { dataTransfer, clientX: 1, clientY: 2 });
+    expect(drops()).toEqual([{ type: 'dropTables', payload: { position: { x: 1, y: 2 }, uris: [], fromLibrary: true } }]);
+  });
+
+  it('the hint goes when the diagram changes under it (the tables were added by a drop on its row)', () => {
+    render(<App />);
+    postFromHost({ type: 'domainLoaded', payload: subjectArea('logical') });
+    postFromHost({ type: 'libraryDragStarted', payload: { tables: ['dim_customer'] } });
+    expect(screen.getByText(HINT)).toBeTruthy();
+    postFromHost({ type: 'domainLoaded', payload: { ...subjectArea('logical'), description: 'now with dim_customer' } });
+    expect(screen.queryByText(HINT)).toBeNull();
+  });
+
+  it('the hint goes when the host selects a table (a drop on the row found it already there)', () => {
+    render(<App />);
+    postFromHost({ type: 'domainLoaded', payload: subjectArea('logical') });
+    postFromHost({ type: 'libraryDragStarted', payload: { tables: ['dim_customer'] } });
+    expect(screen.getByText(HINT)).toBeTruthy();
+    postFromHost({ type: 'revealTable', payload: { modelName: 'dim_customer' } });
+    expect(screen.queryByText(HINT)).toBeNull();
   });
 
   it('leaves a plain text drag alone, and drops the highlight when the drag leaves', () => {

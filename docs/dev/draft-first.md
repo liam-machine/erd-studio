@@ -94,7 +94,7 @@ Changing it answers `scope`; the page shows **Drawing…** until the flow asks w
 
 ### 2.5 Layout
 
-`autoLayout` (no table has a stored position, `isFreshLayout`'s rule): the page runs the canvas's own ELK layout (`webview/lib/elkLayout` `runElkLayout`, with the options the canvas's first-open layout uses) before drawing, showing `Laying out 257 tables…`; the canvas runs the same layout when it first opens the kept diagram, so the preview is what Keep makes. A file with `erd_layout` positions is drawn as positioned. ELK failing draws `display`'s fallback placement (`computeMissingPositions`) and posts `layoutFailed`.
+`autoLayout` (no table has a stored position, `isFreshLayout`'s rule): the page runs the canvas's own ELK layout (`webview/lib/elkLayout` `runElkLayout`, with the options the canvas's first-open layout uses) before drawing, showing `Laying out 257 tables…`; the canvas runs the same layout when it first opens the kept diagram, so the preview is what Keep makes. A file with `erd_layout` positions is drawn as positioned. ELK failing draws `display`'s fallback placement (`computeMissingPositions`) and posts `layoutFailed`, with how long it ran (`ms`) and the canvas's own `LayoutFailureDetail` (`layoutFailureReport`: the failure's class, the draft's size as buckets, how far the fallbacks got, and `log`, the real counts and message for the ERD Studio log only); the wiring counts `draftLayoutFailed` plus the canvas's `layoutFailed*` class, size, duration and fallback codes (`layoutFailureCodes`), and the preview writes the log line. A finished layout's `layoutFinished` carries `rung` when a fallback produced it.
 
 ## 3. Triggers and the prompt gate
 

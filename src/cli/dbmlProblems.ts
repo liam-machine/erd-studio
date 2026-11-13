@@ -38,6 +38,7 @@ import { listMisnamedTableFiles } from '../services/dbmlConversionFiles';
 import { sameName } from '../types/naming';
 import { compileDbmlFilesSeparately } from '../services/dbmlFileCompile';
 import { relationshipsIndexOf } from '../services/dbmlLibraryWrites';
+import { refLinesNamingSpelling, sharedUseSpellingMessage, sharedUseSpellings } from '../services/sharedUseSpelling';
 import { relationshipsImportsFor } from '../services/dbmlRelationshipsIndex';
 import type { RelationshipsIndex } from '../services/dbmlRelationshipsIndex';
 import { unimportedRelationshipsMessage } from '../services/domainService';
@@ -135,6 +136,8 @@ const SEVERITY: Readonly<Record<string, 'error' | 'warning'>> = {
   duplicateDeclaredTable: 'error',
   // A diagram showing two same-named tables from different schema folders that older versions still open.
   twinDiagramVersion: 'warning',
+  // A diagram or relationships file whose use lines import two table files under one spelling ([3003] elsewhere).
+  sharedUseSpelling: 'error',
 };
 
 /**
@@ -306,6 +309,24 @@ export function collectDbmlProblems(ctx: CliContext, storage: ProjectStorage, si
     diagnostics = {};
   }
   const kindOf = new Map(files.map((f) => [f.rel, f.kind]));
+  // Use lines that import two table files under one spelling (two `Table adresse` with no schema): said
+  // with the fix on the later line, in place of the parser's bare [3003] there.
+  const sharedAt = new Set<string>();
+  const sharedRefAt = new Set<string>();
+  for (const f of files) {
+    if ((f.kind !== 'diagram' && f.kind !== 'relationships') || conflicted.has(f.rel)) continue;
+    for (const group of sharedUseSpellings(f.text, f.rel)) {
+      // The parser binds the spelling to one of the files, so a Ref end meaning the other gets its own [4000]: the same cause.
+      for (const line of refLinesNamingSpelling(f.text, group.spelling)) sharedRefAt.add(`${f.rel}\u0000${line}`);
+      const first = group.uses[0];
+      const firstId = first.id !== undefined ? tableIdKey(first.id) : first.resolved.toLowerCase();
+      for (const use of group.uses) {
+        if ((use.id !== undefined ? tableIdKey(use.id) : use.resolved.toLowerCase()) === firstId) continue;
+        sharedAt.add(`${f.rel}\u0000${use.line}`);
+        push({ file: projectRel(f.rel), line: use.line, code: 'sharedUseSpelling', message: sharedUseSpellingMessage(group, use) });
+      }
+    }
+  }
   // In the project's file order, whatever order the compile keyed its result in.
   const entrySet = new Set(entries);
   const diagnosed = [...entries, ...Object.keys(diagnostics).filter((rel) => !entrySet.has(rel))];
@@ -314,6 +335,8 @@ export function collectDbmlProblems(ctx: CliContext, storage: ProjectStorage, si
     if (conflicted.has(rel)) continue;
     const kind = kindOf.get(rel);
     for (const d of list) {
+      if (d.code === 3003 && sharedAt.has(`${rel}\u0000${d.line}`)) continue;
+      if (d.code === 4000 && sharedRefAt.has(`${rel}\u0000${d.line}`) && /does not exist in Table/i.test(d.message)) continue;
       const hint = (kind === 'table' && DBML_TABLE_QUOTE_HINT_CODES.has(String(d.code)))
         || (kind === 'diagram' && DBML_DIAGRAM_QUOTE_HINT_CODES.has(String(d.code)))
         ? ` ${DBML_QUOTE_HINT}` : '';
@@ -480,15 +503,24 @@ export function collectDbmlProblems(ctx: CliContext, storage: ProjectStorage, si
    * schema) is the qualifier, then the one table of the name (an unqualified end: the one in tables/public/).
    * Undefined when none, or when several and nothing decides (the attach reports those itself).
    */
-  const endTableOf = (f: ProjectFile, name: string, qualifier: string | undefined): ReturnType<typeof tableOf> => {
+  const endTableOf = (f: ProjectFile, name: string, qualifier: string | undefined, columns?: readonly string[]): ReturnType<typeof tableOf> => {
     const direct = tableOf(name);
     const candidates = named.get(name.toLowerCase()) ?? [];
     // (The snapshot is always scoped when there is one; without one there are no candidates.)
     if (candidates.length < 2) return direct ?? candidates[0];
     const q = qualifier?.replace(/^"(.*)"$/, '$1').toLowerCase();
     const spelled = (q === undefined ? name : `${q}.${name}`).toLowerCase();
-    const use = outline(f).uses.find((u) => !u.wildcard && (u.specifiers ?? []).some((sp) => sp.toLowerCase() === spelled));
-    const viaUse = use ? byPath.get(use.resolved.toLowerCase()) : undefined;
+    const viaUses = [...new Set(outline(f).uses
+      .filter((u) => !u.wildcard && (u.specifiers ?? []).some((sp) => sp.toLowerCase() === spelled))
+      .map((u) => byPath.get(u.resolved.toLowerCase()))
+      .filter((t): t is NonNullable<typeof t> => t !== undefined))];
+    // The spelling two of the file's use lines import from different tables (sharedUseSpelling): the one
+    // with every column the end names, as the attach reads it; else none (ambiguousTableReference says so).
+    if (viaUses.length > 1) {
+      const fit = (columns ?? []).length === 0 ? [] : viaUses.filter((t) => columns!.every((c) => t.columns.some((x) => x.toLowerCase() === c.toLowerCase())));
+      return fit.length === 1 ? fit[0] : undefined;
+    }
+    const viaUse = viaUses[0];
     if (viaUse) return viaUse;
     const only = (ts: typeof candidates): ReturnType<typeof tableOf> => (ts.length === 1 ? ts[0] : undefined);
     if (q === undefined) return only(candidates.filter((t) => folderOf(t) === 'public'));
@@ -672,22 +704,26 @@ export function collectDbmlProblems(ctx: CliContext, storage: ProjectStorage, si
     const missing = new Map<string, { name: string; line: number; text: string }>();
     const missingSchemas = new Set<string>();
     for (const ref of reading.refs) {
-      const ends = [[ref.owner, ref.ownerQualifier], [ref.target, ref.targetQualifier]] as const;
-      for (const [end, qualifier] of ends) {
-        const t = endTableOf(f, end, qualifier);
+      const ownerColumns = ref.relationships.map((r) => r.fromColumn);
+      const targetColumns = ref.relationships.map((r) => r.toColumn);
+      const ends = [[ref.owner, ref.ownerQualifier, ownerColumns], [ref.target, ref.targetQualifier, targetColumns]] as const;
+      for (const [end, qualifier, columns] of ends) {
+        const t = endTableOf(f, end, qualifier, columns);
         if (!t || t.storage !== 'dbml' || covered(t)) continue;
         if (qualifier !== undefined) missingSchemas.add(qualifier.replace(/^"(.*)"$/, '$1').toLowerCase());
         if (missing.has(t.path.toLowerCase())) continue;
         missing.set(t.path.toLowerCase(), { name: t.name.toLowerCase(), line: ref.line, text: `use { table ${t.reference} } from '${usePathBetween(f.rel, t.path)}'` });
       }
-      const owner = endTableOf(f, ref.owner, ref.ownerQualifier);
-      const target = endTableOf(f, ref.target, ref.targetQualifier);
+      const owner = endTableOf(f, ref.owner, ref.ownerQualifier, ownerColumns);
+      const target = endTableOf(f, ref.target, ref.targetQualifier, targetColumns);
       // A table whose file does not read has no columns to check: that file's own problem is the one to fix.
       if ((owner && !readsCleanly(owner)) || (target && !readsCleanly(target))) continue;
       if (owner && target) {
+        // Each end as the Ref spells it (`bqs.adresse.nowhere` once qualified), so the message names what the file says.
+        const asWritten = (name: string, qualifier: string | undefined): string => (qualifier !== undefined ? `${qualifier}.${name}` : name);
         const gone = ref.relationships.flatMap((r) => [
-          ...(owner.columns.some((c) => c.toLowerCase() === r.fromColumn.toLowerCase()) ? [] : [`${owner.name}.${r.fromColumn}`]),
-          ...(target.columns.some((c) => c.toLowerCase() === r.toColumn.toLowerCase()) ? [] : [`${target.name}.${r.toColumn}`]),
+          ...(owner.columns.some((c) => c.toLowerCase() === r.fromColumn.toLowerCase()) ? [] : [`${asWritten(ref.owner, ref.ownerQualifier)}.${r.fromColumn}`]),
+          ...(target.columns.some((c) => c.toLowerCase() === r.toColumn.toLowerCase()) ? [] : [`${asWritten(ref.target, ref.targetQualifier)}.${r.toColumn}`]),
         ]);
         if (gone.length > 0) {
           push({
@@ -711,8 +747,8 @@ export function collectDbmlProblems(ctx: CliContext, storage: ProjectStorage, si
       // The relationship's from end is the Ref's owner, unless the reader turned it round.
       const forward = sameName(ref.relationships[0]?.fromModel ?? ref.owner, ref.owner);
       pushPending(f.rel, ref, (end) => ((end === 'from') === forward
-        ? endTableOf(f, ref.owner, ref.ownerQualifier)
-        : endTableOf(f, ref.target, ref.targetQualifier)));
+        ? endTableOf(f, ref.owner, ref.ownerQualifier, ref.relationships.map((r) => r.fromColumn))
+        : endTableOf(f, ref.target, ref.targetQualifier, ref.relationships.map((r) => r.toColumn))));
     }
     if (missing.size > 0) missingUseTables.set(projectRel(f.rel), { tables: new Set([...missing.values()].map((m) => m.name)), schemas: missingSchemas });
     for (const m of missing.values()) {

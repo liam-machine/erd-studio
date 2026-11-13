@@ -90,7 +90,10 @@ function twinFiles(root: string): Record<string, string> {
 const TWINS_DIR = path.resolve(__dirname, '../fixtures/dbml');
 // missing-model's twin holds a table file that does not parse and use lines
 // for tables with no file, on purpose: it is the tolerance case.
-const CLEAN_TWINS = fs.readdirSync(TWINS_DIR).filter((name) => name !== 'missing-model');
+// same-name-unqualified is the reporter's photo-2 as 2.0.4 wrote it: two unqualified
+// `Table adresse` files imported under one spelling, which every parser refuses ([3003]).
+const UNCLEAN_TWINS = new Set(['missing-model', 'same-name-unqualified']);
+const CLEAN_TWINS = fs.readdirSync(TWINS_DIR).filter((name) => !UNCLEAN_TWINS.has(name));
 
 describe('the DBML twins compile clean as multi-file projects, the way other DBML tools read them', () => {
   it('the clean twins are the four §9.2 cases, Convert\'s missing-model output (D26/D27), the context-field spellings, an imported table\'s settings, the alias workaround and two tables of one name in two schema folders', () => {
@@ -101,6 +104,12 @@ describe('the DBML twins compile clean as multi-file projects, the way other DBM
   });
 
   describe.each(STORAGE_PARSERS)('%s', (_label, parser) => {
+    it('same-name-unqualified: the second `use { table adresse }` is refused ([3003]), so other DBML tools show one adresse', () => {
+      const files = twinFiles(path.join(TWINS_DIR, 'same-name-unqualified', '.erd-studio'));
+      const result = compileDbmlProject(files, ['bronze/diagrams/sap.dbml'], parser);
+      expect((result['bronze/diagrams/sap.dbml'] ?? []).map((d) => `${d.line} [${d.code}]`)).toContain('13 [3003]');
+    });
+
     it.each(CLEAN_TWINS)('%s', (name) => {
       const files = twinFiles(path.join(TWINS_DIR, name, '.erd-studio'));
       const entries = Object.keys(files).filter((p) => p.split('/')[1] === 'diagrams');

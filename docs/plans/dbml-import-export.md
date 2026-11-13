@@ -1,7 +1,7 @@
 # DBML import and export (round trip) — Plan
 
 **Date:** 2026-10-26
-**Prompted by:** @gbrueckl's customer is wary of ERD Studio's "proprietary nature": if development stops, are their models stranded? Gerhard suggested DBML and keeping layout separate from the model.
+**Prompted by:** @gbrueckl's customer is wary of ERD Studio's "proprietary nature": if development stops, are their models stranded? the reporter suggested DBML and keeping layout separate from the model.
 **Builds on:** the v1 Mermaid / DBML export (`packages/core/src/exportDbml.ts`, shipped 2026-10-09).
 > **Superseded by `docs/plans/native-dbml-storage.md` (2.0 native storage).** Since ERD Studio 2.0, DBML is the storage itself, not only a way in and out; the export and import described here are unchanged and still the route to dbdiagram.io. The history below stays as written.
 

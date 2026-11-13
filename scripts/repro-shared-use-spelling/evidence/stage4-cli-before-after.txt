@@ -1,0 +1,80 @@
+# the reporter's photo-2, stage 4 (repair): CLI before/after
+# BEFORE = origin/develop base 5b5f85a9 (stage 1 found v2.0.4 identical for this shape); AFTER = fix/reporter-feedback-3 (fix ba2770aa + this repair)
+# Project A: packages/core/test/fixtures/dbml/same-name-unqualified (the two adresse tables have different columns: id vs adr_id)
+# Project B: both adresse tables have 'id' (the Breaker's case), Refs as 2.0.4 wrote them:
+#   Ref: unit.bqs_adresse_id >? adresse.id   /   Ref: unit.ccc_adresse_id >? adresse.id
+
+===== BEFORE: doctor --project <A> --no-dbt (DBML problems only) =====
+✗ .erd-studio/bronze/diagrams/sap.dbml line 13: Table 'adresse' already exists in schema 'public' (3003)
+✗ .erd-studio/bronze/relationships/bronze.dbml line 7: Column 'adr_id' does not exist in Table 'public.adresse' (4000)
+✗ .erd-studio/bronze/relationships/bronze.dbml line 8: Column 'adr_id' does not exist in Table 'public.adresse' (4000)
+✗ .erd-studio/bronze/relationships/bronze.dbml line 9: Column 'nowhere' does not exist in Table 'public.adresse' (4000)
+✗ .erd-studio/bronze/relationships/bronze.dbml line 4: Table 'adresse' already exists in schema 'public' (3003)
+✗ .erd-studio/bronze/tables/bqs/adresse.dbml: This file declares Table adresse, as bronze/tables/ccc/adresse.dbml also does. ERD Studio tells them apart by their schema folders, but other DBML tools cannot import two tables of one schema and name. Declare the table in its folder's schema (Table bqs.adresse), or remove the copy. (duplicateDeclaredTable)
+✗ .erd-studio/bronze/tables/ccc/adresse.dbml: This file declares Table adresse, as bronze/tables/bqs/adresse.dbml also does. ERD Studio tells them apart by their schema folders, but other DBML tools cannot import two tables of one schema and name. Declare the table in its folder's schema (Table ccc.adresse), or remove the copy. (duplicateDeclaredTable)
+! .erd-studio/bronze/tables/bqs/adresse.dbml line 1: write `Table bqs.adresse`: other DBML tools read an unqualified table as `public.adresse`. (unqualifiedTable)
+! .erd-studio/bronze/tables/bqs/bqs__v_sap_prod_unit2.dbml line 1: write `Table bqs.bqs__v_sap_prod_unit2`: other DBML tools read an unqualified table as `public.bqs__v_sap_prod_unit2`. (unqualifiedTable)
+! .erd-studio/bronze/tables/ccc/adresse.dbml line 1: write `Table ccc.adresse`: other DBML tools read an unqualified table as `public.adresse`. (unqualifiedTable)
+! .erd-studio/bronze/relationships/bronze.dbml line 7: This Ref names adresse.adr_id, which is not a column of its table. ERD Studio still draws the line between the two tables, but it points at a column the table does not have, and other DBML tools reject the file. Fix the column name, or delete the Ref. (danglingRef)
+! .erd-studio/bronze/relationships/bronze.dbml line 8: This Ref names adresse.adr_id, which is not a column of its table. ERD Studio still draws the line between the two tables, but it points at a column the table does not have, and other DBML tools reject the file. Fix the column name, or delete the Ref. (danglingRef)
+! .erd-studio/bronze/relationships/bronze.dbml line 9: This Ref names adresse.nowhere, which is not a column of its table. ERD Studio still draws the line between the two tables, but it points at a column the table does not have, and other DBML tools reject the file. Fix the column name, or delete the Ref. (danglingRef)
+! bqs__v_sap_prod_unit2.unit_id → adresse.nowhere looks drawn backwards (it starts at bqs__v_sap_prod_unit2's key) — in .erd-studio/bronze/diagrams/bqs-only.dbml, .erd-studio/bronze/diagrams/sap.dbml
+
+===== BEFORE: export sap.dbml --format dbml (Tables and Refs) =====
+Table bqs__v_sap_prod_unit2 {
+Table "bqs.adresse" {
+Table "ccc.adresse" {
+Ref: bqs__v_sap_prod_unit2.bqs_adresse_id > "bqs.adresse".id
+
+===== AFTER: doctor --project <A> --no-dbt (DBML problems only) =====
+✗ .erd-studio/bronze/diagrams/sap.dbml line 13: Line 13 imports adresse from ../tables/ccc/adresse.dbml, as line 12 (../tables/bqs/adresse.dbml) does from another file. DBML reads both as one table, so dbdiagram.io and other DBML tools refuse this import ([3003]) and show only one adresse, and a Ref end spelled adresse names neither. Declare each table in its schema folder's schema (Table ccc.adresse, Table bqs.adresse) and spell the use lines and Refs the same way (use { table ccc.adresse } from '../tables/ccc/adresse.dbml'): opening the diagram in ERD Studio offers Qualify Tables, which does all of it in one edit. (sharedUseSpelling)
+✗ .erd-studio/bronze/relationships/bronze.dbml line 4: Line 4 imports adresse from ../tables/ccc/adresse.dbml, as line 2 (../tables/bqs/adresse.dbml) does from another file. DBML reads both as one table, so dbdiagram.io and other DBML tools refuse this import ([3003]) and show only one adresse, and a Ref end spelled adresse names neither. Declare each table in its schema folder's schema (Table ccc.adresse, Table bqs.adresse) and spell the use lines and Refs the same way (use { table ccc.adresse } from '../tables/ccc/adresse.dbml'): opening the diagram in ERD Studio offers Qualify Tables, which does all of it in one edit. (sharedUseSpelling)
+✗ .erd-studio/bronze/tables/bqs/adresse.dbml: This file declares Table adresse, as bronze/tables/ccc/adresse.dbml also does. ERD Studio tells them apart by their schema folders, but other DBML tools cannot import two tables of one schema and name. Declare the table in its folder's schema (Table bqs.adresse), or remove the copy. (duplicateDeclaredTable)
+✗ .erd-studio/bronze/tables/ccc/adresse.dbml: This file declares Table adresse, as bronze/tables/bqs/adresse.dbml also does. ERD Studio tells them apart by their schema folders, but other DBML tools cannot import two tables of one schema and name. Declare the table in its folder's schema (Table ccc.adresse), or remove the copy. (duplicateDeclaredTable)
+! .erd-studio/bronze/tables/bqs/adresse.dbml line 1: write `Table bqs.adresse`: other DBML tools read an unqualified table as `public.adresse`. (unqualifiedTable)
+! .erd-studio/bronze/tables/bqs/bqs__v_sap_prod_unit2.dbml line 1: write `Table bqs.bqs__v_sap_prod_unit2`: other DBML tools read an unqualified table as `public.bqs__v_sap_prod_unit2`. (unqualifiedTable)
+! .erd-studio/bronze/tables/ccc/adresse.dbml line 1: write `Table ccc.adresse`: other DBML tools read an unqualified table as `public.adresse`. (unqualifiedTable)
+! .erd-studio/bronze/relationships/bronze.dbml line 9: This Ref names adresse, which tables in more than one schema folder have (bqs, ccc), and nothing says which, so it is not drawn. Write the end as <schema>.adresse, with a use line for that table. (ambiguousTableReference)
+
+===== AFTER: export sap.dbml --format dbml (Tables and Refs) =====
+Table bqs.bqs__v_sap_prod_unit2 {
+Table bqs.adresse {
+Table ccc.adresse {
+Ref: bqs.bqs__v_sap_prod_unit2.bqs_adresse_id > bqs.adresse.id
+Ref: bqs.bqs__v_sap_prod_unit2.ccc_adresse_id > ccc.adresse.adr_id
+Ref: ccc.adresse.adr_id > bqs.adresse.id
+
+===== BEFORE: doctor --project <B> --no-dbt (DBML problems only) =====
+✗ .erd-studio/bronze/diagrams/sap.dbml line 12: Table 'adresse' already exists in schema 'public' (3003)
+✗ .erd-studio/bronze/relationships/bronze.dbml line 3: Table 'adresse' already exists in schema 'public' (3003)
+✗ .erd-studio/bronze/tables/bqs/adresse.dbml: This file declares Table adresse, as bronze/tables/ccc/adresse.dbml also does. ERD Studio tells them apart by their schema folders, but other DBML tools cannot import two tables of one schema and name. Declare the table in its folder's schema (Table bqs.adresse), or remove the copy. (duplicateDeclaredTable)
+✗ .erd-studio/bronze/tables/ccc/adresse.dbml: This file declares Table adresse, as bronze/tables/bqs/adresse.dbml also does. ERD Studio tells them apart by their schema folders, but other DBML tools cannot import two tables of one schema and name. Declare the table in its folder's schema (Table ccc.adresse), or remove the copy. (duplicateDeclaredTable)
+! .erd-studio/bronze/tables/bqs/adresse.dbml line 1: write `Table bqs.adresse`: other DBML tools read an unqualified table as `public.adresse`. (unqualifiedTable)
+! .erd-studio/bronze/tables/bqs/unit.dbml line 1: write `Table bqs.unit`: other DBML tools read an unqualified table as `public.unit`. (unqualifiedTable)
+! .erd-studio/bronze/tables/ccc/adresse.dbml line 1: write `Table ccc.adresse`: other DBML tools read an unqualified table as `public.adresse`. (unqualifiedTable)
+
+===== BEFORE: export sap.dbml --format dbml (Tables and Refs) =====
+Table unit {
+Table "bqs.adresse" {
+Table "ccc.adresse" {
+Ref: unit.bqs_adresse_id > "bqs.adresse".id
+Ref: unit.ccc_adresse_id > "bqs.adresse".id
+
+===== AFTER: doctor --project <B> --no-dbt (DBML problems only) =====
+✗ .erd-studio/bronze/diagrams/sap.dbml line 12: Line 12 imports adresse from ../tables/ccc/adresse.dbml, as line 11 (../tables/bqs/adresse.dbml) does from another file. DBML reads both as one table, so dbdiagram.io and other DBML tools refuse this import ([3003]) and show only one adresse, and a Ref end spelled adresse names neither. Declare each table in its schema folder's schema (Table ccc.adresse, Table bqs.adresse) and spell the use lines and Refs the same way (use { table ccc.adresse } from '../tables/ccc/adresse.dbml'): opening the diagram in ERD Studio offers Qualify Tables, which does all of it in one edit. (sharedUseSpelling)
+✗ .erd-studio/bronze/relationships/bronze.dbml line 3: Line 3 imports adresse from ../tables/ccc/adresse.dbml, as line 1 (../tables/bqs/adresse.dbml) does from another file. DBML reads both as one table, so dbdiagram.io and other DBML tools refuse this import ([3003]) and show only one adresse, and a Ref end spelled adresse names neither. Declare each table in its schema folder's schema (Table ccc.adresse, Table bqs.adresse) and spell the use lines and Refs the same way (use { table ccc.adresse } from '../tables/ccc/adresse.dbml'): opening the diagram in ERD Studio offers Qualify Tables, which does all of it in one edit. (sharedUseSpelling)
+✗ .erd-studio/bronze/tables/bqs/adresse.dbml: This file declares Table adresse, as bronze/tables/ccc/adresse.dbml also does. ERD Studio tells them apart by their schema folders, but other DBML tools cannot import two tables of one schema and name. Declare the table in its folder's schema (Table bqs.adresse), or remove the copy. (duplicateDeclaredTable)
+✗ .erd-studio/bronze/tables/ccc/adresse.dbml: This file declares Table adresse, as bronze/tables/bqs/adresse.dbml also does. ERD Studio tells them apart by their schema folders, but other DBML tools cannot import two tables of one schema and name. Declare the table in its folder's schema (Table ccc.adresse), or remove the copy. (duplicateDeclaredTable)
+! .erd-studio/bronze/tables/bqs/adresse.dbml line 1: write `Table bqs.adresse`: other DBML tools read an unqualified table as `public.adresse`. (unqualifiedTable)
+! .erd-studio/bronze/tables/bqs/unit.dbml line 1: write `Table bqs.unit`: other DBML tools read an unqualified table as `public.unit`. (unqualifiedTable)
+! .erd-studio/bronze/tables/ccc/adresse.dbml line 1: write `Table ccc.adresse`: other DBML tools read an unqualified table as `public.adresse`. (unqualifiedTable)
+! .erd-studio/bronze/relationships/bronze.dbml line 5: This Ref names adresse, which tables in more than one schema folder have (bqs, ccc), and nothing says which, so it is not drawn. Write the end as <schema>.adresse, with a use line for that table. (ambiguousTableReference)
+! .erd-studio/bronze/relationships/bronze.dbml line 6: This Ref names adresse, which tables in more than one schema folder have (bqs, ccc), and nothing says which, so it is not drawn. Write the end as <schema>.adresse, with a use line for that table. (ambiguousTableReference)
+
+===== AFTER: export sap.dbml --format dbml (Tables and Refs) =====
+Table bqs.unit {
+Table bqs.adresse {
+Table ccc.adresse {
+
+# Reading: BEFORE project B exports both Refs on bqs.adresse (the ccc one on the wrong table). AFTER, B draws/exports
+# neither until Qualify Tables, which asks which table each Ref end means (see the vitest output in stage4-tests.txt).
