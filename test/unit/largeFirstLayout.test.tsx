@@ -131,6 +131,53 @@ describe('#294 first-open layout of a large import that times out', () => {
     expect(fakes.state.layoutCalls).toBe(1);
   });
 
+  it('a later layout that works takes the failure toast away (it would otherwise sit over the new layout)', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    act(() => {
+      useEditorStore.getState().setDomain(importedSubjectArea(hostFallback));
+      useEditorStore.getState().setPendingAutoLayout(true);
+    });
+    await act(async () => { render(<Toolbar nodes={nodes} edges={edges} />); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(LAYOUT_TIMEOUT_MS + 10); });
+    expect(useEditorStore.getState().toastActions).toEqual(['layoutFeedback']);
+
+    // The engine answers this time (Shift+L, the Layout button or Apply).
+    fakes.state.layoutImpl = (graph) => {
+      const g = graph as { children: Array<{ id: string; width: number; height: number }> };
+      return Promise.resolve({ ...g, children: g.children.map((c, i) => ({ ...c, x: (i % 7) * 400, y: Math.floor(i / 7) * 300 })) });
+    };
+    await act(async () => { useEditorStore.getState().triggerAutoLayout(); await vi.advanceTimersByTimeAsync(10); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(10); });
+
+    expect(posts('layoutFinished')).toHaveLength(2);
+    expect(posts('layoutFinished')[1].payload).toMatchObject({ ok: true });
+    expect(posts('layoutFinished')[1].payload.rung).toBeUndefined();
+    expect(useEditorStore.getState().toastMessage).toBeNull();
+    expect(useEditorStore.getState().toastActions).toBeNull();
+  });
+
+  it('a guard timeout whose grid fails too says so in plain words, with Send Feedback only', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    let reads = 0;
+    const breaking = nodes.map((n, i) => (i === 0 ? {
+      ...n,
+      get measured() { if (++reads > 2) throw new Error('grid failed'); return { width: 260, height: 180 }; },
+    } as TableFlowNode : n));
+    act(() => {
+      useEditorStore.getState().setDomain(importedSubjectArea(hostFallback));
+      useEditorStore.getState().setPendingAutoLayout(true);
+    });
+    await act(async () => { render(<Toolbar nodes={breaking} edges={edges} />); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(LAYOUT_TIMEOUT_MS + 10); });
+
+    expect(posts('layoutFinished')[0].payload).toMatchObject({ ok: false, firstOpen: true, failure: 'timeout' });
+    expect(useEditorStore.getState().toastMessage).toBe(
+      'This diagram is too large to arrange automatically (ERD Studio stopped after 30 seconds). Your tables are all here, where they were. This is a limit in ERD Studio, not a problem with your files.',
+    );
+    expect(useEditorStore.getState().toastActions).toEqual(['layoutFeedback']);
+    expect(posts('updatePositions')).toHaveLength(0);
+  });
+
   // When even the grid fails, runElkLayout rejects with the first error; the
   // toast must still use plain words: no "ELK", no raw message.
   it.each([
@@ -186,6 +233,17 @@ describe('layoutFailureNotice (#294)', () => {
     ['other', false, BUG_IN_PLACE, ['retryLayout', 'layoutFeedback']],
   ] as const)('%s (arranged in the grid: %s)', (failure, arranged, message, actions) => {
     expect(layoutFailureNotice(failure, arranged)).toEqual({ message, actions });
+  });
+
+  it('a layout setting the engine refuses points at the diagram\'s layoutOptions, without Try Again or blaming either side', () => {
+    expect(layoutFailureNotice('unsupported', true)).toEqual({
+      message: "ERD Studio couldn't arrange this diagram with its layout settings. Your tables are all here, in tidy columns in relationship order. If the diagram file sets viewConfig.layoutOptions, check them; if it doesn't, this is a bug in ERD Studio.",
+      actions: ['layoutFeedback'],
+    });
+    expect(layoutFailureNotice('unsupported', false).message).toContain('Your tables are all here, where they were.');
+    expect(layoutFailureNotice('unsupported', false).message).not.toContain('not a problem with your files');
+    // What a typo in the file's own options is classified as.
+    expect(classifyLayoutFailure(new Error("org.eclipse.elk.core.UnsupportedConfigurationException: Layout algorithm 'mrtee' not found for Root Node root"))).toBe('unsupported');
   });
 
   it('running out of memory is a limit too, and no class names the engine', () => {

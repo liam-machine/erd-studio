@@ -26,7 +26,6 @@ import {
   type LayoutFallbackRung,
 } from '../../src/types/webviewError';
 import { NODE_WIDTH, resolveNodeDimensions } from '@erd-studio/renderer/sizing';
-import type { ToastAction } from '../store/editorStore';
 
 // ---------------------------------------------------------------------------
 // Node size estimation — lives in @erd-studio/renderer (lib/nodeSizing.ts) so
@@ -1053,6 +1052,13 @@ export async function runElkLayout(
   throw err;
 }
 
+/**
+ * A button a layout notice's toast can offer: `retryLayout` runs Auto Layout
+ * again, `layoutFeedback` opens Send Feedback filled in with the toast's
+ * words. The editor store re-exports it as its toast's buttons.
+ */
+export type ToastAction = 'retryLayout' | 'layoutFeedback';
+
 /** What the canvas tells the user about a layout: the toast's words and its buttons. */
 export interface LayoutNotice {
   message: string;
@@ -1065,14 +1071,23 @@ export interface LayoutNotice {
  * and what to do next. `arranged`: the tables were put in the grid's tidy
  * columns; otherwise they stay where they were. A diagram too large to finish
  * in time or memory is a limit, and trying again would only wait again, so it
- * offers Send Feedback alone; anything else is a bug and offers Try Again too.
+ * offers Send Feedback alone. A refused layout setting (`unsupported`) may be
+ * the diagram file's own `viewConfig.layoutOptions`, so it names them rather
+ * than saying whose problem it is, and offers no Try Again (the same settings
+ * fail the same way). Anything else is a bug and offers Try Again too.
  */
 export function layoutFailureNotice(failure: LayoutFailure, arranged: boolean): LayoutNotice {
+  const where = arranged ? 'in tidy columns in relationship order' : 'where they were';
   if (failure === 'timeout' || failure === 'memory') {
     const stopped = failure === 'timeout' ? `stopped after ${LAYOUT_TIMEOUT_MS / 1000} seconds` : 'ran out of memory';
-    const where = arranged ? 'in tidy columns in relationship order' : 'where they were';
     return {
       message: `This diagram is too large to arrange automatically (ERD Studio ${stopped}). Your tables are all here, ${where}. This is a limit in ERD Studio, not a problem with your files.`,
+      actions: ['layoutFeedback'],
+    };
+  }
+  if (failure === 'unsupported') {
+    return {
+      message: `ERD Studio couldn't arrange this diagram with its layout settings. Your tables are all here, ${where}. If the diagram file sets viewConfig.layoutOptions, check them; if it doesn't, this is a bug in ERD Studio.`,
       actions: ['layoutFeedback'],
     };
   }

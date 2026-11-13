@@ -109,9 +109,11 @@
 .toast__action {
   height: var(--control-height-sm);
   padding: 0 var(--space-4);
-  border: 1px solid var(--control-border);
+  /* A visible pill at rest in every theme (--control-border is transparent;
+     --glass-border is the contrast border in high contrast). */
+  border: 1px solid var(--glass-border);
   border-radius: var(--radius-pill);
-  background: transparent;
+  background: var(--control-fill);
   color: var(--text-primary);
   cursor: pointer;
   font-family: var(--font-ui);
@@ -123,7 +125,7 @@
 
 .toast__action:hover {
   background: var(--control-fill-hover);
-  border-color: var(--control-border-hover);
+  border-color: var(--glass-border-strong);
 }
 
 .toast__action:active {

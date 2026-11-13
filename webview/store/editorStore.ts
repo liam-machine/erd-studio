@@ -29,6 +29,7 @@ import type {
   FeedbackDiagnosticsView,
   FeedbackKind,
 } from '../../src/types/feedback';
+import type { ToastAction } from '../lib/elkLayout';
 
 export type {
   EdgeContextMenu,
@@ -41,13 +42,13 @@ export type {
 // Types
 // ---------------------------------------------------------------------------
 
-/** Prefill data for FK dialog when opened via drag-to-connect. */
 /**
- * A button a store toast can offer: `retryLayout` runs Auto Layout again,
- * `layoutFeedback` opens Send Feedback filled in with the toast's words.
+ * A button a store toast can offer. Declared with the layout notices that
+ * raise it (`webview/lib/elkLayout.ts`), so that lib stays free of the store.
  */
-export type ToastAction = 'retryLayout' | 'layoutFeedback';
+export type { ToastAction };
 
+/** Prefill data for FK dialog when opened via drag-to-connect. */
 export interface FkDialogPrefill {
   fromModel: string;
   fromColumn: string;
@@ -617,6 +618,10 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
           // Reset canvas mode to pan on stage switch; select mode is short-lived UI intent
           // and shouldn't persist across a stage change (physical is read-only).
           canvasMode: 'pan' as const,
+          // An Auto Layout failure's toast (#294) waits for its close, so it
+          // would otherwise outlive the stage it was about: its Try Again
+          // would lay out the new stage.
+          ...(state.toastActions ? { toastMessage: null, toastActions: null } : {}),
         }
       : {}),
   })),

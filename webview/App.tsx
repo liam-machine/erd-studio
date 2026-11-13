@@ -192,10 +192,15 @@ function EditorCanvas() {
     }
   }, [invalidSelectedNode]);
 
-  // Memoized callback for toast dismissal (prevents timer re-creation)
+  // Memoized callback for toast dismissal (prevents timer re-creation).
+  // A store toast with buttons (#294) waits for its own close: a local toast
+  // drawn over it dismisses only itself, so the buttons come back under it.
+  const localToastRef = useRef(toastMessage);
+  localToastRef.current = toastMessage;
   const dismissToast = useCallback(() => {
+    const coveredActions = localToastRef.current !== null && useEditorStore.getState().toastActions !== null;
     setToastMessage(null);
-    setStoreToastMessage(null);
+    if (!coveredActions) setStoreToastMessage(null);
   }, [setStoreToastMessage]);
   const activeToastMessage = toastMessage ?? storeToastMessage;
   // The store toast's buttons (#294: an Auto Layout failure's Try Again and
@@ -901,7 +906,9 @@ function EditorCanvas() {
         </AreaErrorBoundary>
       </ReactFlow>
 
-      {activeToastMessage && (
+      {/* A sticky layout-failure toast (#294) steps aside while a host error,
+          drawn in the same corner, is up; it comes back when that closes. */}
+      {activeToastMessage && !(activeToastActions && error) && (
         <Toast
           message={activeToastMessage}
           variant="warning"

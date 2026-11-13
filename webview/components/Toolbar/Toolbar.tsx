@@ -137,6 +137,10 @@ export function Toolbar({ nodes, edges }: ToolbarProps) {
   const registerSearchFocus = useEditorStore((s) => s.registerSearchFocus);
   const registerAutoLayout = useEditorStore((s) => s.registerAutoLayout);
   const setToastMessage = useEditorStore((s) => s.setToastMessage);
+  // Read by runLayout through a ref, so a toast does not re-register the layout.
+  const toastActions = useEditorStore((s) => s.toastActions);
+  const toastActionsRef = useRef(toastActions);
+  toastActionsRef.current = toastActions;
   const recordError = useEditorStore((s) => s.recordError);
   const logicalOnly = useEditorStore((s) => s.logicalOnly);
   // Get current zoom level from React Flow store
@@ -574,6 +578,9 @@ export function Toolbar({ nodes, edges }: ToolbarProps) {
     }
 
     setIsLayouting(true);
+    // An earlier layout's failure toast (#294) waits for its close; this run
+    // tells its own outcome, so the old words must not sit over the new layout.
+    if (toastActionsRef.current) setToastMessage(null);
     const startedAt = performance.now();
     // Usage telemetry (2.0 B17): the stack-safe fallback, the fallback that
     // produced the layout, and a failure's class and size buckets (never its

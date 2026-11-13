@@ -62,6 +62,7 @@ beforeAll(() => {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockVsCode.getState.mockReset();
   useEditorStore.setState(initialStoreState, true);
 });
 
@@ -107,6 +108,45 @@ describe('Auto Layout failure toast buttons (#294)', () => {
     expect(screen.queryByRole('button', { name: 'Send Feedback' })).toBeNull();
     act(() => { vi.advanceTimersByTime(TOAST_AUTO_DISMISS_MS + 1); });
     expect(useEditorStore.getState().toastMessage).toBeNull();
+  });
+
+  it('a local toast drawn over it dismisses only itself, and the buttons come back', () => {
+    // The persisted selection names a table that is gone: App's own toast.
+    mockVsCode.getState.mockReturnValue({ selectedNode: 'ghost' });
+    const notice = layoutFailureNotice('timeout', true);
+    act(() => useEditorStore.getState().setToastMessage(notice.message, notice.actions));
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    openApp();
+    expect(screen.getByRole('alert').textContent).toContain('no longer exists');
+
+    act(() => { vi.advanceTimersByTime(TOAST_AUTO_DISMISS_MS + 1); });
+    expect(useEditorStore.getState().toastMessage).toBe(notice.message);
+    expect(useEditorStore.getState().toastActions).toEqual(['layoutFeedback']);
+    expect(screen.getByRole('alert').textContent).toContain('too large to arrange automatically');
+    act(() => { vi.advanceTimersByTime(TOAST_AUTO_DISMISS_MS * 3); });
+    expect(screen.getByRole('button', { name: 'Send Feedback' })).toBeTruthy();
+  });
+
+  it('a stage switch takes it away (its Try Again would lay out the other stage); a plain toast is left alone', () => {
+    openApp();
+    raise(layoutFailureNotice('worker', true));
+    act(() => useEditorStore.getState().setDomain({ ...emptySubjectArea, stage: 'physical' } as DisplaySubjectArea));
+    expect(useEditorStore.getState().toastMessage).toBeNull();
+    expect(useEditorStore.getState().toastActions).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Try Again' })).toBeNull();
+
+    act(() => useEditorStore.getState().setToastMessage('Saved'));
+    act(() => useEditorStore.getState().setDomain({ ...emptySubjectArea, stage: 'logical' } as DisplaySubjectArea));
+    expect(useEditorStore.getState().toastMessage).toBe('Saved');
+  });
+
+  it('a host error in the same corner hides it until the error is closed', () => {
+    openApp();
+    raise(layoutFailureNotice('worker', true));
+    act(() => useEditorStore.setState({ error: 'Something went wrong' }));
+    expect(screen.queryByRole('button', { name: 'Try Again' })).toBeNull();
+    act(() => useEditorStore.setState({ error: null }));
+    expect(screen.getByRole('button', { name: 'Try Again' })).toBeTruthy();
   });
 
   it('a new toast without buttons drops the earlier one\'s buttons', () => {
