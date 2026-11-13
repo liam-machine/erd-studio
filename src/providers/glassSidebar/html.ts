@@ -304,42 +304,76 @@ svg.gs-icon {
 .gs-sections {
   display: flex;
   flex-direction: column;
-  gap: var(--space-4);
   padding: var(--space-2) var(--gs-gutter) 0;
 }
 
-.gs-section {
-  position: relative;
+/* A section is one card to the eye, drawn as two boxes: its header and its
+   body. The section element itself has no box (display: contents), so the
+   header's sticky range is the whole list, not its own card: every header
+   stays in view, parked in order under the search field or at the foot of
+   the pane, while the bodies scroll past (pinHeaders() sets the offsets). */
+.gs-section { display: contents; }
+
+.gs-section[hidden] { display: none; }
+
+.gs-section__header {
+  position: sticky;
+  top: var(--gs-pin-top, auto);
+  bottom: var(--gs-pin-bottom, auto);
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 36px;
+  margin-top: var(--space-4);
+  padding: 0 var(--space-3) 0 var(--space-2);
   border: 1px solid var(--glass-border);
-  border-radius: var(--radius-lg);
+  border-bottom-color: transparent;
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
   background:
-    linear-gradient(180deg, color-mix(in srgb, white 3%, transparent), transparent 48px),
+    linear-gradient(180deg, color-mix(in srgb, white 3%, transparent), transparent),
     var(--glass-surface-2);
+}
+
+.gs-section:first-child .gs-section__header { margin-top: 0; }
+
+body.vscode-light .gs-section__header,
+body.vscode-light .gs-section__body {
+  background: var(--glass-surface-3);
+}
+
+/* Held at its parking place with rows passing under it: opaque enough to read. */
+.gs-section__header.is-stuck,
+body.vscode-light .gs-section__header.is-stuck {
+  background:
+    linear-gradient(var(--glass-surface-3), var(--glass-surface-3)),
+    color-mix(in srgb, var(--editor-bg) 86%, transparent);
+  -webkit-backdrop-filter: var(--glass-backdrop);
+  backdrop-filter: var(--glass-backdrop);
+}
+
+/* Folded, or parked away from its body: the header is the whole card. An
+   open one keeps its chevron down, and a click brings its section back. */
+.gs-section--collapsed .gs-section__header,
+.gs-section__header.is-parked {
+  border-bottom-color: var(--glass-border);
+  border-radius: var(--radius-lg);
   box-shadow: var(--glass-elevation-1);
 }
 
-.gs-sections--intro .gs-section {
-  animation: gs-rise var(--duration-slow) var(--ease-out) both;
+.gs-section--collapsed .gs-section__header {
+  transition: border-radius 0s linear var(--duration-base), border-color 0s linear var(--duration-base);
 }
 
-body.vscode-light .gs-section {
-  background: var(--glass-surface-3);
+.gs-sections--intro .gs-section__header,
+.gs-sections--intro .gs-section__body {
+  animation: gs-rise var(--duration-slow) var(--ease-out) both;
+  animation-delay: inherit;
 }
 
 @keyframes gs-rise {
   from { opacity: 0; transform: translateY(4px); }
   to { opacity: 1; transform: none; }
-}
-
-.gs-section[hidden] { display: none; }
-
-.gs-section__header {
-  position: relative;
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  min-height: 36px;
-  padding: 0 var(--space-3) 0 var(--space-2);
 }
 
 .gs-section__toggle {
@@ -486,11 +520,28 @@ body.vscode-light .gs-section {
 .gs-section__body {
   display: grid;
   grid-template-rows: 1fr;
+  border: 1px solid var(--glass-border);
+  border-top: 0;
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+  background: var(--glass-surface-2);
+  box-shadow: var(--glass-elevation-1);
   transition: grid-template-rows var(--duration-base) var(--ease-standard);
 }
 
-.gs-section--collapsed .gs-section__body {
+.gs-section--collapsed .gs-section__body,
+body.vscode-light .gs-section--collapsed .gs-section__body {
   grid-template-rows: 0fr;
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  transition: grid-template-rows var(--duration-base) var(--ease-standard),
+    border-color 0s linear var(--duration-base), background-color 0s linear var(--duration-base), box-shadow 0s linear var(--duration-base);
+}
+
+/* A row brought into view (arrow keys, a reveal) stops clear of the headers parked above and below its section. */
+.gs-row {
+  scroll-margin-top: calc(var(--gs-pin-top, 0px) + 48px);
+  scroll-margin-bottom: calc(var(--gs-pin-bottom, 0px) + 4px);
 }
 
 .gs-section__inner {
@@ -919,7 +970,7 @@ body.vscode-high-contrast-light .gs-welcome__glyph {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .gs-skeleton__dot, .gs-skeleton__bar, .gs-section { animation: none; }
+  .gs-skeleton__dot, .gs-skeleton__bar, .gs-section__header, .gs-section__body { animation: none; }
 }
 
 .gs-noresults {
@@ -1751,14 +1802,16 @@ export const GLASS_SIDEBAR_SCRIPT = String.raw`
       card.appendChild(body);
       fresh.push(card);
     });
+    pinHeaders(fresh);
     reconcile(sectionsEl, fresh);
+    markParked();
     if (sectionsEl.getAttribute('aria-busy') !== 'false') sectionsEl.setAttribute('aria-busy', 'false');
     if (intro) {
       sectionsEl.classList.add('gs-sections--intro');
       setTimeout(function () {
         introActive = false;
         sectionsEl.classList.remove('gs-sections--intro');
-        cards().forEach(function (c) { c.removeAttribute('style'); });
+        cards().forEach(function (c) { c.style.animationDelay = ''; });
       }, 700);
     }
     renderCtx = null;
@@ -1851,6 +1904,12 @@ export const GLASS_SIDEBAR_SCRIPT = String.raw`
     var act = b.getAttribute('data-act');
     var i = Number(b.getAttribute('data-i'));
     if (act === 'toggle') {
+      // An open section whose header is parked away from it: the click brings it back.
+      var parkedHead = b.closest('.gs-section__header');
+      if (parkedHead && parkedHead.classList.contains('is-parked') && !card.classList.contains('gs-section--collapsed')) {
+        bringSectionBack(card);
+        return;
+      }
       // In place (no re-render), so the body folds and the chevron turns.
       setSectionCollapsed(card, !card.classList.contains('gs-section--collapsed'));
     } else if (act === 'welcome') {
@@ -2023,6 +2082,67 @@ export const GLASS_SIDEBAR_SCRIPT = String.raw`
     if (head) { head.focus(); head.scrollIntoView({ block: 'nearest' }); }
   }
 
+  /**
+   * Keeps every section header in view: each gets the sticky offsets that
+   * stack it under the search field (after the headers above it) and above
+   * the foot of the pane (before the headers below it). When the headers
+   * alone would take over half the pane, nothing is pinned.
+   */
+  function pinHeaders(list) {
+    var search = document.querySelector('.gs-search');
+    var head = sectionsEl.querySelector('.gs-section__header');
+    // Parked headers stack almost touching: no room between two for the rows passing under to show.
+    var gap = 2;
+    var slot = (head ? head.offsetHeight : 38) + gap;
+    var top = search ? search.offsetHeight : 0;
+    var pin = list.length > 1 && list.length * slot <= (window.innerHeight - top) / 2;
+    list.forEach(function (c, k) {
+      if (pin) {
+        c.style.setProperty('--gs-pin-top', (top + k * slot) + 'px');
+        c.style.setProperty('--gs-pin-bottom', (gap + (list.length - 1 - k) * slot) + 'px');
+      } else {
+        c.style.removeProperty('--gs-pin-top');
+        c.style.removeProperty('--gs-pin-bottom');
+      }
+    });
+  }
+
+  /**
+   * Marks the headers held at their parking place (is-stuck), and of those
+   * the ones that stand alone there: folded, or open with the body scrolled
+   * out from under them (is-parked). Runs after a render and on scroll.
+   */
+  function markParked() {
+    cards().forEach(function (c) {
+      var head = c.querySelector('.gs-section__header');
+      var body = c.querySelector('.gs-section__body');
+      if (!head || !body) return;
+      var pinTop = parseFloat(c.style.getPropertyValue('--gs-pin-top'));
+      var pinBottom = parseFloat(c.style.getPropertyValue('--gs-pin-bottom'));
+      var stuck = false, parked = false;
+      if (!isNaN(pinTop)) {
+        var hr = head.getBoundingClientRect();
+        var atTop = hr.top <= pinTop + 0.5;
+        var atBottom = hr.bottom >= window.innerHeight - pinBottom - 0.5;
+        stuck = atTop || atBottom;
+        // Detached: the body is still below the pane's foot, or has scrolled out above.
+        var br = body.getBoundingClientRect();
+        parked = stuck && (c.classList.contains('gs-section--collapsed') || br.top > hr.bottom + 1 || br.bottom <= hr.bottom + 1);
+      }
+      if (head.classList.contains('is-stuck') !== stuck) head.classList.toggle('is-stuck', stuck);
+      if (head.classList.contains('is-parked') !== parked) head.classList.toggle('is-parked', parked);
+    });
+  }
+
+  /** Scrolls an open section whose header is parked back under that header. */
+  function bringSectionBack(card) {
+    var head = card.querySelector('.gs-section__header');
+    var body = card.querySelector('.gs-section__body');
+    var pinTop = parseFloat(card.style.getPropertyValue('--gs-pin-top')) || 0;
+    var y = body.getBoundingClientRect().top + window.scrollY - pinTop - head.offsetHeight;
+    window.scrollTo({ top: Math.max(0, y), behavior: 'smooth' });
+  }
+
   function setSectionCollapsed(card, collapsed) {
     var key = card.dataset.key;
     if (query()) return;
@@ -2031,6 +2151,9 @@ export const GLASS_SIDEBAR_SCRIPT = String.raw`
     card.classList.toggle('gs-section--collapsed', collapsed);
     var head = document.getElementById('gs-head-' + key);
     if (head) head.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+    markParked();
+    // Again once the body has folded or opened: the headers below have moved.
+    setTimeout(markParked, 320);
   }
 
   sectionsEl.addEventListener('keydown', function (ev) {
@@ -2119,6 +2242,7 @@ export const GLASS_SIDEBAR_SCRIPT = String.raw`
     scrolledFrame = requestAnimationFrame(function () {
       scrolledFrame = 0;
       appEl.classList.toggle('is-scrolled', window.scrollY > 2);
+      markParked();
     });
   }, { passive: true });
 
@@ -2253,7 +2377,7 @@ export const GLASS_SIDEBAR_SCRIPT = String.raw`
     return hit;
   }
   window.addEventListener('blur', function () { closeMenu(false); });
-  window.addEventListener('resize', function () { closeMenu(false); });
+  window.addEventListener('resize', function () { closeMenu(false); pinHeaders(cards()); markParked(); });
   document.addEventListener('keydown', function (ev) {
     if (ev.key === 'Escape' && openMenuState) { ev.preventDefault(); closeMenu(true); }
   });
