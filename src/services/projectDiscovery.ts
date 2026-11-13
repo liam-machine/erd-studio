@@ -116,6 +116,44 @@ export function autoDetectProject(candidates: readonly string[], semanticDir: st
 }
 
 /**
+ * Whether the host's own search for dbt_project.yml (`hostCandidates`) cannot
+ * change the root {@link resolveDbtProject} picks, so activation need not wait
+ * for it (#295): no `projectPath` and no picked project, and the first
+ * workspace folder that is a dbt project already holds ERD data. Workspace
+ * folders come first among the candidates and auto-detection takes the first
+ * candidate holding ERD data, so nothing the search adds (projects deeper
+ * than the walk goes) can come before it. A root dbt project without ERD data
+ * still waits: a deeper project that holds some would win.
+ */
+export function hostSearchCannotChangeRoot(
+  folderPaths: readonly string[],
+  opts: { projectPath?: string; picked?: string; semanticDir?: string } = {},
+): boolean {
+  if ((opts.projectPath ?? '').trim() !== '' || opts.picked) return false;
+  const first = folderPaths.find(hasDbtProjectFile);
+  return first !== undefined && hasErdStudioData(first, opts.semanticDir ?? '.erd-studio');
+}
+
+/**
+ * `candidates` with the host search's projects it lacks appended (each still
+ * holding dbt_project.yml, once per location): for counting the workspace's
+ * dbt projects when the search answers after activation, without walking the
+ * folders again.
+ */
+export function withHostCandidates(candidates: readonly string[], hostCandidates: readonly string[]): string[] {
+  const seen = new Set(candidates.map((dir) => pathKey(dir)));
+  const all = [...candidates];
+  for (const dir of hostCandidates) {
+    const key = pathKey(dir);
+    if (!seen.has(key) && hasDbtProjectFile(dir)) {
+      seen.add(key);
+      all.push(dir);
+    }
+  }
+  return all;
+}
+
+/**
  * Which rule chose the root: `setting` (erdStudio.projectPath), `picked`
  * (Select dbt Project…), `auto` (a detected dbt project), `erdData` (no dbt
  * project; the first workspace folder holding ERD data) or `folder` (no dbt

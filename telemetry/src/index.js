@@ -860,6 +860,13 @@ const FEATURES = [
   'layoutFallbackRung3',
   // #304: the host's dbt_project.yml search failed and the walk alone still found a dbt project.
   'dbtSearchFailedWalkFound',
+  // Also added after 2.0.4 (#295): which stretch held a slow activation, a late start
+  // suggestion, and the dbt search not waited for.
+  'activationSlowDbtSearch',
+  'activationSlowDiscovery',
+  'activationSlowServices',
+  'startLookLateSuggestion',
+  'dbtSearchSkipped',
 ];
 
 /** The only keys `errors` may carry; anything else is dropped. */

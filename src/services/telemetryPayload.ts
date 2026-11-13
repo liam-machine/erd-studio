@@ -744,6 +744,18 @@ export const FEATURES = [
   // the bounded walk alone still found a dbt project. Not an error: the user
   // lost nothing. Activation only, never Select dbt Project….
   'dbtSearchFailedWalkFound',
+  // Also added after 2.0.4 (#295). An activation that read its project after more
+  // than 10 s (beside activationOver10s): which stretch held the longest
+  // share, the wait on the host's dbt search, the rest of Discovery, or
+  // Services. A retry of the start look after a timeout turned the blank
+  // suggestion into an import. The host's dbt search was not waited for: the
+  // first dbt workspace folder already holds ERD data, so it cannot change
+  // the project that opens.
+  'activationSlowDbtSearch',
+  'activationSlowDiscovery',
+  'activationSlowServices',
+  'startLookLateSuggestion',
+  'dbtSearchSkipped',
 ] as const;
 export type TelemetryFeature = (typeof FEATURES)[number];
 

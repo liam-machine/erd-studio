@@ -47,6 +47,43 @@ export function activationFailureCodes(phase: ActivationPhase): TelemetryErrorCo
 export const SLOW_ACTIVATION_MS = 10_000;
 
 /**
+ * The stretches of activation before the project is read (the
+ * `activationOver10s` measurement), in milliseconds: `dbtSearch`, the wait
+ * on the host's dbt_project.yml search (bounded by
+ * `ACTIVATION_DBT_SEARCH_MS`, so a long one means the shared extension host
+ * thread was busy, not that the search was slow); `discovery`, the rest of
+ * the Discovery phase (the globalState writes, the folder walk); `services`,
+ * from the Services phase to the project read. The later phases (Watchers,
+ * Views, Commands, Prompts) start after the measurement, so they have no key.
+ */
+export interface ActivationSpans {
+  dbtSearch: number;
+  discovery: number;
+  services: number;
+}
+
+/** Each stretch's key, in tie order (the first listed wins a tie). */
+export const ACTIVATION_SLOW: Record<keyof ActivationSpans, TelemetryFeature> = {
+  dbtSearch: 'activationSlowDbtSearch',
+  discovery: 'activationSlowDiscovery',
+  services: 'activationSlowServices',
+};
+
+/**
+ * Which stretch held the longest share of an activation that read its project
+ * after more than {@link SLOW_ACTIVATION_MS} (`totalMs`); undefined for a
+ * quicker one.
+ */
+export function slowActivationFeature(spans: ActivationSpans, totalMs: number): TelemetryFeature | undefined {
+  if (!(totalMs > SLOW_ACTIVATION_MS)) return undefined;
+  let longest: keyof ActivationSpans = 'dbtSearch';
+  for (const span of Object.keys(ACTIVATION_SLOW) as (keyof ActivationSpans)[]) {
+    if (spans[span] > spans[longest]) longest = span;
+  }
+  return ACTIVATION_SLOW[longest];
+}
+
+/**
  * Why a search that ended in `error` failed (#304): `findFiles` rejected,
  * the code that sorts what it returned threw, or `findFiles` threw before
  * returning a promise.

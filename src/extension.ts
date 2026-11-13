@@ -33,8 +33,10 @@ import { MigrationFailed, MigrationService, migrateLegacySemanticDir } from './s
 import {
   DRAW_FROM_DBT_NEEDS_DBT_MESSAGE,
   hasErdStudioData,
+  hostSearchCannotChangeRoot,
   resolveDbtProject,
   samePath,
+  withHostCandidates,
   type DbtProjectResolution,
 } from './services/projectDiscovery';
 import { YmlParserService, emptyYmlData } from './services/ymlParserService';
@@ -86,6 +88,7 @@ import {
   dbtSearchFailureCodes,
   harnessFailureKeys,
   loggedErrorCodes,
+  slowActivationFeature,
   type ActivationPhase,
   type DbtSearchResult,
   type RefreshKind,
@@ -413,12 +416,16 @@ function workspaceFolderPaths(): string[] {
  * ({@link findHostDbtProjects}), merged with the bounded walk.
  */
 function resolveWorkspaceProject(context: vscode.ExtensionContext, hostCandidates?: readonly string[]): DbtProjectResolution {
-  return resolveDbtProject(workspaceFolderPaths(), {
+  return resolveDbtProject(workspaceFolderPaths(), { ...workspaceProjectChoice(context), hostCandidates });
+}
+
+/** The user's own say in the project: `erdStudio.projectPath`, the picked project, and where ERD data lives. */
+function workspaceProjectChoice(context: vscode.ExtensionContext): { projectPath: string; picked: string | undefined; semanticDir: string } {
+  return {
     projectPath: getErdStudioSetting('projectPath', ''),
     picked: context.workspaceState.get<string>(SELECTED_PROJECT_KEY),
     semanticDir: getErdStudioSetting('semanticDir', '.erd-studio'),
-    hostCandidates,
-  });
+  };
 }
 
 /** How long activation waits for the host's dbt_project.yml search before the walk alone decides. */
@@ -1599,17 +1606,40 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
   const glassSidebar = registerGlassSidebar(context);
 
   // The host's own search for dbt_project.yml (every depth), bounded so it
-  // never holds activation up; the walk alone decides when it is late.
-  const hostDbtSearch = await findHostDbtProjects(ACTIVATION_DBT_SEARCH_MS);
-  const hostDbtProjects = hostDbtSearch.paths;
-  if (hostDbtSearch.outcome === 'timeout') telemetry.feature('dbtSearchTimedOut');
-  else if (hostDbtSearch.outcome === 'error') for (const code of dbtSearchFailureCodes(hostDbtSearch.reason)) telemetry.error(code);
+  // never holds activation up; the walk alone decides when it is late. Not
+  // waited for at all when nothing it finds can change the project that
+  // opens (#295: the first dbt workspace folder already holds ERD data): it
+  // then runs on, off activation's path, only to count the workspace's dbt
+  // projects for the Select dbt Project button (below, with the project row).
+  const dbtSearchStart = Date.now();
+  // Undefined when activation did not wait for the search (dbtSearchSkipped).
+  let hostDbtSearch: DbtSearchResult | undefined;
+  let lateHostDbtSearch: Promise<string[] | undefined> | undefined;
+  if (hostSearchCannotChangeRoot(workspaceFolderPaths(), workspaceProjectChoice(context))) {
+    telemetry.feature('dbtSearchSkipped');
+    lateHostDbtSearch = findHostDbtProjects(60_000).then((late) => {
+      if (late.outcome === 'error') {
+        for (const code of dbtSearchFailureCodes(late.reason)) telemetry.error(code);
+        // No projectPath, no pick, and the walk found the dbt project that
+        // opens (hostSearchCannotChangeRoot), so this failure lost nothing.
+        telemetry.feature('dbtSearchFailedWalkFound');
+      }
+      return late.paths;
+    });
+  } else {
+    hostDbtSearch = await findHostDbtProjects(ACTIVATION_DBT_SEARCH_MS);
+    if (hostDbtSearch.outcome === 'timeout') telemetry.feature('dbtSearchTimedOut');
+    else if (hostDbtSearch.outcome === 'error') for (const code of dbtSearchFailureCodes(hostDbtSearch.reason)) telemetry.error(code);
+  }
+  const hostDbtProjects = hostDbtSearch?.paths;
+  // Activation's stretches, for a slow one (slowActivationFeature, below).
+  const dbtSearchMs = elapsedMs(dbtSearchStart);
   const projectResolution = resolveWorkspaceProject(context, hostDbtProjects);
   // The search failed and the walk alone still found a dbt project (#304):
   // a failure without this is one that may have cost the user their project.
   // `autoRoot` is what the walk resolves (a projectPath setting or a pick does
   // not make it), so a setting or a pick says nothing either way.
-  if (hostDbtSearch.outcome === 'error' && projectResolution.autoRoot !== undefined) telemetry.feature('dbtSearchFailedWalkFound');
+  if (hostDbtSearch?.outcome === 'error' && projectResolution.autoRoot !== undefined) telemetry.feature('dbtSearchFailedWalkFound');
   const workspaceRoot = projectResolution.root;
   // Logical-only mode: a root without dbt_project.yml (any folder now opens).
   // No Physical stage, no dbt services or watchers, nothing written unasked.
@@ -1692,6 +1722,7 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
   }
 
   activationPhase = 'Services';
+  const servicesStartMs = elapsedMs(activationStart);
   log.info(hasDbt
     ? `ERD Studio: Found dbt project at ${workspaceRoot}`
     : `ERD Studio: Opened ${workspaceRoot} (no dbt_project.yml: logical-only)`);
@@ -2178,6 +2209,13 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     activationMs: projectReadMs,
   });
   if (projectReadMs > SLOW_ACTIVATION_MS) telemetry.featureOnce('activationOver10s');
+  // Which stretch held a slow one (#295): the later phases start after this point.
+  const slowStretch = slowActivationFeature({
+    dbtSearch: dbtSearchMs,
+    discovery: servicesStartMs - dbtSearchMs,
+    services: projectReadMs - servicesStartMs,
+  }, projectReadMs);
+  if (slowStretch) telemetry.featureOnce(slowStretch);
 
   // A diagram in a picker: its layer and table count, and its tables as the
   // detail line, so typing a table's name finds every diagram that shows it.
@@ -2248,7 +2286,7 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
       // more), off activation's path. A failure is counted once per window
       // (#304): only when activation's own search timed out and so counted none.
       void findHostDbtProjects(60_000).then((late) => {
-        if (late.outcome === 'error' && hostDbtSearch.outcome === 'timeout') {
+        if (late.outcome === 'error' && hostDbtSearch?.outcome === 'timeout') {
           for (const code of dbtSearchFailureCodes(late.reason)) telemetry.error(code);
         }
         const found = late.paths?.find((dir) => !samePath(dir, workspaceRoot));
@@ -3321,12 +3359,25 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
           : undefined);
       };
       showProjectName();
+      // The host's search that activation did not wait for (#295): a dbt project
+      // only it found (deeper than the walk goes) reveals the button and the
+      // row, as it would have had activation waited. The open project stays.
+      let lateSearchSettled = false;
+      void lateHostDbtSearch?.then((paths) => {
+        if (lateSearchSettled || !paths || !hasDbt || hasMultipleProjects) return;
+        if (withHostCandidates(projectResolution.candidates, paths).length <= 1) return;
+        hasMultipleProjects = true;
+        void vscode.commands.executeCommand('setContext', 'erdStudio.hasMultipleDbtProjects', true);
+        showProjectName();
+      });
       const foldersChanged = vscode.workspace.onDidChangeWorkspaceFolders(() => {
+        // The late search answered for the old folders: these are counted afresh.
+        lateSearchSettled = true;
         hasMultipleProjects = hasDbt && resolveWorkspaceProject(context).candidates.length > 1;
         void vscode.commands.executeCommand('setContext', 'erdStudio.hasMultipleDbtProjects', hasMultipleProjects);
         showProjectName();
       });
-      return vscode.Disposable.from(domainTreeView!, domainTreeData!, foldersChanged);
+      return vscode.Disposable.from(domainTreeView!, domainTreeData!, foldersChanged, { dispose: () => { lateSearchSettled = true; } });
     })(),
     vscode.window.registerCustomEditorProvider(SUBJECT_AREA_EDITOR_VIEW_TYPE, editorProvider, {
       // Keep the webview (React tree, ELK worker, in-progress discrepancy /

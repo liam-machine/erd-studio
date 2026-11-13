@@ -1023,7 +1023,7 @@ a message or a count of tables. A sum over `features` excludes
 **B4 — activation timing, the host dbt search, and why activation failed (by phase).**
 
 - `activationOver10s` — activation took more than 10 s up to the project summary (once a day).
-- `dbtSearchTimedOut` — the host search for a dbt_project.yml timed out.
+- `dbtSearchTimedOut` — the host search for a dbt_project.yml timed out. Since `dbtSearchSkipped` ("Keys added after 2.0.0"), a window whose dbt project already holds ERD data does not wait for the search and never records this key, so its share falls without any search getting faster: read it beside `dbtSearchSkipped`, and judge speed by `activationOver10s`.
 - `activationFailed` (error) — activation threw (the total; one phase code beside it).
 - `activationFailedDiscovery` (error) — activation threw while finding the project.
 - `activationFailedServices` (error) — activation threw while creating the services.
@@ -1591,6 +1591,34 @@ in which a project deeper than the walk would be missed).
 # Why the dbt project search failed, and whether the walk saved the day (installs and counts, last 14 days)
 npx wrangler d1 execute erd-studio-telemetry --remote --command \
   "SELECT 'errors' AS kind, e.key, COUNT(DISTINCT h.install_id) AS installs, SUM(e.value) AS total FROM heartbeats h, json_each(h.errors) e WHERE COALESCE(h.dev, 0) = 0 AND e.key LIKE 'dbtSearchFailed%' AND h.day >= date('now','-14 days') GROUP BY e.key UNION ALL SELECT 'features', f.key, COUNT(DISTINCT h.install_id), SUM(f.value) FROM heartbeats h, json_each(h.features) f WHERE COALESCE(h.dev, 0) = 0 AND f.key = 'dbtSearchFailedWalkFound' AND h.day >= date('now','-14 days') GROUP BY f.key"
+```
+
+**What a slow start was waiting for** (#295, also added after 2.0.4). About a
+quarter of Windows installs on 2.x recorded `activationOver10s`, and the first
+six of them all recorded `dbtSearchTimedOut` too, which could not tell the
+reasons apart: the host's dbt search is capped at 1 s, so it cannot be the 10 s
+itself. These name the stretch that held the longest share of such an
+activation, once a day, beside `activationOver10s`. Only the stretches before
+the measurement can be named: the Watchers, Views, Commands and Prompts phases
+(the `activationFailed*` phases after Services) start after it, so they have
+no key. The search's own stretch is the time spent *waiting* on it; with its
+1 s cap, a long one means the shared extension host thread was busy (another
+extension's start, or our own synchronous work), so its timer ran late too.
+
+- `activationSlowDbtSearch` — the longest stretch of a start over 10 s was the wait on the host's search for a dbt_project.yml: the extension host thread was busy.
+- `activationSlowDiscovery` — the longest stretch was the rest of finding the project: the folder walk (up to 5,000 folders, synchronous) or the globalState writes before it.
+- `activationSlowServices` — the longest stretch was creating the services, up to the project read (reading a large ERD folder).
+
+What the start screen's first timeout cost, and the search activation no
+longer waits for:
+
+- `startLookLateSuggestion` — the start screen's look at the folder ran out of time, the blank-diagram suggestion was shown, and a later look (the retry, with twice the time) found something to import, so the suggestion changed to an import. Read beside `startLookTimeout` (the installs whose first look ran out of time) and `startLookGaveUp`.
+- `dbtSearchSkipped` — activation did not wait for the host's search for a dbt_project.yml: no `erdStudio.projectPath`, no picked project, and the first dbt workspace folder already holds ERD data, so nothing the search could find changes the project that opens (`hostSearchCannotChangeRoot`). The search still runs, off activation's path, to count the workspace's dbt projects for **Select dbt Project**; if it fails, `dbtSearchFailed` is still recorded, but a timeout is not.
+
+```bash
+# What held starts over 10 s, per OS (installs, last 28 days)
+npx wrangler d1 execute erd-studio-telemetry --remote --command \
+  "SELECT h.os, j.key, COUNT(DISTINCT h.install_id) AS installs FROM heartbeats h, json_each(h.features) j WHERE h.day >= date('now','-28 days') AND h.day < date('now') AND COALESCE(h.dev, 0) = 0 AND (j.key LIKE 'activationSlow%' OR j.key IN ('activationOver10s', 'dbtSearchTimedOut', 'dbtSearchSkipped')) GROUP BY h.os, j.key ORDER BY h.os, installs DESC"
 ```
 
 ## The local archive

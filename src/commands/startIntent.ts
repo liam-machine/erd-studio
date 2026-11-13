@@ -59,7 +59,11 @@ export interface StartIntentDeps {
   onDbtProjectSeen?(): void;
   timeoutMs?: number;
   now?(): number;
-  /** Counts a fixed key (`startLookTimeout`, `startLookGaveUp`; the host counts each once a day). */
+  /**
+   * Counts a fixed key (`startLookTimeout`, `startLookGaveUp`,
+   * `startLookLateSuggestion`: a retry after a timeout turned the published
+   * blank into an import; the host counts each once a day).
+   */
   feature?(key: TelemetryFeature): void;
   /** Counts a fixed error code (`startLookFailed`, `startContextFailed`). */
   error?(code: TelemetryErrorCode): void;
@@ -85,6 +89,8 @@ export class StartIntentTracker {
   private published: StartIntent | undefined;
   private scheduled: ReturnType<typeof setTimeout> | undefined;
   private disposed = false;
+  /** `startLookLateSuggestion` was counted (once per session). */
+  private lateCounted = false;
 
   constructor(private readonly deps: StartIntentDeps) {}
 
@@ -131,6 +137,11 @@ export class StartIntentTracker {
     }
     const intent = startIntentFor({ ...ctx, found: this.found });
     if (intent && intent !== this.published && !this.disposed) {
+      // What the first timeout cost: blank was shown, and a retry then found an import.
+      if (this.published === 'blank' && this.timeouts > 0 && isImportIntent(intent) && !this.lateCounted) {
+        this.lateCounted = true;
+        this.count(() => this.deps.feature?.('startLookLateSuggestion'));
+      }
       this.published = intent;
       this.deps.publish(intent);
     }
@@ -215,6 +226,11 @@ export class StartIntentTracker {
     this.inFlight = run();
     return this.inFlight;
   }
+}
+
+/** A suggestion that only a look can make: one of the direct imports. */
+function isImportIntent(intent: StartIntent): boolean {
+  return intent === 'importSemanticModel' || intent === 'importSqlDdl' || intent === 'importDbmlFile';
 }
 
 function isFindings(value: ReadonlySet<DetectedImportSource> | StartLookFindings): value is StartLookFindings {

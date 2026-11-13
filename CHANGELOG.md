@@ -32,6 +32,8 @@ heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that
 - **Large diagrams lay out much faster.** A diagram of more than 150 tables starts with a lighter way of placing tables, so it may look a little different. A diagram of 1,000 tables or more (or 2,000 relationships or more) is arranged in tidy columns in relationship order, instead of running out of time or memory.
 - **When Auto Layout cannot keep its grouping, or falls back to tidy columns, the canvas says so** and the ERD Studio log records what happened, instead of showing an error. A layout that times out now also falls back to tidy columns.
 - **After you change a layout option, the Layout settings panel reminds you to press Re-apply Layout** to use it.
+- **ERD Studio starts sooner in a dbt project that already has diagrams.** It no longer waits up to a second for VS Code's search for other dbt projects when that search cannot change which project opens. The search still runs in the background, and if it finds another dbt project the **Select dbt Project** button appears then.
+- The anonymous daily usage report now also says which part of a start that took over 10 seconds was slowest, whether the start screen's suggestion changed to an import after its first look at the folder ran out of time, and when ERD Studio did not wait for the dbt project search. Never names, paths or messages.
 - **A DBML table declared without a schema now carries its schema folder's name**, on the canvas as in Confluence. An export declares it as `Table <schema>.<name>`; before, the export left it unqualified, or wrote `"bqs.adresse"` as one name when two schema folders shared it. `erd-studio inventory` prints `bqs.adresse` and `ccc.adresse` for a name two schema folders share.
 
 ### Fixed
