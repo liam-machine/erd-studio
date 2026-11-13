@@ -22,6 +22,8 @@ import {
   TABLE_LIBRARY_FILTER,
   describeFilterOutcome,
   filterPrompt,
+  type FilterFlag,
+  type FilterKey,
   type FilterNoun,
   type FilterOutcome,
   type FilterSpec,
@@ -210,7 +212,7 @@ export class SidebarFilter implements vscode.Disposable {
 }
 
 /** Each view's box: its title, examples and what it calls its rows. */
-const VIEW_FILTERS = {
+export const VIEW_FILTERS = {
   diagrams: {
     title: 'Filter Diagrams',
     placeholder: 'sales  layer:gold  table:dim_customer  schema:finance',
@@ -234,6 +236,65 @@ const VIEW_FILTERS = {
 export type SidebarFilterViewName = keyof typeof VIEW_FILTERS;
 
 export type SidebarFilters = Record<SidebarFilterViewName, SidebarFilter>;
+
+/** What each key finds, in a few words (the glass sidebar's list of keys). */
+const KEY_MEANINGS: Readonly<Record<Exclude<FilterKey, 'is'>, string>> = {
+  layer: 'In a layer (id or name)',
+  schema: 'In a schema',
+  owner: 'Owned by someone',
+  type: 'Fact, dimension, bridge…',
+  col: 'Has a column',
+  table: 'A table, by name',
+  diagram: 'On a diagram',
+  file: 'Stored in a file',
+};
+
+/** What each `is:` flag finds. */
+const FLAG_MEANINGS: Readonly<Record<FilterFlag, string>> = {
+  unused: 'Tables on no diagram',
+  problem: 'Needs attention',
+  'cross-layer': 'Joins two layers',
+  composite: 'Over several columns',
+};
+
+/** One entry of the keys list: what to type, what it finds, and which views it filters. */
+export interface SidebarFilterKeyHelp {
+  /** As typed: `layer:` (a value follows) or `is:unused` (complete). */
+  readonly key: string;
+  readonly meaning: string;
+  /** The rows it filters, in the views' own words: `tables, relationships`. */
+  readonly where: string;
+}
+
+/** How plain words, phrases and exclusions work (the views' shared syntax). */
+export const SIDEBAR_FILTER_SYNTAX = 'Every word must match · "a phrase" · -word leaves out';
+
+/**
+ * Every key and `is:` flag the three views understand, with its meaning and
+ * the views it filters, in the order the views list them. Built from the
+ * views' own filter specs, so it can never offer a key no view knows.
+ */
+export function sidebarFilterKeys(): SidebarFilterKeyHelp[] {
+  const views = Object.values(VIEW_FILTERS);
+  const where = (has: (spec: FilterSpec) => boolean): string => views.filter((v) => has(v.spec)).map((v) => v.noun.many).join(', ');
+  const keys: SidebarFilterKeyHelp[] = [];
+  const seen = new Set<string>();
+  for (const view of views) {
+    for (const key of view.spec.keys) {
+      if (key === 'is' || seen.has(key)) continue;
+      seen.add(key);
+      keys.push({ key: `${key}:`, meaning: KEY_MEANINGS[key], where: where((spec) => spec.keys.includes(key)) });
+    }
+  }
+  for (const view of views) {
+    for (const flag of view.spec.flags) {
+      if (seen.has(`is:${flag}`)) continue;
+      seen.add(`is:${flag}`);
+      keys.push({ key: `is:${flag}`, meaning: FLAG_MEANINGS[flag], where: where((spec) => spec.flags.includes(flag)) });
+    }
+  }
+  return keys;
+}
 
 /**
  * One filter per sidebar view, and their commands: Filter… and Clear Filter

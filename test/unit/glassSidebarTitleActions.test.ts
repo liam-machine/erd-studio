@@ -1,7 +1,8 @@
 /**
  * The glass sidebar's section headers (titleActions.ts): every section shows
- * at most `+` then `…`, the per-view finders are left out (one search field
- * covers them) and nothing else is lost.
+ * at most `+` then `…`, the per-view Filter… boxes are left out (the one
+ * search field drives the same filters), Go to Table… leads the Table
+ * Library's `…`, and nothing else is lost.
  */
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -13,7 +14,7 @@ const pkg = JSON.parse(readFileSync(join(__dirname, '../../package.json'), 'utf8
 const index = new ContributionIndex(pkg.contributes);
 const commandOf = (a: MenuAction) => (a.submenu ? undefined : index.menu(a.menu)[a.index]?.command);
 
-function header(view: string, extra: Record<string, unknown> = {}) {
+function header(view: string, extra: Record<string, unknown> = {}, options: { filterInField?: boolean } = {}) {
   const ctx: Record<string, unknown> = {
     view,
     'erdStudio.hasProject': true,
@@ -24,7 +25,7 @@ function header(view: string, extra: Record<string, unknown> = {}) {
     ...extra,
   };
   const raw = index.resolve('view/title', (key) => ctx[key]);
-  return { raw, shaped: consistentTitleActions(raw, commandOf) };
+  return { raw, shaped: consistentTitleActions(raw, commandOf, options) };
 }
 const commands = (actions: MenuAction[]) => actions.map(commandOf);
 const flat = (t: { navigation: MenuAction[]; groups: MenuAction[][] }) => [
@@ -40,13 +41,14 @@ describe('consistentTitleActions', () => {
     expect(shaped.groups.length).toBeGreaterThan(0);
   });
 
-  it('Table Library: New Table… and New Schema… become its +, and Go to Table / Filter are gone', () => {
+  it('Table Library: New Table… and New Schema… become its +, Go to Table… leads the … menu, Filter is gone', () => {
     const { shaped } = header('erdStudio.modelLibrary');
     expect(shaped.navigation).toHaveLength(1);
     expect(shaped.navigation[0]).toMatchObject({ title: 'New…', icon: 'add' });
     expect(commands(shaped.navigation[0].submenu!.flat())).toEqual(['erdStudio.newTable', 'erdStudio.newSchema']);
     const all = commands(flat(shaped));
-    expect(all).not.toContain('erdStudio.goToTable');
+    // A jump to one table (not a filter the search field replaces): first under ….
+    expect(commands(shaped.groups[0])).toEqual(['erdStudio.goToTable']);
     expect(all).not.toContain('erdStudio.filterTableLibrary');
     // No longer repeated under ….
     expect(commands(shaped.groups.flat())).not.toContain('erdStudio.newTable');
@@ -58,16 +60,22 @@ describe('consistentTitleActions', () => {
     expect(commands(shaped.groups[0])).toEqual(['erdStudio.groupRelationshipsByFile']);
   });
 
-  it('keeps Clear Filter as an icon while a filter is in force', () => {
+  it('keeps Clear Filter as an icon while a filter of the section\'s own is in force', () => {
     const { shaped } = header('erdStudio.relationships', { 'erdStudio.relationshipsFiltered': true });
     expect(commands(shaped.navigation)).toEqual(['erdStudio.clearRelationshipsFilter']);
     expect(commands(flat(shaped))).not.toContain('erdStudio.filterRelationships');
   });
 
-  it('loses nothing but the finders, and every action keeps its (menu, index)', () => {
+  it('drops Clear Filter when the filter is the search field\'s (the field clears it)', () => {
+    const { shaped } = header('erdStudio.relationships', { 'erdStudio.relationshipsFiltered': true }, { filterInField: true });
+    expect(shaped.navigation).toEqual([]);
+    expect(commands(flat(shaped))).not.toContain('erdStudio.clearRelationshipsFilter');
+  });
+
+  it('loses nothing but the Filter… boxes, and every action keeps its (menu, index)', () => {
     for (const view of ['erdStudio.domainTree', 'erdStudio.modelLibrary', 'erdStudio.relationships', 'erdStudio.help']) {
       const { raw, shaped } = header(view);
-      const hidden = /^erdStudio\.(goToTable|filter(Diagrams|TableLibrary|Relationships))$/;
+      const hidden = /^erdStudio\.filter(Diagrams|TableLibrary|Relationships)$/;
       const key = (a: MenuAction) => `${a.menu}#${a.index}`;
       const before = flat(raw).filter((a) => !hidden.test(commandOf(a) ?? '')).map(key).sort();
       expect(flat(shaped).map(key).sort()).toEqual(before);

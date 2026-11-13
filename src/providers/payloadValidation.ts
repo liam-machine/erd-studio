@@ -842,6 +842,50 @@ export function validateDropTablesPayload(value: unknown): string | null {
   return null;
 }
 
+/** The largest screen coordinate or page size a {@link CanvasFrame} or a release point may carry (far past any display). */
+export const CANVAS_FRAME_MAX = 1_000_000;
+
+/** Exactly these keys, each a finite number within ±{@link CANVAS_FRAME_MAX}; else why not. */
+function finiteNumbers(value: unknown, keys: readonly string[], what: string): string | null {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return `${what} is an object of numbers.`;
+  const record = value as Record<string, unknown>;
+  if (Object.keys(record).length !== keys.length || !keys.every((k) => k in record)) return `${what} has exactly ${keys.join(', ')}.`;
+  for (const k of keys) {
+    const v = record[k];
+    if (typeof v !== 'number' || !Number.isFinite(v)) return `${k} must be a finite number.`;
+    if (Math.abs(v) > CANVAS_FRAME_MAX) return `${k} is out of range.`;
+  }
+  return null;
+}
+
+/** The keys of a {@link CanvasFrame}. */
+export const CANVAS_FRAME_KEYS = ['originX', 'originY', 'scale', 'windowX', 'windowY', 'width', 'height', 'pixelRatio'] as const;
+
+/** The keys of a glass sidebar drag's release point (`LibraryDragRelease`). */
+export const DRAG_RELEASE_KEYS = ['x', 'y', 'refX', 'refY', 'refScreenX', 'refScreenY', 'windowX', 'windowY'] as const;
+
+/**
+ * Validate a {@link CanvasFrame} (`canvasFrame`'s payload, and the frame the
+ * host passes back with `libraryDragReleased`): exactly its eight keys, each
+ * a finite number in range, the page size positive, the scale and the pixel
+ * ratio above 0 and at most 16. Numbers only: nothing in it is a path, a
+ * name or a command.
+ */
+export function validateCanvasFramePayload(value: unknown): string | null {
+  const shape = finiteNumbers(value, CANVAS_FRAME_KEYS, 'A canvas frame');
+  if (shape) return shape;
+  const f = value as Record<string, number>;
+  if (f.width <= 0 || f.height <= 0) return 'width and height must be positive.';
+  if (f.scale <= 0 || f.scale > 16) return 'scale is out of range.';
+  if (f.pixelRatio <= 0 || f.pixelRatio > 16) return 'pixelRatio is out of range.';
+  return null;
+}
+
+/** Validate a glass sidebar drag's release point (`LibraryDragRelease`): exactly its eight finite numbers, in range. */
+export function validateDragReleasePayload(value: unknown): string | null {
+  return finiteNumbers(value, DRAG_RELEASE_KEYS, 'A release point');
+}
+
 /**
  * Validate a `requestNewRelationshipFiles` payload. It carries nothing — the
  * host answers for the open diagram — so only an absent payload or an empty

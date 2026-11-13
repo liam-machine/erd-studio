@@ -7,8 +7,8 @@
  *                         manifestStaleness, syncPlanGenerated, error,
  *                         openFeedback, feedbackContext, feedbackAnalysis,
  *                         feedbackSubmitted, revealRelationship, canvasContext,
- *                         revealTable, libraryDragStarted, libraryDragEnded, filesNotShown,
- *                         canvasNotice
+ *                         revealTable, selectTables, libraryDragStarted, libraryDragReleased,
+ *                         libraryDragEnded, filesNotShown, canvasNotice
  *   Webview → Extension:  ready, requestExistingTables, requestNewRelationshipFiles, addModel, addColumn, removeColumn, addRelationship,
  *                         removeModel(s), removeRelationship(s), editRelationship,
  *                         addExistingModel(s), dropTables, updatePositions, switchStage,
@@ -18,7 +18,8 @@
  *                         layoutFinished, webviewError (usage telemetry only),
  *                         crashFallback (the crash screen's two buttons),
  *                         openNotedFile, addRelationshipsImports, reloadFromDisk
- *                         (the "not shown" strip's file links and buttons)
+ *                         (the "not shown" strip's file links and buttons),
+ *                         canvasFrame (where the canvas sits on screen)
  *
  * All message types use a discriminated union pattern with a `type` field,
  * enabling exhaustive switch handling in message handlers.
@@ -459,6 +460,24 @@ export interface RevealTableMessage {
 }
 
 /**
+ * Select these tables on the canvas, and nothing else: no pan, no zoom, no
+ * detail panel (a drop on the canvas: the tables appear where they were
+ * dropped, at the zoom the user had). Posted by `handleDropTables` after a
+ * drop adds tables (the ones added) or finds them all there already (with a
+ * `canvasNotice`). The webview waits for a refresh that draws them (up to
+ * `REVEAL_TABLE_WAIT_MS`), then marks them selected; names it does not draw
+ * are skipped silently. At most `ADD_EXISTING_TABLES_LIMIT` names. An older
+ * webview ignores it (the tables are added all the same). Every other
+ * "show this table" path keeps {@link RevealTableMessage}.
+ */
+export interface SelectTablesMessage {
+  type: 'selectTables';
+  payload: {
+    modelNames: string[];
+  };
+}
+
+/**
  * A drag has started in the sidebar's Table Library (its drag controller's
  * `handleDrag`, `src/providers/tableLibraryDrag.ts`): posted to every open,
  * loaded canvas on the logical stage, which shows "Drop to add
@@ -471,6 +490,66 @@ export interface LibraryDragStartedMessage {
   payload: {
     tables: string[];
   };
+}
+
+/**
+ * Where a canvas page sits on screen, learned from two of its own pointer
+ * events at least a few pixels apart: `scale` is screen pixels per page
+ * pixel (a pointer event's `screenX` is in screen pixels, its `clientX` in
+ * the page's CSS pixels: they differ by VS Code's zoom), and `originX` /
+ * `originY` the page's top-left corner on screen (`screenX - clientX *
+ * scale`). The rest is what the page measured then (`window.screenX` /
+ * `screenY`, `innerWidth` / `innerHeight`, `devicePixelRatio`): the frame
+ * holds only while all of those are unchanged (a window move, a resize, a
+ * layout change or a zoom changes one). Plain numbers only.
+ */
+export interface CanvasFrame {
+  originX: number;
+  originY: number;
+  scale: number;
+  windowX: number;
+  windowY: number;
+  width: number;
+  height: number;
+  pixelRatio: number;
+}
+
+/**
+ * Where a glass sidebar drag was let go, as the sidebar page saw it: `x`,
+ * `y` the release point in that page's CSS pixels (outside its bounds), and
+ * one pointer event of that page for reference (`refX` / `refY` its page
+ * point, `refScreenX` / `refScreenY` its screen point) with the window's
+ * place then (`windowX` / `windowY`). A page that knows its own scale and
+ * place on screen ({@link CanvasFrame}) maps it into its own coordinates:
+ * screen = ref screen + (point - ref point) * scale. Plain numbers only.
+ */
+export interface LibraryDragRelease {
+  x: number;
+  y: number;
+  refX: number;
+  refY: number;
+  refScreenX: number;
+  refScreenY: number;
+  windowX: number;
+  windowY: number;
+}
+
+/**
+ * A Table Library drag that started in the glass sidebar (a webview) was let
+ * go outside the sidebar ({@link LibraryDragRelease}). Posted by
+ * `SemanticEditorProvider.libraryDragReleased` to every loaded logical canvas
+ * that was on screen when the drag started and still is, about as soon as
+ * the mouse button comes up. A canvas in the same window that knows where it
+ * sits on screen (its own {@link CanvasFrame}, or `frame`: the last one a
+ * canvas in the same editor group reported, used only when every measured
+ * value still matches) and finds the point well inside its diagram finishes
+ * the drop at once (`dropTables` with `afterDrag`), instead of waiting for
+ * the pointer to move. Otherwise it ignores this and the pointer path
+ * applies. An older webview ignores it.
+ */
+export interface LibraryDragReleasedMessage {
+  type: 'libraryDragReleased';
+  payload: LibraryDragRelease & { frame?: CanvasFrame };
 }
 
 /**
@@ -551,7 +630,9 @@ export type ExtensionMessage =
   | FilesNotShownMessage
   | CanvasNoticeMessage
   | RevealTableMessage
+  | SelectTablesMessage
   | LibraryDragStartedMessage
+  | LibraryDragReleasedMessage
   | LibraryDragEndedMessage
   | ErrorMessage;
 
@@ -770,6 +851,18 @@ export interface DropTablesMessage {
      */
     afterDrag?: boolean;
   };
+}
+
+/**
+ * Where this canvas sits on screen ({@link CanvasFrame}), sent when it
+ * changes (read from the canvas's own pointer events): the host keeps the
+ * last one per editor group and passes it with `libraryDragReleased` to a
+ * canvas of that group that has not seen the pointer since it opened. Writes
+ * nothing, so it is allowed on the physical stage too.
+ */
+export interface CanvasFrameMessage {
+  type: 'canvasFrame';
+  payload: CanvasFrame;
 }
 
 /**
@@ -1303,6 +1396,7 @@ export type WebviewMessage =
   | AddExistingModelsMessage
   | AddModelsFromDbtMessage
   | DropTablesMessage
+  | CanvasFrameMessage
   | UpdatePositionsMessage
   | RefreshManifestMessage
   | UndoMessage

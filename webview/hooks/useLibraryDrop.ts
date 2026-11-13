@@ -20,8 +20,12 @@
  * here: the webview's first pointer event after the drag, when
  * {@link dragEndedOverCanvas} says the drag ended over the diagram, is posted
  * as a `dropTables` marked `afterDrag` (the host adds the drag it remembered,
- * if nothing used it up). See docs/dev/architecture.md, "Dragging tables from
- * the Table Library".
+ * if nothing used it up). A drag from the glass sidebar (a webview) also says
+ * where it was let go (`libraryDragReleased`, a screen point): the canvas
+ * under it posts that drop at once, without waiting for the pointer to move,
+ * when it knows where it sits on screen (`releaseInPage`, from its own
+ * pointer events). See docs/dev/architecture.md, "Dragging tables from the
+ * Table Library".
  *
  * When a drop does arrive: over an editable logical diagram, a drag that
  * carries URIs (or the Table Library drag the host announced) is accepted as
@@ -44,7 +48,7 @@ import { useIsViewer } from '@erd-studio/renderer/editor';
 
 import { useSend } from './useMessageBus';
 import { useEditorStore } from '../store/editorStore';
-import { DROP_TABLES_URI_LIMIT, DROP_TABLES_URI_MAX_LENGTH, TABLE_LIBRARY_DRAG_MIME } from '../../src/types/messages';
+import { DROP_TABLES_URI_LIMIT, DROP_TABLES_URI_MAX_LENGTH, TABLE_LIBRARY_DRAG_MIME, type CanvasFrame, type LibraryDragRelease } from '../../src/types/messages';
 
 /** How long the "Drop to add" hint stays without a drop or a pointer move (a long sidebar takes a while to cross). */
 export const LIBRARY_DRAG_HINT_MS = 20_000;
@@ -97,6 +101,118 @@ export function dragEndedOverCanvas(sample: PointerSample, viewport: { readonly 
   const mx = Number.isFinite(sample.movementX) ? sample.movementX! : 0;
   const my = Number.isFinite(sample.movementY) ? sample.movementY! : 0;
   return inside(x - mx, y - my, 1);
+}
+
+/** What the page measures now, to tell whether a {@link CanvasFrame} still holds. */
+export interface PageMetrics {
+  readonly windowX: number;
+  readonly windowY: number;
+  readonly width: number;
+  readonly height: number;
+  readonly pixelRatio: number;
+}
+
+/** This page's metrics (window place, size, pixel ratio). */
+export function pageMetrics(win: Pick<Window, 'screenX' | 'screenY' | 'innerWidth' | 'innerHeight' | 'devicePixelRatio'> = window): PageMetrics {
+  return { windowX: win.screenX, windowY: win.screenY, width: win.innerWidth, height: win.innerHeight, pixelRatio: win.devicePixelRatio };
+}
+
+/** One pointer event's page point and screen point. */
+export interface PointerPoint {
+  readonly screenX: number;
+  readonly screenY: number;
+  readonly clientX: number;
+  readonly clientY: number;
+}
+
+/** How far apart (page pixels, on one axis) two pointer events must be to measure the page's scale from. */
+export const FRAME_SAMPLE_MIN_PX = 8;
+
+/** A measured scale within 1% of one of VS Code's zoom steps (1.2 to a whole power) is that step. */
+export function snapScale(scale: number): number {
+  const step = 1.2 ** Math.round(Math.log(scale) / Math.log(1.2));
+  return Math.abs(scale - step) <= step * 0.01 ? step : scale;
+}
+
+/**
+ * Where the page sits on screen ({@link CanvasFrame}), from two of its
+ * pointer events at least {@link FRAME_SAMPLE_MIN_PX} apart: screen pixels
+ * per page pixel (they differ by VS Code's zoom), measured on the axis that
+ * moved more (the other must agree when it moved too), and the page's
+ * top-left corner on screen. Null when the two cannot say.
+ */
+export function frameOfPointers(a: PointerPoint, b: PointerPoint, metrics: PageMetrics): CanvasFrame | null {
+  const values = [a.screenX, a.screenY, a.clientX, a.clientY, b.screenX, b.screenY, b.clientX, b.clientY];
+  if (!values.every(Number.isFinite)) return null;
+  const dx = b.clientX - a.clientX;
+  const dy = b.clientY - a.clientY;
+  const alongX = Math.abs(dx) >= Math.abs(dy);
+  const moved = alongX ? dx : dy;
+  if (Math.abs(moved) < FRAME_SAMPLE_MIN_PX) return null;
+  const measured = (alongX ? b.screenX - a.screenX : b.screenY - a.screenY) / moved;
+  if (!(measured > 0.1 && measured <= 16)) return null;
+  const across = alongX ? dy : dx;
+  if (Math.abs(across) >= FRAME_SAMPLE_MIN_PX) {
+    const other = (alongX ? b.screenY - a.screenY : b.screenX - a.screenX) / across;
+    if (Math.abs(other - measured) > measured * 0.02) return null;
+  }
+  const scale = snapScale(measured);
+  const frame: CanvasFrame = { originX: b.screenX - b.clientX * scale, originY: b.screenY - b.clientY * scale, scale, ...metrics };
+  return isCanvasFrame(frame) ? frame : null;
+}
+
+/** A well-formed {@link CanvasFrame}: its eight finite numbers, a positive size, scale and pixel ratio. */
+export function isCanvasFrame(value: unknown): value is CanvasFrame {
+  if (typeof value !== 'object' || value === null) return false;
+  const f = value as Record<string, unknown>;
+  const keys = ['originX', 'originY', 'scale', 'windowX', 'windowY', 'width', 'height', 'pixelRatio'];
+  if (!keys.every((k) => typeof f[k] === 'number' && Number.isFinite(f[k]))) return false;
+  return (f.width as number) > 0 && (f.height as number) > 0 && (f.scale as number) > 0 && (f.pixelRatio as number) > 0;
+}
+
+/** A well-formed {@link LibraryDragRelease}: its eight finite numbers. */
+export function isDragRelease(value: unknown): value is LibraryDragRelease {
+  if (typeof value !== 'object' || value === null) return false;
+  const r = value as Record<string, unknown>;
+  return ['x', 'y', 'refX', 'refY', 'refScreenX', 'refScreenY', 'windowX', 'windowY'].every((k) => typeof r[k] === 'number' && Number.isFinite(r[k]));
+}
+
+/** Whether two frames are the same, give or take measuring noise (nothing new to report). */
+export function sameFrame(a: CanvasFrame | null, b: CanvasFrame | null): boolean {
+  if (!a || !b) return a === b;
+  return Math.abs(a.originX - b.originX) < 0.5 && Math.abs(a.originY - b.originY) < 0.5 && Math.abs(a.scale - b.scale) < 0.001
+    && a.windowX === b.windowX && a.windowY === b.windowY && a.width === b.width && a.height === b.height && a.pixelRatio === b.pixelRatio;
+}
+
+/** Whether the page measures now exactly what it did when `frame` was read (so the frame holds). */
+function frameHolds(frame: unknown, metrics: PageMetrics): frame is CanvasFrame {
+  return isCanvasFrame(frame)
+    && frame.windowX === metrics.windowX && frame.windowY === metrics.windowY
+    && frame.width === metrics.width && frame.height === metrics.height && frame.pixelRatio === metrics.pixelRatio;
+}
+
+/**
+ * Where a glass sidebar drag's release ({@link LibraryDragRelease}) falls in
+ * this page, by the first frame that still holds: the page's own (from its
+ * pointer events), else `given` (the last frame a canvas of the same editor
+ * group reported). A frame holds only while the window's place, the page's
+ * size and the pixel ratio are exactly what they were when it was read; a
+ * release from another window never maps. Null when unknown: the drop then
+ * waits for the pointer, as before.
+ */
+export function releaseInPage(
+  release: unknown,
+  metrics: PageMetrics,
+  own: CanvasFrame | null,
+  given?: unknown,
+): { x: number; y: number } | null {
+  if (!isDragRelease(release) || release.windowX !== metrics.windowX || release.windowY !== metrics.windowY) return null;
+  const frame = frameHolds(own, metrics) ? own : frameHolds(given, metrics) ? given : null;
+  if (!frame) return null;
+  const screenX = release.refScreenX + (release.x - release.refX) * frame.scale;
+  const screenY = release.refScreenY + (release.y - release.refY) * frame.scale;
+  const point = { x: (screenX - frame.originX) / frame.scale, y: (screenY - frame.originY) / frame.scale };
+  return Number.isFinite(point.x) && Number.isFinite(point.y) ? point : null;
 }
 
 /** DataTransfer types that carry URIs (types are lower case once in a DataTransfer). */
@@ -206,6 +322,20 @@ export interface LibraryDrop {
   libraryDragStarted: (tables: readonly string[]) => void;
   /** The host's `libraryDragEnded`: the drag was used up elsewhere. */
   libraryDragEnded: () => void;
+  /**
+   * This canvas has posted a drop (`dropTables`). The canvas then turns React
+   * Flow's first-open `fitView` off: on a diagram that opened empty that fit
+   * is still queued, and would fire on the first tables to appear, the
+   * dropped ones, moving the view the user dropped into.
+   */
+  dropPosted: boolean;
+  /**
+   * The host's `libraryDragReleased`: a glass sidebar drag was let go at this
+   * screen point. Finishes the drop at once when the point is on this diagram
+   * and the page knows where it sits; otherwise does nothing (the pointer path
+   * still applies).
+   */
+  libraryDragReleased: (release: unknown, frame?: unknown) => void;
 }
 
 /**
@@ -234,6 +364,7 @@ export function useLibraryDrop(onRefused?: (reason: string) => void): LibraryDro
   const send = useSend();
 
   const [hintTables, setHintTables] = useState<string[] | null>(null);
+  const [dropPosted, setDropPosted] = useState(false);
   const [dropActive, setDropActive] = useState(false);
   /** A Table Library drag is announced and not over yet: the next pointer event in the webview ends it. */
   const [dragArmed, setDragArmed] = useState(false);
@@ -263,7 +394,7 @@ export function useLibraryDrop(onRefused?: (reason: string) => void): LibraryDro
   // The diagram changed under the hint, or the host selected a table on it
   // (`revealTable`): the tables were added (or found already there) another
   // way, such as a drop on the diagram's row. The hint has nothing left to say.
-  const pendingReveal = useEditorStore((s) => s.pendingTableReveal);
+  const pendingReveal = useEditorStore((s) => s.pendingTableReveal ?? s.pendingTableSelection);
   const domainAtHint = useRef(domain);
   const revealAtHint = useRef(pendingReveal);
   useEffect(() => {
@@ -289,6 +420,27 @@ export function useLibraryDrop(onRefused?: (reason: string) => void): LibraryDro
   editableRef.current = editable;
   const loadedRef = useRef(loaded);
   loadedRef.current = loaded;
+
+  /**
+   * The drag ended at this page point (no drop event came): if it is on the
+   * diagram (`dragEndedOverCanvas`), post the `afterDrag` drop there.
+   */
+  const finishAfterDrag = useCallback((sample: PointerSample): void => {
+    const landed = dragEndedOverCanvas(sample, { width: window.innerWidth, height: window.innerHeight });
+    if (!landed) return;
+    if (!editableRef.current) {
+      onRefused?.(DROP_REFUSED_READ_ONLY);
+      return;
+    }
+    const point = screenToFlowPosition({ x: sample.x, y: sample.y });
+    if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) return;
+    setDropPosted(true);
+    send({
+      type: 'dropTables',
+      payload: { position: { x: Math.round(point.x), y: Math.round(point.y) }, uris: [], fromLibrary: true, afterDrag: true },
+    });
+  }, [onRefused, screenToFlowPosition, send]);
+
   useEffect(() => {
     if (!dragArmed || viewer) return undefined;
     const onFirstPointer = (event: PointerEvent): void => {
@@ -296,26 +448,12 @@ export function useLibraryDrop(onRefused?: (reason: string) => void): LibraryDro
       endLibraryDrag();
       if (at === undefined || Date.now() - at > LIBRARY_DRAG_FRESH_MS || !loadedRef.current) return;
       const target = event.target as Element | null;
-      const landed = dragEndedOverCanvas(
-        {
-          x: event.clientX,
-          y: event.clientY,
-          movementX: event.type === 'pointermove' ? event.movementX : 0,
-          movementY: event.type === 'pointermove' ? event.movementY : 0,
-          onDiagram: typeof target?.closest === 'function' && target.closest('.react-flow') !== null,
-        },
-        { width: window.innerWidth, height: window.innerHeight },
-      );
-      if (!landed) return;
-      if (!editableRef.current) {
-        onRefused?.(DROP_REFUSED_READ_ONLY);
-        return;
-      }
-      const point = screenToFlowPosition({ x: event.clientX, y: event.clientY });
-      if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) return;
-      send({
-        type: 'dropTables',
-        payload: { position: { x: Math.round(point.x), y: Math.round(point.y) }, uris: [], fromLibrary: true, afterDrag: true },
+      finishAfterDrag({
+        x: event.clientX,
+        y: event.clientY,
+        movementX: event.type === 'pointermove' ? event.movementX : 0,
+        movementY: event.type === 'pointermove' ? event.movementY : 0,
+        onDiagram: typeof target?.closest === 'function' && target.closest('.react-flow') !== null,
       });
     };
     window.addEventListener('pointermove', onFirstPointer, true);
@@ -324,7 +462,54 @@ export function useLibraryDrop(onRefused?: (reason: string) => void): LibraryDro
       window.removeEventListener('pointermove', onFirstPointer, true);
       window.removeEventListener('pointerdown', onFirstPointer, true);
     };
-  }, [dragArmed, viewer, endLibraryDrag, screenToFlowPosition, send, onRefused]);
+  }, [dragArmed, viewer, endLibraryDrag, finishAfterDrag]);
+
+  // Where this page sits on screen, from its own pointer events (a glass
+  // sidebar drop is placed by it): two of them at least FRAME_SAMPLE_MIN_PX
+  // apart, with nothing measured changing between. Reported to the host when
+  // it changes, so a canvas opened later in the same editor group can use it.
+  const ownFrame = useRef<CanvasFrame | null>(null);
+  useEffect(() => {
+    if (viewer) return undefined;
+    let anchor: { point: PointerPoint; metrics: PageMetrics } | null = null;
+    const onPointer = (event: PointerEvent): void => {
+      const metrics = pageMetrics();
+      const point: PointerPoint = { screenX: event.screenX, screenY: event.screenY, clientX: event.clientX, clientY: event.clientY };
+      const sameMetrics = anchor !== null && anchor.metrics.windowX === metrics.windowX && anchor.metrics.windowY === metrics.windowY
+        && anchor.metrics.width === metrics.width && anchor.metrics.height === metrics.height && anchor.metrics.pixelRatio === metrics.pixelRatio;
+      if (!anchor || !sameMetrics) {
+        anchor = { point, metrics };
+        return;
+      }
+      // Too close to measure from: keep the anchor until the pointer has moved far enough.
+      if (Math.max(Math.abs(point.clientX - anchor.point.clientX), Math.abs(point.clientY - anchor.point.clientY)) < FRAME_SAMPLE_MIN_PX) return;
+      const frame = frameOfPointers(anchor.point, point, metrics);
+      anchor = { point, metrics };
+      if (!frame || sameFrame(frame, ownFrame.current)) return;
+      ownFrame.current = frame;
+      send({ type: 'canvasFrame', payload: { ...frame } });
+    };
+    window.addEventListener('pointermove', onPointer, { capture: true, passive: true });
+    window.addEventListener('pointerdown', onPointer, { capture: true, passive: true });
+    return () => {
+      window.removeEventListener('pointermove', onPointer, true);
+      window.removeEventListener('pointerdown', onPointer, true);
+    };
+  }, [viewer, send]);
+
+  const libraryDragReleased = useCallback((release: unknown, frame?: unknown): void => {
+    const startedAt = libraryDragAt.current;
+    if (viewer || startedAt === undefined || Date.now() - startedAt > LIBRARY_DRAG_FRESH_MS || !loadedRef.current) return;
+    const point = releaseInPage(release, pageMetrics(), ownFrame.current, frame);
+    // Unknown where this page is: the pointer path finishes it, as before.
+    if (!point) return;
+    const target = typeof document.elementFromPoint === 'function' ? document.elementFromPoint(point.x, point.y) : null;
+    const sample: PointerSample = { x: point.x, y: point.y, onDiagram: target !== null && target.closest('.react-flow') !== null };
+    // Not on this diagram (another editor, the tab bar, outside the window): another canvas may take it.
+    if (!dragEndedOverCanvas(sample, { width: window.innerWidth, height: window.innerHeight })) return;
+    endLibraryDrag();
+    finishAfterDrag(sample);
+  }, [viewer, endLibraryDrag, finishAfterDrag]);
 
   const clearOver = useCallback(() => {
     enterDepth.current = 0;
@@ -375,6 +560,7 @@ export function useLibraryDrop(onRefused?: (reason: string) => void): LibraryDro
       endLibraryDrag();
       const point = screenToFlowPosition({ x: event.clientX, y: event.clientY });
       if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) return;
+      setDropPosted(true);
       send({
         type: 'dropTables',
         payload: {
@@ -411,5 +597,7 @@ export function useLibraryDrop(onRefused?: (reason: string) => void): LibraryDro
     hintTables: viewer ? null : editable ? shownTables : null,
     libraryDragStarted,
     libraryDragEnded: endLibraryDrag,
+    libraryDragReleased,
+    dropPosted,
   };
 }
