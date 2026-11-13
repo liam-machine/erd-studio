@@ -43,6 +43,7 @@ import {
   type AnnotationFlowEdge,
 } from '@erd-studio/renderer/editor';
 import { isStaleStageReply } from './lib/stageRequest';
+import { answerDropTrace, noteDomainLoaded } from './lib/dropTrace';
 import { useEditorStore, editorStoreApi } from './store/editorStore';
 import { vscodeCanvasHost } from './host/vscodeCanvasHost';
 import { DragLine } from './components/Graph/DragLine';
@@ -275,6 +276,7 @@ function EditorCanvas() {
           useEditorStore.getState().setExistingModels(msg.payload.existingModels);
           break;
         case 'domainLoaded':
+          noteDomainLoaded();
           setHostLoading(null);
           applySubjectAreaPayload(msg.payload);
           // Set on a fresh domain (no stored positions), cleared by every other
@@ -375,9 +377,13 @@ function EditorCanvas() {
           // Something the host did by itself (it added a relationships import after a save): said briefly.
           if (typeof msg.payload?.message === 'string' && msg.payload.message !== '') setNotice(msg.payload.message);
           break;
+        case 'dropTrace':
+          // A timed drop: say when the redrawn diagram is on screen (timing only).
+          answerDropTrace(msg.payload?.trace, (message) => vscode.postMessage(message));
+          break;
       }
     },
-    [setError, setDiscrepancyReport, setManifestStale, setSyncPlanGenerated, libraryDragStarted, libraryDragEnded],
+    [setError, setDiscrepancyReport, setManifestStale, setSyncPlanGenerated, libraryDragStarted, libraryDragEnded, vscode],
   );
 
   useMessageBus(onMessage, /* sendReadyOnMount */ true);

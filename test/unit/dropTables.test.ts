@@ -37,6 +37,8 @@ import { OwnWriteTracker } from '../../src/services/ownWriteTracker';
 import type { ManifestService } from '../../src/services/manifestService';
 import type { YmlParserService } from '../../src/services/ymlParserService';
 import type { TemplateService } from '../../src/services/templateService';
+import { setLogSink, type LogSink } from '../../src/services/logger';
+import { telemetry } from '../../src/services/telemetryService';
 
 // ---------------------------------------------------------------------------
 // The drag source
@@ -666,5 +668,106 @@ describe('noteLibraryDrag', () => {
     const { panel } = await loaded(provider);
     provider.noteLibraryDrag([]);
     expect(posted(panel, 'libraryDragStarted')).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Drop timing (src/services/dropTiming.ts): the provider's marks, the
+// canvas's answer, the log line and the telemetry keys
+// ---------------------------------------------------------------------------
+
+describe('drop timing', () => {
+  let lines: string[];
+  let keys: string[];
+  beforeEach(() => {
+    lines = [];
+    const at2 = (level: string) => (message: string | Error) => { lines.push(`${level} ${String(message)}`); };
+    const sink: LogSink = { trace: at2('trace'), debug: at2('debug'), info: at2('info'), warn: at2('warn'), error: at2('error') };
+    setLogSink(sink);
+    keys = [];
+    vi.spyOn(telemetry, 'featureQuiet').mockImplementation((key) => { keys.push(key); });
+  });
+  afterEach(() => setLogSink(undefined));
+
+  const dropLines = (): string[] => lines.filter((l) => l.includes('[Drop timing]'));
+  const traceOf = (panel: Panel): number => (posted(panel, 'dropTrace')[0] as { payload: { trace: number } }).payload.trace;
+
+  it('a drop on the canvas posts dropTrace right after the redrawn diagram, and the canvas\'s answer logs every stage and counts its keys', async () => {
+    const provider = buildProvider(root);
+    const { panel } = await loaded(provider);
+    provider.noteLibraryDrag(['dim_region'], [at(DIM_REGION)]);
+    await drop(panel, [], { x: 500, y: 300 }, true);
+    expect(_appliedEdits).toHaveLength(1);
+    const types = panel._postedMessages.map((m) => (m as { type: string }).type);
+    expect(types.indexOf('dropTrace')).toBe(types.indexOf('domainLoaded') + 1);
+    // Not logged until the canvas says it painted the table.
+    expect(dropLines()).toEqual([]);
+    await panel._simulateMessage({ type: 'dropShown', payload: { trace: traceOf(panel), renderMs: 12 } });
+    expect(dropLines()).toHaveLength(1);
+    const line = dropLines()[0];
+    expect(line).toMatch(/^info \[Drop timing\] 1 table onto staging\.dbml \(dropped on the canvas\): shown after /);
+    for (const stage of ['wait', 'prepare', 'plan', 'edit', 'save', 'redraw', 'canvas']) expect(line).toMatch(new RegExp(`\\b${stage} \\d`));
+    expect(line).not.toMatch(/\bopen \d/);
+    expect(line).toContain('canvas render 12 ms');
+    expect(line).not.toContain(root);
+    expect(keys).toEqual(['dropRouteCanvas', 'dropShownUnder1s']);
+    // A second answer, or one for another drop, changes nothing.
+    await panel._simulateMessage({ type: 'dropShown', payload: { trace: traceOf(panel) } });
+    expect(dropLines()).toHaveLength(1);
+  });
+
+  it('a drag that ended over the canvas is timed as afterDrag', async () => {
+    const provider = buildProvider(root);
+    const { panel } = await loaded(provider);
+    provider.noteLibraryDrag(['dim_region'], [at(DIM_REGION)]);
+    await dragEndedOver(panel);
+    await panel._simulateMessage({ type: 'dropShown', payload: { trace: traceOf(panel) } });
+    expect(dropLines()[0]).toContain('(drag ended over the canvas, no drop event): shown');
+    expect(keys[0]).toBe('dropRouteAfterDrag');
+  });
+
+  it('a drop that adds nothing is logged at once, with its route only, and no dropTrace', async () => {
+    const provider = buildProvider(root);
+    const { panel } = await loaded(provider);
+    provider.noteLibraryDrag(['fct_order'], [at(FCT_ORDER)]);
+    await drop(panel, [], { x: 1, y: 1 }, true);
+    expect(posted(panel, 'dropTrace')).toEqual([]);
+    expect(dropLines()).toHaveLength(1);
+    expect(dropLines()[0]).toContain('(dropped on the canvas): nothing added after');
+    expect(keys).toEqual(['dropRouteCanvas']);
+  });
+
+  it('a drop that missed the canvas is timed from the tab it opened, with the diagram brought forward as its own stage', async () => {
+    const provider = buildProvider(root);
+    const { panel } = await loaded(provider);
+    provider.noteLibraryDrag(['dim_region'], [at(DIM_REGION)]);
+    provider.noteDropSeen('missedDrop', at(STAGING));
+    provider.noteDropDiagramOpened(at(STAGING));
+    await provider.addTablesToDiagram(vscode.Uri.file(at(STAGING)), ['dim_region'], [at(DIM_REGION)]);
+    expect(_appliedEdits).toHaveLength(1);
+    await panel._simulateMessage({ type: 'dropShown', payload: { trace: traceOf(panel) } });
+    const line = dropLines()[0];
+    expect(line).toContain('(drop opened the file, added from its tab): shown');
+    expect(line).toMatch(/Stages: open \d+ ms · wait /);
+    expect(line).toMatch(/drag before the drop \d+ ms/);
+    expect(keys[0]).toBe('dropRouteMissedDrop');
+  });
+
+  it('Add to Diagram (no drop) is never timed, and a bad dropShown is ignored', async () => {
+    const provider = buildProvider(root);
+    const { panel } = await loaded(provider);
+    await provider.addTablesToDiagram(vscode.Uri.file(at(STAGING)), ['dim_region'], [at(DIM_REGION)]);
+    expect(_appliedEdits).toHaveLength(1);
+    expect(posted(panel, 'dropTrace')).toEqual([]);
+    await panel._simulateMessage({ type: 'dropShown', payload: { trace: 'x' } });
+    expect(dropLines()).toEqual([]);
+    expect(keys).toEqual([]);
+  });
+
+  it('a dropShown with no drop followed is ignored and says nothing', async () => {
+    const provider = buildProvider(root);
+    const { panel } = await loaded(provider);
+    await panel._simulateMessage({ type: 'dropShown', payload: { trace: 99 } });
+    expect(errors(panel)).toEqual([]);
   });
 });

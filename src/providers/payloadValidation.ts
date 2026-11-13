@@ -997,6 +997,22 @@ export function validateLayoutFinishedPayload(value: unknown): value is LayoutFi
     && readLayoutFailureDetail(value) !== undefined;
 }
 
+/** The longest `renderMs` a `dropShown` may carry (ten minutes): anything longer is not a render time. */
+export const DROP_SHOWN_MAX_RENDER_MS = 600_000;
+
+/**
+ * `dropShown` (a timed drop's tables are on screen; timing only): `trace`, a
+ * whole number from 1, and an optional `renderMs`, a whole or fractional
+ * number of milliseconds from 0 to {@link DROP_SHOWN_MAX_RENDER_MS}. Nothing
+ * else is read.
+ */
+export function validateDropShownPayload(value: unknown): value is { trace: number; renderMs?: number } {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const { trace, renderMs } = value as { trace?: unknown; renderMs?: unknown };
+  return typeof trace === 'number' && Number.isSafeInteger(trace) && trace >= 1
+    && (renderMs === undefined || (typeof renderMs === 'number' && Number.isFinite(renderMs) && renderMs >= 0 && renderMs <= DROP_SHOWN_MAX_RENDER_MS));
+}
+
 /** `webviewError` (usage telemetry only, 2.0 B13): a `kind` and an `area` from their fixed lists, nothing else read. */
 export function validateWebviewErrorPayload(value: unknown): value is WebviewErrorPayload {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;

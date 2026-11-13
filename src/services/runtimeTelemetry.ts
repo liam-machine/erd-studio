@@ -195,6 +195,7 @@ export const HANDLER_GROUP: Record<WebviewMessageType, HandlerGroup> = {
   openAnotherDomain: 'other',
   openGettingStarted: 'other',
   showLogs: 'other',
+  dropShown: 'other',
   exportDiagram: 'other',
   generateSyncPlan: 'compare',
   runDbtCompile: 'other',
@@ -373,6 +374,7 @@ const LOGGED_ERROR_CODES: Record<LoggedErrorArea, TelemetryErrorCode> = {
 export const LOGGED_ERROR_AREAS: Readonly<Record<string, LoggedErrorArea>> = {
   // createLogger scopes
   Canvas: 'Canvas',
+  'Drop timing': 'Canvas',
   'Convert to DBML': 'Other',
   dbml: 'Other',
   Draft: 'Draft',

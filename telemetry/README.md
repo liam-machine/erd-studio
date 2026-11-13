@@ -1643,6 +1643,51 @@ once more and its first repeat is not marked.
 
 - `suggestPromptShownAgain` — the start suggestion showed on a machine where it had already been shown (in another folder, or in this one after **Turn On Start Suggestions for This Folder**), counted beside `suggestPromptShown`.
 
+**How long a table drop takes to show** (added after 2.0.5). On a large
+library a drop from the Table Library can take many seconds to show its
+table on a user's machine, while the same add takes tens of milliseconds in
+our tests, so the slow part is somewhere only their machine can tell us. A
+drop is timed from the moment ERD Studio learns of it to the moment the
+diagram has painted the table (the canvas answers `dropTrace` with
+`dropShown` after its next paint), in eight stages
+(`src/services/dropTiming.ts`): `open` (bringing the diagram forward, for a
+drop that missed the canvas or landed on a Diagrams row), `wait` (the
+diagram's edit queue, a stage switch, a diagram still loading), `prepare`
+(dbt data, which tables, their relationships), `plan` (the files the edit
+writes: the library plan and every other diagram it updates), `edit` (the WorkspaceEdit),
+`save` (saving what it touched), `redraw` (rebuilding the diagram and posting
+it), `canvas` (the message's trip and the canvas's render). The drag itself
+(the user's hand) is never a stage. The time of every stage, the canvas's
+own render time and how long the host stayed busy after posting go to the
+ERD Studio log only (one `[Drop timing]` line per drop, which Send
+Feedback's "Include recent ERD Studio log" carries); telemetry gets fixed
+keys, each counted once per drop. Read `dropShownOver15s` against the
+heartbeat's `os`, and `dropSlow*` for where the time went.
+
+- `dropRouteCanvas` — a drop event reached the diagram (a Shift-drop, or a table file from the Explorer).
+- `dropRouteAfterDrag` — no drop event came: the diagram's first pointer event after the drag said it ended over the diagram.
+- `dropRouteMissedDrop` — the editor group took the drop and opened the table's file; ERD Studio added the table from that tab.
+- `dropRouteDiagramsRow` — the drop landed on a diagram's row in the Diagrams view.
+- `dropShownUnder1s` — a drop that wrote showed its table in under 1 s.
+- `dropShown1to5s` — it showed after 1 to 5 s.
+- `dropShown5to15s` — it showed after 5 to 15 s.
+- `dropShownOver15s` — it showed after 15 s or more.
+- `dropShownNever` — it was written, but the diagram never said it showed it within a minute (or the add itself had not finished by then).
+- `dropSlowOpen` — beside a drop of 1 s or more: bringing the diagram forward was the slowest stage.
+- `dropSlowWait` — waiting for the diagram (its edit queue, a stage switch, a load) was the slowest stage.
+- `dropSlowPrepare` — working out what to add (dbt data, relationships) was the slowest stage.
+- `dropSlowPlan` — planning the files the edit writes (the library plan, every other diagram it updates) was the slowest stage.
+- `dropSlowEdit` — making the edit (opening files, `applyEdit`) was the slowest stage.
+- `dropSlowSave` — saving the files the edit touched was the slowest stage.
+- `dropSlowRedraw` — rebuilding the diagram and posting it was the slowest stage.
+- `dropSlowCanvas` — the trip to the diagram and its render was the slowest stage.
+
+```bash
+# How long drops took to show, and where the time went, per OS (installs and drops, last 28 days)
+npx wrangler d1 execute erd-studio-telemetry --remote --command \
+  "SELECT h.os, j.key, COUNT(DISTINCT h.install_id) AS installs, SUM(j.value) AS drops FROM heartbeats h, json_each(h.features) j WHERE h.day >= date('now','-28 days') AND h.day < date('now') AND COALESCE(h.dev, 0) = 0 AND j.key LIKE 'drop%' GROUP BY h.os, j.key ORDER BY h.os, j.key"
+```
+
 ## The local archive
 
 Because D1 keeps raw rows for only 90 days, the operator's machine keeps
