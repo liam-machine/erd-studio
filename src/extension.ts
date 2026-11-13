@@ -3496,6 +3496,8 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
           } else {
             await vscode.commands.executeCommand('erdStudio.openDomain', filePath);
           }
+          // A timed drop (a Diagrams row, a missed canvas drop): the diagram is in front.
+          editorProvider.noteDropDiagramOpened(filePath);
           return editorProvider.addTablesToDiagram(vscode.Uri.file(filePath), tables, files);
         },
         // The diagram in front of the user (or the only one on screen) takes the tables without a pick.
@@ -3512,6 +3514,7 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
           ...(remembered ? { remembered } : {}),
         });
         if (!found) return false;
+        editorProvider.noteDropSeen('diagramsRow', filePath);
         await addToDiagramDeps.addTables(filePath, found.names, found.files);
         return true;
       });
@@ -3595,6 +3598,7 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
           diagramName: (filePath) => deps.listSubjectAreas().find((s) => samePath(s.filePath, filePath))?.domain
             ?? path.basename(filePath, path.extname(filePath)),
           addTables: (filePath, tables, files) => addToDiagramDeps.addTables(filePath, tables, files),
+          dropSeen: (filePath) => editorProvider.noteDropSeen('missedDrop', filePath),
         }),
         vscode.commands.registerCommand(GO_TO_TABLE_COMMAND, (query?: unknown) =>
           goToTableCommand(goToTableDeps, typeof query === 'string' ? query : undefined)),

@@ -31,6 +31,8 @@ export interface MissedCanvasDropDeps {
   listTableFiles(): readonly DroppableTableFile[];
   /** The diagram's name as the Diagrams view shows it. */
   diagramName(filePath: string): string;
+  /** The drop was seen, aimed at the diagram at `filePath` (drop timing, `dropTiming.ts`), before the add starts. */
+  dropSeen?(filePath: string): void;
   /** Add to Diagram's add: bring the diagram forward and add the tables in one edit; resolves to the tables it added. */
   addTables(filePath: string, tables: readonly string[], files?: readonly string[]): Promise<readonly string[] | undefined | unknown>;
   /** Tests pass their own clock. */
@@ -102,6 +104,11 @@ export function watchMissedCanvasDrops(deps: MissedCanvasDropDeps): vscode.Dispo
           if (other !== tab && otherInput instanceof vscode.TabInputText && files.some((f) => samePath(f, otherInput.uri.fsPath))) close(other);
         }
         const diagram = deps.diagramName(missed.diagramPath);
+        try {
+          deps.dropSeen?.(missed.diagramPath);
+        } catch {
+          // Timing must never stop the add.
+        }
         void Promise.resolve(deps.addTables(missed.diagramPath, missed.names, missed.files)).then((added) => {
           // What the canvas added; nothing when all were there already or it refused (the canvas said so).
           const fresh = Array.isArray(added) ? [...new Set(added as string[])] : [];

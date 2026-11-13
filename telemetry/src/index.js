@@ -872,6 +872,24 @@ const FEATURES = [
   'suggestPromptShownAgain',
   // #305: Convert to DBML… pressed in the canvas's information button.
   'convertToDbmlFromCanvasInfo',
+  // Added after 2.0.5: a timed table drop: its route, how long until it showed (a range), its slowest stage.
+  'dropRouteCanvas',
+  'dropRouteAfterDrag',
+  'dropRouteMissedDrop',
+  'dropRouteDiagramsRow',
+  'dropShownUnder1s',
+  'dropShown1to5s',
+  'dropShown5to15s',
+  'dropShownOver15s',
+  'dropShownNever',
+  'dropSlowOpen',
+  'dropSlowWait',
+  'dropSlowPrepare',
+  'dropSlowPlan',
+  'dropSlowEdit',
+  'dropSlowSave',
+  'dropSlowRedraw',
+  'dropSlowCanvas',
 ];
 
 /** The only keys `errors` may carry; anything else is dropped. */

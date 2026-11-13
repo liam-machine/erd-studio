@@ -766,6 +766,28 @@ export const FEATURES = [
   // #305: Convert to DBML… pressed in the canvas's information button (a project
   // from before 2.0), counted beside the command's own convertToDbml.
   'convertToDbmlFromCanvasInfo',
+  // Added after 2.0.5: a table drop from the Table Library, timed from the
+  // moment the host learned of it (src/services/dropTiming.ts). How it
+  // arrived (always); how long until the canvas painted the table, as a range
+  // (a drop that wrote), or that it never said so; and, for a drop that took
+  // a second or more, its slowest stage. Never a name, a path or a count.
+  'dropRouteCanvas',
+  'dropRouteAfterDrag',
+  'dropRouteMissedDrop',
+  'dropRouteDiagramsRow',
+  'dropShownUnder1s',
+  'dropShown1to5s',
+  'dropShown5to15s',
+  'dropShownOver15s',
+  'dropShownNever',
+  'dropSlowOpen',
+  'dropSlowWait',
+  'dropSlowPrepare',
+  'dropSlowPlan',
+  'dropSlowEdit',
+  'dropSlowSave',
+  'dropSlowRedraw',
+  'dropSlowCanvas',
 ] as const;
 export type TelemetryFeature = (typeof FEATURES)[number];
 

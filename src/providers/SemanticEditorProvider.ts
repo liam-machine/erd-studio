@@ -277,12 +277,14 @@ import { withRelationshipHomes } from '../services/diagramRelationshipHomes';
 import { normaliseName } from '../services/nameUtils';
 import { yieldToEventLoop } from '../services/libraryWarmUp';
 import { createLogger, elapsedMs, log, phaseTimer, plural } from '../services/logger';
+import { DropTimer, dropTimingFeatures, dropTimingLogLine, type DropRoute, type DropSummary } from '../services/dropTiming';
 import { SHOW_LOGS_BUTTON, SHOW_LOGS_COMMAND } from '../services/showLogs';
 import type { SessionPromptKind } from '../services/activationPrompts';
 import { parseGuideAction, type CanvasGuideStart, type GuideActionPayload } from '../types/onboardingGuide';
 
 /** The canvas's lines in the ERD Studio log: opening a diagram, position saves. */
 const canvasLog = createLogger('Canvas');
+const dropLog = createLogger('Drop timing');
 
 /**
  * Backoff between re-reads of a domain file that read as empty or truncated.
@@ -639,6 +641,7 @@ import {
   validateDropTablesPayload,
   validateCanvasFramePayload,
   validateDragReleasePayload,
+  validateDropShownPayload,
   validateOpenModelFilePayload,
   validateGoToTablePayload,
   validateTableActionPayload,
@@ -1019,6 +1022,23 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
   /** Per panel: the pending flush after VS Code's own undo/redo (see scheduleNativeUndoFlush). */
   private readonly nativeUndoTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+  /**
+   * Times each table drop from the moment the host learns of it to the
+   * canvas painting the table (`src/services/dropTiming.ts`): one line in the
+   * ERD Studio log per drop, and fixed usage-telemetry keys.
+   */
+  private readonly dropTimer = new DropTimer({
+    now: () => performance.now(),
+    samePath: (a, b) => samePath(a, b),
+    report: (summary) => this.reportDrop(summary),
+    setTimeout: (fn, ms) => {
+      const handle = setTimeout(fn, ms);
+      (handle as { unref?: () => void }).unref?.();
+      return handle;
+    },
+    clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
+  });
 
   /** The background read of the table library (extension.ts), told about foreground work so it steps aside. */
   private libraryWarmUp: { noteForegroundWork(): void } | undefined;
@@ -2507,6 +2527,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           'guide',
           // Usage telemetry only (2.0 B13): a crash's kind and area.
           'webviewError',
+          // Timing only: a timed drop's tables are on the canvas.
+          'dropShown',
           // The crash screen's Reload / Send Feedback: reloads the page or opens Send Feedback; writes nothing.
           'crashFallback',
           // The toolbar's Curved / Hops switch: a view preference (a user setting), not a schema
@@ -2709,6 +2731,12 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             // No payload to validate. Writes nothing, so it is on the physical allowlist.
             await vscode.commands.executeCommand('erdStudio.showGettingStarted');
             break;
+          case 'dropShown': {
+            // Timing only: a timed drop's tables are on the canvas (the log and fixed telemetry keys). Writes nothing.
+            const payload = (message as { payload?: unknown }).payload;
+            if (validateDropShownPayload(payload)) this.dropTimer.shown(payload.trace, payload.renderMs);
+            break;
+          }
           case 'showLogs':
             // No payload to validate. Opens the ERD Studio output channel; on the physical allowlist.
             await vscode.commands.executeCommand(SHOW_LOGS_COMMAND);
@@ -5085,6 +5113,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       if (written) options.onLayoutOnly?.();
       return written;
     }
+    // A timed drop: what to add is worked out; the edit is planned next.
+    this.dropTimer.mark('prepared', document.uri.fsPath);
     // A DBML diagram, or a project whose library holds DBML (native DBML
     // storage, §5.3): planned against the library and applied by
     // applyFileWrites. A YAML/JSON project keeps the path below unchanged.
@@ -5124,6 +5154,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     const expected = [document.uri.fsPath, ...created, ...deleted, ...modelDocs.map((d) => d.uri.fsPath), ...otherDomainDocs.map((d) => d.uri.fsPath)];
     const expectation = this.ownWriteTracker.expectWrite(expected);
     this.pendingUpdates.set(panelKey, true);
+    this.dropTimer.mark('planned', document.uri.fsPath);
     try {
       const success = await vscode.workspace.applyEdit(edit);
       if (!success) {
@@ -5134,6 +5165,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         return false;
       }
       options.onApplied?.();
+      this.dropTimer.mark('applied', document.uri.fsPath);
       // A save that fails is reported, never ignored: the edit is applied in
       // memory, so without a word the file would sit open and unsaved (#126).
       const unsaved: string[] = [];
@@ -5180,6 +5212,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       if (ourPaths.size > 0) {
         this.editedTablePaths.set(panelKey, ourPaths);
       }
+      this.dropTimer.mark('saved', document.uri.fsPath);
       // The table files this edit wrote, created or deleted: their parses, and
       // the library index when one appeared or went (the redraw below reads both).
       this.tableLibraryService.invalidatePaths([...created, ...deleted, ...modelDocs.map((d) => d.uri.fsPath)]);
@@ -5189,6 +5222,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       // panel that shows a model we just wrote.
       if (refreshWebview && webview) {
         await this.sendSubjectAreaData(document, webview);
+        this.postDropTrace(document, webview);
       }
     } finally {
       this.ownWriteTracker.settleWrites(expectation);
@@ -5449,6 +5483,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     }
 
     this.pendingUpdates.set(panelKey, true);
+    this.dropTimer.mark('planned', fsPath);
     let applied: AppliedFileWrites;
     try {
       const result = await this.applyAndSaveWrites(document, primaryText, writes, options);
@@ -5463,6 +5498,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       this.tableLibraryService.primeRelationshipsFiles(written);
       if (refreshWebview && webview) {
         await this.sendSubjectAreaData(document, webview);
+        this.postDropTrace(document, webview);
       }
     } finally {
       this.pendingUpdates.delete(panelKey);
@@ -5535,6 +5571,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         return null;
       }
       options.onApplied?.();
+      this.dropTimer.mark('applied', fsPath);
       const unsaved: string[] = [];
       const saveFailures = new Set<SaveFailure>();
       const onSaveFailure = (reason: SaveFailure) => saveFailures.add(reason);
@@ -5564,6 +5601,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       }
       for (const filePath of applied.created) ourPaths.add(filePath);
       if (ourPaths.size > 0) this.editedTablePaths.set(panelKey, ourPaths);
+      this.dropTimer.mark('saved', fsPath);
       if (unsaved.length > 0) {
         for (const code of saveFailureCodes(saveFailures, { modelFile: modelFileUnsaved })) telemetry.error(code);
         options.onUnsaved?.();
@@ -7031,11 +7069,44 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     files?: readonly string[],
   ): Promise<string[] | undefined> {
     if (modelNames.length === 0) return [];
-    return this.runTableAction(uri, {
+    const added = await this.runTableAction(uri, {
       reveal: modelNames[0],
       add: [...modelNames],
       ...(files !== undefined && files.length === modelNames.length ? { files: [...files] } : {}),
     });
+    // A timed drop whose add wrote nothing is finished; one held for the canvas's `ready` settles when it runs.
+    if (added !== undefined) this.dropTimer.settle(uri.fsPath);
+    return added;
+  }
+
+  /**
+   * A drop on the diagram at `filePath` that did not reach its canvas: one on
+   * its row in the Diagrams view, or one the editor group took (it opened the
+   * table's file, `missedCanvasDrop.ts`). Starts timing it.
+   */
+  noteDropSeen(route: Extract<DropRoute, 'missedDrop' | 'diagramsRow'>, filePath: string): void {
+    this.dropTimer.dropSeen(route, filePath);
+  }
+
+  /** The diagram a timed drop is going to was brought forward (Add to Diagram's route). */
+  noteDropDiagramOpened(filePath: string): void {
+    this.dropTimer.mark('opened', filePath);
+  }
+
+  /** A finished drop: its line in the ERD Studio log, and its fixed telemetry keys. */
+  private reportDrop(summary: DropSummary): void {
+    try {
+      dropLog.info(dropTimingLogLine(summary, path.basename(summary.target)));
+      for (const key of dropTimingFeatures(summary)) telemetry.featureQuiet(key);
+    } catch {
+      // Timing must never break a drop.
+    }
+  }
+
+  /** After a diagram is redrawn on its canvas: when a drop on it is timed, ask the canvas to say once it has painted. */
+  private postDropTrace(document: vscode.TextDocument, webview: vscode.Webview): void {
+    const trace = this.dropTimer.posted(document.uri.fsPath);
+    if (trace !== undefined && !this.disposedWebviews.has(webview)) this.post(webview, { type: 'dropTrace', payload: { trace } });
   }
 
   /**
@@ -7050,6 +7121,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     files?: readonly string[],
   ): void {
     if (tables.length === 0) return;
+    this.dropTimer.dragStarted(tables.length);
     const onScreen = new Set(Array.from(this.openPanels.keys()).filter((key) => this.panelOnScreen(key)));
     this.pendingLibraryDrag = {
       tables: [...tables],
@@ -7164,6 +7236,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       if (!afterDragLands(this.pendingLibraryDrag, panelKey, this.panelOnScreen(panelKey), Date.now())) return;
       payload = { position: given.position, uris: [], fromLibrary: true };
     }
+    this.dropTimer.dropSeen(given.afterDrag === true ? 'afterDrag' : 'canvas', document.uri.fsPath);
     try {
       const dropped = tablesOfDroppedUris(payload.uris, this.tableLibraryService.listTableFiles());
       // The drop uses the library drag up, whichever way its tables came.
@@ -7223,6 +7296,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       logHandlerFailure(`[SemanticEditorProvider] Dropping tables failed: ${message}`, err);
       recordHandlerFailure('model', err);
       this.post(webview, { type: 'error', payload: { message: `Failed to add the dropped tables: ${message}` } });
+    } finally {
+      this.dropTimer.settle(document.uri.fsPath);
     }
   }
 
@@ -7325,7 +7400,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         const { at: _at, ...action } = pending;
         void this.applyTableAction(panelKey, action).catch((err: unknown) => {
           log.error(`[SemanticEditorProvider] Table action failed: ${err instanceof Error ? err.message : String(err)}`);
-        });
+        }).finally(() => this.dropTimer.settle(fsPath));
       }
     }
   }
@@ -9361,6 +9436,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
      */
     options: { dropAt?: NodePosition; alreadyAsNotice?: boolean } = {},
   ): Promise<string[]> {
+    this.dropTimer.mark('started', document.uri.fsPath);
     const members = this.parseSubjectAreaFile(document).members;
     if (!members) return [];
     const firstOfFile = (f: TableFileEntry, i: number): boolean => files.findIndex((g) => samePath(g.filePath, f.filePath)) === i;
@@ -9723,6 +9799,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
      */
     options: { dropAt?: NodePosition; sourcePaths?: readonly string[] } = {},
   ): Promise<void> {
+    this.dropTimer.mark('started', document.uri.fsPath);
     try {
       // Rows the dialog listed from Table Library files, added by their files where a name alone cannot say which table;
       // the other rows (dbt models the library does not have) by name, in the same edit.
