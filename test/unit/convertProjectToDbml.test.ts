@@ -157,7 +157,7 @@ describe('convertProjectToDbml', () => {
     expect(info.mock.calls.some((c) => typeof c[1] === 'object' && (c[1] as { modal?: boolean })?.modal)).toBe(false);
     expect(shown).toHaveLength(1);
     const { view, panel, html } = shown[0];
-    expect(panel.title).toBe('Convert to DBML');
+    expect(panel._title).toBe('Convert to DBML');
     expect(panel._disposed).toBe(true);
     expect(view.mode).toBe('review');
     expect(view.heading).toBe('Convert this project to DBML?');

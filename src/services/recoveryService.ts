@@ -12,6 +12,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { RELOAD_ANYWAY_BUTTON, SHOW_FILES_BUTTON, unsavedFilesMessage } from './commandErrors';
 import { log } from './logger';
+import { pathKey } from './pathKey';
 
 /**
  * Custom editor viewType for the domain canvas. Single source of truth — keep
@@ -45,6 +46,47 @@ export function activeSubjectAreaCanvasPath(): string | undefined {
   return input instanceof vscode.TabInputCustom && input.viewType === SUBJECT_AREA_EDITOR_VIEW_TYPE && input.uri.scheme === 'file'
     ? input.uri.fsPath
     : undefined;
+}
+
+/**
+ * The files of the diagram canvases on screen: each editor group's active tab
+ * that is a diagram, each file once. Add to Diagram… adds to the only one
+ * without asking when the active tab is not a diagram (the sidebar or another
+ * group has focus).
+ */
+export function openDiagramPaths(): string[] {
+  const paths: string[] = [];
+  for (const group of vscode.window.tabGroups.all) {
+    const input = group.activeTab?.input;
+    if (input instanceof vscode.TabInputCustom && input.viewType === SUBJECT_AREA_EDITOR_VIEW_TYPE && input.uri.scheme === 'file'
+      && !paths.includes(input.uri.fsPath)) {
+      paths.push(input.uri.fsPath);
+    }
+  }
+  return paths;
+}
+
+/**
+ * The editor group that already shows the diagram at `filePath`, as its view
+ * column: a group with it in front (the active group first), else the active
+ * group when it holds a tab of it, else any group that does. Undefined when
+ * no tab shows it. Add to Diagram… brings the diagram forward there, so an
+ * add never opens a second tab of it in the active group.
+ */
+export function diagramViewColumn(filePath: string): vscode.ViewColumn | undefined {
+  const key = pathKey(filePath);
+  const isIt = (tab: vscode.Tab | undefined): boolean => {
+    const input = tab?.input;
+    return input instanceof vscode.TabInputCustom && input.viewType === SUBJECT_AREA_EDITOR_VIEW_TYPE
+      && input.uri.scheme === 'file' && pathKey(input.uri.fsPath) === key;
+  };
+  const groups = vscode.window.tabGroups.all;
+  const active = vscode.window.tabGroups.activeTabGroup;
+  const inFront = groups.filter((group) => isIt(group.activeTab));
+  if (active && inFront.includes(active)) return active.viewColumn;
+  if (inFront.length > 0) return inFront[0].viewColumn;
+  if (active && (active.tabs ?? []).some(isIt)) return active.viewColumn;
+  return groups.find((group) => group.tabs.some(isIt))?.viewColumn;
 }
 
 /**

@@ -1,10 +1,12 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as vscode from 'vscode';
 
 import {
   SUBJECT_AREA_EDITOR_VIEW_TYPE,
   activeSubjectAreaCanvasPath,
   hasOpenSubjectAreaCanvas,
+  diagramViewColumn,
+  openDiagramPaths,
   saveAllAndReload,
 } from '../../src/services/recoveryService';
 
@@ -67,6 +69,69 @@ describe('recoveryService', () => {
       active.activeTab = { input: new vscode.TabInputCustom(vscode.Uri.file('/p/a.png'), 'imagePreview.previewEditor') };
       expect(activeSubjectAreaCanvasPath()).toBeUndefined();
       active.activeTab = undefined;
+    });
+  });
+
+  describe('openDiagramPaths', () => {
+    const diagram = (p: string) => ({ input: new vscode.TabInputCustom(vscode.Uri.file(p), SUBJECT_AREA_EDITOR_VIEW_TYPE) });
+    afterEach(() => { mockTabGroups.all = []; });
+
+    it('is each editor group\'s active tab that is a diagram, each file once; hidden tabs and other editors are left out', () => {
+      const sales = diagram('/p/.erd-studio/gold/diagrams/sales.dbml');
+      const staging = diagram('/p/.erd-studio/silver/diagrams/staging.dbml');
+      (mockTabGroups as unknown as { all: unknown[] }).all = [
+        { tabs: [staging, sales], activeTab: sales },
+        { tabs: [{ input: { uri: vscode.Uri.file('/p/a.ts') } }], activeTab: { input: { uri: vscode.Uri.file('/p/a.ts') } } },
+        { tabs: [sales], activeTab: sales },
+        { tabs: [], activeTab: undefined },
+      ];
+      expect(openDiagramPaths()).toEqual(['/p/.erd-studio/gold/diagrams/sales.dbml']);
+    });
+
+    it('is empty with no diagram on screen', () => {
+      expect(openDiagramPaths()).toEqual([]);
+    });
+  });
+
+  describe('diagramViewColumn', () => {
+    const SALES = '/p/.erd-studio/gold/diagrams/sales.dbml';
+    const diagram = (p: string) => ({ input: new vscode.TabInputCustom(vscode.Uri.file(p), SUBJECT_AREA_EDITOR_VIEW_TYPE) });
+    const text = { input: new vscode.TabInputText(vscode.Uri.file('/p/README.md')) };
+    const groups = mockTabGroups as unknown as { all: unknown[]; activeTabGroup: unknown };
+    let activeBefore: unknown;
+    beforeEach(() => { activeBefore = groups.activeTabGroup; });
+    afterEach(() => { groups.activeTabGroup = activeBefore; groups.all = []; });
+
+    it('is the group that shows the diagram in front, though another group is active (no second tab there)', () => {
+      const sales = diagram(SALES);
+      const left = { tabs: [text], activeTab: text, viewColumn: 1 };
+      const right = { tabs: [sales], activeTab: sales, viewColumn: 2 };
+      groups.all = [left, right];
+      groups.activeTabGroup = left;
+      expect(diagramViewColumn(SALES)).toBe(2);
+      // Spelled in another case (macOS, Windows): the same file.
+      if (process.platform !== 'linux') expect(diagramViewColumn(SALES.toUpperCase())).toBe(2);
+    });
+
+    it('prefers the active group when it shows the diagram in front too, then a group with it in front, then one with it behind', () => {
+      const sales = diagram(SALES);
+      const a = { tabs: [sales], activeTab: sales, viewColumn: 1 };
+      const b = { tabs: [sales], activeTab: sales, viewColumn: 2 };
+      groups.all = [a, b];
+      groups.activeTabGroup = b;
+      expect(diagramViewColumn(SALES)).toBe(2);
+      const behind = { tabs: [sales, text], activeTab: text, viewColumn: 1 };
+      const front = { tabs: [sales], activeTab: sales, viewColumn: 3 };
+      groups.all = [behind, front];
+      groups.activeTabGroup = behind;
+      expect(diagramViewColumn(SALES)).toBe(3);
+      groups.all = [behind];
+      expect(diagramViewColumn(SALES)).toBe(1);
+    });
+
+    it('is undefined when no tab shows the diagram (it opens in the active group as before)', () => {
+      groups.all = [{ tabs: [text], activeTab: text, viewColumn: 1 }, { tabs: [diagram('/p/other.dbml')], viewColumn: 2 }];
+      expect(diagramViewColumn(SALES)).toBeUndefined();
     });
   });
 

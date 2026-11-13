@@ -161,7 +161,7 @@ import type { YmlData } from '../types/ymlData';
 import type { DiscrepancyReport } from '../types/discrepancy';
 import type { DisplaySubjectArea, DisplayRelationship } from '../types/display';
 import type { Rationale, Cardinality, ColumnDef, DesignTable, Meta, Stage } from '../types/semantic';
-import type { DropTablesMessage, LibraryDragStartedMessage, RevealRelationshipMessage, RevealTableMessage, UpdateColumnPayloadColumn, UpdateMetaMessage } from '../types/messages';
+import type { CanvasNoticeMessage, DropTablesMessage, LibraryDragEndedMessage, LibraryDragStartedMessage, RevealRelationshipMessage, RevealTableMessage, UpdateColumnPayloadColumn, UpdateMetaMessage } from '../types/messages';
 import { GO_TO_TABLE_COMMAND, REVEAL_IN_TABLE_LIBRARY_COMMAND, projectRelativePath } from '../commands/goToTable';
 import { MOVE_TABLE_COMMAND } from '../commands/moveDbml';
 import type { GroundTruth } from '../types/syncPlan';
@@ -172,6 +172,7 @@ import { handlerFailureKeys, handlerGroupOf, type HandlerGroup } from '../servic
 import { markRecorded, wasRecorded } from '../services/telemetryOnce';
 import {
   canvasLayoutTelemetry,
+  layoutDegradedLogLine,
   layoutFailureLogLine,
   dbmlDiagramFeatures,
   isUserFileProblem,
@@ -267,6 +268,8 @@ import type { ParsedSubjectArea, SubjectAreaResolver } from './subjectAreaCodec'
 import type { TableId } from '../types/tableId';
 import type { TableFileEntry } from '../services/logicalModelService';
 import { tableIdKey, tableIdOfPath } from '../types/tableId';
+import { addsLineNamingSpelling, listInWords, sharedUseSpellingKey, sharedUseSpellingMessage, sharedUseSpellings, type SharedUseSpelling } from '../services/sharedUseSpelling';
+import type { SharedSpellingEndChoice } from '../services/dbmlLibraryWrites';
 import { tableIdOfEntry } from '../services/tableLibraryIndex';
 import { renameMemberRefs, type DiagramMemberTable } from '../services/diagramMemberTable';
 import { readDbtProjectConfig } from '../services/dbtProjectConfig';
@@ -379,6 +382,10 @@ interface TableFileOps {
    * `planDbmlLibraryWrites`' `newRefFile`). A YAML write never reads it.
    */
   newRefFile?: NewRefFileChoice;
+  /** DBML only: tables declared with no schema to declare in their schema folder's (Qualify Tables), by identity. */
+  qualify?: TableId[];
+  /** With `qualify`: the table each Ref end means whose columns do not say, as the user picked it. */
+  qualifyEnds?: SharedSpellingEndChoice[];
 }
 
 /** The open canvas a table file delete anchors on (see deleteTablesWithCascade, #274). */
@@ -724,15 +731,48 @@ export const PENDING_REVEAL_MS = 60_000;
 /** How long a Table Library drag is remembered for a drop that brings no table file. */
 export const PENDING_LIBRARY_DRAG_MS = 60_000;
 
+/**
+ * Whether a canvas's `afterDrag` drop (the webview saw a Table Library drag
+ * end over it; no drop event arrived) adds the remembered drag: it is still
+ * waiting (no drop, row drop or missed-drop add used it), fresh
+ * ({@link PENDING_LIBRARY_DRAG_MS}), and the canvas was on screen when the
+ * drag started and still is.
+ */
+export function afterDragLands(
+  pending: { at: number; onScreen?: ReadonlySet<string> } | undefined,
+  panelKey: string,
+  visibleNow: boolean,
+  now: number,
+): boolean {
+  if (!pending || !visibleNow) return false;
+  if (now < pending.at || now - pending.at > PENDING_LIBRARY_DRAG_MS) return false;
+  return pending.onScreen?.has(panelKey) === true;
+}
+
 /** The answer to a drop on the canvas that names no table. */
 export const DROP_TABLES_NOTHING_MESSAGE =
   'ERD Studio: Hold Shift and drop a table from the Table Library, or a table file from the Explorer, onto the diagram.';
 
-/** The answer to a drop of tables that are all on the diagram already (they are selected instead). */
+/**
+ * The answer to a drop (or Add to Diagram…) of tables that are all on the
+ * diagram already (they are selected instead): a notice on that canvas
+ * (`canvasNotice`), where the user is looking.
+ */
 export function alreadyOnDiagramMessage(tables: readonly string[]): string {
   return tables.length === 1
-    ? `ERD Studio: "${tables[0]}" is already on this diagram.`
-    : `ERD Studio: These ${tables.length} tables are already on this diagram.`;
+    ? `"${tables[0]}" is already on this diagram.`
+    : `These ${tables.length} tables are already on this diagram.`;
+}
+
+/** "Already on this diagram: a, b and 3 more." — the tables of a mixed add that were there already. */
+export function alreadyOnDiagramList(tables: readonly string[]): string {
+  const more = tables.length > 5 ? ` and ${tables.length - 5} more` : '';
+  return `Already on this diagram: ${tables.slice(0, 5).join(', ')}${more}.`;
+}
+
+/** The canvas notice for an add of some tables where the others were there already. */
+export function addedWithAlreadyMessage(added: number, already: readonly string[]): string {
+  return `Added ${added} table${added === 1 ? '' : 's'}. ${alreadyOnDiagramList(already)}`;
 }
 
 /** How long the status bar says where a new relationship was saved. */
@@ -819,6 +859,8 @@ export function refreshFailedNote(kind: RefreshKind): FileNote {
 export const OPEN_AS_TEXT_BUTTON = 'Open as Text';
 export const SELECT_DBT_PROJECT_BUTTON = 'Select dbt Project…';
 export const OPEN_BOTH_FILES_BUTTON = 'Open Both Files';
+/** The button that declares tables imported under one spelling in their schema folders' schemas. */
+export const QUALIFY_TABLES_BUTTON = 'Qualify Tables';
 
 /** Open the copy that is used and, beside it, the copy that is ignored. */
 async function openBothFiles(used: string, ignored: string): Promise<void> {
@@ -1198,7 +1240,13 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * a drop on a canvas whose DataTransfer names no table file adds these,
    * once, while younger than {@link PENDING_LIBRARY_DRAG_MS}.
    */
-  private pendingLibraryDrag: { tables: string[]; files?: string[]; at: number } | undefined;
+  private pendingLibraryDrag: {
+    tables: string[];
+    files?: string[];
+    at: number;
+    /** The canvases on screen when the drag started: only one of these may say the drag ended over it (`afterDrag`). */
+    onScreen?: ReadonlySet<string>;
+  } | undefined;
 
   /**
    * Webviews whose panel has been disposed. Refresh paths iterate a snapshot
@@ -2393,7 +2441,10 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
     // Track this panel — default to logical stage (v3 unified files have no stage in path)
     const panelKey = document.uri.toString();
-    this.openPanels.set(panelKey, { document, webview: webviewPanel.webview, activeStage: 'logical', panel: webviewPanel });
+    // Kept for the dispose handler: VS Code marks the panel disposed before it fires
+    // onDidDispose, and a disposed panel throws "Webview is disposed" on `webview`.
+    const panelWebview = webviewPanel.webview;
+    this.openPanels.set(panelKey, { document, webview: panelWebview, activeStage: 'logical', panel: webviewPanel });
     this.lastActivePanelKey = panelKey;
     // Usage telemetry (2.0 B13): a canvas that stays blank, timed only while it is visible.
     const readyWatch = new ReadyWatch(webviewPanel.visible !== false, {
@@ -2900,6 +2951,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
               for (const feature of big.features) telemetry.feature(feature);
               // The real counts and message, for the ERD Studio log only (never sent).
               if (!payload.ok) log.warn(`[SemanticEditorProvider] ${layoutFailureLogLine('canvas', payload)}`);
+              // A layout that worked but not as asked (a fallback, the grid): the page's description and the counts.
+              else if (payload.log) log.info(`[SemanticEditorProvider] ${layoutDegradedLogLine('canvas', { ...payload, log: payload.log })}`);
             } else {
               log.warn('[SemanticEditorProvider] Ignoring a layoutFinished with a field out of range');
             }
@@ -3464,7 +3517,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       lineStyleSubscription.dispose();
       readyWatch.dispose();
       telemetry.canvasClosed(panelKey);
-      this.forgetPanel(panelKey, webviewPanel.webview);
+      // Never `webviewPanel.webview` here: it throws once disposed, and the closed canvas
+      // would stay in openPanels, where the next Table Library drag threw on its `visible`.
+      this.forgetPanel(panelKey, panelWebview);
       this.backwardsDrawn.delete(document.uri.toString());
     });
   }
@@ -4912,7 +4967,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     // Only positions or sticky-note boxes moved (a drag, a layout, a resize):
     // the layout is all that is written, in either storage, and the sidebar
     // trees are told nothing they show changed.
-    const layoutOnly = !modelFiles?.save?.length && !modelFiles?.delete?.length && options.otherDomains === undefined
+    const layoutOnly = !modelFiles?.save?.length && !modelFiles?.delete?.length && !modelFiles?.qualify?.length && options.otherDomains === undefined
       && isLayoutOnlyChange(file.snapshot, file.parsed);
     if (layoutOnly && (file.storage === 'json' || (file.writable !== false && !file.holdsOwnTables))) {
       const written = await this.applyLayoutOnlyEdit(document, file, text, options);
@@ -5252,6 +5307,27 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       writes = [...tableWrites, ...others, ...settled];
     } catch (err) {
       throw this.refusalOf(err);
+    }
+    // A diagram or relationships file this edit would make import two tables under one spelling (two
+    // `Table adresse` files with no schema, from bqs/ and ccc/): every DBML parser refuses the second line
+    // ([3003]) and a Ref end of that spelling names neither. Offered once: declare them in their schema
+    // folders' schemas in this same edit, else nothing is written.
+    const shared = this.sharedSpellingsAdded(document, primaryText, writes);
+    if (shared.length > 0) {
+      const ids = this.qualifiableTablesOf(shared);
+      if (modelFiles?.qualify === undefined && ids.length > 0) {
+        if (await this.askToQualifyTables(shared, ids)) {
+          const qualifyEnds = await this.chooseSharedSpellingEnds(ids);
+          if (qualifyEnds !== undefined) {
+            return this.applyStorageEdit(document, file, text, { ...options, modelFiles: { ...(modelFiles ?? {}), qualify: ids, qualifyEnds } }, layoutOnly);
+          }
+        }
+        // Nothing written: the canvas goes back to what the files say.
+        if (refreshWebview && webview && !this.disposedWebviews.has(webview)) await this.sendSubjectAreaData(document, webview);
+        return false;
+      }
+      const group = shared[0];
+      throw new EditRefused(`${this.shownSubjectAreaPath(this.semanticAbsoluteOf(group.file))}: ${sharedUseSpellingMessage(group, group.uses[group.uses.length - 1])}`);
     }
     // Any file this edit writes that is open with unsaved changes would be
     // replaced under the user's work: refused by name, before anything is written.
@@ -5650,6 +5726,184 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     }
   }
 
+  /** A path relative to the semantic dir, made absolute. */
+  private semanticAbsoluteOf(rel: string): string {
+    return path.join(this.semanticRootDir(), ...rel.split('/'));
+  }
+
+  /**
+   * The `use` spellings the DBML diagram and relationships files of an edit
+   * would import from two different table files (`sharedUseSpellings`) that
+   * they do not already, or that a file already shares and the edit writes
+   * a new line naming (a Ref end or `use` line spelled so, which no table
+   * would be drawn for): what the edit adds, never a file's lines left as
+   * they were.
+   */
+  private sharedSpellingsAdded(document: vscode.TextDocument, primaryText: string, writes: readonly FileWrite[]): Array<SharedUseSpelling & { file: string }> {
+    const root = this.semanticRootDir();
+    const relOf = (p: string): string => path.relative(root, p).split(path.sep).join('/');
+    const files: Array<{ abs: string; before: string | null; after: string }> = [];
+    if (this.isDbmlDocument(document)) files.push({ abs: document.uri.fsPath, before: document.getText(), after: primaryText });
+    for (const w of writes) {
+      if (w.kind === 'delete' || !/\.dbml$/i.test(w.path) || samePath(w.path, document.uri.fsPath)) continue;
+      const kind = classifySemanticFile(relOf(w.path), { tablesDirIsLayer: false }).kind;
+      if (kind !== 'relationships' && kind !== 'diagram') continue;
+      files.push({ abs: w.path, before: w.kind === 'create' ? null : this.openOrDiskText(w.path), after: w.text });
+    }
+    const out: Array<SharedUseSpelling & { file: string }> = [];
+    for (const f of files) {
+      if (f.before === f.after) continue;
+      const rel = relOf(f.abs);
+      const after = sharedUseSpellings(f.after, rel);
+      if (after.length === 0) continue;
+      const before = new Set(f.before === null ? [] : sharedUseSpellings(f.before, rel).map(sharedUseSpellingKey));
+      for (const group of after) {
+        if (!before.has(sharedUseSpellingKey(group)) || addsLineNamingSpelling(f.before ?? '', f.after, group.spelling)) out.push({ ...group, file: rel });
+      }
+    }
+    return out;
+  }
+
+  /** The tables of `groups` that Qualify can declare in their folder's schema: every one outside `public/`, once. */
+  private qualifiableTablesOf(groups: readonly SharedUseSpelling[]): TableId[] {
+    const ids = new Map<string, TableId>();
+    for (const group of groups) {
+      for (const use of group.uses) {
+        if (use.id === undefined || use.id.schema.toLowerCase() === 'public') continue;
+        ids.set(tableIdKey(use.id), { schema: use.id.schema, name: use.id.name });
+      }
+    }
+    return [...ids.values()];
+  }
+
+  /** Ask before Qualify rewrites table files: true to qualify, false to write nothing. */
+  private async askToQualifyTables(groups: readonly SharedUseSpelling[], ids: readonly TableId[]): Promise<boolean> {
+    const group = groups[0];
+    const name = group.uses[0].id?.name ?? group.spelling;
+    const files = [...new Set(groups.flatMap((g) => g.uses.map((u) => u.resolved)))];
+    const choice = await vscode.window.showWarningMessage(
+      `${listInWords(files)} ${files.length === 2 ? 'both' : 'all'} declare Table ${group.spelling} with no schema. DBML reads them as one table, so dbdiagram.io and other DBML tools show only one ${name}.`,
+      {
+        modal: true,
+        detail: `Qualify Tables declares ${listInWords(ids.map((id) => `Table ${id.schema}.${id.name}`))} and spells every use line and Ref that names them the same way, in this edit (one undo). Cancel changes nothing.`,
+      },
+      QUALIFY_TABLES_BUTTON,
+    );
+    return choice === QUALIFY_TABLES_BUTTON;
+  }
+
+  /**
+   * Whether a relationships file (relative to the semantic dir) may import
+   * two table files under one spelling, by the library's cached reading of
+   * it (no read when it is current); true when there is no reading to ask.
+   */
+  private mayShareUseSpelling(file: string): boolean {
+    const abs = this.semanticAbsoluteOf(file);
+    const open = vscode.workspace.textDocuments.some((d) => d.uri.scheme === 'file' && samePath(d.uri.fsPath, abs) && d.isDirty);
+    const reading = open ? undefined : this.tableLibraryService.readRelationshipsFile?.(abs);
+    if (!reading) return true;
+    const folder = path.posix.dirname(file);
+    const paths = new Map<string, Set<string>>();
+    for (const u of reading.useTables ?? []) {
+      const key = `${(u.qualifier ?? '').toLowerCase()}\0${u.table.toLowerCase()}`;
+      const resolved = path.posix.normalize(path.posix.join(folder, u.path.toLowerCase().endsWith('.dbml') ? u.path : `${u.path}.dbml`)).toLowerCase();
+      const set = paths.get(key) ?? new Set<string>();
+      set.add(resolved);
+      paths.set(key, set);
+      if (set.size > 1) return true;
+    }
+    return false;
+  }
+
+  /**
+   * Before Qualify Tables: ask which table each Ref end means whose spelling
+   * two `use` lines of its file give to different tables and whose columns
+   * both tables have (`TableLibraryService.sharedSpellingEndsToDecide`), one
+   * question per end. Undefined when the user cancels one: nothing is written.
+   */
+  private async chooseSharedSpellingEnds(ids: readonly TableId[]): Promise<SharedSpellingEndChoice[] | undefined> {
+    const ends = this.tableLibraryService.sharedSpellingEndsToDecide?.(ids, (filePath) => this.openOrDiskText(filePath)) ?? [];
+    const choices: SharedSpellingEndChoice[] = [];
+    for (const [i, end] of ends.entries()) {
+      const picked = await vscode.window.showQuickPick(
+        end.candidates.map((id, j) => ({ label: `${id.schema}.${id.name}`, description: end.paths[j], id })),
+        {
+          title: `Which ${end.spelling} does this relationship mean?${ends.length > 1 ? ` (${i + 1} of ${ends.length})` : ''}`,
+          placeHolder: `${end.file} line ${end.line}: ${end.refText}. ${end.fitting === 0
+            ? `No ${end.spelling} has ${end.endText.slice(end.spelling.length + 1)}: pick the table it was meant for.`
+            : `Every ${end.spelling} has ${end.endText.slice(end.spelling.length + 1)}, so only you can say which ${end.endText} means.`}`,
+          ignoreFocusOut: true,
+        },
+      );
+      if (picked === undefined) return undefined;
+      choices.push({ file: end.file, line: end.line, side: end.side, table: picked.id });
+    }
+    return choices;
+  }
+
+  /**
+   * Say so, once per session per file, when an opened DBML diagram (or a
+   * relationships file it imports) already imports two tables under one
+   * spelling: written by hand, by another tool, or by ERD Studio 2.0.4 or
+   * older. Offers Qualify Tables, which fixes every such file in one edit.
+   */
+  private warnAboutSharedUseSpellings(document: vscode.TextDocument, webview: vscode.Webview): void {
+    if (this.refreshHolds > 0 || !this.isDbmlDocument(document)) return;
+    const root = this.semanticRootDir();
+    const rel = path.relative(root, document.uri.fsPath).split(path.sep).join('/');
+    const files = [rel];
+    const diagramText = document.getText();
+    const relationships = /^[ \t]*use[ \t]*\*[ \t]*from[ \t]*(['"])(.*?)\1/gm;
+    let m: RegExpExecArray | null;
+    while ((m = relationships.exec(diagramText)) !== null) {
+      const target = path.posix.normalize(path.posix.join(path.posix.dirname(rel), m[2].toLowerCase().endsWith('.dbml') ? m[2] : `${m[2]}.dbml`));
+      if (classifySemanticFile(target, { tablesDirIsLayer: false }).kind === 'relationships') files.push(target);
+    }
+    const groups: Array<SharedUseSpelling & { file: string }> = [];
+    for (const file of files) {
+      // A relationships file is looked at through the library's cached reading first: its text is read
+      // (for the lines to name) only when two of its `use` lines spell a table alike.
+      if (file !== rel && !this.mayShareUseSpelling(file)) continue;
+      const text = file === rel ? diagramText : this.openOrDiskText(this.semanticAbsoluteOf(file));
+      if (text === null) continue;
+      for (const group of sharedUseSpellings(text, file)) groups.push({ ...group, file });
+    }
+    if (groups.length === 0) return;
+    const key = `${document.uri.fsPath}\0shared-use\0${groups.map((g) => `${g.file}:${sharedUseSpellingKey(g)}`).join('|')}`;
+    if (this.duplicateWarningsShown.has(key)) return;
+    this.duplicateWarningsShown.add(key);
+    const first = groups[0];
+    const ids = this.qualifiableTablesOf(groups);
+    // The Refs nothing decides are not drawn until each says which table it means: say how many.
+    let undecided = 0;
+    try {
+      undecided = ids.length > 0 ? this.tableLibraryService.sharedSpellingEndsToDecide?.(ids, (filePath) => this.openOrDiskText(filePath)).length ?? 0 : 0;
+    } catch {
+      undecided = 0;
+    }
+    const notDrawn = undecided === 0 ? ''
+      : ` ${undecided} Ref end${undecided === 1 ? '' : 's'} spelled ${first.spelling} could mean either table, so ${undecided === 1 ? 'that relationship is' : 'those relationships are'} not drawn; Qualify Tables asks you which table each means.`;
+    void vscode.window.showWarningMessage(
+      `${first.file}: ${sharedUseSpellingMessage(first, first.uses[first.uses.length - 1], 'canvas')}${notDrawn}`,
+      ...(ids.length > 0 ? [QUALIFY_TABLES_BUTTON] : []),
+    ).then(async (choice) => {
+      if (choice !== QUALIFY_TABLES_BUTTON || this.disposedWebviews.has(webview)) return;
+      try {
+        const qualifyEnds = await this.chooseSharedSpellingEnds(ids);
+        if (qualifyEnds === undefined || this.disposedWebviews.has(webview)) return;
+        await this.applySubjectAreaEdit(document, () => { /* the tables' headers, use lines and Refs only */ }, {
+          stage: 'logical',
+          webview,
+          modelFiles: { qualify: ids, qualifyEnds },
+          errorLabel: 'Failed to qualify the tables.',
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        if (!this.disposedWebviews.has(webview)) void webview.postMessage({ type: 'error', payload: { message } });
+      }
+    });
+  }
+
   /**
    * Say so — once per session per file — when this domain uses a name that
    * two files in the library define. Only one of them can be used (names are
@@ -6011,6 +6265,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       timer.phase('reading the diagram and its tables');
       let unifiedDomain = await this.readSubjectAreaTolerantly(document.uri.fsPath, { dbtKeyIndex });
       this.warnAboutDuplicateTables(unifiedDomain, document);
+      this.warnAboutSharedUseSpellings(document, webview);
 
       // A fresh domain — models but not one stored position, typically written
       // by an AI assistant with `viewConfig: {}` — is laid out by the webview's
@@ -6595,6 +6850,19 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   }
 
   /**
+   * Whether a canvas's panel is on screen. Never throws: a panel VS Code
+   * disposed without our hearing of it is forgotten and counts as not shown.
+   */
+  private panelOnScreen(panelKey: string): boolean {
+    if (this.forgetIfGone(panelKey)) return false;
+    try {
+      return this.openPanels.get(panelKey)?.panel?.visible === true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
    * Select and centre one relationship on the canvas of `uri` (the
    * Relationships view's Open in Diagram). A canvas that has loaded its
    * diagram gets it at once, switched to the logical stage first (the line is
@@ -6632,7 +6900,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * edit (`handleAddExistingModels`: one edit, one undo, placed next to
    * related tables), then select the first one added. When every one is on
    * the diagram already, the first is selected and named instead. The caller
-   * opens the diagram.
+   * opens the diagram. Resolves to the tables added (none when every one was
+   * there already or the add was refused), or undefined when the canvas has
+   * not loaded its diagram yet and the add is held for its `ready`.
    */
   async addTablesToDiagram(
     uri: vscode.Uri,
@@ -6643,9 +6913,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
      * the diagram) by its file, never by a name another schema folder shares.
      */
     files?: readonly string[],
-  ): Promise<void> {
-    if (modelNames.length === 0) return;
-    await this.runTableAction(uri, {
+  ): Promise<string[] | undefined> {
+    if (modelNames.length === 0) return [];
+    return this.runTableAction(uri, {
       reveal: modelNames[0],
       add: [...modelNames],
       ...(files !== undefined && files.length === modelNames.length ? { files: [...files] } : {}),
@@ -6664,7 +6934,13 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     files?: readonly string[],
   ): void {
     if (tables.length === 0) return;
-    this.pendingLibraryDrag = { tables: [...tables], ...(files !== undefined && files.length === tables.length ? { files: [...files] } : {}), at: Date.now() };
+    const onScreen = new Set(Array.from(this.openPanels.keys()).filter((key) => this.panelOnScreen(key)));
+    this.pendingLibraryDrag = {
+      tables: [...tables],
+      ...(files !== undefined && files.length === tables.length ? { files: [...files] } : {}),
+      at: Date.now(),
+      onScreen,
+    };
     const message: LibraryDragStartedMessage = { type: 'libraryDragStarted', payload: { tables: [...tables] } };
     for (const [panelKey, panel] of Array.from(this.openPanels.entries())) {
       if (!panel.loaded || panel.activeStage !== 'logical' || this.disposedWebviews.has(panel.webview) || this.forgetIfGone(panelKey)) continue;
@@ -6676,9 +6952,37 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   private takeLibraryDrag(): { tables: string[]; files?: string[] } | undefined {
     const pending = this.pendingLibraryDrag;
     this.pendingLibraryDrag = undefined;
+    // Used up (a drop somewhere, or a missed canvas drop): no canvas goes on saying "Drop to add".
+    if (pending) {
+      const ended: LibraryDragEndedMessage = { type: 'libraryDragEnded' };
+      for (const [panelKey, panel] of Array.from(this.openPanels.entries())) {
+        if (!panel.loaded || this.disposedWebviews.has(panel.webview) || this.forgetIfGone(panelKey)) continue;
+        this.post(panel.webview, ended);
+      }
+    }
     return pending && Date.now() - pending.at <= PENDING_LIBRARY_DRAG_MS
       ? { tables: pending.tables, ...(pending.files ? { files: pending.files } : {}) }
       : undefined;
+  }
+
+  /**
+   * The Table Library drag a drop on a diagram's row in the Diagrams view
+   * ended (the extension's drop handler): used up there, so a later canvas
+   * drop never adds it again, and its fallback when the drop names no table.
+   */
+  takeRememberedLibraryDrag(): { tables: string[]; files?: string[] } | undefined {
+    return this.takeLibraryDrag();
+  }
+
+  /** The remembered Table Library drag, with when it started, if there is one; not used up (the missed-drop check). */
+  peekRememberedLibraryDrag(): { tables: string[]; files?: string[]; at: number } | undefined {
+    const pending = this.pendingLibraryDrag;
+    return pending ? { tables: [...pending.tables], ...(pending.files ? { files: [...pending.files] } : {}), at: pending.at } : undefined;
+  }
+
+  /** A brief note on one canvas (`canvasNotice`): what an add of tables found already there. */
+  private postCanvasNotice(webview: vscode.Webview, message: string): void {
+    this.post(webview, { type: 'canvasNotice', payload: { message } } satisfies CanvasNoticeMessage);
   }
 
   /**
@@ -6693,8 +6997,17 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     document: vscode.TextDocument,
     webview: vscode.Webview,
     panelKey: string,
-    payload: DropTablesMessage['payload'],
+    given: DropTablesMessage['payload'],
   ): Promise<void> {
+    let payload = given;
+    if (given.afterDrag === true) {
+      // No drop reached the canvas; the webview saw the drag end over it. Only
+      // the drag still waiting, started while this canvas was on screen, and
+      // only while it still is: anything else ended elsewhere (or a drop or a
+      // missed-drop add already used it), and says nothing.
+      if (!afterDragLands(this.pendingLibraryDrag, panelKey, this.panelOnScreen(panelKey), Date.now())) return;
+      payload = { position: given.position, uris: [], fromLibrary: true };
+    }
     try {
       const dropped = tablesOfDroppedUris(payload.uris, this.tableLibraryService.listTableFiles());
       // The drop uses the library drag up, whichever way its tables came.
@@ -6712,7 +7025,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       if (byFile && byFile.rest.length === 0) {
         telemetry.feature('addModel');
         await this.queueEdit(panelKey, async () => {
-          const added = await this.addTableFiles(document, webview, byFile.files, { dropAt: payload.position });
+          const added = await this.addTableFiles(document, webview, byFile.files, { dropAt: payload.position, alreadyAsNotice: true });
           if (added.length > 0) this.post(webview, { type: 'revealTable', payload: { modelName: added[0] } } satisfies RevealTableMessage);
         });
         return;
@@ -6732,7 +7045,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       const fresh = names.filter((name) => !members.has(normaliseName(name)));
       if (fresh.length === 0) {
         this.post(webview, { type: 'revealTable', payload: { modelName: names[0] } } satisfies RevealTableMessage);
-        void vscode.window.showInformationMessage(alreadyOnDiagramMessage(names));
+        this.postCanvasNotice(webview, alreadyOnDiagramMessage(names));
         return;
       }
       telemetry.feature('addModel');
@@ -6753,33 +7066,34 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   }
 
   /** Run a table action on a loaded canvas of `uri` now, or hold it for its `ready`. */
-  private async runTableAction(uri: vscode.Uri, action: TableAction): Promise<void> {
+  private async runTableAction(uri: vscode.Uri, action: TableAction): Promise<string[] | undefined> {
     const open = Array.from(this.openPanels.entries()).find(([, p]) =>
       p.loaded && !this.disposedWebviews.has(p.webview) && samePath(p.document.uri.fsPath, uri.fsPath));
     if (!open) {
       this.pendingTableActions.set(uri.fsPath, { ...action, at: Date.now() });
-      return;
+      return undefined;
     }
-    await this.applyTableAction(open[0], action);
+    return this.applyTableAction(open[0], action);
   }
 
-  private async applyTableAction(panelKey: string, action: TableAction): Promise<void> {
+  /** Apply a table action to a loaded canvas; resolves to the tables it added (none for a reveal, a refusal or all there). */
+  private async applyTableAction(panelKey: string, action: TableAction): Promise<string[]> {
     const panel = this.openPanels.get(panelKey);
-    if (!panel) return;
+    if (!panel) return [];
     if (panel.activeStage !== 'logical') {
       await this.handleSwitchStage(panelKey, panel.document, panel.webview, 'logical');
     }
     if (action.add && action.files && this.schemaScoped() && this.isDbmlDocument(panel.document)) {
-      await this.applyTableFilesAction(panelKey, panel.document, panel.webview, action.add, action.files);
-      return;
+      return this.applyTableFilesAction(panelKey, panel.document, panel.webview, action.add, action.files);
     }
     // A JSON diagram adds by name, which reads the library's first table of a shared name: any other is refused, never swapped.
     const refused = action.add && action.files && this.schemaScoped() ? this.sharedNameAddRefusal(action.add, action.files) : null;
     if (refused !== null) {
       this.post(panel.webview, { type: 'error', payload: { message: refused } });
-      return;
+      return [];
     }
     let reveal = action.reveal;
+    let addedNames: string[] = [];
     if (action.add) {
       const add = action.add;
       const membersOf = (): Set<string> =>
@@ -6787,19 +7101,20 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       const before = membersOf();
       const fresh = add.filter((name) => !before.has(normaliseName(name)));
       if (fresh.length === 0) {
-        // All there already: select the first and say so, briefly.
-        void vscode.window.showInformationMessage(alreadyOnDiagramMessage(add));
+        // All there already: select the first and say so, on the canvas.
+        this.postCanvasNotice(panel.webview, alreadyOnDiagramMessage(add));
       } else {
         // Every name goes to the add, so its note names the ones already here.
         await this.queueEdit(panelKey, () => this.handleAddExistingModels(panel.document, panel.webview, add));
         const after = membersOf();
-        const added = fresh.find((name) => after.has(normaliseName(name)));
+        addedNames = fresh.filter((name) => after.has(normaliseName(name)));
         // A refused add has said why: nothing to select.
-        if (added === undefined) return;
-        reveal = added;
+        if (addedNames.length === 0) return [];
+        reveal = addedNames[0];
       }
     }
     this.post(panel.webview, { type: 'revealTable', payload: { modelName: reveal } } satisfies RevealTableMessage);
+    return addedNames;
   }
 
   /**
@@ -6817,7 +7132,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     webview: vscode.Webview,
     names: readonly string[],
     files: readonly string[],
-  ): Promise<void> {
+  ): Promise<string[]> {
     const entries = files.map((f) => this.tableLibraryService.tableEntryAt(f));
     const shownAs = (i: number): string | undefined => {
       const id = entries[i]?.id;
@@ -6825,18 +7140,19 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     };
     const fresh = names.map((_n, i) => i).filter((i) => shownAs(i) === undefined);
     if (fresh.length === 0) {
-      // All there already: select the first and say so, briefly.
-      void vscode.window.showInformationMessage(alreadyOnDiagramMessage(names));
+      // All there already: select the first and say so, on the canvas.
+      this.postCanvasNotice(webview, alreadyOnDiagramMessage(names.map((n, i) => shownAs(i) ?? n)));
       this.post(webview, { type: 'revealTable', payload: { modelName: shownAs(0) ?? names[0] } } satisfies RevealTableMessage);
-      return;
+      return [];
     }
     // Every table goes to the add, so its note names the ones already here.
     await this.queueEdit(panelKey, () => this.handleAddExistingModels(document, webview, names, {
       sourcePaths: files.map((f) => this.workspaceRelative(f)),
     }));
     // A refused add has said why: nothing to select.
-    const added = fresh.map(shownAs).find((ref) => ref !== undefined);
-    if (added !== undefined) this.post(webview, { type: 'revealTable', payload: { modelName: added } } satisfies RevealTableMessage);
+    const addedAt = fresh.filter((i) => shownAs(i) !== undefined);
+    if (addedAt.length > 0) this.post(webview, { type: 'revealTable', payload: { modelName: shownAs(addedAt[0]) ?? names[addedAt[0]] } } satisfies RevealTableMessage);
+    return addedAt.map((i) => names[i]);
   }
 
   /** Run the table action held for the diagram at `fsPath`, if it is still fresh. */
@@ -8877,14 +9193,29 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     document: vscode.TextDocument,
     webview: vscode.Webview,
     files: readonly TableFileEntry[],
-    options: { dropAt?: NodePosition } = {},
+    /**
+     * `alreadyAsNotice`: a drop on the canvas: tables that are all there already
+     * are selected and named in a canvas notice ({@link alreadyOnDiagramMessage}),
+     * as a drop of names is, rather than refused with an error.
+     */
+    options: { dropAt?: NodePosition; alreadyAsNotice?: boolean } = {},
   ): Promise<string[]> {
     const members = this.parseSubjectAreaFile(document).members;
     if (!members) return [];
-    const fresh = files.filter((f, i) => f.id !== undefined && !members.memberOf(f.id) && files.findIndex((g) => samePath(g.filePath, f.filePath)) === i);
+    const firstOfFile = (f: TableFileEntry, i: number): boolean => files.findIndex((g) => samePath(g.filePath, f.filePath)) === i;
+    const fresh = files.filter((f, i) => f.id !== undefined && !members.memberOf(f.id) && firstOfFile(f, i));
+    // The tables the diagram shows already (the same file), as it names them: named after the add, never dropped silently.
+    const present = files
+      .filter((f, i) => f.id !== undefined && members.memberOf(f.id) !== undefined && firstOfFile(f, i))
+      .map((f) => members.memberOf(f.id!)!.ref);
     if (fresh.length === 0) {
       const first = files[0];
       const shown = first?.id ? members.memberOf(first.id)?.ref ?? first.name : first?.name ?? '';
+      if (options.alreadyAsNotice && present.length > 0) {
+        this.post(webview, { type: 'revealTable', payload: { modelName: present[0] } } satisfies RevealTableMessage);
+        this.postCanvasNotice(webview, alreadyOnDiagramMessage(present));
+        return [];
+      }
       this.post(webview, { type: 'error', payload: { message: `Table "${shown}" already exists in this diagram.` } });
       return [];
     }
@@ -8920,6 +9251,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     );
     if (!success) return [];
     this.selectorsService.scheduleRegenerate();
+    if (present.length > 0) this.postCanvasNotice(webview, addedWithAlreadyMessage(refs.length, present.map((ref) => renames.get(ref) ?? ref)));
     if (dbt.unstored) void vscode.window.showInformationMessage(`Added ${refs.join(', ')}. ${dbt.unstored}`);
     return refs;
   }
@@ -9324,12 +9656,12 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       // without a word. The dbt picker leaves those out up front.
       const alreadyIn = fromDbt ? [] : [
         ...draft.skipped.filter((s) => s.reason === 'already-in-domain').map((s) => s.name),
-        ...(members ? resolvedFiles.filter((f) => members.memberOf(f.id!) !== undefined).map((f) => members.memberOf(f.id!)!.ref) : []),
+        ...(members ? [...(byFile ?? []), ...resolvedFiles]
+          .filter((f, i, all) => f.id !== undefined && members.memberOf(f.id) !== undefined && all.findIndex((g) => samePath(g.filePath, f.filePath)) === i)
+          .map((f) => members.memberOf(f.id!)!.ref) : []),
       ];
-      const skippedNote = [
-        describeSkippedDbtModels(draft.skipped, { logicalOnly: this.logicalOnly }),
-        alreadyIn.length > 0 ? `Already in this diagram: ${alreadyIn.slice(0, 5).join(', ')}${alreadyIn.length > 5 ? ` and ${alreadyIn.length - 5} more` : ''}.` : '',
-      ].filter(Boolean).join(' ');
+      const describedSkips = describeSkippedDbtModels(draft.skipped, { logicalOnly: this.logicalOnly });
+      const skippedNote = [describedSkips, alreadyIn.length > 0 ? alreadyOnDiagramList(alreadyIn) : ''].filter(Boolean).join(' ');
       if (draft.modelNames.length === 0 && files.length === 0) {
         if (fromDbt) telemetry.feature('addFromDbtNothingDrawable');
         this.post(webview, {
@@ -9419,9 +9751,11 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           onSuccess: () => {
             if (fromDbt) telemetry.feature('addFromDbt');
             this.selectorsService.scheduleRegenerate();
-            const note = [skippedNote, routed.unstored].filter(Boolean).join(' ');
+            const added = addedNames.length;
+            // The tables already there are named on the canvas, where the user is looking.
+            if (alreadyIn.length > 0) this.postCanvasNotice(webview, addedWithAlreadyMessage(added, alreadyIn));
+            const note = [describedSkips, routed.unstored].filter(Boolean).join(' ');
             if (note) {
-              const added = addedNames.length;
               void vscode.window.showInformationMessage(
                 `Added ${added} table${added === 1 ? '' : 's'}${from}. ${note}`,
               );

@@ -7,7 +7,7 @@
  *                         manifestStaleness, syncPlanGenerated, error,
  *                         openFeedback, feedbackContext, feedbackAnalysis,
  *                         feedbackSubmitted, revealRelationship, canvasContext,
- *                         revealTable, libraryDragStarted, filesNotShown,
+ *                         revealTable, libraryDragStarted, libraryDragEnded, filesNotShown,
  *                         canvasNotice
  *   Webview → Extension:  ready, requestExistingTables, requestNewRelationshipFiles, addModel, addColumn, removeColumn, addRelationship,
  *                         removeModel(s), removeRelationship(s), editRelationship,
@@ -431,10 +431,13 @@ export interface FilesNotShownMessage {
 
 /**
  * A brief, dismissable note on the canvas about something ERD Studio did by
- * itself (an info toast that hides after a few seconds). Today only one
- * sender: the relationships imports added to a diagram after a relationships
- * file was saved in this window (`SemanticEditorProvider.settleImportsAfterSave`,
- * `importsAddedMessage`). Plain words, never an error.
+ * itself (an info toast that hides after a few seconds). Senders: the
+ * relationships imports added to a diagram after a relationships file was
+ * saved in this window (`SemanticEditorProvider.settleImportsAfterSave`,
+ * `importsAddedMessage`), and an add of tables (a drop, Add to Diagram…, Add
+ * Existing Tables) that found some or all of them on the diagram already
+ * (`alreadyOnDiagramMessage`, `addedWithAlreadyMessage`). Plain words, never
+ * an error.
  */
 export interface CanvasNoticeMessage {
   type: 'canvasNotice';
@@ -458,9 +461,9 @@ export interface RevealTableMessage {
 /**
  * A drag has started in the sidebar's Table Library (its drag controller's
  * `handleDrag`, `src/providers/tableLibraryDrag.ts`): posted to every open,
- * loaded canvas on the logical stage, which shows "Hold Shift and drop to add
- * … to this diagram" over an editable diagram. VS Code lets a drag that
- * started in the workbench reach a webview only while Shift is held. The
+ * loaded canvas on the logical stage, which shows "Drop to add
+ * … to this diagram" over an editable diagram, and takes its first pointer
+ * event after it as the drag's end (see `DropTablesMessage.afterDrag`). The
  * tables are the drag's, in order, at most {@link ADD_EXISTING_TABLES_LIMIT}.
  */
 export interface LibraryDragStartedMessage {
@@ -468,6 +471,19 @@ export interface LibraryDragStartedMessage {
   payload: {
     tables: string[];
   };
+}
+
+/**
+ * The Table Library drag announced by `libraryDragStarted` is used up: its
+ * tables were dropped on a canvas or on a diagram's row in the Diagrams view,
+ * or the drop missed the canvas and opened the file instead (the host adds
+ * the tables there). Posted by `SemanticEditorProvider.takeLibraryDrag` to every
+ * loaded canvas, which takes its "Drop to add" hint down and stops
+ * treating the drag as in progress. An older webview ignores it (the hint
+ * then times out as before).
+ */
+export interface LibraryDragEndedMessage {
+  type: 'libraryDragEnded';
 }
 
 /**
@@ -517,6 +533,7 @@ export type ExtensionMessage =
   | CanvasNoticeMessage
   | RevealTableMessage
   | LibraryDragStartedMessage
+  | LibraryDragEndedMessage
   | ErrorMessage;
 
 // ---------------------------------------------------------------------------
@@ -683,13 +700,26 @@ export const DROP_TABLES_URI_MAX_LENGTH = 4096;
 /**
  * The Table Library's own drag mime type (`application/vnd.code.tree.<view id,
  * lower case>`): VS Code puts it on every drag that starts in that view, so a
- * drop that carries it is a Table Library drag.
+ * drop that carries it is a Table Library drag. It is only that signal: VS
+ * Code writes its own `{ id, itemHandles }` under it at dragstart, and a drop
+ * in another tree reads that first, so the dragged names travel under
+ * {@link TABLE_LIBRARY_NAMES_MIME} instead.
  */
 export const TABLE_LIBRARY_DRAG_MIME = 'application/vnd.code.tree.erdstudio.modellibrary';
 
 /**
- * Something was dropped on the canvas (a Shift-drag from the Table Library,
- * or a table file from the Explorer): `position` is the drop point in flow
+ * The dragged tables' names (a JSON array of strings), set by the Table
+ * Library's drag controller and read by a drop on a Diagrams row. Lower case,
+ * as a browser DataTransfer keeps types. VS Code also writes an empty native
+ * entry of this type at dragstart (so a tree accepts the drag), which a drop
+ * hands over before the controller's own item: read every item of the type.
+ */
+export const TABLE_LIBRARY_NAMES_MIME = 'application/vnd.erdstudio.tables+json';
+
+/**
+ * Something was dropped on the canvas (a drag from the Table Library, or a
+ * table file from the Explorer), or a Table Library drag ended over it
+ * (`afterDrag`): `position` is the drop point in flow
  * coordinates, `uris` whatever URIs the drop's DataTransfer held (possibly
  * none). The host resolves each `file:` URI to a table file, else uses the
  * Table Library drag that started in the last minute, and adds the tables
@@ -708,6 +738,18 @@ export interface DropTablesMessage {
     uris: string[];
     /** The drop's DataTransfer carried {@link TABLE_LIBRARY_DRAG_MIME}: a Table Library drag. Absent means false. */
     fromLibrary?: boolean;
+    /**
+     * No drop event reached the canvas: a Table Library drag ended with the
+     * pointer over it (the webview's first pointer event after the host's
+     * `libraryDragStarted`, well inside the canvas). On macOS Chromium does
+     * not deliver a drag that started in the workbench to the webview's
+     * out-of-process frame, so a Shift-drop usually ends this way. `uris` is
+     * empty; the host adds the drag it remembered, if it is still pending and
+     * this canvas was on screen when it started, and otherwise does nothing
+     * (the drag ended somewhere else, or a drop already used it). Absent
+     * means false.
+     */
+    afterDrag?: boolean;
   };
 }
 

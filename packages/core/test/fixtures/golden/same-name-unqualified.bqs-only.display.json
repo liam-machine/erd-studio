@@ -1,0 +1,114 @@
+{
+  "schemaVersion": 7,
+  "domain": "bqs_only",
+  "layer": "bronze",
+  "stage": "logical",
+  "description": "One of the two adresse tables: the relationships file still imports both under one spelling",
+  "models": [
+    {
+      "name": "bqs__v_sap_prod_unit2",
+      "schema": "bqs",
+      "description": "",
+      "columns": [
+        {
+          "name": "unit_id",
+          "dataType": "INT",
+          "description": "",
+          "isPrimaryKey": true,
+          "isForeignKey": false,
+          "isNaturalKey": false
+        },
+        {
+          "name": "bqs_adresse_id",
+          "dataType": "INT",
+          "description": "",
+          "isPrimaryKey": false,
+          "isForeignKey": true,
+          "isNaturalKey": false
+        },
+        {
+          "name": "ccc_adresse_id",
+          "dataType": "INT",
+          "description": "",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNaturalKey": false
+        }
+      ],
+      "layer": "bronze"
+    },
+    {
+      "name": "adresse",
+      "schema": "bqs",
+      "description": "",
+      "columns": [
+        {
+          "name": "id",
+          "dataType": "INT",
+          "description": "",
+          "isPrimaryKey": true,
+          "isForeignKey": false,
+          "isNaturalKey": false
+        },
+        {
+          "name": "strasse",
+          "dataType": "VARCHAR",
+          "description": "",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNaturalKey": false
+        },
+        {
+          "name": "ort",
+          "dataType": "VARCHAR",
+          "description": "",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNaturalKey": false
+        }
+      ],
+      "layer": "bronze"
+    }
+  ],
+  "relationships": [
+    {
+      "fromModel": "bqs__v_sap_prod_unit2",
+      "fromColumn": "bqs_adresse_id",
+      "toModel": "adresse",
+      "toColumn": "id",
+      "cardinality": "many-to-one"
+    }
+  ],
+  "viewConfig": {
+    "positions": {
+      "adresse": {
+        "x": 400,
+        "y": 40
+      },
+      "bqs__v_sap_prod_unit2": {
+        "x": 40,
+        "y": 40
+      }
+    }
+  },
+  "layerConfig": {
+    "id": "bronze",
+    "label": "Bronze",
+    "abbreviation": "BRZ",
+    "color": "#cd7f32",
+    "creatable": true,
+    "order": 1
+  },
+  "readOnly": false,
+  "positionDraggable": true,
+  "layerConfigs": [
+    {
+      "id": "bronze",
+      "label": "Bronze",
+      "abbreviation": "BRZ",
+      "color": "#cd7f32",
+      "creatable": true,
+      "order": 1
+    }
+  ]
+}

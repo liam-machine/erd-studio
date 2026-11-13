@@ -28,7 +28,7 @@ import { createLogger, elapsedMs, log, plural } from '../services/logger';
 import { layersFailure } from '../services/diagramCommandErrors';
 import { showCommandFailure } from '../commands/commandFailure';
 import type { DbmlFileIconResolver } from './dbmlFileKinds';
-import { ADD_EXISTING_TABLES_LIMIT, TABLE_LIBRARY_DRAG_MIME } from '../types/messages';
+import { ADD_EXISTING_TABLES_LIMIT, TABLE_LIBRARY_DRAG_MIME, TABLE_LIBRARY_NAMES_MIME } from '../types/messages';
 import { CONVERT_ROW_DESCRIPTION, CONVERT_ROW_LABEL, CONVERT_ROW_TOOLTIP } from '../services/convertOffer';
 import { START_COMMAND } from '../types/startActions';
 import { layerSwatchIcon } from './layerSwatch';
@@ -56,12 +56,76 @@ const treeLog = createLogger('Subject Areas');
 export const LAYER_DRAG_MIME_TYPE = 'application/vnd.code.tree.dbtsemantic.layer';
 
 /**
+ * What the Diagrams view takes: layer rows (reordered), and Table Library rows
+ * (by their names' type, or the library's own tree type, which VS Code writes
+ * on every drag from it). The deferred provider the view starts with declares
+ * the same list.
+ */
+export const DIAGRAMS_DROP_MIME_TYPES: readonly string[] = [LAYER_DRAG_MIME_TYPE, TABLE_LIBRARY_NAMES_MIME, TABLE_LIBRARY_DRAG_MIME];
+
+/** What a drop of Table Library rows on anything but a diagram's row is told. */
+export const DROP_ON_DIAGRAM_ROW_MESSAGE = 'ERD Studio: Drop tables on a diagram\'s name to add them to that diagram.';
+
+/** What a drop on a diagram's row is told when it names no table the library has. */
+export function dropNamedNoTableMessage(diagram: string): string {
+  return `ERD Studio: Nothing was added to ${diagram}: the drop named no table in the Table Library. Right-click the tables and choose Add to Diagram… instead.`;
+}
+
+/**
+ * Adds dropped Table Library rows to the diagram at `filePath` (the
+ * extension's Add to Diagram write): `tables` are the dragged names (possibly
+ * none, when the drop's names could not be read), `uris` the dragged files.
+ * Answers `false` when it found no table to add.
+ */
+export type TablesDropHandler = (filePath: string, tables: string[], uris: string[]) => Promise<boolean | void>;
+
+/**
  * The table names a Table Library drag carries (`TableLibraryDragController`
  * sets an array of names): read as the value itself, or as its JSON text when
  * VS Code hands the item over serialised. Names only, each once, at most the
  * Add Existing Tables cap.
  */
 export async function draggedTableNames(item: vscode.DataTransferItem): Promise<string[]> {
+  return namesOfDragValue(item);
+}
+
+/**
+ * The table names of a Table Library drop: the first item of
+ * {@link TABLE_LIBRARY_NAMES_MIME} (or, from an older drag source, of the
+ * view's tree mime type) that holds a list of names. A drop on another tree
+ * holds several items of one type — VS Code's native entry first (empty, or
+ * its own `{ id, itemHandles }` under the tree mime type), then the drag
+ * controller's — and `DataTransfer.get` returns only the first, so every
+ * item is read. Empty when none holds a name.
+ */
+export async function draggedTableNamesOf(dataTransfer: vscode.DataTransfer): Promise<string[]> {
+  // The names' own type first, whatever order the items came in.
+  const wanted = [TABLE_LIBRARY_NAMES_MIME, TABLE_LIBRARY_DRAG_MIME];
+  const byType = new Map<string, vscode.DataTransferItem[]>(wanted.map((mime) => [mime, []]));
+  dataTransfer.forEach((item, mime) => byType.get(mime.toLowerCase())?.push(item));
+  for (const mime of wanted) {
+    for (const item of byType.get(mime) ?? []) {
+      const names = await namesOfDragValue(item);
+      if (names.length > 0) return names;
+    }
+  }
+  return [];
+}
+
+/** What a drop landed on, for the log: a diagram's or layer's name, or the empty space. */
+function dropTargetLabel(target: TreeElement | undefined): string {
+  if (!target) return 'the empty space';
+  if (target.type === 'domain') return `diagram "${target.summary.domain}"`;
+  if (target.type === 'layer') return `layer "${target.layer}"`;
+  return `a ${target.type} row`;
+}
+
+/** Whether a drop is a Table Library drag: it carries the names' type or the view's own tree mime type. */
+export function isTableLibraryDrop(dataTransfer: vscode.DataTransfer): boolean {
+  return dataTransfer.get(TABLE_LIBRARY_NAMES_MIME) !== undefined || dataTransfer.get(TABLE_LIBRARY_DRAG_MIME) !== undefined;
+}
+
+async function namesOfDragValue(item: vscode.DataTransferItem): Promise<string[]> {
   let value: unknown = item.value;
   if (typeof value === 'string' || value === undefined || value === null) {
     let text = typeof value === 'string' ? value : '';
@@ -86,13 +150,18 @@ export async function draggedTableNames(item: vscode.DataTransferItem): Promise<
  * empty when the drag carries none.
  */
 export async function draggedTableUris(dataTransfer: vscode.DataTransfer): Promise<string[]> {
-  const item = dataTransfer.get('text/uri-list');
-  if (!item) return [];
-  let text = typeof item.value === 'string' ? item.value : '';
-  if (!text) {
-    try { text = await item.asString(); } catch { text = ''; }
+  // Every `text/uri-list` item, in order (a drop may hold an empty native one before the controller's).
+  const items: vscode.DataTransferItem[] = [];
+  dataTransfer.forEach((item, mime) => { if (mime.toLowerCase() === 'text/uri-list') items.push(item); });
+  for (const item of items) {
+    let text = typeof item.value === 'string' ? item.value : '';
+    if (!text) {
+      try { text = await item.asString(); } catch { text = ''; }
+    }
+    const uris = text.split(/\r?\n/).map((line) => line.trim()).filter((line) => /^file:/i.test(line)).slice(0, ADD_EXISTING_TABLES_LIMIT);
+    if (uris.length > 0) return uris;
   }
-  return text.split(/\r?\n/).map((line) => line.trim()).filter((line) => /^file:/i.test(line)).slice(0, ADD_EXISTING_TABLES_LIMIT);
+  return [];
 }
 
 // ---------------------------------------------------------------------------
@@ -233,15 +302,16 @@ export class SubjectAreaTreeProvider
   private diagramTotal: number | undefined;
 
   // TreeDragAndDropController properties
-  readonly dropMimeTypes = [LAYER_DRAG_MIME_TYPE, TABLE_LIBRARY_DRAG_MIME];
+  readonly dropMimeTypes = [...DIAGRAMS_DROP_MIME_TYPES];
   readonly dragMimeTypes = [LAYER_DRAG_MIME_TYPE];
   /**
    * Adds Table Library rows dropped on a diagram's row to that diagram (set
    * by the extension: Add to Diagram's write). `uris` are the dragged tables'
    * files (`text/uri-list`), which say which table where two schema folders
-   * share a name.
+   * share a name, and which tables were dragged when the names could not be
+   * read. It answers `false` when it found no table to add.
    */
-  private tablesDropHandler: ((filePath: string, tables: string[], uris: string[]) => Promise<void>) | undefined;
+  private tablesDropHandler: TablesDropHandler | undefined;
   /**
    * Where the library tells tables apart by their schema folders (set by
    * the extension): which table each diagram member is (`usage`) and each
@@ -304,9 +374,12 @@ export class SubjectAreaTreeProvider
     // Table Library rows dropped on a diagram's row: added to that diagram.
     // This drop stays inside VS Code's own trees, so it needs no Shift and
     // does not depend on a drag reaching the canvas webview.
-    const tablesItem = dataTransfer.get(TABLE_LIBRARY_DRAG_MIME);
-    if (tablesItem) {
-      await this.dropTables(target, await draggedTableNames(tablesItem), await draggedTableUris(dataTransfer));
+    if (isTableLibraryDrop(dataTransfer)) {
+      const tables = await draggedTableNamesOf(dataTransfer);
+      const uris = await draggedTableUris(dataTransfer);
+      // A support trail: a drop that changed nothing is otherwise silent in the log.
+      log.info(`[Diagrams] Table Library drop on ${dropTargetLabel(target)}: ${tables.length} table name(s), ${uris.length} file(s)`);
+      await this.dropTables(target, tables, uris);
       return;
     }
 
@@ -377,19 +450,24 @@ export class SubjectAreaTreeProvider
   }
 
   /** Who adds tables dropped on a diagram's row (the extension wires Add to Diagram's write here). */
-  setTablesDropHandler(handler: (filePath: string, tables: string[], uris: string[]) => Promise<void>): void {
+  setTablesDropHandler(handler: TablesDropHandler): void {
     this.tablesDropHandler = handler;
   }
 
-  /** Table Library rows dropped on `target`: added when it is a diagram's row, else the user is told where to drop. */
+  /**
+   * Table Library rows dropped on `target`: added when it is a diagram's row,
+   * else the user is told where to drop. Never silent: a drop whose tables
+   * cannot be told says so, with the route that needs no drag.
+   */
   private async dropTables(target: TreeElement | undefined, tables: string[], uris: string[]): Promise<void> {
-    if (tables.length === 0 || !this.tablesDropHandler) return;
+    if (!this.tablesDropHandler) return;
     if (!target || target.type !== 'domain') {
-      void vscode.window.showInformationMessage('ERD Studio: Drop tables on a diagram\'s name to add them to that diagram.');
+      void vscode.window.showInformationMessage(DROP_ON_DIAGRAM_ROW_MESSAGE);
       return;
     }
     try {
-      await this.tablesDropHandler(target.summary.filePath, tables, uris);
+      const found = await this.tablesDropHandler(target.summary.filePath, tables, uris);
+      if (found === false) void vscode.window.showInformationMessage(dropNamedNoTableMessage(target.summary.domain));
     } catch (err) {
       log.error('[DomainTreeProvider] Adding dropped tables to a diagram failed:', err);
       const message = err instanceof Error ? err.message : String(err);

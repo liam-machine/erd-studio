@@ -240,7 +240,7 @@ function EditorCanvas() {
   // Drops of tables on the canvas (a Shift-drag from the Table Library or the
   // Explorer): the drop handlers, the highlight and the "Hold Shift" hint.
   // A drop that adds nothing (the physical stage) says why, as a notice.
-  const { dropHandlers, dropActive, hintTables, libraryDragStarted } = useLibraryDrop(setNotice);
+  const { dropHandlers, dropActive, hintTables, libraryDragStarted, libraryDragEnded } = useLibraryDrop(setNotice);
 
   const onMessage = useCallback(
     (msg: ExtensionMessage) => {
@@ -333,6 +333,10 @@ function EditorCanvas() {
           // "Hold Shift and drop to add …": an editable logical diagram only (useLibraryDrop).
           if (Array.isArray(msg.payload?.tables)) libraryDragStarted(msg.payload.tables);
           break;
+        case 'libraryDragEnded':
+          // The drag was used up (dropped somewhere, or missed the canvas): the hint goes.
+          libraryDragEnded();
+          break;
         case 'feedbackContext':
           useEditorStore
             .getState()
@@ -351,7 +355,7 @@ function EditorCanvas() {
           break;
       }
     },
-    [setError, setDiscrepancyReport, setManifestStale, setSyncPlanGenerated, libraryDragStarted],
+    [setError, setDiscrepancyReport, setManifestStale, setSyncPlanGenerated, libraryDragStarted, libraryDragEnded],
   );
 
   useMessageBus(onMessage, /* sendReadyOnMount */ true);

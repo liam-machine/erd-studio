@@ -116,6 +116,9 @@ export function layoutRelBucket(relationships: number): LayoutRelBucket {
  * The fallback that produced a layout whose default attempt failed
  * (`stackSafeFallbacks` in `webview/lib/elkLayout.ts`), named by what it
  * drops: 2 is Brandes–Köpf node placement, 3 also leaves post-compaction out.
+ * The later steps (the same with grouping off, and the grid that needs no
+ * ELK, which also lays out a diagram too large to try) are reported as 3
+ * until telemetry has keys of their own; the extension's log names them.
  */
 export const LAYOUT_FALLBACK_RUNGS = [2, 3] as const;
 export type LayoutFallbackRung = (typeof LAYOUT_FALLBACK_RUNGS)[number];
@@ -132,7 +135,9 @@ export const LAYOUT_LOG_MESSAGE_MAX = 500;
 
 /**
  * What a failed layout says for the extension's own log, and for nothing
- * else: the real counts and the error's message. Never read by telemetry.
+ * else: the real counts and the error's message. A layout that worked but not
+ * as asked (a fallback, the grid) sends one too, its `message` saying what
+ * happened. Never read by telemetry.
  */
 export interface LayoutFailureLog {
   tables: number;

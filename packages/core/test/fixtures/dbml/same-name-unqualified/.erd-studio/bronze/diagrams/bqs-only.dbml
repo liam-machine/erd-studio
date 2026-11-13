@@ -1,0 +1,12 @@
+Project bqs_only {
+  Note: 'One of the two adresse tables: the relationships file still imports both under one spelling'
+  erd_schema_version: '7'
+  erd_layout: '''
+    adresse 400 40
+    bqs__v_sap_prod_unit2 40 40
+  '''
+}
+
+use { table bqs__v_sap_prod_unit2 } from '../tables/bqs/bqs__v_sap_prod_unit2.dbml'
+use { table adresse } from '../tables/bqs/adresse.dbml'
+use * from '../relationships/bronze.dbml'

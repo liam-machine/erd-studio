@@ -417,6 +417,22 @@ export function relationshipsImportsFor(
     const unreadable = new Set([...index.unreadable].map(lower));
     for (const file of options.current) if (unreadable.has(lower(file))) out.add(file);
   }
+  // An imported file holding a Ref whose end names a member's name but no one table (`adresse`, which two of
+  // its `use` lines give to bqs/ and ccc/, and whose columns both have): it may be this diagram's Ref, so the
+  // line stays until Qualify Tables says which table it means.
+  if (options.current && options.current.length > 0 && index.identities) {
+    const current = new Set(options.current.map(lower));
+    // A label (`bqs.adresse`, `adresse`) or an identity key (`bqs/adresse`): its table name.
+    const bareOf = (label: string): string => label.slice(Math.max(label.lastIndexOf('.'), label.lastIndexOf('/')) + 1);
+    const memberNames = new Set([...members].map((m) => bareOf(lower(typeof m === 'string' ? m : m.name))));
+    const unplaced = (label: string, id: string | undefined): boolean => id === undefined && memberNames.has(bareOf(label));
+    for (const ref of index.refs) {
+      if (ref.pending || index.unreadable.has(ref.file) || !current.has(lower(ref.file))) continue;
+      const ownerHere = among(names, ref.owner, ref.ownerId) || unplaced(ref.owner, ref.ownerId);
+      const targetHere = among(names, ref.target, ref.targetId) || unplaced(ref.target, ref.targetId);
+      if (ownerHere && targetHere && (unplaced(ref.owner, ref.ownerId) || unplaced(ref.target, ref.targetId))) out.add(ref.file);
+    }
+  }
   const result = [...out].filter((f) => !options.exists || options.exists(f));
   return result.sort(byteOrder);
 }

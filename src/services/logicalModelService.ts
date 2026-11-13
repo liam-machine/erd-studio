@@ -41,8 +41,8 @@ import { keepLineEndings } from './lineEndings';
 import type { FileWrite } from './fileWrites';
 import { UnsavedFilesRefused } from './fileWrites';
 import { writeFilesWithRollback, type FileWriteIo } from './fsFileWrites';
-import { planDbmlLibraryWrites, relationshipsIndexOf } from './dbmlLibraryWrites';
-import type { DbmlDraftTable, DbmlLibraryOps, DbmlLibrarySnapshot, DbmlLibraryWritePlan, DbmlSnapshotTable, DbmlTableHome, NewRefFileChoice } from './dbmlLibraryWrites';
+import { decideSharedSpellingEnds, planDbmlLibraryWrites, relationshipsIndexOf } from './dbmlLibraryWrites';
+import type { DbmlDraftTable, DbmlLibraryOps, DbmlLibrarySnapshot, DbmlLibraryWritePlan, DbmlSnapshotTable, DbmlTableHome, NewRefFileChoice, SharedSpellingEnd, SharedSpellingEndChoice } from './dbmlLibraryWrites';
 import { placeNewRef } from './dbmlRelationshipsIndex';
 import type { RelationshipsIndex } from './dbmlRelationshipsIndex';
 import { settleDbmlDiagramWrites } from './dbmlDiagramSettle';
@@ -70,6 +70,17 @@ export interface TableFileOps {
    * already checked by {@link TableLibraryService.chosenRelationshipsFile}.
    */
   newRefFile?: NewRefFileChoice;
+  /**
+   * DBML only: tables declared with no schema (`Table adresse`) to declare in
+   * their schema folder's (`planDbmlLibraryWrites`' `qualify`), by identity.
+   */
+  qualify?: TableId[];
+  /**
+   * With `qualify`: the table each Ref end means that its columns do not
+   * decide (`decideSharedSpellingEnds`), as the person chose it. An end
+   * left undecided refuses the edit.
+   */
+  qualifyEnds?: SharedSpellingEndChoice[];
 }
 
 /**
@@ -1144,12 +1155,15 @@ export class TableLibraryService {
     this.tableCacheGeneration++;
     let reading: DbmlTableReading;
     try {
-      reading = parseTableDbml(fs.readFileSync(filePath, 'utf-8'), dbmlStem(path.basename(filePath)));
+      // Its schema folder is the schema of an unqualified Table (§1.2), as core's loader reads it.
+      const schemaFolder = dbmlTreePathOf(this.semanticRelative(filePath))?.schema;
+      reading = parseTableDbml(fs.readFileSync(filePath, 'utf-8'), dbmlStem(path.basename(filePath)), schemaFolder !== undefined ? { schemaFolder } : {});
     } catch (err) {
       reading = { ok: false, error: { kind: 'read', message: err instanceof Error ? err.message : String(err) } };
     }
     this.dbmlCache.set(filePath, { signature, reading });
-    if (reading.ok) this.logDbmlProblems(filePath, signature, reading.problems);
+    // An unqualified Table's note (read with its schema folder) is doctor's to report, not one log line per table.
+    if (reading.ok) this.logDbmlProblems(filePath, signature, reading.problems.filter((p) => p.code !== 'unqualifiedTable'));
     return reading;
   }
 
@@ -1957,16 +1971,27 @@ export class TableLibraryService {
       const text = this.serializeTable(yamlModel, fromName);
       writes.push(this.tableExists(model.name) ? { kind: 'replace', path: modelPath, text } : { kind: 'create', path: modelPath, text });
     }
-    const anyDbml = dbmlOps.save!.length > 0 || dbmlOps.delete!.length > 0;
+    const anyDbml = dbmlOps.save!.length > 0 || dbmlOps.delete!.length > 0 || (ops?.qualify?.length ?? 0) > 0;
     if (!anyDbml && !options.dbml) return { writes };
     const plan = planDbmlLibraryWrites(this.dbmlSnapshot(options.readText), {
       ...dbmlOps,
+      ...(ops?.qualify && ops.qualify.length > 0 ? { qualify: ops.qualify, ...(ops.qualifyEnds ? { qualifyEnds: ops.qualifyEnds } : {}) } : {}),
       newTableHome: this.dbmlHomeOf(home),
       ...(options.schemaFromSource ? { schemaFromSource: true } : {}),
       ...(ops?.newRefFile ? { newRefFile: ops.newRefFile } : {}),
     });
     for (const w of plan.writes) writes.push({ ...w, path: this.semanticAbsolute(w.path) } as FileWrite);
     return { writes, plan };
+  }
+
+  /**
+   * The Ref ends Qualify (`qualify`) cannot re-spell without being told which
+   * table each means: both tables a `use` spelling names have the end's
+   * columns (`decideSharedSpellingEnds`). Empty when the columns decide every one.
+   */
+  sharedSpellingEndsToDecide(qualify: readonly TableId[], readText?: (filePath: string) => string | null): SharedSpellingEnd[] {
+    if (qualify.length === 0) return [];
+    return decideSharedSpellingEnds(this.dbmlSnapshot(readText), qualify).undecided;
   }
 
   /**

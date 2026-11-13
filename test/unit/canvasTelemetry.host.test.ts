@@ -167,6 +167,30 @@ describe('webviewError and layoutFinished (B13, B17)', () => {
     await panel._simulateMessage({ type: 'layoutFinished', payload: { ms: 900, ok: true, fallback: true, rung: 3 } });
     expect(featureKeys()).toEqual(['layoutUnder1s', 'layoutStackFallback', 'layoutFallbackRung3']);
 
+    // A layout that worked but not as asked (Gerhard, 2026-11-12): what the
+    // page says it did, with the counts, goes to the log as an info line;
+    // telemetry counts only the rung, never the text or the counts.
+    const info = vi.spyOn(log, 'info').mockImplementation(() => {});
+    feature.mockClear();
+    error.mockClear();
+    await panel._simulateMessage({
+      type: 'layoutFinished',
+      payload: {
+        ms: 1200, ok: true, fallback: true, rung: 3,
+        log: { tables: 130, relationships: 80, message: 'used the grid fallback (no ELK), grouping depth; the default layout failed: Maximum call stack size exceeded' },
+      },
+    });
+    expect(info.mock.calls.map((c) => String(c[0]))).toContain(
+      '[SemanticEditorProvider] Auto layout used the grid fallback (no ELK), grouping depth; the default layout failed: Maximum call stack size exceeded (130 tables, 80 relationships; after 1200 ms)',
+    );
+    expect(errorCodes()).toEqual([]);
+    expect(JSON.stringify(feature.mock.calls)).not.toMatch(/grid|Maximum call stack|130/);
+    // A layout that worked as asked writes no line.
+    info.mockClear();
+    await panel._simulateMessage({ type: 'layoutFinished', payload: { ms: 300, ok: true } });
+    expect(info.mock.calls.filter((c) => String(c[0]).includes('Auto layout'))).toEqual([]);
+    info.mockRestore();
+
     // A field out of range: nothing is counted at all.
     error.mockClear();
     feature.mockClear();

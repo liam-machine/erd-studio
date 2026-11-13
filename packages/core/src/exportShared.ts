@@ -196,10 +196,18 @@ function readColumn(raw: Record<string, unknown>, name: string): ExportColumn {
 
 function readTable(raw: Record<string, unknown>, name: string): ExportTable {
   const own = text(raw.tableName);
+  const tableName = own.trim() ? own : name;
+  // One of two tables of one name from different schema folders whose file declares no schema (`Table
+  // adresse` in tables/bqs/): the diagram calls it `<schema folder>.<name>`, and that folder is its schema,
+  // so it is declared `Table bqs.adresse` rather than as one public table whose name holds a dot.
+  const named = text(raw.schema).trim();
+  const folder = !named && tableName !== name && name.toLowerCase().endsWith(`.${tableName.toLowerCase()}`)
+    ? name.slice(0, name.length - tableName.length - 1).trim()
+    : '';
   const model: ExportTable = {
     name,
-    tableName: own.trim() ? own : name,
-    schema: text(raw.schema).trim(),
+    tableName,
+    schema: named || folder,
     description: text(raw.description),
     rationale: [],
     rationaleEntries: [],
