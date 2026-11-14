@@ -39,7 +39,7 @@ interface Harness {
   tableLibraryService: TableLibraryService;
 }
 
-function buildProvider(projectRoot: string): Harness {
+function buildProvider(projectRoot: string, workspaceState: { get(key: string): unknown; update(key: string, value: unknown): Promise<void> } = { get: () => true, update: async () => {} }): Harness {
   const layerService = new LayerService(projectRoot, '.erd-studio');
   const subjectAreaService = new SubjectAreaService(layerService);
   const tableLibraryService = new TableLibraryService(projectRoot, '.erd-studio');
@@ -49,7 +49,7 @@ function buildProvider(projectRoot: string): Harness {
     globalStorageUri: vscode.Uri.file(path.join(projectRoot, '.global-storage')),
     extension: { packageJSON: { version: '0.0.0-test' } },
     globalState: { get: () => true, update: async () => {} },
-    workspaceState: { get: () => true, update: async () => {} },
+    workspaceState,
     subscriptions: [],
   } as unknown as vscode.ExtensionContext;
   const empty = { models: new Map(), relationshipTests: [], uniqueColumns: new Map(), compositeUniqueGroups: new Map(), disabledModels: new Set() };
@@ -208,6 +208,24 @@ describe('Add Existing Table rows on a large library', () => {
     posted(panel).length = 0;
     await panel._simulateMessage({ type: 'ready' });
     expect(answer.existingModels).toEqual(loadedPayload(panel).existingModels);
+  });
+
+  it('the offers a first open may make read no table the diagram does not show', async () => {
+    const names = addTables(EXISTING_TABLES_READ_AT_MOST + 20);
+    // A project that has answered no offer yet: each one is considered on this open.
+    // (The other tests' workspaceState answers every key `true`, so the move offer returns before it asks.)
+    const answers = new Map<string, unknown>();
+    const h = buildProvider(root, { get: (key) => answers.get(key), update: async (key, value) => { answers.set(key, value); } });
+    const { panel } = await open(h, 'gold/diagrams/sales.dbml');
+    await panel._simulateMessage({ type: 'ready' });
+    // The offers run after the diagram is posted, without being awaited: let them finish.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(loadedPayload(panel)).toBeDefined();
+    // Whether relationships live in the library (the move offer's question) is answered
+    // from the file listing in a DBML project: the rest of the library stays unread, for
+    // the background read to take in slices.
+    expect(h.tableLibraryService.unreadTableFiles().map((e) => e.name)).toEqual(expect.arrayContaining(names));
   });
 
   it(`up to ${EXISTING_TABLES_READ_AT_MOST} unread files are read for the payload, as before`, async () => {

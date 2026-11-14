@@ -4042,16 +4042,30 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   /**
    * Whether this project keeps relationships in the model library (#126) —
    * see `usesLibraryRelationships` for the opt-in rule.
+   *
+   * `models` may be a function that lists the library's tables. Listing them
+   * reads every table file, so a caller that has not read them yet passes the
+   * function, and it runs only when the rule needs it: never in a DBML
+   * library (the rule's first clause, answered from the file listing), and
+   * never in a project whose diagrams hold no relationships. A first canvas
+   * open asks this through `maybeOfferRelationshipMove`, straight after the
+   * diagram is posted; reading the library there held the extension host for
+   * as long as every table takes to parse.
    */
-  private relationshipsInLibrary(models: readonly SemanticTable[], document?: vscode.TextDocument): boolean {
+  private relationshipsInLibrary(
+    models: readonly SemanticTable[] | (() => readonly SemanticTable[]),
+    document?: vscode.TextDocument,
+  ): boolean {
     // A DBML diagram holds no relationships (D5): they live in the table library.
     if (document && this.isDbmlDocument(document)) return true;
+    // The rule's DBML clause decides it alone, so nothing is read for the other clauses.
+    const dbmlLibrary = this.libraryHoldsDbml();
     const semanticDir = path.relative(this.workspaceRoot, path.dirname(this.tableLibraryService.getTablesDir()));
     return usesLibraryRelationships(
       models,
-      this.subjectAreaService.countSubjectAreaFileRelationships(this.workspaceRoot, semanticDir),
-      this.tableLibraryService.hasUnreadableRelationships(),
-      this.libraryHoldsDbml(),
+      dbmlLibrary ? 0 : this.subjectAreaService.countSubjectAreaFileRelationships(this.workspaceRoot, semanticDir),
+      dbmlLibrary ? false : this.tableLibraryService.hasUnreadableRelationships(),
+      dbmlLibrary,
     );
   }
 
@@ -4137,7 +4151,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       const unstored = describeUnstoredRelationships(kept);
       return { kept: [], saves: [...newModels, ...changed.filter((m) => !newModels.includes(m))], ...(unstored ? { unstored } : {}) };
     }
-    if (added.length === 0 || !this.relationshipsInLibrary(this.tableLibraryService.listTables())) {
+    if (added.length === 0 || !this.relationshipsInLibrary(() => this.tableLibraryService.listTables())) {
       return { kept: [...added], saves: [...newModels] };
     }
     // A link another diagram still draws from its own copy stays in this
@@ -4163,7 +4177,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     this.relationshipMoveOffered = true;
     try {
       if (this.context.workspaceState?.get<boolean>(RELATIONSHIP_MOVE_DECLINED_KEY)) return false;
-      if (this.relationshipsInLibrary(this.tableLibraryService.listTables())) return false;
+      if (this.relationshipsInLibrary(() => this.tableLibraryService.listTables())) return false;
       const semanticDir = path.relative(this.workspaceRoot, path.dirname(this.tableLibraryService.getTablesDir()));
       const shared = sharedRelationshipCount(readSubjectAreaRelationships(this.subjectAreaService, this.workspaceRoot, semanticDir));
       if (shared === 0) return false;
