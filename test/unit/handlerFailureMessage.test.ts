@@ -154,6 +154,18 @@ describe('#319: a handler failure of ours never shows the exception', () => {
     expect(codes(error)).toEqual(['handlerFailed', 'handlerFailedUndo', 'handlerFailedAtOther']);
   });
 
+  it('Add the import: its own catch follows the same rule (the exception is in the report, never the toast)', async () => {
+    const { provider, panel, payloads } = await open();
+    vi.spyOn(provider as never, 'handleAddRelationshipsImports' as never).mockRejectedValue(new Error(RAW) as never);
+    await panel._simulateMessage({ type: 'addRelationshipsImports' });
+    expect(payloads()).toHaveLength(1);
+    const [{ message, feedback }] = payloads();
+    expect(message).toBe(`Adding the import hit a problem in ERD Studio while making the change, so the change may not have been made. ${SEND_US}`);
+    expect(message).not.toContain('boom');
+    expect(feedback?.description).toContain('boom at');
+    expect(feedback?.description).not.toContain('/home/x');
+  });
+
   it("a refusal written for the user keeps today's text and gets no button (a table file open with unsaved changes)", async () => {
     const { panel, payloads } = await open();
     const doc = createMockTextDocument(at('gold/tables/gold/fct_order.dbml'), fs.readFileSync(at('gold/tables/gold/fct_order.dbml'), 'utf-8'));
@@ -276,6 +288,14 @@ describe('#319: handlerFailureMessage (the one rule)', () => {
     const err = Object.assign(new Error('ENOSPC: no space left on device, write'), { code: 'ENOSPC' });
     expect(handlerFailureMessage(err, words, { explained: false, stage: 'storageWrite', applied: false }))
       .toEqual({ message: 'Failed to add column: the disk is full. Free up some space, then try again.' });
+    // The boundary has no label: the sentence stands alone, so it starts with a capital.
+    expect(handlerFailureMessage(err, { title: 'That action' }, { explained: false }))
+      .toEqual({ message: 'The disk is full. Free up some space, then try again.' });
+  });
+
+  it('the report note follows the exception after a blank line, with its paths redacted', () => {
+    const toast = handlerFailureMessage(new Error('boom'), { title: 'That action', reportNote: 'Canvas message: undo' }, { explained: false });
+    expect(toast.feedback?.description).toBe('That action hit a problem while making the change.\n\nError: boom\n\nCanvas message: undo');
   });
 });
 

@@ -210,7 +210,8 @@ export function handlerFailureMessage(err: unknown, words: HandlerFailureWords, 
   if (ctx.explained) return { message: labelled(raw) };
   // Only while nothing had been applied: after that, what matters is that the change was made.
   const write = ctx.applied === true ? 'other' : classifyWriteFailure(err);
-  if (write === 'disk-full') return { message: labelled('the disk is full. Free up some space, then try again.') };
+  // Without a label (the boundary) the sentence stands alone, so it starts with a capital.
+  if (write === 'disk-full') return { message: `${words.label ? `${words.label}: the` : 'The'} disk is full. Free up some space, then try again.` };
   if (write === 'permission') {
     const at = failedPath(err);
     const folder = at && ctx.workspaceRoot ? projectRelative(ctx.workspaceRoot, path.dirname(at)) : undefined;
@@ -236,9 +237,7 @@ export function handlerFailureMessage(err: unknown, words: HandlerFailureWords, 
   const feedback = feedbackPrefill(words.title, doing, err);
   return {
     message: oursMessage(words.title, doing, outcome),
-    feedback: words.reportNote ? { ...feedback, description: `${feedback.description}
-
-${redactPaths(words.reportNote)}` } : feedback,
+    feedback: words.reportNote ? { ...feedback, description: `${feedback.description}\n\n${redactPaths(words.reportNote)}` } : feedback,
   };
 }
 

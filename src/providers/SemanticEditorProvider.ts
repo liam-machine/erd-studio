@@ -83,7 +83,7 @@ import { EXPORT_DIAGRAM_COMMAND } from '../commands/exportDiagram';
 import { SEND_FEEDBACK_BUTTON, crashFeedbackPrefill, noReadyFeedbackPrefill, describeDbmlMistake, describeDiagramFileProblem, describeJsonMistake, feedbackPrefill, handlerFailureMessage, oursMessage, projectRelative, reportNotOpenedMessage, showErrorWithActions, type FeedbackPrefill, type HandlerFailureWords } from '../services/commandErrors';
 import { isCrashFallbackAction, type CrashFallbackAction } from '../types/webviewError';
 import { askNoReadyRecovery } from './noReadyRecovery';
-import { ManifestMissingError, ManifestService } from '../services/manifestService';
+import { ManifestService } from '../services/manifestService';
 import { YmlParserService } from '../services/ymlParserService';
 import { TemplateService } from '../services/templateService';
 import { LayerService } from '../services/layerService';
@@ -589,14 +589,15 @@ function isExplainedRefusal(err: unknown): boolean {
 /**
  * Whether a handler failure's own words were written for the user, so its
  * toast shows them (#319): a refusal, a problem in the diagram file, and
- * three failures that name what in the project stopped the edit (a bare name
- * two tables share, a table file with a mistake in it, a manifest.json that
- * is not there). The last three keep their telemetry as it was; this decides
- * the words only.
+ * two failures that name what in the project stopped the edit (a bare name
+ * two tables share, a table file with a mistake in it). The last two keep
+ * their telemetry as it was; this decides the words only. A missing
+ * manifest.json is not among them: `loadManifest` never throws it (it
+ * answers with an empty manifest), and its message holds an absolute path.
  */
 function saysItself(err: unknown): boolean {
   return isExplainedRefusal(err) || isUserFileProblem(err)
-    || err instanceof AmbiguousTableName || err instanceof TableDbmlError || err instanceof ManifestMissingError;
+    || err instanceof AmbiguousTableName || err instanceof TableDbmlError;
 }
 
 /**
@@ -2729,7 +2730,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             } catch (err) {
               const detail = err instanceof Error ? err.message : String(err);
               if (!(err instanceof EditRefused)) logHandlerFailure(`[SemanticEditorProvider] Adding the relationships imports failed: ${detail}`, err);
-              this.post(webviewPanel.webview, { type: 'error', payload: { message: `Failed to add the import: ${detail}` } });
+              // The same rule as every handler's catch (#319): a refusal keeps its words, anything else is ours.
+              this.postHandlerFailure(webviewPanel.webview, err, { label: 'Failed to add the import', title: 'Adding the import' });
             }
             break;
           }
@@ -6134,7 +6136,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         });
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        if (!this.disposedWebviews.has(webview)) void webview.postMessage({ type: 'error', payload: { message } });
+        // A refusal keeps its own words; anything else is ours (#319): the exception goes to the log and the report, never the toast.
+        logHandlerFailure(`[SemanticEditorProvider] Qualify Tables failed: ${message}`, err);
+        this.postHandlerFailure(webview, err, { title: 'Qualifying the tables' });
       }
     });
   }
