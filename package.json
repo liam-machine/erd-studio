@@ -1712,7 +1712,7 @@
     "@dbml/core": "11.0.0",
     "@dbml/parse": "11.0.0",
     "@erd-studio/core": "0.5.1",
-    "@erd-studio/renderer": "0.5.2",
+    "@erd-studio/renderer": "0.5.3",
     "@xyflow/react": "^12.5.0",
     "elkjs": "^0.9.3",
     "react": "^18.3.0",
