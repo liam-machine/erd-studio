@@ -567,8 +567,16 @@ export interface DraftPreviewEvents {
    * (after `noReady`; optional). The preview has already reloaded the page for
    * `reload`; the wiring counts the button with the crash screen's keys and,
    * for `feedback`, opens Send Feedback.
+   * `opened` (optional, #320): the page said ready after the notification was
+   * shown, so only `feedback` arrives (Reload is ignored), and it is neither
+   * counted nor prefilled as a page that did not open.
    */
-  noReadyChoice?(source: DraftSource, action: CrashFallbackAction): void;
+  noReadyChoice?(source: DraftSource, action: CrashFallbackAction, opened?: boolean): void;
+  /**
+   * The page said ready after `noReady` (optional, #320): slow, not broken.
+   * `range` is how long after it was shown.
+   */
+  lateReady?(source: DraftSource, range: '30to60s' | 'over60s'): void;
   /** ELK laid the draft out (optional, 2.0 B17). */
   layoutFinished?(source: DraftSource, layout: { ms: number; fitZoom: FitZoomBucket; fallback?: true; rung?: LayoutFallbackRung }): void;
   /** The page closed while the draft on show was still being laid out (optional, 2.0 B17). */

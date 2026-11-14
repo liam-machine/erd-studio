@@ -138,6 +138,8 @@ export class DraftPreviewPanel {
   private readonly disposables: vscode.Disposable[] = [];
   /** Did the page come up (2.0 B13)? Timed while the tab is visible. */
   private readonly readyWatch: ReadyWatch;
+  /** The page shows its crash screen (until it is reloaded). */
+  private crashed = false;
   /** The id of the draft the page is laying out (posted with `autoLayout`, no `layoutFinished` / `layoutFailed` yet). */
   private layingOut: string | undefined;
   /** The extension's `dist/` folder (the page's script and stylesheet). */
@@ -218,14 +220,22 @@ export class DraftPreviewPanel {
     webview.html = this.pageHtml();
     this.readyWatch = new ReadyWatch(panel.visible !== false, {
       ready: (slow) => this.events.pageReady?.(this.view.source, slow),
+      lateReady: (range) => this.events.lateReady?.(this.view.source, range),
       noReady: () => {
         this.events.noReady?.(this.view.source);
         // The page never mounted, so its crash screen cannot show: the host
         // offers the same two buttons in a notification.
         void askNoReadyRecovery('draft').then((action) => {
           if (!action || this.disposed) return;
+          // The notification cannot be taken down, and the page has opened
+          // since (#320): Reload would throw a working preview away, so it
+          // does nothing, and Send Feedback is told the page is up.
+          // A page that crashed after it opened keeps both buttons.
+          const opened = this.ready && !this.crashed;
+          if (opened && action === 'reload') return;
           if (action === 'reload') this.reloadPage();
-          this.events.noReadyChoice?.(this.view.source, action);
+          if (opened) this.events.noReadyChoice?.(this.view.source, action, true);
+          else this.events.noReadyChoice?.(this.view.source, action);
         });
       },
     });
@@ -256,7 +266,10 @@ export class DraftPreviewPanel {
    */
   private reloadPage(): void {
     if (this.disposed) return;
+    // A page reloaded before it ever said ready: the ready that follows is the new page's (#320).
+    this.readyWatch.reloaded();
     this.ready = false;
+    this.crashed = false;
     this.layingOut = undefined;
     this.panel.webview.html = this.pageHtml();
   }
@@ -376,6 +389,8 @@ export class DraftPreviewPanel {
         return;
       }
       case 'pageError':
+        // A render crash always ends on the crash screen (the page's root boundary).
+        if (message.kind === 'render') this.crashed = true;
         this.events.pageError?.(this.view.source, message.kind);
         return;
       case 'crashFallback':

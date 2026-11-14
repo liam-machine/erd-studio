@@ -181,7 +181,7 @@ import {
   subjectAreaLoadDetailCode,
   webviewErrorCodes,
 } from '../services/telemetryCanvas';
-import { ReadyWatch } from '../services/readyWatch';
+import { lateReadyFeatures, ReadyWatch } from '../services/readyWatch';
 import { saveDocument, saveDocumentByUri, saveWithoutFormatting } from './documentSave';
 import { dirtyFiles } from './dirtyDocuments';
 import { subjectAreaLoadErrorCode, subjectAreaLoadStepCode, layoutFeature, saveFailureCodes, type SaveFailure, type SubjectAreaLoadFailure, type SubjectAreaLoadStep, type TelemetryFeature } from '../services/telemetryPayload';
@@ -2483,12 +2483,25 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     // Usage telemetry (2.0 B13): a canvas that stays blank, timed only while it is visible.
     const readyWatch = new ReadyWatch(webviewPanel.visible !== false, {
       ready: (slow) => { if (slow) telemetry.feature('readySlowOver10s'); },
+      // The canvas was slow, not broken (#320): it opened after the notification below.
+      lateReady: (range) => { for (const key of lateReadyFeatures(range)) telemetry.feature(key); },
       noReady: () => {
         telemetry.error('webviewNoReadyCanvas');
         // The page never mounted, so its crash screen cannot show: the host
         // offers the same two buttons in a notification.
         void askNoReadyRecovery('canvas').then((action) => {
-          if (!action || this.openPanels.get(panelKey)?.webview !== webviewPanel.webview) return undefined;
+          const entry = this.openPanels.get(panelKey);
+          if (!action || entry?.webview !== webviewPanel.webview) return undefined;
+          // The notification cannot be taken down, and the canvas has opened
+          // since (#320): Reload would throw a working canvas away, and Send
+          // Feedback would report one that "did not open". Reload does
+          // nothing; Send Feedback opens the canvas's own dialog. A canvas
+          // that crashed after it opened keeps both buttons.
+          if (readyWatch.isReady && !entry.crashed) {
+            if (action === 'feedback') return vscode.commands.executeCommand('erdStudio.reportBug');
+            return undefined;
+          }
+          if (action === 'reload') readyWatch.reloaded();
           return this.crashChoice(action, panelKey, webviewPanel, document, noReadyFeedbackPrefill('canvas'));
         }).catch((err: unknown) => log.warn('[SemanticEditorProvider] The blank-canvas recovery failed', err));
       },
@@ -3062,6 +3075,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
               break;
             }
             if (payload !== raw) log.warn('[SemanticEditorProvider] Dropped a bad area or detail from a crashFallback');
+            // A page that crashed before it ever said ready: the ready after this Reload is the new page's (#320).
+            if (payload.action === 'reload') readyWatch.reloaded();
             await this.crashChoice(payload.action, panelKey, webviewPanel, document, crashFeedbackPrefill('canvas', payload));
             break;
           }

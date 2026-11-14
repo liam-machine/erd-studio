@@ -75,7 +75,7 @@ import {
 import type { CliLauncherInstallResult, CliLauncherOptions } from '../services/cliLauncherService';
 import { telemetry } from '../services/telemetryService';
 import { harnessFailureKeys, hookSkippedFeatures, welcomeFailureCode } from '../services/runtimeTelemetry';
-import { ReadyWatch } from '../services/readyWatch';
+import { lateReadyFeatures, ReadyWatch } from '../services/readyWatch';
 import type { DraftModelEntry } from '../services/dbtDraft';
 import type { ManifestData } from '../types/manifest';
 import { normaliseName } from '../services/nameUtils';
@@ -823,9 +823,16 @@ export class GettingStartedPanel {
         if (slow) telemetry.feature('readySlowOver10s');
       },
       noReady: () => telemetry.error('webviewNoReadyWelcome'),
+      // The panel was slow, not broken (#320).
+      lateReady: (range) => { for (const key of lateReadyFeatures(range)) telemetry.feature(key); },
     });
     this.disposables.push(
-      panel.onDidChangeViewState((e) => this.readyWatch.visibility(e.webviewPanel.visible)),
+      panel.onDidChangeViewState((e) => {
+        // This panel does not keep its page while hidden: the one shown next is a new page, and
+        // its ready is not a late one from the page that was reported (#320).
+        if (!e.webviewPanel.visible) this.readyWatch.reloaded();
+        this.readyWatch.visibility(e.webviewPanel.visible);
+      }),
       panel.webview.onDidReceiveMessage((message: unknown) => {
         void this.handleMessage(message).catch((err) => {
           telemetry.error('welcomePanelFailed');

@@ -788,6 +788,10 @@ export const FEATURES = [
   'dropSlowSave',
   'dropSlowRedraw',
   'dropSlowCanvas',
+  // #320: a panel said ready after its `webviewNoReady*` was reported (slow, not broken), and how late (a range).
+  'readyAfterNoReady',
+  'readyLate30to60s',
+  'readyLateOver60s',
 ] as const;
 export type TelemetryFeature = (typeof FEATURES)[number];
 
