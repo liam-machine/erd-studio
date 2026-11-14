@@ -212,7 +212,7 @@ const DIR = (semanticDir: string | undefined): string => `${(semanticDir ?? '.er
 function moreWaysText(starts: ReadonlySet<DraftOtherStart>): string | undefined {
   const parts: string[] = [];
   if (starts.has('import')) parts.push('Import… reads SQL scripts, Power BI and Fabric models, and DBML.');
-  if (starts.has('guide')) parts.push('Bring In Your Data Model… shows how to get it out of Databricks, Snowflake, SQL Server, Fabric and more, into an open format.');
+  if (starts.has('guide')) parts.push('Import Your Data Model… shows how to get it out of Databricks, Snowflake, SQL Server, Fabric and more, into an open format.');
   if (parts.length === 0) return undefined;
   return `Is your data model somewhere else? ${parts.join(' ')}`;
 }

@@ -19,8 +19,10 @@ import {
   START_COMMAND,
   START_INTENTS,
   START_INTENT_CONTEXT_KEY,
+  START_INTENT_REASONS,
   START_SURFACES,
   TOUR_LABEL,
+  importGuideCommandLink,
   isStartIntent,
   moreStartsCommandLink,
   moreStartsFor,
@@ -265,7 +267,7 @@ describe('erdStudio.start', () => {
     const pick = vi.fn(async (items: Array<StartPickItem | StartPickGuideItem>) => items[items.length - 1]);
     await runStart(undefined, { context: () => ({ hasProject: false, hasDbt: false }), executeCommand, pick });
     expect(pick.mock.calls[0][0].map((i) => i.label)).toEqual([
-      '$(book) Open an Example…', '$(question) Bring In Your Data Model…',
+      '$(book) Open an Example…', '$(question) Import Your Data Model…',
     ]);
     expect(executeCommand.mock.calls).toEqual([['erdStudio.showImportGuide', { from: 'startPick' }]]);
     expect(feature).not.toHaveBeenCalled();
@@ -324,8 +326,11 @@ describe('the start surfaces in package.json', () => {
   const proseLines = (md: string) => md.split('\n').filter((l) => l.trim() !== '' && !isButtonLine(l)).map((l) => l.replace(/\[([^\]]+)\]\([^)]*\)/g, '$1'));
   const words = (text: string) => text.split(/\s+/).filter(Boolean).length;
 
-  /** `waiting`: the empty Diagrams view shows "Loading diagrams…" until the look publishes the suggestion. */
-  interface Window { name: string; keys: WhenContext; ctx: StartContext; starts: StartAction[]; waiting?: boolean }
+  /**
+   * `waiting`: the empty Diagrams view shows "Loading diagrams…" until the look publishes the suggestion.
+   * `hasTables`: the library holds a table (`erdStudio.hasTables`) though no diagram shows one yet.
+   */
+  interface Window { name: string; keys: WhenContext; ctx: StartContext; starts: StartAction[]; waiting?: boolean; hasTables?: boolean }
 
   /**
    * Every window a start surface can be seen in, with the context keys the
@@ -335,25 +340,28 @@ describe('the start surfaces in package.json', () => {
    */
   const emptyCtx: StartContext = { hasProject: false, hasDbt: false };
   const windows: Window[] = [{ name: 'empty window', keys: { workspaceFolderCount: 0 }, ctx: emptyCtx, starts: startActionsFor(emptyCtx) }];
-  for (const hasDbt of [false, true]) for (const storage of STORAGES) for (const found of SOME_FOUND) for (const looked of [false, true]) {
+  for (const hasDbt of [false, true]) for (const storage of STORAGES) for (const found of SOME_FOUND) for (const looked of [false, true]) for (const hasTables of [false, true]) {
     const ctx: StartContext = { hasProject: true, hasDbt, storage, hasDiagrams: false, found: looked ? found : undefined };
     const intent = startIntentFor(ctx);
     windows.push({
-      name: `${hasDbt ? 'dbt' : 'plain'} ${storage ?? 'no storage key'} found=[${found.join(',')}] ${looked ? `published ${intent}` : 'not looked yet'}`,
+      name: `${hasDbt ? 'dbt' : 'plain'} ${storage ?? 'no storage key'} found=[${found.join(',')}] ${looked ? `published ${intent}` : 'not looked yet'}${hasTables ? ' with tables' : ''}`,
       keys: {
         workspaceFolderCount: 1,
         'erdStudio.hasProject': true,
         'erdStudio.hasDbtProject': hasDbt,
         'erdStudio.diagramsLoading': false,
         'erdStudio.hasDiagrams': false,
+        // Unset until activation reads the library: the empty project's entries hold for an unset key.
+        ...(hasTables ? { 'erdStudio.hasTables': true } : {}),
         ...(storage ? { 'erdStudio.storage': storage } : {}),
         ...(looked ? { [START_INTENT_CONTEXT_KEY]: intent } : {}),
       },
       ctx,
       starts: startActionsFor(ctx),
       // A folder without dbt whose files can decide: no start shows before the suggestion
-      // (New Diagram first, then an import under the cursor, was the flash this prevents).
+      // (one sentence, then another under the cursor, was the flash this prevents).
       waiting: !looked && !hasDbt && storage !== 'yaml' && storage !== 'mixed',
+      hasTables,
     });
   }
 
@@ -384,15 +392,45 @@ describe('the start surfaces in package.json', () => {
     expect(offered).toEqual(w.starts);
   }
 
-  it.each(windows)('the empty Diagrams view: one button for the suggestion and one "More ways to start…" link: $name', (w) => {
+  /**
+   * An empty project (no diagram, no table): Import Your Data Model… is the
+   * one button, the first thing in the sidebar, and New Diagram… the one
+   * quiet link. The sentence says what the folder holds, never a file name;
+   * the guide itself leads with that source.
+   */
+  function expectImportFirst(md: string, w: Window): void {
+    const btns = buttonLines(md);
+    expect(btns, md).toEqual([`[${IMPORT_GUIDE_LABEL}](${importGuideCommandLink('sidebar')})`]);
+    expect(md.indexOf(btns[0])).toBeLessThan(md.indexOf('Or: '));
+    const others = allLinks(md).filter((l) => !btns[0].includes(`(${l.target})`));
+    expect(others).toEqual([{ label: START_ACTION_LABELS.blank, target: startCommandLink('blank', 'sidebar') }]);
+    const intent = w.keys[START_INTENT_CONTEXT_KEY] as StartIntent | undefined;
+    expect(md.split('\n')[0]).toMatch(/^No diagrams or tables yet\./);
+    if (w.ctx.hasDbt) expect(md).toContain('This folder is a dbt project.');
+    else if (intent && START_INTENT_REASONS[intent]) expect(md).toContain(START_INTENT_REASONS[intent]!);
+    else expect(md).not.toContain('This folder');
+  }
+
+  it.each(windows)('the empty Diagrams view: Import Your Data Model… first in an empty project, Convert in an older one: $name', (w) => {
     const shown = diagramsWelcome.filter((e) => evalWhen(e.when, w.keys));
     if (w.waiting) {
-      // Until the suggestion is published: Loading, and no start that may change under the cursor.
+      // Until the suggestion is published: Loading, and no sentence that may change under the cursor.
       expect(shown.map((e) => e.contents)).toEqual(['Loading diagrams…']);
       return;
     }
     expect(shown).toHaveLength(1);
-    expectStartShape(shown[0].contents, w, 'sidebar');
+    const pre20 = w.keys['erdStudio.storage'] === 'yaml' || w.keys['erdStudio.storage'] === 'mixed';
+    if (w.keys.workspaceFolderCount === 0 || pre20) {
+      // No folder (nothing to import into yet) and a project from before 2.0 (Convert first) keep the start shape.
+      expectStartShape(shown[0].contents, w, 'sidebar');
+    } else if (w.hasTables) {
+      // Tables but no diagram: not empty, so the import is Help & Feedback's first row; here, New Diagram… alone.
+      expect(buttonLines(shown[0].contents)).toEqual([`[${START_ACTION_LABELS.blank}](${startCommandLink('blank', 'sidebar')})`]);
+      expect(allLinks(shown[0].contents)).toHaveLength(1);
+      expect(shown[0].contents).toContain('Table Library');
+    } else {
+      expectImportFirst(shown[0].contents, w);
+    }
   });
 
   it.each(windows)('the empty Diagrams view stays short: at most two short lines, no question: $name', ({ keys, waiting }) => {
@@ -405,7 +443,8 @@ describe('the start surfaces in package.json', () => {
     }
   });
 
-  it.each(windows)('the walkthrough has one start step, the same shape, its title the action\'s label: $name', (w) => {
+  // The walkthrough is unchanged by tables: its starts follow the rule in every window.
+  it.each(windows.filter((w) => !w.hasTables))('the walkthrough has one start step, the same shape, its title the action\'s label: $name', (w) => {
     const shown = pkg.contributes.walkthroughs[0].steps.filter((s) => evalWhen(s.when, w.keys));
     const withStarts = shown.filter((s) => allLinks(s.description).some((l) => l.target.startsWith(`command:${START_COMMAND}`)));
     expect(withStarts).toHaveLength(1);
@@ -450,8 +489,11 @@ describe('the start surfaces in package.json', () => {
     for (const s of pkg.contributes.walkthroughs[0].steps) for (const [, key] of (s.when ?? '').matchAll(/(erdStudio\.[A-Za-z]+)/g)) keys.add(key);
     expect([...keys].sort()).toEqual([
       'erdStudio.diagramsLoading', 'erdStudio.hasDbtProject', 'erdStudio.hasDiagrams', 'erdStudio.hasMultipleDbtProjects',
-      'erdStudio.hasProject', 'erdStudio.startIntent', 'erdStudio.storage',
+      'erdStudio.hasProject', 'erdStudio.hasTables', 'erdStudio.startIntent', 'erdStudio.storage',
     ]);
+    // erdStudio.hasTables is the host's own (extension.ts, refreshHasTables), set from the library it lists.
+    const host = fs.readFileSync(path.join(__dirname, '../../src/extension.ts'), 'utf8');
+    expect(host).toContain(`'setContext', 'erdStudio.hasTables'`);
   });
 });
 
@@ -490,7 +532,7 @@ describe('one label per action, on every surface', () => {
   it('no surface keeps an old name for an action or for the tour', () => {
     const text = allText();
     for (const old of [
-      'See how to bring it in', 'Show Me How', 'Bring In an Existing Data Model', 'Bring In My Model', 'Start Blank', 'See an Example',
+      'See how to bring it in', 'Show Me How', 'Bring In an Existing Data Model', 'Bring In My Model', 'Bring In Your Data Model', 'Start Blank', 'See an Example',
       'Other Ways to Start', 'Create Diagram', 'Start from your SQL scripts', 'Start your data model', 'Watch Getting Started Video',
       'Watch the video', 'one-minute dbt tour', 'Watch the One-Minute Tour', 'one-minute tour', 'Welcome to ERD Studio', 'Get started</a>', '[Get started]',
     ]) expect(text, old).not.toContain(old);

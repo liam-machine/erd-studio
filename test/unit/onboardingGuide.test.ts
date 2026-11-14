@@ -50,7 +50,7 @@ function exampleInFolder(): DraftView {
     banner: { ...view.banner, keepLabel: 'Keep This Example', primary: 'blank', shownStarts: ['guide'], detail: 'Keep saves it as coffee_shop in the Gold layer (.erd-studio/gold/diagrams/coffee_shop.dbml).' },
     otherStarts: [
       { id: 'blank', label: 'New Diagram…' },
-      { id: 'guide', label: 'Bring In Your Data Model…' },
+      { id: 'guide', label: 'Import Your Data Model…' },
       { id: 'import', label: 'Import…' },
     ],
   };
@@ -61,7 +61,7 @@ describe('phase A: the steps on the draft page, per kind of draft', () => {
     const steps = draftGuideSteps({ view: findView('sqlDdl', 'Draft from 2 SQL files (PostgreSQL) · 4 tables, 3 relationships · not saved') });
     expect(steps.map((s) => s.id)).toEqual(['draftBanner', 'draftMoreWays', 'draftKeep']);
     expect(steps[0].text).toBe('This is a draft of your model, drawn from 2 SQL files (PostgreSQL): 3 tables, 2 relationships. Nothing is saved yet.');
-    expect(steps[1].text).toBe('Is your data model somewhere else? Import… reads SQL scripts, Power BI and Fabric models, and DBML. Bring In Your Data Model… shows how to get it out of Databricks, Snowflake, SQL Server, Fabric and more, into an open format.');
+    expect(steps[1].text).toBe('Is your data model somewhere else? Import… reads SQL scripts, Power BI and Fabric models, and DBML. Import Your Data Model… shows how to get it out of Databricks, Snowflake, SQL Server, Fabric and more, into an open format.');
     expect(steps[2].text).toBe('Keep as Diagram makes it your first logical model: one DBML file per table in .erd-studio/, ready to commit. Press it to continue.');
     expect(steps[2].waitsForClick).toBe(true);
     expect(steps.slice(0, 2).every((s) => !s.waitsForClick)).toBe(true);

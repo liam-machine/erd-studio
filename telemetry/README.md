@@ -989,7 +989,8 @@ Investigate when:
   `relMoveCancelled`, or any `relMoveWriteFailed`.
 - **From 2.0:** any `convertToDbmlUnrestored` (a user's files left half
   converted: top priority); any `activationFailed` (its phase code says where);
-  any `webviewCrash*` or `webviewNoReady*`; `handlerFailed*`, `dbmlWriteOverlap`
+  any `webviewCrash*` or `webviewNoReady*` (less the
+  `readyAfterNoReady` beside it: that panel opened late, it was not broken); `handlerFailed*`, `dbmlWriteOverlap`
   or `refreshFailed*` on the new version but not the previous one;
   `importSqlEngineLoadFailed` or `importDbmlParserThrew` (the importer itself
   broke). `domainLoadDbml*` (other than `ParserThrew`), `modelFileDbml*` (other
@@ -1189,7 +1190,7 @@ mistake in it, a save VS Code refused) records no error code: only the
 - `editRefused` — a canvas edit was refused with an explanation to the user.
 - `handlerFileProblem` — a canvas stage switch or comparison met a diagram file the user or an assistant broke, removed or locked (core's file and validation errors, except a DBML parser that threw or core's own `TypeError`); the user is told what is wrong with the file. Not a failure of ours, so no `handlerFailed*` beside it.
 - `canvasReconnectReload` — a canvas asked the host to reload it.
-- `handlerFailed` (error) — a canvas message handler threw (the total; one group beside it).
+- `handlerFailed` (error) — a canvas message handler threw (the total; one group beside it, and from the release after 2.0.6 one step and a storage, under "Keys added after 2.0.0").
 - `handlerFailedModel` (error) — a model handler threw.
 - `handlerFailedColumn` (error) — a column handler threw.
 - `handlerFailedKey` (error) — a key handler threw.
@@ -1228,10 +1229,10 @@ mistake in it, a save VS Code refused) records no error code: only the
 - `webviewCrashOther` (error) — another webview area crashed.
 - `webviewWindowError` (error) — an uncaught error in a webview.
 - `webviewRejection` (error) — an unhandled promise rejection in a webview.
-- `webviewNoReadyCanvas` (error) — a visible canvas never reported ready within 30 s.
+- `webviewNoReadyCanvas` (error) — a visible canvas never reported ready within 30 s. It may have come up later: see `readyAfterNoReady` under Keys added after 2.0.0, which applies to all three `webviewNoReady*` codes.
 - `webviewNoReadyDraft` (error) — a visible draft page never reported ready within 30 s.
 - `webviewNoReadyWelcome` (error) — a visible Welcome panel never reported ready within 30 s.
-- `crashFallbackReload` — the crash screen a canvas or draft page shows after a render crash (instead of a blank panel) had its Reload pressed; the panel was reloaded. Also counted from the notification a canvas or draft page gets when it never reported ready (`webviewNoReadyCanvas` / `webviewNoReadyDraft` the same day), which offers the same two buttons.
+- `crashFallbackReload` — the crash screen a canvas or draft page shows after a render crash (instead of a blank panel) had its Reload pressed; the panel was reloaded. Also counted from the notification a canvas or draft page gets when it never reported ready (`webviewNoReadyCanvas` / `webviewNoReadyDraft` the same day), which offers the same two buttons. Not counted when the page had reported ready before the button was pressed (`readyAfterNoReady`): that Reload is ignored, and that Send Feedback opens an ordinary report (unless the page had crashed after it opened: then both count as before).
 - `crashFallbackFeedback` — the crash screen, or that notification, had its Send Feedback pressed; Send Feedback opened (the report itself is the user's to read and file; nothing of it is in telemetry).
 
 **B14 — why a DBML diagram failed to load, and diagrams that render degraded.**
@@ -1455,8 +1456,9 @@ Appended to `FEATURES` after the 2.0.0 list above (in
 the same terms: fixed keys, never a name, a path, a message or a count of
 tables (a failed layout's size is one of four fixed ranges, below). Deploy the
 Worker before the extension release that records them, or their counts are
-dropped. The failed-layout codes and the dbt search failure reasons in this
-section are appended to `ERROR_CODES` in the same way.
+dropped. The failed-layout codes, the dbt search failure reasons and the canvas
+handler failure steps in this section are appended to `ERROR_CODES` in the
+same way.
 
 **The import guide's Microsoft Fabric card.** A Warehouse or a Lakehouse's SQL
 analytics endpoint is read as SQL Server, so without these a Fabric import
@@ -1581,6 +1583,36 @@ And one feature, recorded at activation only:
 
 - `dbtSearchFailedWalkFound` — the search failed and the bounded walk still found a dbt project (it alone would have opened one), so nothing was lost. A project chosen by `erdStudio.projectPath` or **Select dbt Project…** does not count: only what the walk found. Since #295, also when activation did not wait for the search (`dbtSearchSkipped`) and the search it left running then failed: that window opened the dbt project the walk found, so nothing was lost there either.
 
+**Where a canvas handler failure came from (#319).** `handlerFailed` and its
+group say which kind of canvas action threw, not which step of the edit. These
+say the step, decided on the device from how far the edit had got
+(`src/services/editFailureStage.ts`), never from the error's text. Exactly one
+`handlerFailedAt*` is counted beside each `handlerFailed`, so the seven sum to
+the total on every version that has them; an older version sends the total and
+its group alone. Never sum `handlerFailed*`: one failure is the total, its
+group, its step and (when the diagram had been read) its storage. A
+relationship handler's failure (`relHandlerFailed`) and a refusal the user was
+told about (`editRefused`, `handlerFileProblem`) get none of them.
+
+Two things to know when comparing versions. The step and storage keys are new
+keys for failures that were already counted, so "`handlerFailed*` on the new
+version but not the previous one" is not a new failure when the key is one of
+these nine. And from the same release, a sentence the canvas already showed
+the user in plain words (a column name that is taken, a table or column the
+file no longer has, a table file with a mistake in it) is thrown as a refusal:
+it counts `editRefused`, no longer `handlerFailed` and its group, so
+`handlerFailed` may fall between the two versions with nothing fixed.
+
+- `handlerFailedAtRead` (error) — the throw came while reading the open diagram, before any change was worked out.
+- `handlerFailedAtMutate` (error) — working out the change threw (the handler's own edit of the parsed diagram or table).
+- `handlerFailedAtLayoutWrite` (error) — writing positions or sticky-note boxes alone threw, before VS Code applied the edit.
+- `handlerFailedAtStorageWrite` (error) — planning or writing an edit in a project whose library holds DBML threw, before VS Code applied the edit.
+- `handlerFailedAtJsonWrite` (error) — writing an edit in a YAML/JSON project threw, before VS Code applied the edit.
+- `handlerFailedAtSave` (error) — VS Code applied the edit and saving it threw. Expect close to none: a save that fails without throwing is `saveFailed*`.
+- `handlerFailedAtOther` (error) — the throw came after the save (the redraw, the refresh of other diagrams), or outside the edit pipeline.
+- `handlerFailedDbml` (error) — the diagram being edited is a `.dbml` file (counted beside a `handlerFailed` whose edit had read the diagram).
+- `handlerFailedJson` (error) — the diagram being edited is a `.json` file (the same). A JSON diagram in a project whose library holds DBML is written by the storage path, so `handlerFailedJson` can sit beside `handlerFailedAtStorageWrite`.
+
 Where `dbtSearchFailed` is counted: at activation; when activation did not wait
 for the search (`dbtSearchSkipped`, #295) and the search it left running fails
 (with `dbtSearchFailedWalkFound` beside it, since that window's project came
@@ -1697,6 +1729,15 @@ heartbeat's `os`, and `dropSlow*` for where the time went.
 npx wrangler d1 execute erd-studio-telemetry --remote --command \
   "SELECT h.os, j.key, COUNT(DISTINCT h.install_id) AS installs, SUM(j.value) AS drops FROM heartbeats h, json_each(h.features) j WHERE h.day >= date('now','-28 days') AND h.day < date('now') AND COALESCE(h.dev, 0) = 0 AND j.key LIKE 'drop%' GROUP BY h.os, j.key ORDER BY h.os, j.key"
 ```
+
+**A panel that opened after it was reported as not opening** (added after
+2.0.6, #320). A `webviewNoReady*` code says a visible panel had not said
+ready after 30 s, which a slow start and a broken page both do. These keys
+count the slow ones:
+
+- `readyAfterNoReady` — a canvas, draft page or Welcome panel reported ready after its `webviewNoReady*` had already been recorded (#320): it was slow, not broken. An install-day's `webviewNoReady*` minus its `readyAfterNoReady` is the panels that never came up (a late ready just after midnight UTC lands on the next day's row). Not counted for the ready of a page the user reloaded from the no-ready notification (that day has `crashFallbackReload`). It is not a subset of `readySlowOver10s`: a panel hidden and shown again after the 30 s restarts that clock.
+- `readyLate30to60s` — beside `readyAfterNoReady`: the ready came less than 60 s after the panel was shown (by the clock from the show whose 30 s ran out, hidden or not since). A 60 s limit would not have reported it.
+- `readyLateOver60s` — beside `readyAfterNoReady`: the ready came 60 s or more after the panel was shown.
 
 ## The local archive
 

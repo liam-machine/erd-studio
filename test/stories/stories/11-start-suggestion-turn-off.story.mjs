@@ -49,9 +49,11 @@ export default story({
 
     await s.step('When I reload the window, it does not ask again', async () => {
       await s.ui.reloadWindow();
-      // The folder still suggests the import (the sidebar's button): only the popup is off.
+      // The folder still suggests the import (the sidebar says what it holds, under Import Your Data Model…): only the popup is off.
       await s.ui.openSidebar('ERD Studio');
-      await s.expectVisible(s.sel.welcomeLink('Import your SQL scripts'), { what: 'the sidebar\'s "Import your SQL scripts" (the look at the folder has finished)' });
+      await s.expectVisible(s.sel.welcomeLink('Import Your Data Model…'), { what: 'the sidebar\'s "Import Your Data Model…" button' });
+      // The look at the folder has finished: the empty view names what it found.
+      await s.eventually(async () => (await s.ui.sidebarText()).includes('This folder has CREATE TABLE scripts.'), { message: 'the sidebar never said the folder has CREATE TABLE scripts' });
       // The popup comes right after that look; give it time to (wrongly) show.
       await sleep(3000);
       const toasts = await s.ui.notifications();

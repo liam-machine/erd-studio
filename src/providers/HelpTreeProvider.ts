@@ -5,6 +5,11 @@
  * rows rather than unlabelled title-bar icons. The reports the user filed
  * from ERD Studio (`ReportTrackingService`) show under "My Reports" once
  * there is one; its rows are {@link MyReportsTreeProvider}'s.
+ *
+ * **Import Your Data Model…** leads the rows once the project has a diagram
+ * or a table ({@link HelpTreeProvider.setProjectHasModel}): before that, the
+ * empty Diagrams view's own button is the first thing in the sidebar, and the
+ * same row here would only repeat it.
  */
 
 import * as vscode from 'vscode';
@@ -12,6 +17,7 @@ import * as vscode from 'vscode';
 import type { ReportTrackingService } from '../services/reportTrackingService';
 import { MyReportsTreeProvider, type MyReportNode } from './MyReportsTreeProvider';
 import { IMPORT_GUIDE_COMMAND, IMPORT_GUIDE_LABEL, TOUR_LABEL } from '../types/startActions';
+import type { ImportGuideSurface } from '../services/importGuide';
 import { SHOW_ME_AROUND_COMMAND, SHOW_ME_AROUND_LABEL } from '../types/onboardingGuide';
 
 export interface HelpActionNode {
@@ -20,6 +26,8 @@ export interface HelpActionNode {
   readonly label: string;
   readonly icon: string;
   readonly command: string;
+  /** The command's arguments, fixed here (the import guide's `{ from: 'sidebar' }`). */
+  readonly arguments?: readonly unknown[];
   readonly tooltip: string;
 }
 
@@ -29,15 +37,22 @@ export interface HelpReportsNode {
 
 export type HelpNode = HelpActionNode | HelpReportsNode | MyReportNode;
 
-/** The rows, in order. Each runs a contributed command; none takes an argument. */
+/**
+ * The first row once the project has a diagram or a table: the import guide,
+ * counted as opened from the sidebar (`importGuideFromSidebar`, the key its
+ * empty-view button counts too).
+ */
+export const HELP_IMPORT_ACTION: HelpActionNode = {
+  type: 'action', id: 'importGuide', label: IMPORT_GUIDE_LABEL, icon: 'cloud-download', command: IMPORT_GUIDE_COMMAND,
+  arguments: [{ from: 'sidebar' satisfies ImportGuideSurface }],
+  tooltip: 'Bring in the model you already have: SQL scripts, DBML, a Power BI or Fabric semantic model, Databricks, Snowflake and more.',
+};
+
+/** The rows always shown, in order, after {@link HELP_IMPORT_ACTION} when it shows. Each runs a contributed command. */
 export const HELP_ACTIONS: readonly HelpActionNode[] = [
   {
     type: 'action', id: 'aiHelper', label: 'Set Up My AI Helper', icon: 'sparkle', command: 'erdStudio.setupAiHelper',
     tooltip: 'Teach your AI assistant (Claude Code, GitHub Copilot, Codex, Gemini CLI or Cursor) to read and write your diagrams.',
-  },
-  {
-    type: 'action', id: 'importGuide', label: IMPORT_GUIDE_LABEL, icon: 'cloud-download', command: IMPORT_GUIDE_COMMAND,
-    tooltip: 'How to export the model you already have from Databricks, Snowflake, Power BI, Fabric or a database, and import it.',
   },
   {
     type: 'action', id: 'gettingStarted', label: TOUR_LABEL, icon: 'play-circle', command: 'erdStudio.showGettingStarted',
@@ -63,6 +78,8 @@ export class HelpTreeProvider implements vscode.TreeDataProvider<HelpNode>, vsco
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
   private readonly reports: MyReportsTreeProvider;
   private readonly subscription: vscode.Disposable;
+  /** The project holds a diagram or a table (`erdStudio.hasDiagrams` / `erdStudio.hasTables`): the import row leads. */
+  private projectHasModel = false;
 
   constructor(private readonly tracking: ReportTrackingService) {
     this.reports = new MyReportsTreeProvider(tracking);
@@ -73,9 +90,20 @@ export class HelpTreeProvider implements vscode.TreeDataProvider<HelpNode>, vsco
     this._onDidChangeTreeData.fire(undefined);
   }
 
+  /**
+   * Whether the project holds a diagram or a table. Until it does, the empty
+   * Diagrams view leads with **Import Your Data Model…**; after, this view's
+   * first row does. Lists again only when the answer changes.
+   */
+  setProjectHasModel(has: boolean): void {
+    if (has === this.projectHasModel) return;
+    this.projectHasModel = has;
+    this.refresh();
+  }
+
   getChildren(element?: HelpNode): HelpNode[] {
     if (!element) {
-      const rows: HelpNode[] = [...HELP_ACTIONS];
+      const rows: HelpNode[] = [...(this.projectHasModel ? [HELP_IMPORT_ACTION] : []), ...HELP_ACTIONS];
       // After Send Feedback: the reports it filed, once there is one.
       if (this.tracking.getReports().length > 0) {
         rows.splice(rows.findIndex((r) => r.type === 'action' && r.id === 'feedback') + 1, 0, { type: 'reports' });
@@ -104,7 +132,7 @@ export class HelpTreeProvider implements vscode.TreeDataProvider<HelpNode>, vsco
     item.iconPath = new vscode.ThemeIcon(element.icon);
     item.tooltip = element.tooltip;
     item.contextValue = 'helpAction';
-    item.command = { command: element.command, title: element.label };
+    item.command = { command: element.command, title: element.label, ...(element.arguments ? { arguments: [...element.arguments] } : {}) };
     return item;
   }
 

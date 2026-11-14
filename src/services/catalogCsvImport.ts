@@ -435,7 +435,7 @@ export type CatalogCsvResult =
   | { ok: false; reason: CatalogCsvFailure; problems: CatalogCsvProblem[]; ledger: LedgerEntry[] };
 
 /** Where the import guide's queries are, for a note about a file that lacks keys. */
-const GUIDE_POINTER = 'The catalog queries in ERD Studio: Bring In Your Data Model… include them.';
+const GUIDE_POINTER = 'The catalog queries in ERD Studio: Import Your Data Model… include them.';
 
 interface FkGroup { name?: string; toCatalog: string; toSchema: string; toTable: string; pairs: Array<{ from: string; to: string; ordinal: number }>; line: number; file: string }
 

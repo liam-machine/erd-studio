@@ -1,7 +1,10 @@
 /**
  * The start screen: the one-click ways to begin a data model, offered the same
- * way on every surface a new user meets — the Welcome panel, the Get Started
- * walkthrough and the empty Diagrams view.
+ * way on every surface a new user meets — the Get Started walkthrough, the
+ * start quick pick and a draft's More ways to start. The empty Diagrams view
+ * of an empty project leads with the import guide instead
+ * ({@link IMPORT_GUIDE_LABEL}, which itself leads with the suggestion), with
+ * New Diagram… as its one link.
  *
  * Pure and vscode-free: the host, the Welcome panel's page and the tests share
  * it. What the folder suggests (the **intent**) comes from {@link startIntentFor}
@@ -65,7 +68,7 @@ export const START_ACTION_LABELS: Readonly<Record<StartAction, string>> = {
 };
 
 /** The import guide (`erdStudio.showImportGuide`): its command title, its tab and every link to it. */
-export const IMPORT_GUIDE_LABEL = 'Bring In Your Data Model…';
+export const IMPORT_GUIDE_LABEL = 'Import Your Data Model…';
 /** The one link under a start surface's button: the other starts, in a quick pick (`erdStudio.start` with `{ from }` alone). */
 export const MORE_STARTS_LABEL = 'More ways to start…';
 /** The start quick pick's title (the same words as the link that opens it). */
@@ -310,12 +313,13 @@ export function moreStartsCommandLink(from: Exclude<StartSurface, 'welcome'>): s
 // The import guide: one quiet link on every start surface
 // ---------------------------------------------------------------------------
 
-/** **Bring In Your Data Model…** (`src/services/importGuide.ts`). */
+/** **Import Your Data Model…** (`src/services/importGuide.ts`). */
 export const IMPORT_GUIDE_COMMAND = 'erdStudio.showImportGuide';
 
 /**
- * A `command:` link to the guide, saying where it was opened from. The start
- * surfaces no longer carry one: the guide is the last item of the
+ * A `command:` link to the guide, saying where it was opened from: the
+ * sidebar's empty Diagrams and Table Library views (`sidebar`). The
+ * walkthrough carries none: there the guide is the last item of the
  * {@link MORE_STARTS_LABEL} quick pick (and of Import…'s picker).
  */
 export function importGuideCommandLink(from: 'walkthrough' | 'sidebar'): string {

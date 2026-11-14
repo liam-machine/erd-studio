@@ -113,7 +113,7 @@ export function recordStart(action: StartAction, from: StartSurface): void {
 /**
  * Run `erdStudio.start`. A valid `{ action, from }` is counted and run. `{ from }`
  * alone is a surface's **More ways to start…** link: the starts other than
- * that surface's button (`moreStartsFor`), then **Bring In Your Data Model…**
+ * that surface's button (`moreStartsFor`), then **Import Your Data Model…**
  * (the import guide), the pick counted as that surface's start (or the
  * guide's `importGuideFrom<Surface>`). Anything else (a stray link, an old
  * keybinding) shows every start that applies here and the guide, and counts

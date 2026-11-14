@@ -8,6 +8,10 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { JSDOM } from 'jsdom';
 
+import { readFileSync } from 'fs';
+import { join } from 'path';
+
+import { ContributionIndex, parseWelcomeContents, type Contributions } from '../../src/providers/glassSidebar/contributions';
 import { buildGlassSidebarHtml } from '../../src/providers/glassSidebar/html';
 import type { GlassFilterGuide, GlassSection, SerialisedNode } from '../../src/providers/glassSidebar/protocol';
 
@@ -1404,5 +1408,51 @@ describe('progress on a section (busy)', () => {
     const reduced = [...html.matchAll(/@media \(prefers-reduced-motion: reduce\) \{([\s\S]*?)\n\}/g)].map((m) => m[1]).join('\n');
     expect(reduced).toMatch(/\.gs-section__progress::before \{[^}]*animation: gs-breathe/);
     expect(reduced).not.toMatch(/gs-progress /);
+  });
+});
+
+describe('the empty project: Import Your Data Model… first', () => {
+  // The real package.json's empty-state content, resolved as the host does (GlassSidebarProvider.snapshot).
+  const contributes = (JSON.parse(readFileSync(join(__dirname, '../../package.json'), 'utf8')) as { contributes: Contributions }).contributes;
+  const index = new ContributionIndex(contributes);
+  const welcomeFor = (viewId: string, keys: Record<string, unknown>) => index
+    .welcome(viewId, (k) => (k === 'workspaceFolderCount' ? 1 : keys[k]))
+    .map(({ index: entry, contents }) => ({ entry, paragraphs: parseWelcomeContents(contents).paragraphs }));
+  const EMPTY = { 'erdStudio.hasProject': true, 'erdStudio.storage': 'dbml', 'erdStudio.diagramsLoading': false, 'erdStudio.startIntent': 'blank' };
+  const empty = (keys: Record<string, unknown>): GlassSection[] => [
+    { key: 'diagrams', title: 'Diagrams', visible: true, defaultCollapsed: false, actions: { navigation: [], groups: [] }, welcome: welcomeFor('erdStudio.domainTree', keys), nodes: [] },
+    { key: 'tables', title: 'Table Library', visible: true, defaultCollapsed: false, actions: { navigation: [], groups: [] }, welcome: welcomeFor('erdStudio.modelLibrary', keys), nodes: [] },
+  ];
+
+  it('draws one primary button, Import Your Data Model…, at the top of the Diagrams card, with New Diagram… a quiet link under it', () => {
+    const { win, posted } = load();
+    sendState(win, empty(EMPTY));
+    const diagrams = win.document.querySelector('[data-section="diagrams"]') ?? win.document.querySelectorAll('.gs-section')[0];
+    const welcome = diagrams!.querySelector('.gs-welcome')!;
+    // In order: the glyph, the title, one line, the primary button, the link.
+    expect([...welcome.children].map((c) => c.className)).toEqual(['gs-welcome__glyph gs-welcome__glyph--diagrams', 'gs-welcome__lead', '', 'gs-button gs-button--primary', '']);
+    expect(welcome.querySelector('.gs-welcome__lead')?.textContent).toBe('No diagrams or tables yet.');
+    const primary = win.document.querySelectorAll('.gs-button--primary');
+    expect(primary).toHaveLength(1);
+    expect(primary[0].textContent).toBe('Import Your Data Model…');
+    expect(welcome.querySelector('.gs-link')?.textContent).toBe('New Diagram…');
+    // The Table Library points the same way, as a link: no second button competing with it.
+    const library = win.document.querySelectorAll('.gs-welcome')[1];
+    expect(library.querySelectorAll('.gs-button')).toHaveLength(0);
+    expect([...library.querySelectorAll('.gs-link')].map((l) => l.textContent)).toEqual(['Import Your Data Model…']);
+    // A click names the entry and the link, never a command.
+    (primary[0] as HTMLElement).click();
+    const sent = posted.filter((m) => (m as { type: string }).type === 'welcomeLink');
+    expect(sent).toHaveLength(1);
+    const { entry, link } = sent[0] as { entry: number; link: number };
+    expect(parseWelcomeContents(contributes.viewsWelcome![entry].contents).links[link].href).toBe('command:erdStudio.showImportGuide?%5B%7B%22from%22%3A%22sidebar%22%7D%5D');
+    expect(JSON.stringify(sent[0])).not.toContain('erdStudio.');
+  });
+
+  it('a project with tables but no diagram: its one button is New Diagram…', () => {
+    const { win } = load();
+    sendState(win, empty({ ...EMPTY, 'erdStudio.hasTables': true }));
+    const primary = win.document.querySelectorAll('.gs-button--primary');
+    expect([...primary].map((b) => b.textContent)).toEqual(['New Diagram…']);
   });
 });

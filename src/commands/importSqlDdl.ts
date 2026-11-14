@@ -1078,7 +1078,7 @@ async function importCatalogExport(deps: ImportSqlDdlDeps, read: SqlResume, pres
       actions[SHOW_IMPORT_REPORT_LABEL] = () => ui.showImportReport!(reportId);
     }
     if (ui.showLogs) actions[SHOW_LOGS_BUTTON] = () => ui.showLogs!();
-    const pointer = result.reason === 'notCatalog' ? ' The queries in ERD Studio: Bring In Your Data Model… write one.' : '';
+    const pointer = result.reason === 'notCatalog' ? ' The queries in ERD Studio: Import Your Data Model… write one.' : '';
     showError(`${TITLE}: ${first?.message ?? 'the catalog export could not be read.'}${pointer}`, actions);
     return undefined;
   }

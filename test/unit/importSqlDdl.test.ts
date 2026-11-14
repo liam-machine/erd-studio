@@ -158,7 +158,7 @@ afterEach(() => {
 });
 
 describe('Import SQL DDL… — contributed', () => {
-  it('is a palette command with no legacy alias, not pre-registered, and in the + menu after Import DBML…', () => {
+  it('is a palette command with no legacy alias, not pre-registered; the + menu reaches it through Import Your Data Model… (the guide)', () => {
     const pkg = packageJson as unknown as {
       contributes: { commands: Array<{ command: string; title: string; category?: string }>; menus: Record<string, Array<{ command?: string; when?: string; group?: string }>> };
     };
@@ -168,7 +168,8 @@ describe('Import SQL DDL… — contributed', () => {
     expect(NO_LEGACY_ALIAS.has(IMPORT_SQL_DDL_COMMAND)).toBe(true);
     expect(PRE_REGISTERED_COMMANDS.has(IMPORT_SQL_DDL_COMMAND)).toBe(false);
     expect(pkg.contributes.menus.commandPalette.filter((m) => m.command === IMPORT_SQL_DDL_COMMAND)).toEqual([{ command: IMPORT_SQL_DDL_COMMAND, when: 'erdStudio.hasProject' }]);
-    expect(pkg.contributes.menus['erdStudio.newMenu']).toContainEqual({ command: IMPORT_SQL_DDL_COMMAND, when: 'erdStudio.hasProject', group: '1_diagram@4' });
+    expect(pkg.contributes.menus['erdStudio.newMenu'].map((m) => m.command)).not.toContain(IMPORT_SQL_DDL_COMMAND);
+    expect(pkg.contributes.menus['erdStudio.newMenu'].map((m) => m.command)).toContain('erdStudio.showImportGuide');
   });
 });
 

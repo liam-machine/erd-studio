@@ -66,8 +66,10 @@
  * 152px plus a 15px bottom margin, and 10px are left between them. It
  * scrolls instead, never sideways.
  */
+/* Above the minimap's row: the reserve comes from the canvas's size
+   (lib/canvasChrome.ts), so a small minimap leaves the panel more room. */
 .detail-panel--viewer {
-  max-height: min(calc(100vh - 100px), calc(100% - 192px));
+  max-height: min(calc(100vh - 100px), calc(100% - var(--shell-inset) - var(--detail-panel-bottom-reserve, 177px)));
   overflow-x: hidden;
   overscroll-behavior: contain;
 }

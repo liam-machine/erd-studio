@@ -1,7 +1,8 @@
 // Someone whose warehouse is in Microsoft Fabric, in a folder of their own
-// with nothing in it to bring in yet. The empty Diagrams view's "More ways to
-// start…" link opens the other starts; Import… opens its picker, whose last
-// item is "Bring In Your Data Model…" (for a model that is not a file yet).
+// with nothing in it to bring in yet. The empty Diagrams view leads with
+// "Import Your Data Model…"; this story takes the other way in, Import… from
+// the Command Palette, whose picker's last item is "Import Your Data Model…"
+// (for a model that is not a file yet).
 // It opens the import guide, whose Microsoft Fabric card has two parts: a
 // semantic model (Git integration) and a Warehouse or SQL analytics endpoint
 // (SQL Server Management Studio's Script Table as …, read as SQL Server).
@@ -24,8 +25,8 @@ import { REPO } from '../lib/launch.mjs';
 import { DRAFT, waitForDraft, waitForDraftKeepingName } from '../lib/draft.mjs';
 import { story } from '../lib/story.mjs';
 
-const GUIDE_ITEM = 'Bring In Your Data Model…';
-const GUIDE_TAB = 'Bring In Your Data Model';
+const GUIDE_ITEM = 'Import Your Data Model…';
+const GUIDE_TAB = 'Import Your Data Model';
 const CARD = `doc.querySelector('[data-card="fabric"]')`;
 const WAREHOUSE = `[...${CARD}.querySelectorAll('.ig-section')].find(s => s.querySelector('[data-guide-action="fabricWarehouse"]'))`;
 const IMPORT = `${CARD}.querySelector('[data-action="run"][data-guide-action="fabricWarehouse"]')`;
@@ -47,17 +48,13 @@ export default story({
       await s.eventually(async () => (await s.ui.windowTitle()).includes('fabric-reporting'), { message: 'the fabric-reporting folder did not open' });
     });
 
-    const MORE = s.sel.welcomeLink('More ways to start…');
-    await s.step('When I open the ERD Studio sidebar and click "More ways to start…"', async () => {
+    await s.step('When I open the ERD Studio sidebar it leads with Import Your Data Model…; I run Import… from the Command Palette', async () => {
       await s.ui.openSidebar('ERD Studio');
-      await s.expectVisible(MORE, { what: 'the empty Diagrams view\'s "More ways to start…" link' });
-      await s.wb.highlight(MORE);
-      await s.pause(1000);
-      await s.wb.unhighlight();
-      await s.wb.click(MORE);
-      await s.ui.waitForQuickPick({ title: 'More ways to start' });
-      await s.ui.pick('Import…');
-    }, { say: 'When I open the ERD Studio sidebar, click More ways to start, and choose Import.' });
+      // The empty project's one button is the guide itself (story 13's path); this story is Import…'s picker.
+      await s.expectVisible(s.sel.welcomeLink(GUIDE_ITEM), { what: 'the empty Diagrams view\'s "Import Your Data Model…" button' });
+      s.assert.deepEqual(await s.wb.ev(s.sel.welcomeButtons), [GUIDE_ITEM], 'the empty Diagrams view\'s one button');
+      await s.ui.runCommand('ERD Studio: Import…');
+    }, { say: 'When I open the ERD Studio sidebar it offers to import my data model. I run Import from the Command Palette instead.' });
 
     await s.step(`Import… ends with "${GUIDE_ITEM}"`, async () => {
       const pick = await s.ui.waitForQuickPick({ title: 'Import' });
@@ -66,7 +63,7 @@ export default story({
       await s.wb.highlight(s.sel.quickPickRow(GUIDE_ITEM));
       await s.pause(1500);
       await s.wb.unhighlight();
-    }, { say: 'Import offers my files, and last: bring in your data model, from Databricks, Snowflake, Power BI and more.' });
+    }, { say: 'Import offers my files, and last: import your data model, from Databricks, Snowflake, Power BI and more.' });
 
     let guide;
     await s.step('My model is not a file yet, so I pick it: the guide opens', async () => {

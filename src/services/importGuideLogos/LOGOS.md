@@ -1,6 +1,6 @@
 # Third-party logos on the import guide
 
-The marks beside each source's name in **Bring In Your Data Model…** (`src/services/importGuide.ts`).
+The marks beside each source's name in **Import Your Data Model…** (`src/services/importGuide.ts`).
 Copied unchanged from `video/player/assets/logos/` (nothing here loads from `video/` at build or run
 time); each file's source, terms and how it was vetted are in
 `social-video/player/assets/logos/LOGOS.md`.

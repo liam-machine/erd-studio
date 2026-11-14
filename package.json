@@ -145,8 +145,9 @@
       },
       {
         "command": "erdStudio.showImportGuide",
-        "title": "Bring In Your Data Model…",
-        "category": "ERD Studio"
+        "title": "Import Your Data Model…",
+        "category": "ERD Studio",
+        "icon": "$(cloud-download)"
       },
       {
         "command": "erdStudio.showImportReport",
@@ -613,28 +614,33 @@
       },
       {
         "view": "erdStudio.domainTree",
-        "contents": "No diagrams yet.\n\n[New Diagram…](command:erdStudio.start?%5B%7B%22action%22%3A%22blank%22%2C%22from%22%3A%22sidebar%22%7D%5D)\n\nOr: [More ways to start…](command:erdStudio.start?%5B%7B%22from%22%3A%22sidebar%22%7D%5D)",
-        "when": "erdStudio.hasProject && !erdStudio.hasDbtProject && !erdStudio.diagramsLoading && erdStudio.storage != yaml && erdStudio.storage != mixed && erdStudio.startIntent == blank"
+        "contents": "No diagrams or tables yet. Start from your data model: SQL scripts, DBML, Power BI and more.\n\n[Import Your Data Model…](command:erdStudio.showImportGuide?%5B%7B%22from%22%3A%22sidebar%22%7D%5D)\n\nOr: [New Diagram…](command:erdStudio.start?%5B%7B%22action%22%3A%22blank%22%2C%22from%22%3A%22sidebar%22%7D%5D)",
+        "when": "erdStudio.hasProject && !erdStudio.hasDbtProject && !erdStudio.hasTables && !erdStudio.diagramsLoading && erdStudio.storage != yaml && erdStudio.storage != mixed && erdStudio.startIntent == blank"
       },
       {
         "view": "erdStudio.domainTree",
-        "contents": "No diagrams yet. This folder has a Power BI or Fabric semantic model.\n\n[Import your Power BI semantic model](command:erdStudio.start?%5B%7B%22action%22%3A%22importSemanticModel%22%2C%22from%22%3A%22sidebar%22%7D%5D)\n\nOr: [More ways to start…](command:erdStudio.start?%5B%7B%22from%22%3A%22sidebar%22%7D%5D)",
-        "when": "erdStudio.hasProject && !erdStudio.hasDbtProject && !erdStudio.diagramsLoading && erdStudio.storage != yaml && erdStudio.storage != mixed && erdStudio.startIntent == importSemanticModel"
+        "contents": "No diagrams or tables yet. This folder has a Power BI or Fabric semantic model.\n\n[Import Your Data Model…](command:erdStudio.showImportGuide?%5B%7B%22from%22%3A%22sidebar%22%7D%5D)\n\nOr: [New Diagram…](command:erdStudio.start?%5B%7B%22action%22%3A%22blank%22%2C%22from%22%3A%22sidebar%22%7D%5D)",
+        "when": "erdStudio.hasProject && !erdStudio.hasDbtProject && !erdStudio.hasTables && !erdStudio.diagramsLoading && erdStudio.storage != yaml && erdStudio.storage != mixed && erdStudio.startIntent == importSemanticModel"
       },
       {
         "view": "erdStudio.domainTree",
-        "contents": "No diagrams yet. This folder has CREATE TABLE scripts.\n\n[Import your SQL scripts](command:erdStudio.start?%5B%7B%22action%22%3A%22importSqlDdl%22%2C%22from%22%3A%22sidebar%22%7D%5D)\n\nOr: [More ways to start…](command:erdStudio.start?%5B%7B%22from%22%3A%22sidebar%22%7D%5D)",
-        "when": "erdStudio.hasProject && !erdStudio.hasDbtProject && !erdStudio.diagramsLoading && erdStudio.storage != yaml && erdStudio.storage != mixed && erdStudio.startIntent == importSqlDdl"
+        "contents": "No diagrams or tables yet. This folder has CREATE TABLE scripts.\n\n[Import Your Data Model…](command:erdStudio.showImportGuide?%5B%7B%22from%22%3A%22sidebar%22%7D%5D)\n\nOr: [New Diagram…](command:erdStudio.start?%5B%7B%22action%22%3A%22blank%22%2C%22from%22%3A%22sidebar%22%7D%5D)",
+        "when": "erdStudio.hasProject && !erdStudio.hasDbtProject && !erdStudio.hasTables && !erdStudio.diagramsLoading && erdStudio.storage != yaml && erdStudio.storage != mixed && erdStudio.startIntent == importSqlDdl"
       },
       {
         "view": "erdStudio.domainTree",
-        "contents": "No diagrams yet. This folder has a DBML file.\n\n[Import your DBML file](command:erdStudio.start?%5B%7B%22action%22%3A%22importDbmlFile%22%2C%22from%22%3A%22sidebar%22%7D%5D)\n\nOr: [More ways to start…](command:erdStudio.start?%5B%7B%22from%22%3A%22sidebar%22%7D%5D)",
-        "when": "erdStudio.hasProject && !erdStudio.hasDbtProject && !erdStudio.diagramsLoading && erdStudio.storage != yaml && erdStudio.storage != mixed && erdStudio.startIntent == importDbmlFile"
+        "contents": "No diagrams or tables yet. This folder has a DBML file.\n\n[Import Your Data Model…](command:erdStudio.showImportGuide?%5B%7B%22from%22%3A%22sidebar%22%7D%5D)\n\nOr: [New Diagram…](command:erdStudio.start?%5B%7B%22action%22%3A%22blank%22%2C%22from%22%3A%22sidebar%22%7D%5D)",
+        "when": "erdStudio.hasProject && !erdStudio.hasDbtProject && !erdStudio.hasTables && !erdStudio.diagramsLoading && erdStudio.storage != yaml && erdStudio.storage != mixed && erdStudio.startIntent == importDbmlFile"
       },
       {
         "view": "erdStudio.domainTree",
-        "contents": "No diagrams yet. This folder is a dbt project.\n\n[Import from dbt](command:erdStudio.start?%5B%7B%22action%22%3A%22drawFromDbt%22%2C%22from%22%3A%22sidebar%22%7D%5D)\n\nOr: [More ways to start…](command:erdStudio.start?%5B%7B%22from%22%3A%22sidebar%22%7D%5D)",
-        "when": "erdStudio.hasDbtProject && !erdStudio.diagramsLoading && erdStudio.storage != yaml && erdStudio.storage != mixed"
+        "contents": "No diagrams or tables yet. This folder is a dbt project.\n\n[Import Your Data Model…](command:erdStudio.showImportGuide?%5B%7B%22from%22%3A%22sidebar%22%7D%5D)\n\nOr: [New Diagram…](command:erdStudio.start?%5B%7B%22action%22%3A%22blank%22%2C%22from%22%3A%22sidebar%22%7D%5D)",
+        "when": "erdStudio.hasDbtProject && !erdStudio.hasTables && !erdStudio.diagramsLoading && erdStudio.storage != yaml && erdStudio.storage != mixed"
+      },
+      {
+        "view": "erdStudio.domainTree",
+        "contents": "No diagrams yet. Start one, then drag your tables onto it from the Table Library.\n\n[New Diagram…](command:erdStudio.start?%5B%7B%22action%22%3A%22blank%22%2C%22from%22%3A%22sidebar%22%7D%5D)",
+        "when": "erdStudio.hasProject && erdStudio.hasTables && !erdStudio.diagramsLoading && erdStudio.storage != yaml && erdStudio.storage != mixed && (erdStudio.hasDbtProject || erdStudio.startIntent)"
       },
       {
         "view": "erdStudio.domainTree",
@@ -648,7 +654,7 @@
       },
       {
         "view": "erdStudio.modelLibrary",
-        "contents": "No tables yet.\n\nEach table is a file in .erd-studio/ you can commit and review like code. Add one on a diagram's canvas, or ask your AI assistant.",
+        "contents": "No tables yet.\n\nEach table is a file in .erd-studio/ you can commit and review like code. Bring yours in with [Import Your Data Model…](command:erdStudio.showImportGuide?%5B%7B%22from%22%3A%22sidebar%22%7D%5D), add one on a diagram's canvas, or ask your AI assistant.",
         "when": "!erdStudio.tablesLoading"
       },
       {
@@ -1466,39 +1472,14 @@
       ],
       "erdStudio.newMenu": [
         {
-          "command": "erdStudio.createDomain",
-          "when": "erdStudio.hasProject",
-          "group": "1_diagram@1"
-        },
-        {
-          "command": "erdStudio.drawFromDbt",
-          "when": "erdStudio.hasDbtProject",
-          "group": "1_diagram@2"
-        },
-        {
-          "command": "erdStudio.importDbml",
-          "when": "erdStudio.hasProject",
-          "group": "1_diagram@3"
-        },
-        {
-          "command": "erdStudio.importSqlDdl",
-          "when": "erdStudio.hasProject",
-          "group": "1_diagram@4"
-        },
-        {
-          "command": "erdStudio.importSemanticModel",
-          "when": "erdStudio.hasProject",
-          "group": "1_diagram@5"
-        },
-        {
           "command": "erdStudio.showImportGuide",
           "when": "erdStudio.hasProject",
-          "group": "1_import_guide@1"
+          "group": "1_start@1"
         },
         {
-          "command": "erdStudio.addLayer",
-          "when": "erdStudio.hasSemanticDir",
-          "group": "2_layer@1"
+          "command": "erdStudio.createDomain",
+          "when": "erdStudio.hasProject",
+          "group": "1_start@2"
         }
       ]
     },

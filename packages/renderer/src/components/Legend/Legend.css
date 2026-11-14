@@ -76,6 +76,11 @@
   /* A faint sunken well for the samples, derived from the theme foreground. */
   --legend-sample-bg: var(--glass-well);
 
+  /* A column: the title bar stays, the sections scroll under it. The panel
+     is never taller than its canvas (an inline max-height from the canvas's
+     size, lib/canvasChrome.ts), so a short embedded frame scrolls it. */
+  display: flex;
+  flex-direction: column;
   max-width: 260px;
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-xl);
@@ -147,6 +152,8 @@
    --------------------------------------------------------------------------- */
 
 .legend__content {
+  flex: 0 1 auto;
+  min-height: 0;
   padding: var(--space-2) 0 var(--space-3);
   /* Two more sections than this panel was designed for. On a short editor it
      has to scroll rather than grow past the top of the canvas. */
@@ -333,6 +340,24 @@
   stroke: var(--discrepancy-mismatch);
 }
 
+/* A line passing under a table: the x-ray's short faint dashes (EdgeRouting.css). */
+.legend__edge--xray {
+  stroke: color-mix(in srgb, var(--stage-logical) 70%, var(--editor-fg));
+  stroke-width: 1.25;
+  stroke-dasharray: 4 4;
+  stroke-linecap: butt;
+  opacity: 0.6;
+}
+
+/* A neutral line at rest, and a lit one in the layer's colour (--legend-lit-color, set inline). */
+.legend__edge--rest {
+  stroke: var(--canvas-neutral-line);
+}
+
+.legend__edge--lit {
+  stroke: var(--legend-lit-color, var(--canvas-neutral-line));
+}
+
 .legend__edge--annotation {
   stroke: var(--dim-fg);
   stroke-dasharray: 6 4;
@@ -459,10 +484,102 @@
   min-width: 28px;
 }
 
-/* A sample layer badge, in the silver layer's colours as the canvas draws one. */
+/* A fixed slot for a header or line mark, so the descriptions beside the
+   samples line up whatever each sample's width. */
+.legend__sample {
+  display: inline-flex;
+  flex: 0 0 52px;
+  align-items: center;
+}
+
+/* The diagram's own layer badge, drawn as .model-node__badge draws it: a
+   capsule in the layer's colour (--legend-layer-color, set inline from the
+   layer config), neutral when the layer has none. */
 .legend__badge--layer {
-  background: var(--layer-silver-bg);
-  color: var(--layer-silver);
+  border: 1px solid color-mix(in srgb, var(--legend-layer-color, var(--editor-fg)) 30%, transparent);
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--legend-layer-color, var(--editor-fg)) 14%, transparent);
+  color: color-mix(in srgb, var(--legend-layer-color, var(--text-secondary)) 82%, var(--text-primary));
+  letter-spacing: var(--tracking-caps);
+}
+
+/* The warehouse name after a table's name (`as orders`), as .model-node__model-id draws it. */
+.legend__alias-sample {
+  flex-shrink: 0;
+  min-width: 28px;
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+}
+
+/* The grain line under a table's name, as .model-node__grain draws it. */
+.legend__grain-sample {
+  flex-shrink: 0;
+  min-width: 28px;
+  padding: 0 var(--space-2);
+  border-bottom: 1px solid var(--glass-divider);
+  color: var(--text-tertiary);
+  font-size: var(--text-2xs);
+}
+
+/* The editor's "+n" chip, as .model-node__off-diagram draws it. */
+.legend__off-diagram-sample {
+  flex-shrink: 0;
+  padding: 0 6px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-pill);
+  background: var(--control-fill);
+  color: var(--text-tertiary);
+  font-size: 9px;
+  font-weight: var(--weight-semibold);
+  line-height: 14px;
+}
+
+/* A role name on a line and a composite key's chip, as FkEdge draws them. */
+.legend__role-sample,
+.legend__composite-sample {
+  flex-shrink: 0;
+  padding: 0 var(--space-3);
+  border: 1px solid color-mix(in srgb, var(--stage-logical) 40%, transparent);
+  border-radius: var(--radius-pill);
+  background: var(--glass-surface-solid);
+  color: color-mix(in srgb, var(--stage-logical) 55%, var(--text-primary));
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-semibold);
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+/* The ⚠ on a line probably drawn backwards, as .fk-edge__backwards-icon draws it. */
+.legend__backwards-sample {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border: 1px solid var(--glass-tint-warning-edge);
+  border-radius: var(--radius-pill);
+  background:
+    linear-gradient(var(--glass-tint-warning), var(--glass-tint-warning)),
+    var(--glass-surface-solid);
+  color: var(--warning-fg);
+  font-size: var(--text-2xs);
+  line-height: 1;
+}
+
+.legend__items--marks {
+  gap: var(--space-3);
+  margin-top: var(--space-5);
+}
+
+.legend__items--symbols.legend__items--first {
+  margin-top: 0;
+}
+
+.legend__note--empty {
+  margin: 0;
+  padding: var(--space-5) var(--space-6);
 }
 
 /* The schema prefix before a table's name, as .model-node__schema draws it. */

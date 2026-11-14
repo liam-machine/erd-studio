@@ -119,6 +119,7 @@ function EditorCanvas() {
   const errorMergeConflict = useEditorStore((s) => s.errorMergeConflict);
   const errorFileProblem = useEditorStore((s) => s.errorFileProblem);
   const errorNewerSchema = useEditorStore((s) => s.errorNewerSchema);
+  const errorFeedback = useEditorStore((s) => s.errorFeedback);
   const nodes = useEditorStore((s) => s.nodes);
   const edges = useEditorStore((s) => s.edges);
   // The first-open fit, decided once from the first nodes the canvas gets: a
@@ -320,7 +321,8 @@ function EditorCanvas() {
           break;
         case 'error':
           setHostLoading(null);
-          useEditorStore.getState().recordError('extension', msg.payload.message);
+          // A failure of ours keeps its cause in the report's recent errors: the toast no longer holds it (#319).
+          useEditorStore.getState().recordError('extension', msg.payload.feedback?.description ?? msg.payload.message);
           setError(
             msg.payload.message,
             msg.payload.kind,
@@ -334,6 +336,7 @@ function EditorCanvas() {
               }
               : null,
             msg.payload.newerSchema === true,
+            msg.payload.feedback ?? null,
           );
           break;
         case 'openFeedback':
@@ -466,6 +469,11 @@ function EditorCanvas() {
 
   // Host error toast dismissal (canvas stays mounted; see render below)
   const dismissError = useCallback(() => setError(null), [setError]);
+  // A host error that is ERD Studio's (#319) offers Send Feedback, filled in by the host.
+  const errorToastActions = useMemo<ToastActionButton[] | undefined>(
+    () => (errorFeedback ? [{ label: 'Send Feedback', onClick: () => setFeedbackDialogOpen(true, errorFeedback) }] : undefined),
+    [errorFeedback, setFeedbackDialogOpen],
+  );
 
   // Global keyboard shortcuts (Escape, Delete/Backspace, Ctrl+F, copy/paste
   // notes, F2, Shift+L, Shift+?, V/S, Alt+1/2). Registered once — the hook
@@ -474,7 +482,9 @@ function EditorCanvas() {
 
   // Nodes/edges from the domain (transform + overlay effects) and the
   // click/selection handlers — the shared canvas core in @erd-studio/renderer.
-  const { onNodeClick, onEdgeClick, onPaneClick, onSelectionChange } = useCanvasGraph({ discrepancyVisible, discrepancyReport });
+  // A pane click is one click-away step: an open detail panel closes first
+  // (the selection stays), the next click clears it (lib/clickAway.ts).
+  const { onNodeClick, onEdgeClick, onPaneClick, onSelectionChange, keepSelection } = useCanvasGraph({ discrepancyVisible, discrepancyReport });
   // Hover a table to preview its relationships; the lines of the hovered or
   // selected table carry moving direction arrows. Ephemeral: never persisted
   // or posted.
@@ -492,8 +502,14 @@ function EditorCanvas() {
     }
   }, [nodes.length, persistedViewport, setReactFlowViewport]);
 
-  // Position persistence and selection handling.
-  const { onNodesChange } = usePositionPersistence();
+  // Position persistence and selection handling. React Flow's deselection on
+  // the pane click that only closed the detail panel is dropped, so the
+  // selection (one table or several) stays marked.
+  const { onNodesChange: persistNodesChange } = usePositionPersistence();
+  const onNodesChange = useCallback(
+    (changes: Parameters<typeof persistNodesChange>[0]) => persistNodesChange(keepSelection(changes)),
+    [persistNodesChange, keepSelection],
+  );
 
   const onMoveEnd = useCallback(
     (_event: MouseEvent | TouchEvent | null, viewport: Viewport) => {
@@ -965,6 +981,7 @@ function EditorCanvas() {
             ? `ERD Studio couldn't refresh this diagram. This is a problem in ERD Studio, not in your files: ${error}`
             : error}
           variant="error"
+          actions={errorToastActions}
           autoDismissMs={null}
           onDismiss={dismissError}
         />
