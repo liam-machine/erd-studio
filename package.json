@@ -2,7 +2,7 @@
   "name": "erd-studio",
   "displayName": "ERD Studio",
   "description": "Logical data modeling in Git, stored as DBML, an open format. Draw ERDs in VS Code as files your AI assistant reads and writes. Import DBML, SQL or Power BI; compare with dbt.",
-  "version": "2.0.6",
+  "version": "2.0.7",
   "publisher": "liamwynne",
   "license": "SEE LICENSE IN LICENSE",
   "icon": "media/icon.png",
