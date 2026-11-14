@@ -1093,6 +1093,18 @@ export const ERROR_CODES = [
   'dbtSearchFailedRejected',
   'dbtSearchFailedSort',
   'dbtSearchFailedThrew',
+  // #319: where in the edit pipeline a canvas handler failure came from, one
+  // beside each handlerFailed (the total; AtOther for a throw outside the
+  // pipeline or after the save), and the diagram's storage when it was read.
+  'handlerFailedAtRead',
+  'handlerFailedAtMutate',
+  'handlerFailedAtLayoutWrite',
+  'handlerFailedAtStorageWrite',
+  'handlerFailedAtJsonWrite',
+  'handlerFailedAtSave',
+  'handlerFailedAtOther',
+  'handlerFailedDbml',
+  'handlerFailedJson',
 ] as const;
 export type TelemetryErrorCode = (typeof ERROR_CODES)[number];
 

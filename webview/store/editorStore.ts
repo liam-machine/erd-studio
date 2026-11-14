@@ -112,6 +112,8 @@ export interface EditorState extends CanvasState {
   errorFileProblem: { problem: 'empty' | 'syntax'; line?: number; column?: number; fileType?: 'JSON' | 'DBML' } | null;
   /** With `errorKind: 'invalid'` (#261): the diagram was saved by a newer ERD Studio; false unless the host said so. */
   errorNewerSchema: boolean;
+  /** Send Feedback's prefill for a host error that is ERD Studio's (#319: the toast's button); null unless the host sent one. */
+  errorFeedback: NonNullable<ErrorMessage['payload']['feedback']> | null;
   /** Available model templates loaded from semantic/templates/*.json. */
   templates: TableTemplate[];
   /** Manifest models available to add to this domain (not already in domain). @deprecated Use existingModels. */
@@ -305,6 +307,7 @@ export interface EditorActions extends CanvasActions {
     mergeConflict?: boolean,
     fileProblem?: EditorState['errorFileProblem'],
     newerSchema?: boolean,
+    feedback?: EditorState['errorFeedback'],
   ) => void;
   setTemplates: (templates: TableTemplate[]) => void;
   setManifestModels: (models: ManifestModelPreview[]) => void;
@@ -426,6 +429,7 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   errorMergeConflict: false,
   errorFileProblem: null,
   errorNewerSchema: false,
+  errorFeedback: null,
   templates: [],
   manifestModels: [],
   _searchFocusFn: null,
@@ -492,7 +496,7 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
         }
       : { logicalOnly: false },
   ),
-  setError: (error, kind, mergeConflict, fileProblem, newerSchema) => set((state) => {
+  setError: (error, kind, mergeConflict, fileProblem, newerSchema, feedback) => set((state) => {
     // The "deleted or renamed" screen (#161) stands until a fresh domain
     // arrives: a later host error (a refused edit, a failed physical refresh)
     // would otherwise turn it back into a toast over the stale canvas.
@@ -503,6 +507,7 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
       errorMergeConflict: error !== null && mergeConflict === true,
       errorFileProblem: error === null ? null : (fileProblem ?? null),
       errorNewerSchema: error !== null && newerSchema === true,
+      errorFeedback: error === null ? null : (feedback ?? null),
     };
   }),
   setTemplates: (templates) => set({ templates }),
@@ -639,6 +644,7 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
     errorMergeConflict: false,
     errorFileProblem: null,
     errorNewerSchema: false,
+    errorFeedback: null,
     // The notice gets to speak again only when the artifacts behind the stage
     // actually changed. setDomain is NOT only a host payload — usePositionPersistence
     // calls it locally to merge optimistic positions after a drag — so resetting

@@ -260,6 +260,15 @@ export interface ErrorMessage {
     /** With `fileProblem: 'syntax'`: the 1-based line and column of the mistake, when it was located. */
     line?: number;
     column?: number;
+    /**
+     * Over a live canvas (#319): a canvas action failed and the failure is
+     * ERD Studio's, so the toast offers **Send Feedback**, which opens the
+     * dialog filled in with this. `message` never holds the exception's
+     * text; `description` does, with every local path redacted. Absent (a
+     * refusal, a problem in the user's files, an older host): no button.
+     * The load-error screens do not read it.
+     */
+    feedback?: { kind: FeedbackKind; title: string; description: string };
     /** With `fileProblem: 'syntax'`: the diagram file's format, from its extension ("isn't valid JSON" / "isn't valid DBML"). Absent means JSON. */
     fileType?: 'JSON' | 'DBML';
   };

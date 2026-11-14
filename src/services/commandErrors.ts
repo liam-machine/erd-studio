@@ -16,6 +16,7 @@ import { SubjectAreaFileError, SubjectAreaValidationError, type JsonSyntaxProble
 
 import { redactPaths, type FeedbackKind } from '../types/feedback';
 import { cutCrashDetail, type WebviewErrorArea } from '../types/webviewError';
+import type { EditStage } from './editFailureStage';
 
 /** The button that opens Send Feedback prefilled with the failure. */
 export const SEND_FEEDBACK_BUTTON = 'Send Feedback';
@@ -141,6 +142,98 @@ export function feedbackPrefill(title: string, doing: string, err: unknown): Fee
     kind: 'bug',
     title: `${title} failed`,
     description: redactPaths(`${title} hit a problem ${doing}.\n\nError: ${raw}`),
+  };
+}
+
+/** What a canvas handler was doing, for the toast of one that failed (#319). */
+export interface HandlerFailureWords {
+  /** The start of the toast when the failure's own words are for the user: `Failed to add column`. Absent: those words alone. */
+  label?: string;
+  /** The action as a noun phrase, for a failure that is ours: `Adding the column`. */
+  title: string;
+  /** What was not done, when the failure came before the change was made. Default `nothing was changed`. */
+  notDone?: string;
+  /** For a throw outside the edit pipeline (how far it got is unknown): `while …`. Default `while making the change`. */
+  doing?: string;
+  /** For the same throw: what may have been left behind. Default `the change may not have been made`. */
+  outcome?: string;
+  /** A line for the report alone (never the toast), such as the canvas message that failed. */
+  reportNote?: string;
+}
+
+/** What is known about a handler failure when its toast is written. */
+export interface HandlerFailureContext {
+  /** The failure's own words were written for the user (a refusal, a mistake in one of their files). */
+  explained: boolean;
+  /** The edit's stage at the throw (`editFailureTag`); undefined for a throw outside the edit pipeline. */
+  stage?: EditStage;
+  /** VS Code had applied the edit before the throw. */
+  applied?: boolean;
+  /** The project folder, to name a folder that may not be written. */
+  workspaceRoot?: string;
+}
+
+/** A handler failure's toast: its words and, when the failure is ours, Send Feedback's prefill. */
+export interface HandlerFailureToast {
+  message: string;
+  feedback?: FeedbackPrefill;
+}
+
+/** `while …` / `after …` for each stage of an edit that had not been applied. */
+const STAGE_DOING: Readonly<Record<EditStage, string>> = {
+  read: 'while reading the diagram',
+  mutate: 'while working out the change',
+  layoutWrite: 'while writing the positions',
+  storageWrite: 'while writing the change',
+  jsonWrite: 'while writing the change',
+  save: 'while saving the change',
+  other: 'while making the change',
+};
+
+/**
+ * The toast for a canvas handler that failed (#319), one rule for every
+ * handler's catch and for the message boundary:
+ *
+ * - words written for the user (`explained`) are shown as they are, behind
+ *   the handler's label;
+ * - a folder that may not be written or a full disk is said in plain words;
+ * - anything else is ERD Studio's: never the exception's text, which goes in
+ *   Send Feedback's prefill with its paths redacted. What it says was left
+ *   behind follows what is known: nothing changed (the throw came before the
+ *   edit was applied), the change was made (after), or unknown (outside the
+ *   edit pipeline).
+ */
+export function handlerFailureMessage(err: unknown, words: HandlerFailureWords, ctx: HandlerFailureContext): HandlerFailureToast {
+  const raw = err instanceof Error ? err.message : String(err);
+  const labelled = (text: string): string => (words.label ? `${words.label}: ${text}` : text);
+  if (ctx.explained) return { message: labelled(raw) };
+  const write = classifyWriteFailure(err);
+  if (write === 'disk-full') return { message: labelled('the disk is full. Free up some space, then try again.') };
+  if (write === 'permission') {
+    const at = failedPath(err);
+    const folder = at && ctx.workspaceRoot ? projectRelative(ctx.workspaceRoot, path.dirname(at)) : undefined;
+    return {
+      message: labelled(`ERD Studio isn't allowed to write to ${folder ? folder : 'this project'}. Check the folder's permissions, then try again.`),
+    };
+  }
+  let doing: string;
+  let outcome: string;
+  if (ctx.applied === true) {
+    doing = 'after making the change';
+    outcome = 'the change was made, but the diagram may not show it yet';
+  } else if (ctx.stage !== undefined) {
+    doing = STAGE_DOING[ctx.stage];
+    outcome = words.notDone ?? 'nothing was changed';
+  } else {
+    doing = words.doing ?? 'while making the change';
+    outcome = words.outcome ?? 'the change may not have been made';
+  }
+  const feedback = feedbackPrefill(words.title, doing, err);
+  return {
+    message: oursMessage(words.title, doing, outcome),
+    feedback: words.reportNote ? { ...feedback, description: `${feedback.description}
+
+${redactPaths(words.reportNote)}` } : feedback,
   };
 }
 

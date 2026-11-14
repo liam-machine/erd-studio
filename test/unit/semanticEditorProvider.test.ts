@@ -1133,7 +1133,8 @@ describe('message boundary (H21)', () => {
     process.on('unhandledRejection', onRejection);
     try {
       panel._simulateMessage({ type: 'updateModelGrain', payload: { modelName: 'dim_task', grain: 'x' } });
-      await waitForError(panel, /Failed to handle "updateModelGrain": boom/);
+      // Ours (#319): neither the exception's text nor the message type.
+      await waitForError(panel, /^That action hit a problem in ERD Studio while handling it, so it may not have been done\./);
       await new Promise((r) => setTimeout(r, 30));
     } finally {
       process.off('unhandledRejection', onRejection);
