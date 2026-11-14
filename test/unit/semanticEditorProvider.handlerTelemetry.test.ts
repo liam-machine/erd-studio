@@ -118,7 +118,7 @@ describe('B12: canvas handler failures', () => {
     vi.spyOn(provider as never, 'applyTableEdit' as never).mockRejectedValue(new Error('/home/someone/secret broke') as never);
     panel._simulateMessage(ADD_COLUMN);
     await waitForType(panel, 'error');
-    expect(recorded()).toEqual(['!handlerFailed', '!handlerFailedColumn']);
+    expect(recorded()).toEqual(['!handlerFailed', '!handlerFailedColumn', '!handlerFailedAtOther']);
   });
 
   it('a handler that throws through the boundary records its group once, and the user still sees the error', async () => {
@@ -126,8 +126,8 @@ describe('B12: canvas handler failures', () => {
     vi.spyOn(provider as never, 'handleUndoRedo' as never).mockRejectedValue(new Error('undo broke') as never);
     panel._simulateMessage({ type: 'undo' });
     await waitForType(panel, 'error');
-    expect(recorded()).toEqual(['!handlerFailed', '!handlerFailedUndo']);
-    expect(posted(panel).filter((m) => m.type === 'error').at(-1)?.payload?.message).toMatch(/Failed to handle "undo"/);
+    expect(recorded()).toEqual(['!handlerFailed', '!handlerFailedUndo', '!handlerFailedAtOther']);
+    expect(posted(panel).filter((m) => m.type === 'error').at(-1)?.payload?.message).toMatch(/^That action hit a problem in ERD Studio/);
   });
 
   it('an error already counted is not counted again at the boundary', async () => {
@@ -157,7 +157,7 @@ describe('B12: canvas handler failures', () => {
     vi.spyOn(provider as never, 'applyTableEdit' as never).mockRejectedValue(overlap as never);
     panel._simulateMessage(ADD_COLUMN);
     await waitForType(panel, 'error');
-    expect(recorded()).toEqual(['!dbmlWriteOverlap', '!handlerFailed', '!handlerFailedColumn']);
+    expect(recorded()).toEqual(['!dbmlWriteOverlap', '!handlerFailed', '!handlerFailedColumn', '!handlerFailedAtOther']);
 
     error.mockClear();
     feature.mockClear();

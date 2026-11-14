@@ -1155,6 +1155,16 @@ const ERROR_CODES = [
   'dbtSearchFailedRejected',
   'dbtSearchFailedSort',
   'dbtSearchFailedThrew',
+  // #319: which step of the edit pipeline a canvas handler failure came from, and the diagram's storage.
+  'handlerFailedAtRead',
+  'handlerFailedAtMutate',
+  'handlerFailedAtLayoutWrite',
+  'handlerFailedAtStorageWrite',
+  'handlerFailedAtJsonWrite',
+  'handlerFailedAtSave',
+  'handlerFailedAtOther',
+  'handlerFailedDbml',
+  'handlerFailedJson',
 ];
 
 /** Every event the trail may carry: a marker, a feature key, or an error code written `!code`. */
