@@ -707,6 +707,8 @@ describe('allowlists agree with the Worker', () => {
       'layoutFailedUnder1s', 'layoutFailed1to5s', 'layoutFailedOver5s',
       'layoutFailedAllRungs', 'layoutFailedLastRungTimeout', 'layoutFailedLastRungWorker', 'layoutFailedLastRungMemory',
       'dbtSearchFailedRejected', 'dbtSearchFailedSort', 'dbtSearchFailedThrew',
+      'handlerFailedAtRead', 'handlerFailedAtMutate', 'handlerFailedAtLayoutWrite', 'handlerFailedAtStorageWrite',
+      'handlerFailedAtJsonWrite', 'handlerFailedAtSave', 'handlerFailedAtOther', 'handlerFailedDbml', 'handlerFailedJson',
     ]);
     // Liam's decision for B6: no table-count bucket is ever a key of a draft or a canvas open.
     // The one exception is a layout that failed (four fixed ranges, as error codes).
@@ -753,9 +755,9 @@ describe('allowlists agree with the Worker', () => {
     ]);
     for (const key of added) expect(section, key).toMatch(new RegExp(`^- \`${key}\` `, 'm'));
     // The error codes appended after the 2.0.0 list (a failed layout's class, size, duration and fallbacks;
-    // then why the host's dbt search failed, #304), marked as errors.
+    // then why the host's dbt search failed, #304; then where a canvas handler failure came from, #319), marked as errors.
     const addedErrors = ERROR_CODES.slice(ERROR_CODES.indexOf('domainLoadInternalOther') + 1);
-    expect(addedErrors).toHaveLength(24);
+    expect(addedErrors).toHaveLength(33);
     for (const code of addedErrors) expect(section, code).toMatch(new RegExp(`^- \`${code}\` \\(error\\) `, 'm'));
     // Import outcomes: a failure inside ERD Studio is an outcome key; one inside Fabric is a copy with no outcome.
     const outcomes = readme.slice(readme.indexOf('### Import outcomes (2.0)'), readme.indexOf('### Onboarding funnel'));

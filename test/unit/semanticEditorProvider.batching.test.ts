@@ -383,7 +383,8 @@ describe('applySubjectAreaEdit pipeline (H35)', () => {
     applyEditSpy.mockRejectedValueOnce(new Error('disk on fire'));
 
     await panel._simulateMessage({ type: 'addAnnotation', payload: { id: 'boom', text: '', x: 0, y: 0 } });
-    expect(lastError(panel)).toMatch(/Failed to add annotation: disk on fire/);
+    // Ours (#319): what was being done and that nothing changed, never the exception's text.
+    expect(lastError(panel)).toBe("Adding the note hit a problem in ERD Studio while writing the change, so nothing was changed. This isn't something you did. Please send us a report.");
 
     // An external change after the failure must still be picked up.
     const before = counters(panel, doc);

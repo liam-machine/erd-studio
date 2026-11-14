@@ -174,22 +174,22 @@ describe('B12: canvas handler failures', () => {
     expect(new Set(Object.values(HANDLER_GROUP)).size).toBe(12);
   });
 
-  it('a failure is the total and its group; a relationship handler only relHandlerFailed', () => {
-    expect(handlerFailureKeys('column', { explained: false, overlap: false })).toEqual({ errors: ['handlerFailed', 'handlerFailedColumn'], features: [] });
+  it('a failure is the total, its group and its step (#319: AtOther outside the edit pipeline); a relationship handler only relHandlerFailed', () => {
+    expect(handlerFailureKeys('column', { explained: false, overlap: false })).toEqual({ errors: ['handlerFailed', 'handlerFailedColumn', 'handlerFailedAtOther'], features: [] });
     expect(handlerFailureKeys('relationship', { explained: false, overlap: false })).toEqual({ errors: ['relHandlerFailed'], features: [] });
   });
 
   it('an explained refusal is editRefused (nothing for relationships); an overlap is ours', () => {
     expect(handlerFailureKeys('details', { explained: true, overlap: false })).toEqual({ errors: [], features: ['editRefused'] });
     expect(handlerFailureKeys('relationship', { explained: true, overlap: false })).toEqual({ errors: [], features: [] });
-    expect(handlerFailureKeys('model', { explained: true, overlap: true })).toEqual({ errors: ['dbmlWriteOverlap', 'handlerFailed', 'handlerFailedModel'], features: [] });
+    expect(handlerFailureKeys('model', { explained: true, overlap: true })).toEqual({ errors: ['dbmlWriteOverlap', 'handlerFailed', 'handlerFailedModel', 'handlerFailedAtOther'], features: [] });
     expect(handlerFailureKeys('relationship', { explained: true, overlap: true })).toEqual({ errors: ['dbmlWriteOverlap', 'relHandlerFailed'], features: [] });
   });
 
   it('a diagram file the user broke is handlerFileProblem, never a failure of ours', () => {
     expect(handlerFailureKeys('stage', { explained: false, overlap: false, userFile: true })).toEqual({ errors: [], features: ['handlerFileProblem'] });
     expect(handlerFailureKeys('compare', { explained: false, overlap: false, userFile: true })).toEqual({ errors: [], features: ['handlerFileProblem'] });
-    expect(handlerFailureKeys('stage', { explained: false, overlap: false, userFile: false })).toEqual({ errors: ['handlerFailed', 'handlerFailedStage'], features: [] });
+    expect(handlerFailureKeys('stage', { explained: false, overlap: false, userFile: false })).toEqual({ errors: ['handlerFailed', 'handlerFailedStage', 'handlerFailedAtOther'], features: [] });
   });
 
   it('an error is counted once, however many times it is seen; a thrown string cannot be marked', () => {

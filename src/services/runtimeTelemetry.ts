@@ -14,6 +14,7 @@ import { ERROR_CODES, type TelemetryErrorCode, type TelemetryFeature } from './t
 import type { WebviewMessageType } from '../types/messages';
 import type { AssistantHookSkipReason, SkippedAssistantHook } from '../types/harness';
 import type { GettingStartedToHostType } from '../types/gettingStarted';
+import type { EditStage, EditStorage } from './editFailureStage';
 
 const ERROR_CODE_SET: ReadonlySet<string> = new Set<string>(ERROR_CODES);
 
@@ -222,6 +223,17 @@ export const HANDLER_GROUP: Record<WebviewMessageType, HandlerGroup> = {
   canvasFrame: 'other',
 };
 
+/** The stage key counted beside `handlerFailed` (#319): which step of the edit pipeline threw. */
+const HANDLER_FAILED_AT: Record<EditStage, TelemetryErrorCode> = {
+  read: 'handlerFailedAtRead',
+  mutate: 'handlerFailedAtMutate',
+  layoutWrite: 'handlerFailedAtLayoutWrite',
+  storageWrite: 'handlerFailedAtStorageWrite',
+  jsonWrite: 'handlerFailedAtJsonWrite',
+  save: 'handlerFailedAtSave',
+  other: 'handlerFailedAtOther',
+};
+
 const HANDLER_FAILED: Record<Exclude<HandlerGroup, 'relationship'>, TelemetryErrorCode> = {
   model: 'handlerFailedModel',
   column: 'handlerFailedColumn',
@@ -252,10 +264,17 @@ export function handlerGroupOf(type: string): HandlerGroup {
  *   `handlerFileProblem`, never a failure of ours;
  * - anything else: `handlerFailed` and the group's code, or for a
  *   relationship handler only the existing `relHandlerFailed`.
+ *
+ * `stage` and `storage` are the edit's tag (`editFailureTag`), absent for a
+ * throw outside the edit pipeline. Each `handlerFailed` has exactly one
+ * `handlerFailedAt*` beside it (`…AtOther` when untagged, or for a throw
+ * after the save), and `handlerFailedDbml` / `handlerFailedJson` when the
+ * pipeline had read the diagram. A relationship failure (`relHandlerFailed`)
+ * and a failure that is not ours get neither.
  */
 export function handlerFailureKeys(
   group: HandlerGroup,
-  failure: { explained: boolean; overlap: boolean; userFile?: boolean },
+  failure: { explained: boolean; overlap: boolean; userFile?: boolean; stage?: EditStage; storage?: EditStorage },
 ): { errors: TelemetryErrorCode[]; features: TelemetryFeature[] } {
   const errors: TelemetryErrorCode[] = failure.overlap ? ['dbmlWriteOverlap'] : [];
   if (failure.userFile === true && !failure.overlap) return { errors, features: ['handlerFileProblem'] };
@@ -263,7 +282,10 @@ export function handlerFailureKeys(
     return { errors, features: group === 'relationship' ? [] : ['editRefused'] };
   }
   if (group === 'relationship') errors.push('relHandlerFailed');
-  else errors.push('handlerFailed', HANDLER_FAILED[group]);
+  else {
+    errors.push('handlerFailed', HANDLER_FAILED[group], HANDLER_FAILED_AT[failure.stage ?? 'other']);
+    if (failure.storage !== undefined) errors.push(failure.storage === 'dbml' ? 'handlerFailedDbml' : 'handlerFailedJson');
+  }
   return { errors, features: [] };
 }
 

@@ -1189,7 +1189,7 @@ mistake in it, a save VS Code refused) records no error code: only the
 - `editRefused` — a canvas edit was refused with an explanation to the user.
 - `handlerFileProblem` — a canvas stage switch or comparison met a diagram file the user or an assistant broke, removed or locked (core's file and validation errors, except a DBML parser that threw or core's own `TypeError`); the user is told what is wrong with the file. Not a failure of ours, so no `handlerFailed*` beside it.
 - `canvasReconnectReload` — a canvas asked the host to reload it.
-- `handlerFailed` (error) — a canvas message handler threw (the total; one group beside it).
+- `handlerFailed` (error) — a canvas message handler threw (the total; one group beside it, and from the release after 2.0.6 one step and a storage, under "Keys added after 2.0.0").
 - `handlerFailedModel` (error) — a model handler threw.
 - `handlerFailedColumn` (error) — a column handler threw.
 - `handlerFailedKey` (error) — a key handler threw.
@@ -1455,8 +1455,9 @@ Appended to `FEATURES` after the 2.0.0 list above (in
 the same terms: fixed keys, never a name, a path, a message or a count of
 tables (a failed layout's size is one of four fixed ranges, below). Deploy the
 Worker before the extension release that records them, or their counts are
-dropped. The failed-layout codes and the dbt search failure reasons in this
-section are appended to `ERROR_CODES` in the same way.
+dropped. The failed-layout codes, the dbt search failure reasons and the canvas
+handler failure steps in this section are appended to `ERROR_CODES` in the
+same way.
 
 **The import guide's Microsoft Fabric card.** A Warehouse or a Lakehouse's SQL
 analytics endpoint is read as SQL Server, so without these a Fabric import
@@ -1580,6 +1581,36 @@ on every version that has them; an older version sends the total alone.
 And one feature, recorded at activation only:
 
 - `dbtSearchFailedWalkFound` — the search failed and the bounded walk still found a dbt project (it alone would have opened one), so nothing was lost. A project chosen by `erdStudio.projectPath` or **Select dbt Project…** does not count: only what the walk found. Since #295, also when activation did not wait for the search (`dbtSearchSkipped`) and the search it left running then failed: that window opened the dbt project the walk found, so nothing was lost there either.
+
+**Where a canvas handler failure came from (#319).** `handlerFailed` and its
+group say which kind of canvas action threw, not which step of the edit. These
+say the step, decided on the device from how far the edit had got
+(`src/services/editFailureStage.ts`), never from the error's text. Exactly one
+`handlerFailedAt*` is counted beside each `handlerFailed`, so the seven sum to
+the total on every version that has them; an older version sends the total and
+its group alone. Never sum `handlerFailed*`: one failure is the total, its
+group, its step and (when the diagram had been read) its storage. A
+relationship handler's failure (`relHandlerFailed`) and a refusal the user was
+told about (`editRefused`, `handlerFileProblem`) get none of them.
+
+Two things to know when comparing versions. The step and storage keys are new
+keys for failures that were already counted, so "`handlerFailed*` on the new
+version but not the previous one" is not a new failure when the key is one of
+these nine. And from the same release, a sentence the canvas already showed
+the user in plain words (a column name that is taken, a table or column the
+file no longer has, a table file with a mistake in it) is thrown as a refusal:
+it counts `editRefused`, no longer `handlerFailed` and its group, so
+`handlerFailed` may fall between the two versions with nothing fixed.
+
+- `handlerFailedAtRead` (error) — the throw came while reading the open diagram, before any change was worked out.
+- `handlerFailedAtMutate` (error) — working out the change threw (the handler's own edit of the parsed diagram or table).
+- `handlerFailedAtLayoutWrite` (error) — writing positions or sticky-note boxes alone threw, before VS Code applied the edit.
+- `handlerFailedAtStorageWrite` (error) — planning or writing an edit in a project whose library holds DBML threw, before VS Code applied the edit.
+- `handlerFailedAtJsonWrite` (error) — writing an edit in a YAML/JSON project threw, before VS Code applied the edit.
+- `handlerFailedAtSave` (error) — VS Code applied the edit and saving it threw. Expect close to none: a save that fails without throwing is `saveFailed*`.
+- `handlerFailedAtOther` (error) — the throw came after the save (the redraw, the refresh of other diagrams), or outside the edit pipeline.
+- `handlerFailedDbml` (error) — the diagram being edited is a `.dbml` file (counted beside a `handlerFailed` whose edit had read the diagram).
+- `handlerFailedJson` (error) — the diagram being edited is a `.json` file (the same). A JSON diagram in a project whose library holds DBML is written by the storage path, so `handlerFailedJson` can sit beside `handlerFailedAtStorageWrite`.
 
 Where `dbtSearchFailed` is counted: at activation; when activation did not wait
 for the search (`dbtSearchSkipped`, #295) and the search it left running fails
