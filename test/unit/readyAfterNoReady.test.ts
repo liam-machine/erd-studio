@@ -213,6 +213,17 @@ describe('#320 ReadyWatch: a ready after the timeout is told apart', () => {
     expect(w.noReady).toHaveBeenCalledTimes(1);
   });
 
+  it('times the range from the show, not from when a busy host got round to the timer', () => {
+    // The host was stuck for 70 s: the 30 s timer runs late, and the queued ready right after it.
+    let now = 0;
+    const lateReady = vi.fn();
+    const watch = new ReadyWatch(true, { noReady: vi.fn(), lateReady }, () => now);
+    now = 70_000;
+    vi.advanceTimersByTime(READY_TIMEOUT_MS);
+    watch.ready();
+    expect(lateReady.mock.calls).toEqual([['over60s']]);
+  });
+
   it('a late ready that arrives while the panel is hidden still counts', () => {
     const w = watched();
     w.step(READY_TIMEOUT_MS);
@@ -477,6 +488,25 @@ describe('#320 a page replaced before it ever said ready is not a late one', () 
       await note.press(NO_READY_RELOAD_BUTTON);
       expect(panel.webview.html).not.toBe(crashed);
       expect(noReadyChoice.mock.calls.map(([, action, opened]) => [action, opened])).toEqual([['reload', undefined]]);
+    } finally {
+      DraftPreviewPanel.close();
+    }
+  });
+
+  it('draft: a crashed page that says ready again is a fresh page, and the notification\'s Reload leaves it alone', async () => {
+    const note = pendingNotification();
+    const noReadyChoice = vi.fn();
+    const panel = showDraft({ noReady: vi.fn(), noReadyChoice });
+    try {
+      await vi.advanceTimersByTimeAsync(READY_TIMEOUT_MS);
+      await panel._simulateMessage({ type: 'ready' });
+      await panel._simulateMessage({ type: 'pageError', kind: 'render', area: 'draft' });
+      // VS Code loaded the page again (not the preview's own Reload): it says ready once more.
+      await panel._simulateMessage({ type: 'ready' });
+      const working = panel.webview.html;
+      await note.press(NO_READY_RELOAD_BUTTON);
+      expect(panel.webview.html).toBe(working);
+      expect(noReadyChoice).not.toHaveBeenCalled();
     } finally {
       DraftPreviewPanel.close();
     }

@@ -231,11 +231,12 @@ export class DraftPreviewPanel {
           // since (#320): Reload would throw a working preview away, so it
           // does nothing, and Send Feedback is told the page is up.
           // A page that crashed after it opened keeps both buttons.
-          const opened = this.ready && !this.crashed;
-          if (opened && action === 'reload') return;
+          if (this.ready && !this.crashed) {
+            if (action === 'feedback') this.events.noReadyChoice?.(this.view.source, action, true);
+            return;
+          }
           if (action === 'reload') this.reloadPage();
-          if (opened) this.events.noReadyChoice?.(this.view.source, action, true);
-          else this.events.noReadyChoice?.(this.view.source, action);
+          this.events.noReadyChoice?.(this.view.source, action);
         });
       },
     });
@@ -348,6 +349,8 @@ export class DraftPreviewPanel {
     switch (message.type) {
       case 'ready':
         this.ready = true;
+        // A fresh page (first load, a Reload, or one VS Code loaded again): not crashed.
+        this.crashed = false;
         this.readyWatch.ready();
         this.postDraft();
         this.postGuide();

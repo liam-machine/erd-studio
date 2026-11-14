@@ -19,6 +19,8 @@
  * with the panel.
  */
 
+import type { LateReadyRange } from '../types/webviewError';
+
 /** A visible panel with no `ready` after this long counts as one that never became ready. */
 export const READY_TIMEOUT_MS = 30_000;
 
@@ -33,11 +35,12 @@ export const READY_SLOW_MS = 10_000;
 export const READY_LATE_LONG_MS = 60_000;
 
 /**
- * How long after the panel was shown a late `ready` came: the timeout plus
- * the time since it fired. That time is by the clock, hidden or not, because
- * `visibleSince` starts again each time the panel is shown.
+ * How long after the panel was shown a late `ready` came, timed by the clock
+ * from the show that ran out (hidden or not since): `visibleSince` starts
+ * again each time the panel is shown, and a busy host runs the timer late, so
+ * neither the last show nor the moment `noReady()` ran is the start.
  */
-export type LateReadyRange = '30to60s' | 'over60s';
+export type { LateReadyRange };
 
 export interface ReadyWatchHooks {
   ready?(slow: boolean): void;
@@ -56,9 +59,8 @@ export class ReadyWatch {
   /** When the panel was last shown; undefined while hidden. */
   private visibleSince: number | undefined;
   private readySeen = false;
-  private timedOut = false;
-  /** When `noReady()` was reported. */
-  private timedOutAt: number | undefined;
+  /** When the panel was shown for the 30 s `noReady()` reported; undefined until it is reported. */
+  private noReadyShownAt: number | undefined;
   /** The page `noReady()` was about has been replaced by a new one. */
   private replaced = false;
   private disposed = false;
@@ -89,16 +91,17 @@ export class ReadyWatch {
     const slow = this.visibleSince !== undefined && this.now() - this.visibleSince > READY_SLOW_MS;
     this.clear();
     safely(() => this.hooks.ready?.(slow));
-    if (this.timedOutAt === undefined || this.replaced) return;
-    const sinceShown = READY_TIMEOUT_MS + (this.now() - this.timedOutAt);
+    if (this.noReadyShownAt === undefined || this.replaced) return;
+    const sinceShown = this.now() - this.noReadyShownAt;
     const range: LateReadyRange = sinceShown >= READY_LATE_LONG_MS ? 'over60s' : '30to60s';
     safely(() => this.hooks.lateReady?.(range));
   }
 
   /**
-   * The user reloaded the page from the no-ready notification: the `ready`
-   * that follows is the new page's, not a late one from the page that was
-   * reported.
+   * The page was replaced by a new one (Reload on the no-ready notification
+   * or the crash screen, or a panel that does not keep its page was hidden):
+   * the `ready` that follows is the new page's, not a late one from the page
+   * that was reported.
    */
   reloaded(): void {
     if (this.timedOut && !this.readySeen) this.replaced = true;
@@ -114,15 +117,20 @@ export class ReadyWatch {
     this.clear();
   }
 
+  /** Whether `noReady()` has been reported. */
+  private get timedOut(): boolean {
+    return this.noReadyShownAt !== undefined;
+  }
+
   private shown(): void {
-    this.visibleSince = this.now();
+    const shownAt = this.now();
+    this.visibleSince = shownAt;
     this.clear();
     if (this.timedOut) return;
     const timer = setTimeout(() => {
       this.timer = undefined;
       if (this.disposed || this.readySeen || this.timedOut) return;
-      this.timedOut = true;
-      this.timedOutAt = this.now();
+      this.noReadyShownAt = shownAt;
       safely(() => this.hooks.noReady());
     }, READY_TIMEOUT_MS);
     (timer as { unref?: () => void }).unref?.();

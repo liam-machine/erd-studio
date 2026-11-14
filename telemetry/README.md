@@ -1692,15 +1692,21 @@ heartbeat's `os`, and `dropSlow*` for where the time went.
 - `dropSlowSave` — saving the files the edit touched was the slowest stage.
 - `dropSlowRedraw` — rebuilding the diagram and posting it was the slowest stage.
 - `dropSlowCanvas` — the trip to the diagram and its render was the slowest stage.
-- `readyAfterNoReady` — a canvas, draft page or Welcome panel reported ready after its `webviewNoReady*` had already been recorded (#320): it was slow, not broken. An install-day's `webviewNoReady*` minus its `readyAfterNoReady` is the panels that never came up (a late ready just after midnight UTC lands on the next day's row). Not counted for the ready of a page the user reloaded from the no-ready notification (that day has `crashFallbackReload`). It is not a subset of `readySlowOver10s`: a panel hidden and shown again after the 30 s restarts that clock.
-- `readyLate30to60s` — beside `readyAfterNoReady`: the ready came less than 60 s after the panel was shown (the 30 s, plus the time since by the clock, hidden or not). A 60 s limit would not have reported it.
-- `readyLateOver60s` — beside `readyAfterNoReady`: the ready came 60 s or more after the panel was shown.
 
 ```bash
 # How long drops took to show, and where the time went, per OS (installs and drops, last 28 days)
 npx wrangler d1 execute erd-studio-telemetry --remote --command \
   "SELECT h.os, j.key, COUNT(DISTINCT h.install_id) AS installs, SUM(j.value) AS drops FROM heartbeats h, json_each(h.features) j WHERE h.day >= date('now','-28 days') AND h.day < date('now') AND COALESCE(h.dev, 0) = 0 AND j.key LIKE 'drop%' GROUP BY h.os, j.key ORDER BY h.os, j.key"
 ```
+
+**A panel that opened after it was reported as not opening** (added after
+2.0.6, #320). A `webviewNoReady*` code says a visible panel had not said
+ready after 30 s, which a slow start and a broken page both do. These keys
+count the slow ones:
+
+- `readyAfterNoReady` — a canvas, draft page or Welcome panel reported ready after its `webviewNoReady*` had already been recorded (#320): it was slow, not broken. An install-day's `webviewNoReady*` minus its `readyAfterNoReady` is the panels that never came up (a late ready just after midnight UTC lands on the next day's row). Not counted for the ready of a page the user reloaded from the no-ready notification (that day has `crashFallbackReload`). It is not a subset of `readySlowOver10s`: a panel hidden and shown again after the 30 s restarts that clock.
+- `readyLate30to60s` — beside `readyAfterNoReady`: the ready came less than 60 s after the panel was shown (by the clock from the show whose 30 s ran out, hidden or not since). A 60 s limit would not have reported it.
+- `readyLateOver60s` — beside `readyAfterNoReady`: the ready came 60 s or more after the panel was shown.
 
 ## The local archive
 

@@ -35,6 +35,7 @@ import {
   FIT_ZOOM_BUCKETS,
   type CrashFallbackAction,
   type FitZoomBucket,
+  type LateReadyRange,
   type WebviewErrorKind,
   isLayoutFallbackRung,
   readLayoutFailureDetail,
@@ -576,7 +577,7 @@ export interface DraftPreviewEvents {
    * The page said ready after `noReady` (optional, #320): slow, not broken.
    * `range` is how long after it was shown.
    */
-  lateReady?(source: DraftSource, range: '30to60s' | 'over60s'): void;
+  lateReady?(source: DraftSource, range: LateReadyRange): void;
   /** ELK laid the draft out (optional, 2.0 B17). */
   layoutFinished?(source: DraftSource, layout: { ms: number; fitZoom: FitZoomBucket; fallback?: true; rung?: LayoutFallbackRung }): void;
   /** The page closed while the draft on show was still being laid out (optional, 2.0 B17). */
