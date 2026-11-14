@@ -211,7 +211,7 @@ describe('#319: what the toast says was left behind follows how far the edit got
     fs.chmodSync(at('silver/tables'), 0o555);
     await panel._simulateMessage({ type: 'addModel', payload: { name: 'dim_store', description: '', columns: [{ name: 'store_key', dataType: 'INT', description: '', isPrimaryKey: true }] } });
     expect(payloads()).toEqual([
-      { message: "Failed to add table: ERD Studio isn't allowed to write to .erd-studio/silver/tables. Check the folder's permissions, then try again." },
+      { message: "Failed to add table: ERD Studio isn't allowed to read or write in .erd-studio/silver/tables. Check the folder's permissions, then try again." },
     ]);
   });
 
@@ -254,14 +254,22 @@ describe('#319: handlerFailureMessage (the one rule)', () => {
   it('ours, outside the edit pipeline: says the change may not have been made, or the handler\'s own words', () => {
     expect(handlerFailureMessage(new Error('x'), words, { explained: false }).message)
       .toBe(oursMessage('Adding the column', 'while making the change', 'the change may not have been made'));
-    expect(handlerFailureMessage(new Error('x'), { title: 'Generating the sync plan', doing: 'while writing the plan', outcome: 'no plan was generated' }, { explained: false }).message)
-      .toBe(oursMessage('Generating the sync plan', 'while writing the plan', 'no plan was generated'));
+    expect(handlerFailureMessage(new Error('x'), { title: 'Generating the sync plan', doing: 'while writing or opening the plan', outcome: 'the plan may not have been written' }, { explained: false }).message)
+      .toBe(oursMessage('Generating the sync plan', 'while writing or opening the plan', 'the plan may not have been written'));
   });
 
   it('a thrown value that is not an Error is still never shown', () => {
     const toast = handlerFailureMessage('raw string /home/x/a.json', words, { explained: false });
     expect(toast.message).not.toContain('raw string');
     expect(toast.feedback?.description).toContain('raw string');
+  });
+
+  it('after the edit was applied, the toast says the change was made, whatever the error is', () => {
+    const eacces = Object.assign(new Error("EACCES: permission denied, open '/home/x/a.dbml'"), { code: 'EACCES', path: '/home/x/a.dbml' });
+    expect(handlerFailureMessage(eacces, words, { explained: false, stage: 'other', applied: true }).message)
+      .toBe(oursMessage('Adding the column', 'after making the change', 'the change was made, but the diagram may not show it yet'));
+    expect(handlerFailureMessage(new Error('x'), words, { explained: false, stage: 'save', applied: true }).message)
+      .toBe(oursMessage('Adding the column', 'while saving the change', 'the change was made but may not be saved'));
   });
 
   it('a full disk is said in plain words', () => {

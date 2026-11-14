@@ -196,7 +196,8 @@ const STAGE_DOING: Readonly<Record<EditStage, string>> = {
  *
  * - words written for the user (`explained`) are shown as they are, behind
  *   the handler's label;
- * - a folder that may not be written or a full disk is said in plain words;
+ * - a folder ERD Studio may not use or a full disk, met before the edit was
+ *   applied, is said in plain words;
  * - anything else is ERD Studio's: never the exception's text, which goes in
  *   Send Feedback's prefill with its paths redacted. What it says was left
  *   behind follows what is known: nothing changed (the throw came before the
@@ -207,20 +208,24 @@ export function handlerFailureMessage(err: unknown, words: HandlerFailureWords, 
   const raw = err instanceof Error ? err.message : String(err);
   const labelled = (text: string): string => (words.label ? `${words.label}: ${text}` : text);
   if (ctx.explained) return { message: labelled(raw) };
-  const write = classifyWriteFailure(err);
+  // Only while nothing had been applied: after that, what matters is that the change was made.
+  const write = ctx.applied === true ? 'other' : classifyWriteFailure(err);
   if (write === 'disk-full') return { message: labelled('the disk is full. Free up some space, then try again.') };
   if (write === 'permission') {
     const at = failedPath(err);
     const folder = at && ctx.workspaceRoot ? projectRelative(ctx.workspaceRoot, path.dirname(at)) : undefined;
     return {
-      message: labelled(`ERD Studio isn't allowed to write to ${folder ? folder : 'this project'}. Check the folder's permissions, then try again.`),
+      message: labelled(`ERD Studio isn't allowed to read or write in ${folder ? folder : 'this project'}. Check the folder's permissions, then try again.`),
     };
   }
   let doing: string;
   let outcome: string;
   if (ctx.applied === true) {
-    doing = 'after making the change';
-    outcome = 'the change was made, but the diagram may not show it yet';
+    // `save`: VS Code applied the edit and saving it threw, so the files may be open and unsaved.
+    doing = ctx.stage === 'save' ? 'while saving the change' : 'after making the change';
+    outcome = ctx.stage === 'save'
+      ? 'the change was made but may not be saved'
+      : 'the change was made, but the diagram may not show it yet';
   } else if (ctx.stage !== undefined) {
     doing = STAGE_DOING[ctx.stage];
     outcome = words.notDone ?? 'nothing was changed';

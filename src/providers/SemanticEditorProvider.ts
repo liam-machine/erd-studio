@@ -83,7 +83,7 @@ import { EXPORT_DIAGRAM_COMMAND } from '../commands/exportDiagram';
 import { SEND_FEEDBACK_BUTTON, crashFeedbackPrefill, noReadyFeedbackPrefill, describeDbmlMistake, describeDiagramFileProblem, describeJsonMistake, feedbackPrefill, handlerFailureMessage, oursMessage, projectRelative, reportNotOpenedMessage, showErrorWithActions, type FeedbackPrefill, type HandlerFailureWords } from '../services/commandErrors';
 import { isCrashFallbackAction, type CrashFallbackAction } from '../types/webviewError';
 import { askNoReadyRecovery } from './noReadyRecovery';
-import { ManifestService } from '../services/manifestService';
+import { ManifestMissingError, ManifestService } from '../services/manifestService';
 import { YmlParserService } from '../services/ymlParserService';
 import { TemplateService } from '../services/templateService';
 import { LayerService } from '../services/layerService';
@@ -108,6 +108,7 @@ import {
   builtInField,
   setMetaEntry,
   toDisplaySubjectArea,
+  TableDbmlError,
 } from '@erd-studio/core';
 import type { DbtKeyIndex, FieldList, MetaValue } from '@erd-studio/core';
 import { FieldsService } from '../services/fieldsService';
@@ -582,8 +583,20 @@ const EDIT_NOT_APPLIED_MESSAGE = 'The edit could not be applied; nothing was cha
 /** A refusal the user was told about in plain words, which usage telemetry does not count as a failure. */
 function isExplainedRefusal(err: unknown): boolean {
   return err instanceof EditRefused || err instanceof RelationshipsRewriteRefused || err instanceof DuplicateKeyWriteRefused
-    || err instanceof TableNamingWriteRefused || err instanceof DbmlTableWriteRefused || err instanceof DbmlEditRefused
-    || err instanceof AmbiguousTableName;
+    || err instanceof TableNamingWriteRefused || err instanceof DbmlTableWriteRefused || err instanceof DbmlEditRefused;
+}
+
+/**
+ * Whether a handler failure's own words were written for the user, so its
+ * toast shows them (#319): a refusal, a problem in the diagram file, and
+ * three failures that name what in the project stopped the edit (a bare name
+ * two tables share, a table file with a mistake in it, a manifest.json that
+ * is not there). The last three keep their telemetry as it was; this decides
+ * the words only.
+ */
+function saysItself(err: unknown): boolean {
+  return isExplainedRefusal(err) || isUserFileProblem(err)
+    || err instanceof AmbiguousTableName || err instanceof TableDbmlError || err instanceof ManifestMissingError;
 }
 
 /**
@@ -1359,7 +1372,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   private postHandlerFailure(webview: vscode.Webview, err: unknown, words: HandlerFailureWords): void {
     const tag = editFailureTag(err);
     const toast = handlerFailureMessage(err, words, {
-      explained: isExplainedRefusal(err) || isUserFileProblem(err),
+      explained: saysItself(err),
       ...(tag ? { stage: tag.stage, applied: tag.applied } : {}),
       workspaceRoot: this.workspaceRoot,
     });
@@ -10670,7 +10683,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       const msg = err instanceof Error ? err.message : String(err);
       logHandlerFailure(`[SemanticEditorProvider] Sync plan generation failed: ${msg}`, err);
       recordHandlerFailure('compare', err);
-      this.postHandlerFailure(webview, err, { label: 'Failed to generate sync plan', title: 'Generating the sync plan', doing: 'while writing the plan', outcome: 'no plan was generated' });
+      this.postHandlerFailure(webview, err, { label: 'Failed to generate sync plan', title: 'Generating the sync plan', doing: 'while writing or opening the plan', outcome: 'the plan may not have been written' });
     }
   }
 

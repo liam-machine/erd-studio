@@ -1593,6 +1593,15 @@ group, its step and (when the diagram had been read) its storage. A
 relationship handler's failure (`relHandlerFailed`) and a refusal the user was
 told about (`editRefused`, `handlerFileProblem`) get none of them.
 
+Two things to know when comparing versions. The step and storage keys are new
+keys for failures that were already counted, so "`handlerFailed*` on the new
+version but not the previous one" is not a new failure when the key is one of
+these nine. And from the same release, a sentence the canvas already showed
+the user in plain words (a column name that is taken, a table or column the
+file no longer has, a table file with a mistake in it) is thrown as a refusal:
+it counts `editRefused`, no longer `handlerFailed` and its group, so
+`handlerFailed` may fall between the two versions with nothing fixed.
+
 - `handlerFailedAtRead` (error) — the throw came while reading the open diagram, before any change was worked out.
 - `handlerFailedAtMutate` (error) — working out the change threw (the handler's own edit of the parsed diagram or table).
 - `handlerFailedAtLayoutWrite` (error) — writing positions or sticky-note boxes alone threw, before VS Code applied the edit.
