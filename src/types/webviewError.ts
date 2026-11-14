@@ -24,6 +24,13 @@ export type WebviewErrorArea = (typeof WEBVIEW_ERROR_AREAS)[number];
 /** Every area a boundary can name: the canvas's, plus the draft page's one. */
 export type WebviewCrashArea = WebviewErrorArea | 'draft';
 
+/**
+ * How long after its panel was shown a page said `ready`, when that came
+ * after the 30 s no-ready timeout (`ReadyWatch`'s `lateReady`, #320): under a
+ * minute, or a minute or more.
+ */
+export type LateReadyRange = '30to60s' | 'over60s';
+
 /** The `webviewError` payload (canvas → host). */
 export interface WebviewErrorPayload {
   kind: WebviewErrorKind;

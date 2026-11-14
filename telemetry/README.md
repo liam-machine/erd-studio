@@ -989,7 +989,8 @@ Investigate when:
   `relMoveCancelled`, or any `relMoveWriteFailed`.
 - **From 2.0:** any `convertToDbmlUnrestored` (a user's files left half
   converted: top priority); any `activationFailed` (its phase code says where);
-  any `webviewCrash*` or `webviewNoReady*`; `handlerFailed*`, `dbmlWriteOverlap`
+  any `webviewCrash*` or `webviewNoReady*` (less the
+  `readyAfterNoReady` beside it: that panel opened late, it was not broken); `handlerFailed*`, `dbmlWriteOverlap`
   or `refreshFailed*` on the new version but not the previous one;
   `importSqlEngineLoadFailed` or `importDbmlParserThrew` (the importer itself
   broke). `domainLoadDbml*` (other than `ParserThrew`), `modelFileDbml*` (other
@@ -1228,10 +1229,10 @@ mistake in it, a save VS Code refused) records no error code: only the
 - `webviewCrashOther` (error) — another webview area crashed.
 - `webviewWindowError` (error) — an uncaught error in a webview.
 - `webviewRejection` (error) — an unhandled promise rejection in a webview.
-- `webviewNoReadyCanvas` (error) — a visible canvas never reported ready within 30 s.
+- `webviewNoReadyCanvas` (error) — a visible canvas never reported ready within 30 s. It may have come up later: see `readyAfterNoReady` under Keys added after 2.0.0, which applies to all three `webviewNoReady*` codes.
 - `webviewNoReadyDraft` (error) — a visible draft page never reported ready within 30 s.
 - `webviewNoReadyWelcome` (error) — a visible Welcome panel never reported ready within 30 s.
-- `crashFallbackReload` — the crash screen a canvas or draft page shows after a render crash (instead of a blank panel) had its Reload pressed; the panel was reloaded. Also counted from the notification a canvas or draft page gets when it never reported ready (`webviewNoReadyCanvas` / `webviewNoReadyDraft` the same day), which offers the same two buttons.
+- `crashFallbackReload` — the crash screen a canvas or draft page shows after a render crash (instead of a blank panel) had its Reload pressed; the panel was reloaded. Also counted from the notification a canvas or draft page gets when it never reported ready (`webviewNoReadyCanvas` / `webviewNoReadyDraft` the same day), which offers the same two buttons. Not counted when the page had reported ready before the button was pressed (`readyAfterNoReady`): that Reload is ignored, and that Send Feedback opens an ordinary report (unless the page had crashed after it opened: then both count as before).
 - `crashFallbackFeedback` — the crash screen, or that notification, had its Send Feedback pressed; Send Feedback opened (the report itself is the user's to read and file; nothing of it is in telemetry).
 
 **B14 — why a DBML diagram failed to load, and diagrams that render degraded.**
@@ -1728,6 +1729,15 @@ heartbeat's `os`, and `dropSlow*` for where the time went.
 npx wrangler d1 execute erd-studio-telemetry --remote --command \
   "SELECT h.os, j.key, COUNT(DISTINCT h.install_id) AS installs, SUM(j.value) AS drops FROM heartbeats h, json_each(h.features) j WHERE h.day >= date('now','-28 days') AND h.day < date('now') AND COALESCE(h.dev, 0) = 0 AND j.key LIKE 'drop%' GROUP BY h.os, j.key ORDER BY h.os, j.key"
 ```
+
+**A panel that opened after it was reported as not opening** (added after
+2.0.6, #320). A `webviewNoReady*` code says a visible panel had not said
+ready after 30 s, which a slow start and a broken page both do. These keys
+count the slow ones:
+
+- `readyAfterNoReady` — a canvas, draft page or Welcome panel reported ready after its `webviewNoReady*` had already been recorded (#320): it was slow, not broken. An install-day's `webviewNoReady*` minus its `readyAfterNoReady` is the panels that never came up (a late ready just after midnight UTC lands on the next day's row). Not counted for the ready of a page the user reloaded from the no-ready notification (that day has `crashFallbackReload`). It is not a subset of `readySlowOver10s`: a panel hidden and shown again after the 30 s restarts that clock.
+- `readyLate30to60s` — beside `readyAfterNoReady`: the ready came less than 60 s after the panel was shown (by the clock from the show whose 30 s ran out, hidden or not since). A 60 s limit would not have reported it.
+- `readyLateOver60s` — beside `readyAfterNoReady`: the ready came 60 s or more after the panel was shown.
 
 ## The local archive
 

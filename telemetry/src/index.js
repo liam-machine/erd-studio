@@ -890,6 +890,10 @@ const FEATURES = [
   'dropSlowSave',
   'dropSlowRedraw',
   'dropSlowCanvas',
+  // Added after 2.0.6 (#320): a panel said ready after its webviewNoReady* was reported, and how late (a range).
+  'readyAfterNoReady',
+  'readyLate30to60s',
+  'readyLateOver60s',
 ];
 
 /** The only keys `errors` may carry; anything else is dropped. */

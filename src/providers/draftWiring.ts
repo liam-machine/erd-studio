@@ -24,6 +24,7 @@ import {
   draftShownQualityFeatures,
   type DraftQuality,
 } from '../services/draftTelemetry';
+import { lateReadyFeatures } from '../services/readyWatch';
 import { crashFeedbackPrefill, noReadyFeedbackPrefill, type FeedbackPrefill } from '../services/commandErrors';
 import type { TelemetryErrorCode, TelemetryFeature } from '../services/telemetryPayload';
 import { draftLayoutFeatures, layoutFailureCodes, webviewErrorCodes } from '../services/telemetryCanvas';
@@ -203,7 +204,7 @@ export function draftPreviewEvents(
   /** Told when the details open (`trackedDraftPreview`'s `onDetailsOpened`: a later discard is not a rejection at a glance). */
   onDetailsOpened?: () => void,
   /** Open Send Feedback (`erdStudio.reportBug`) with this prefill: the crash screen's Send Feedback. */
-  openFeedback?: (prefill: FeedbackPrefill) => unknown,
+  openFeedback?: (prefill?: FeedbackPrefill) => unknown,
   /** Run Show Import Report (`erdStudio.showImportReport`) for the draft's import: the banner's link. */
   showImportReport?: (reportId?: number) => unknown,
 ): DraftPreviewEvents {
@@ -227,6 +228,10 @@ export function draftPreviewEvents(
       if (slow) feature('readySlowOver10s');
     },
     noReady: () => error('webviewNoReadyDraft'),
+    // The page was slow, not broken (#320): it opened after the no-ready notification.
+    lateReady: (_source, range) => {
+      for (const key of lateReadyFeatures(range)) feature(key);
+    },
     pageError: (_source, kind) => {
       for (const code of webviewErrorCodes(kind, 'draft')) error(code);
     },
@@ -240,7 +245,12 @@ export function draftPreviewEvents(
       void Promise.resolve(openFeedback?.(crashFeedbackPrefill('draft', detail ? { detail } : {}))).catch(() => undefined);
     },
     // The same two buttons, from the host's notification for a page that never became ready.
-    noReadyChoice: (_source, action) => {
+    noReadyChoice: (_source, action, opened) => {
+      if (opened) {
+        // The page opened after the notification (#320): an ordinary report, not a crash's.
+        if (action === 'feedback') void Promise.resolve(openFeedback?.()).catch(() => undefined);
+        return;
+      }
       if (action === 'reload') {
         feature('crashFallbackReload');
         return;
