@@ -46,6 +46,7 @@ import { getErdStudioSetting } from './services/configService';
 import { LAYER_DEFINITION, WHICH_LAYER_FOR_DIAGRAM, defaultDiagramLayer } from './services/layerWording';
 import { manifestDisplayPath, readDbtProjectConfig, resolveManifestPath, type DbtProjectConfig } from './services/dbtProjectConfig';
 import { detectPhysicalTooling, toolingExclude, type ToolingProbe } from './services/physicalTooling';
+import { detectContributors } from './services/contributorCount';
 import { DBT_SEARCH_EXCLUDE_GLOB, sortDbtCandidates } from './services/dbtProjectSearch';
 import { getLastDbtParseLaunchAt, RUN_DBT_PARSE_ACTION, runDbtParse } from './commands/runDbtParse';
 import { workspaceFolderOf } from './commands/dbtCandidate';
@@ -717,6 +718,33 @@ function recordPhysicalTooling(context: vscode.ExtensionContext, session?: { roo
           noteUnusedDbtProject(session.root, undefined, 'tooling');
         }
         void context.workspaceState.update(PHYSICAL_TOOLING_DAY_KEY, today);
+      }, () => { /* telemetry must never break activation */ });
+    }, PHYSICAL_TOOLING_DELAY_MS);
+  } catch { /* telemetry must never break activation */ }
+}
+
+/** workspaceState: the UTC day this project's commit authors were last counted. */
+const CONTRIBUTORS_DAY_KEY = 'erdStudio.telemetry.contributorsDay';
+
+/**
+ * Usage telemetry: whether this project's ERD Studio files are one person's or
+ * a team's, as a bucket of distinct commit authors under the semantic
+ * directory in the last 90 days (`detectContributors()`). Once per workspace
+ * per UTC day, only in a trusted workspace that has the directory, and not at
+ * all while telemetry is off. It runs one read-only `git log`; no name, email,
+ * remote or path is kept or sent.
+ */
+function recordContributorCount(context: vscode.ExtensionContext, semanticDirPath: string): void {
+  try {
+    if (!telemetry.enabled() || !vscode.workspace.isTrusted) return;
+    const today = new Date().toISOString().slice(0, 10);
+    if (context.workspaceState.get<string>(CONTRIBUTORS_DAY_KEY) === today) return;
+    setTimeout(() => {
+      if (!fs.existsSync(semanticDirPath)) return;
+      void detectContributors(semanticDirPath).then(found => {
+        if (found === undefined) return;
+        telemetry.contributors(found);
+        void context.workspaceState.update(CONTRIBUTORS_DAY_KEY, today);
       }, () => { /* telemetry must never break activation */ });
     }, PHYSICAL_TOOLING_DELAY_MS);
   } catch { /* telemetry must never break activation */ }
@@ -2383,6 +2411,7 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
   }
   recordDetectedAssistants();
   recordPhysicalTooling(context, { root: workspaceRoot, hasDbt });
+  recordContributorCount(context, fullSemanticDirPath);
 
   // Surface a broken layers.json once per distinct error. LayerService falls
   // back to default layers in memory but refuses to overwrite the file, so the

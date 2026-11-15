@@ -1284,6 +1284,14 @@ export type TelemetryPlatform = (typeof PLATFORMS)[number];
 
 /** How many of the last {@link RETENTION_WINDOW_DAYS} days something happened on. */
 export type RecentDaysBucket = '0' | '1' | '2-3' | '4-7' | '8-14' | '15-28';
+/**
+ * How many people committed to the project's ERD Studio files in the last 90
+ * days (`detectContributors()`, `src/services/contributorCount.ts`), smallest
+ * first. Never extend or rename a value: a deployed Worker refuses a heartbeat
+ * whose `contributors` it does not list.
+ */
+export const CONTRIBUTOR_BUCKETS = ['0', '1', '2-3', '4-10', '10+'] as const;
+export type ContributorBucket = (typeof CONTRIBUTOR_BUCKETS)[number];
 /** Days from first activation to the first canvas open, or `never` (yet). */
 export type FirstCanvasBucket = TenureBucket | 'never';
 
@@ -1334,6 +1342,14 @@ export interface DailyCounters {
   physicalTools?: TelemetryPhysicalTool[];
   /** The data platforms found by the same detection (union), on the same terms. */
   platforms?: TelemetryPlatform[];
+  /**
+   * Distinct commit authors under the semantic directory in the last 90 days,
+   * as a bucket ({@link recordContributors}); the largest of the projects
+   * counted today. Absent when none was counted (no project, no git, an
+   * untrusted workspace). Not carried over by {@link nextDay}, like
+   * `physicalTools`.
+   */
+  contributors?: ContributorBucket;
   /**
    * The onboarding trail ({@link recordTrail}): the day's events in order, with
    * the seconds between them. Absent on a day it was not kept ({@link trailKept}).
@@ -1412,6 +1428,8 @@ export interface HeartbeatBody {
   physicalTools?: TelemetryPhysicalTool[];
   /** Omitted when no detection ran that day. */
   platforms?: TelemetryPlatform[];
+  /** Omitted when no project's commit authors were counted that day. */
+  contributors?: ContributorBucket;
   /** Use per diagram that day; omitted when no diagram was opened or edited. */
   diagrams?: DiagramUse[];
   /** The onboarding trail; omitted on a day it was not kept. */
@@ -1628,6 +1646,13 @@ export function recordPhysicalTooling(
     physicalTools: unionIn(state.physicalTools, found.tools, PHYSICAL_TOOLS),
     platforms: unionIn(state.platforms, found.platforms, PLATFORMS),
   };
+}
+
+/** One project's commit authors were counted. A day with several projects keeps the largest bucket. */
+export function recordContributors(state: DailyCounters, found: ContributorBucket): DailyCounters {
+  if (!CONTRIBUTOR_BUCKETS.includes(found)) return state;
+  const had = state.contributors === undefined ? -1 : CONTRIBUTOR_BUCKETS.indexOf(state.contributors);
+  return CONTRIBUTOR_BUCKETS.indexOf(found) > had ? { ...state, contributors: found } : state;
 }
 
 /** `a ∪ b`, restricted to `order` and in its order. */
@@ -1998,6 +2023,9 @@ export function buildHeartbeat(state: DailyCounters, env: HeartbeatEnv): Heartbe
       ? { physicalTools: PHYSICAL_TOOLS.filter(t => state.physicalTools?.includes(t)) }
       : {}),
     ...(Array.isArray(state.platforms) ? { platforms: PLATFORMS.filter(p => state.platforms?.includes(p)) } : {}),
+    ...(CONTRIBUTOR_BUCKETS.includes(state.contributors as ContributorBucket)
+      ? { contributors: state.contributors }
+      : {}),
     ...(sentDiagrams(state.diagrams).length > 0 ? { diagrams: sentDiagrams(state.diagrams) } : {}),
     ...(Array.isArray(state.trail)
       ? { trail: sentTrail(state.trail), trailDropped: clampCount(state.trailDropped ?? 0, MAX_TRAIL_DROPPED) }

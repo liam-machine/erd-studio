@@ -162,6 +162,8 @@ const HOST_VALUES = new Set([
 const REMOTE_VALUES = new Set(['local', 'ssh', 'wsl', 'container', 'codespaces', 'web', 'other']);
 const RECENT_DAYS_VALUES = new Set(['0', '1', '2-3', '4-7', '8-14', '15-28']);
 const FIRST_CANVAS_VALUES = new Set(['never', '0', '1-7', '8-30', '31-90', '90+']);
+/** Distinct commit authors under the project's ERD Studio files in the last 90 days (migrations/0007). */
+const CONTRIBUTOR_VALUES = new Set(['0', '1', '2-3', '4-10', '10+']);
 /** Stored in this order, like STAGES. */
 const ASSISTANTS = ['claude', 'copilot', 'codex', 'gemini', 'cursor'];
 const HARNESSES = ['claude', 'agents', 'copilot', 'gemini', 'codex'];
@@ -1180,9 +1182,9 @@ const UPSERT_SQL = `INSERT INTO heartbeats (
   has_semantic_dir, domain_count, activations, canvas_opens, stages, schema_formats,
   model_count, manifest, catalog, features, errors,
   host, remote, dev, assistants, harnesses, active_days_28, canvas_days_28, first_canvas,
-  physical_tools, platforms, trail, trail_dropped, diagrams
+  physical_tools, platforms, trail, trail_dropped, diagrams, contributors
 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19,
-  ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32)
+  ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33)
 ON CONFLICT(install_id, day) DO UPDATE SET
   received_day = excluded.received_day,
   ext_version = excluded.ext_version,
@@ -1213,7 +1215,8 @@ ON CONFLICT(install_id, day) DO UPDATE SET
   platforms = excluded.platforms,
   trail = excluded.trail,
   trail_dropped = excluded.trail_dropped,
-  diagrams = excluded.diagrams`;
+  diagrams = excluded.diagrams,
+  contributors = excluded.contributors`;
 
 const RETENTION_SQL = `DELETE FROM heartbeats WHERE received_day < date('now', '-${RETENTION_DAYS} days')`;
 
@@ -1241,7 +1244,7 @@ const LEDGER_RETENTION_SQL = `DELETE FROM worker_daily WHERE day < date('now', '
 const SHAPE_FIELDS = new Set([
   'installId', 'day', 'extVersion', 'vscodeMajor', 'os', 'tenure', 'activation', 'stages', 'schemaFormats',
   'modelCount', 'counts', 'features', 'errors', 'host', 'assistants', 'harnesses', 'physicalTools', 'platforms',
-  'trail', 'trailDropped', 'diagrams', 'other',
+  'trail', 'trailDropped', 'diagrams', 'contributors', 'other',
 ]);
 
 /** `major.minor` of an extension version, one digit of major and at most two of minor. */
@@ -1393,6 +1396,7 @@ async function handleHeartbeat(request, env) {
       heartbeat.trail === null ? null : JSON.stringify(heartbeat.trail),
       heartbeat.trailDropped,
       heartbeat.diagrams === null ? null : JSON.stringify(heartbeat.diagrams),
+      heartbeat.contributors,
     )
     .run();
 
@@ -1537,6 +1541,8 @@ function validateHeartbeat(raw, now) {
   if (b.physicalTools !== undefined && !physicalTools) return refused('physicalTools');
   const platforms = b.platforms === undefined ? null : subsetOf(b.platforms, PLATFORMS);
   if (b.platforms !== undefined && !platforms) return refused('platforms');
+  const contributors = optionalOneOf(b.contributors, CONTRIBUTOR_VALUES);
+  if (contributors === INVALID) return refused('contributors');
 
   return {
     ok: true,
@@ -1574,6 +1580,7 @@ function validateHeartbeat(raw, now) {
       trail: trail === null ? null : trail.entries,
       trailDropped: trail === null ? null : typeof b.trailDropped === 'number' ? b.trailDropped : 0,
       diagrams,
+      contributors: /** @type {string | null} */ (contributors),
     },
   };
 }
@@ -1913,6 +1920,7 @@ function errorName(err) {
  * @property {Array<[string, number, number, number]> | null} trail
  * @property {number | null} trailDropped
  * @property {Array<[number, number, number]> | null} diagrams
+ * @property {string | null} contributors
  */
 
 /**

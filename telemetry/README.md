@@ -421,6 +421,44 @@ with `diagrams` NULL is a day without a diagram, or a client from before the
 field; the Worker that predates migration 0006 drops the field, so deploy
 the Worker before the extension release that sends it.
 
+### One person or a team (migrations/0007)
+
+`contributors` says whether a project's ERD Studio files are one person's or a
+team's: how many different people committed under its `.erd-studio/` folder in
+the last 90 days, as a bucket: `0`, `1`, `2-3`, `4-10` or `10+`. The extension
+counts them on the device (`src/services/contributorCount.ts`), at most once a
+day per workspace, about 15 seconds after activation, from one read-only
+`git log --since=90.days.ago --format=%aE -- .` run inside the folder, and
+only in a trusted workspace. The author list stays in memory and only the
+bucket is sent: no name, email, hash, commit, branch, remote or path, so a row
+cannot say which project or which people, and two installs in one repository
+cannot be joined (each just reports the same bucket). Never add a repository
+id or a hash of a remote to do that.
+
+Read it knowing what it counts: **commit authors, not installs.** A teammate
+who edits the files by hand or through an AI assistant counts; a teammate who
+installed ERD Studio and only reads diagrams does not; one person committing
+under two addresses counts twice unless the project's `.mailmap` joins them.
+`0` is a repository with no commit under the folder in the window (new or
+uncommitted files). NULL is a day it was not counted: no `.erd-studio/`
+folder, no git, an untrusted workspace, or a client from before the field.
+The bucket list is fixed: a Worker refuses a heartbeat with a value it does
+not list, so never add or rename one.
+
+```bash
+# Installs by team size (each install's largest bucket over 28 days), and how many of them opened a diagram
+npx wrangler d1 execute erd-studio-telemetry --remote --command \
+  "WITH per AS (SELECT install_id, MAX(CASE contributors WHEN '0' THEN 0 WHEN '1' THEN 1 WHEN '2-3' THEN 2 WHEN '4-10' THEN 3 WHEN '10+' THEN 4 END) AS size, MAX(canvas_opens > 0) AS active FROM heartbeats WHERE day >= date('now','-28 days') AND COALESCE(dev, 0) = 0 AND contributors IS NOT NULL GROUP BY install_id) SELECT CASE size WHEN 0 THEN '0' WHEN 1 THEN '1' WHEN 2 THEN '2-3' WHEN 3 THEN '4-10' ELSE '10+' END AS contributors, COUNT(*) AS installs, SUM(active) AS active FROM per GROUP BY size ORDER BY size"
+
+# New installs that joined a team's project: first seen in a project with 2+ contributors, by week
+npx wrangler d1 execute erd-studio-telemetry --remote --command \
+  "WITH first AS (SELECT install_id, MIN(day) AS d0 FROM heartbeats WHERE COALESCE(dev, 0) = 0 GROUP BY install_id) SELECT strftime('%Y-%W', f.d0) AS week, COUNT(*) AS new_installs, SUM(h.contributors IS NOT NULL) AS counted, SUM(h.contributors IN ('2-3', '4-10', '10+')) AS joined_a_team FROM first f JOIN heartbeats h ON h.install_id = f.install_id AND h.day = f.d0 GROUP BY 1 ORDER BY 1"
+```
+
+Read the second beside `firstRunHasDiagrams` (a first run in a project that
+already had diagrams): together they are the nearest thing to "a teammate
+shared it".
+
 ### Native DBML storage (2.0)
 
 ERD Studio 2.0 stores a project's logical model as DBML files. Its keys are
@@ -1807,7 +1845,7 @@ must stay green in a clone that has never touched this directory.
 
 > Moved from the root `CLAUDE.md`. Read before touching `src/services/telemetryPayload.ts`, `telemetryService.ts` or any `telemetry.*` call site.
 
-One anonymous heartbeat per UTC day, describing the **previous** day, plus (2.0) at most `MAX_PROVISIONAL_SENDS` = 3 same-day interim copies of today (B2, below). The body is a contract with the Worker in `telemetry/` — `v`, `installId`, `day`, `extVersion`, `vscodeMajor`, `os`, `tenure`, `activation`, `hasSemanticDir`, `domainCount`, `activations`, `canvasOpens`, `stages`, `schemaFormats`, `modelCount`, `manifest`, `catalog`, `features`, `errors`, plus the **optional** 1.6.3 fields `host`, `remote`, `dev`, `assistants`, `harnesses`, `activeDays28`, `canvasDays28`, `firstCanvas` (the Worker stores NULL when a client omits them), and the optional `physicalTools` / `platforms` (migration `0003`; omitted on a day no detection ran, `[]` when it ran and found nothing) — and a field or allowed value changes in both places, in one PR. **Evolve the contract additively:** the Worker rejects a heartbeat whose `v` it does not know but drops unknown top-level and `features` / `errors` keys, so new fields are optional, new keys are appended, `HEARTBEAT_VERSION` stays `1`, and the Worker (plus any `telemetry/migrations/*.sql` D1 migration, applied first) is deployed before the release that sends them — `deploy.yml` does both, in that order, for a Worker change merged in the same PR as the extension change or earlier. `telemetry.json` (repo root, VS Code's format) lists every field and must be kept in step. The README deliberately does not mention telemetry — do not add a section back.
+One anonymous heartbeat per UTC day, describing the **previous** day, plus (2.0) at most `MAX_PROVISIONAL_SENDS` = 3 same-day interim copies of today (B2, below). The body is a contract with the Worker in `telemetry/` — `v`, `installId`, `day`, `extVersion`, `vscodeMajor`, `os`, `tenure`, `activation`, `hasSemanticDir`, `domainCount`, `activations`, `canvasOpens`, `stages`, `schemaFormats`, `modelCount`, `manifest`, `catalog`, `features`, `errors`, plus the **optional** 1.6.3 fields `host`, `remote`, `dev`, `assistants`, `harnesses`, `activeDays28`, `canvasDays28`, `firstCanvas` (the Worker stores NULL when a client omits them), and the optional `physicalTools` / `platforms` (migration `0003`; omitted on a day no detection ran, `[]` when it ran and found nothing) and the optional `contributors` (migration `0007`; a bucket of distinct commit authors under the semantic directory, omitted when not counted) — and a field or allowed value changes in both places, in one PR. **Evolve the contract additively:** the Worker rejects a heartbeat whose `v` it does not know but drops unknown top-level and `features` / `errors` keys, so new fields are optional, new keys are appended, `HEARTBEAT_VERSION` stays `1`, and the Worker (plus any `telemetry/migrations/*.sql` D1 migration, applied first) is deployed before the release that sends them — `deploy.yml` does both, in that order, for a Worker change merged in the same PR as the extension change or earlier. `telemetry.json` (repo root, VS Code's format) lists every field and must be kept in step. The README deliberately does not mention telemetry — do not add a section back.
 
 - **`src/services/telemetryPayload.ts`** is pure (no `vscode`, no Node built-ins): `FEATURES` and `ERROR_CODES` (typed unions — an unlisted key cannot be recorded; as with the getting-started funnel keys, user cancels and routes such as `drawCancelScope` / `setupHelperCancelled` / `openClaudeCli` are FEATURES, and only something that broke (`drawWriteFailed`, `firstLayoutFailed`, `launcherRuntimeUnverified`, …) is an ERROR_CODE, which a test enforces; and a test fails if the Worker's lists in `telemetry/src/index.js` differ key for key or in order — a new key is harmless to an old Worker, which drops unknown `features` keys one at a time, but redeploy it before the extension ships or the new counts are lost), the bucket helpers, `DailyCounters`, the `record*` reducers (caps: activations 50, canvasOpens 200, each feature/error 100), `heartbeatDue()` (skips a day with nothing counted and a day older than the Worker's 7-day window) and `buildHeartbeat()`, which rebuilds the body field by field from the allowlists so nothing stray in stored state reaches the wire. There is no field that can hold a name, path or message — keep it that way; `test/unit/telemetryPayload.test.ts` feeds real-looking names and paths through every recorder and asserts none appear in the JSON.
 - **`src/services/telemetryService.ts`** owns globalState (counters, the random `installId` — `crypto.randomUUID()`, minted once per VS Code profile and **never rotated** (it was, every 30 days, until 1.6.2), **never** `vscode.env.machineId` — the first-seen day for `tenure`, and the on-device retention state: recent active / canvas days (`rememberDay`, 28-day window) and the first canvas day, sent only as buckets and cleared by `discard()`). Every `update()` stamps the counters with the running `CounterEnv` (`stampEnv`: ext / VS Code version, `hostBucket(appName)`, `remoteBucket(remoteName, uiKind)`, `dev` from `extensionMode`), so a day is labelled with the build that counted it, the day rollover (on activation and an hourly `setInterval`, cleared on dispose), and the send: `vscode.env.createTelemetryLogger(sender, { ignoreBuiltInCommonProperties: true })` → `logUsage('heartbeat', …)`. VS Code's logger prefixes the event name and clones/scrubs the data, so the sender posts the body `buildHeartbeat()` produced (held in `outgoing`) rather than what arrives through it; `sendErrorData` is a no-op. POST to `TELEMETRY_ENDPOINT` with a 5 s `AbortController`; every failure is swallowed — no retry, toast or log (a retry for the final is deferred to after 2.0). Bodies wait in an in-order queue (`outgoing`) and are queued only while `logger.isUsageEnabled`, so an interim copy never replaces a final waiting to be posted and nothing is posted on its own later. The URL passes through `safeBaseUrl()` (exported from `feedbackAnalysisService`) — one https rule for every outbound base URL. `setTelemetryEndpointForTests()` is the test seam.

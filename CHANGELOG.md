@@ -8,6 +8,12 @@ The `Unreleased` heading below is renamed to the released version by the deploy 
 Releases are patch bumps by default. To ship a minor or major version, write it into the
 heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that.
 
+## Unreleased
+
+### Added
+
+- **Usage telemetry can tell a one-person project from a team's.** If you have telemetry on, ERD Studio now counts how many different people committed to the project's `.erd-studio` folder in the last 90 days and sends only a range: 0, 1, 2-3, 4-10 or more than 10 (`contributors`). It is counted on your machine, at most once a day, from a read-only `git log`, and only in a workspace you trust. No name, email address, commit, branch, repository name or path is sent, so it cannot say which project or which people. `telemetry.json` lists the field.
+
 ## 2.0.7 — 2026-11-14
 
 ### Changed

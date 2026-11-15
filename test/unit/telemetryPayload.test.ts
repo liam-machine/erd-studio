@@ -30,6 +30,9 @@ import {
   REMOTES,
   RETENTION_WINDOW_DAYS,
   firstCanvasBucket,
+  recordContributors,
+  CONTRIBUTOR_BUCKETS,
+  type ContributorBucket,
   hostBucket,
   layoutFeature,
   recentDaysBucket,
@@ -373,6 +376,7 @@ describe('allowlists agree with the Worker', () => {
     expect(workerSet('HOST_VALUES')).toEqual([...HOSTS]);
     expect(workerSet('REMOTE_VALUES')).toEqual([...REMOTES]);
     expect(workerSet('RECENT_DAYS_VALUES')).toEqual(['0', '1', '2-3', '4-7', '8-14', '15-28']);
+    expect(workerSet('CONTRIBUTOR_VALUES')).toEqual([...CONTRIBUTOR_BUCKETS]);
     expect(workerSet('FIRST_CANVAS_VALUES')).toEqual(['never', '0', '1-7', '8-30', '31-90', '90+']);
     expect(workerList('ASSISTANTS')).toEqual([...ASSISTANTS]);
     expect(workerList('HARNESSES')).toEqual([...HARNESSES]);
@@ -803,6 +807,7 @@ describe('allowlists agree with the Worker', () => {
       (/\[([^\]]*)\]/.exec(fields[field].comment)?.[1] ?? '').split(',').map((v: string) => v.trim());
     expect(listed('physicalTools')).toEqual([...PHYSICAL_TOOLS]);
     expect(listed('platforms')).toEqual([...PLATFORMS]);
+    expect(listed('contributors')).toEqual([...CONTRIBUTOR_BUCKETS]);
   });
 });
 
@@ -941,6 +946,38 @@ describe('environment, assistants and retention (1.6.3)', () => {
     expect(layoutFeature(5000, true)).toBe('layout1to5s');
     expect(layoutFeature(5001, true)).toBe('layoutOver5s');
     expect(layoutFeature(10, false)).toBe('layoutFailed');
+  });
+});
+
+describe('contributors', () => {
+  const day = (): DailyCounters => recordActivation(emptyCounters('2026-09-24'), {
+    outcome: 'project_found', hasSemanticDir: true, domainCount: 1,
+  });
+
+  it('is left out of the body until a project was counted that day', () => {
+    expect('contributors' in buildHeartbeat(day(), ENV)).toBe(false);
+  });
+
+  it('sends the bucket, 0 included', () => {
+    expect(buildHeartbeat(recordContributors(day(), '0'), ENV).contributors).toBe('0');
+    expect(buildHeartbeat(recordContributors(day(), '2-3'), ENV).contributors).toBe('2-3');
+  });
+
+  it('keeps the largest of the projects counted that day', () => {
+    let s = recordContributors(day(), '4-10');
+    s = recordContributors(s, '1');
+    expect(s.contributors).toBe('4-10');
+    expect(recordContributors(s, '10+').contributors).toBe('10+');
+  });
+
+  it('never lets a value outside the list into the state or the body', () => {
+    const bad = 'someone@example.com' as unknown as ContributorBucket;
+    expect(recordContributors(day(), bad).contributors).toBeUndefined();
+    expect('contributors' in buildHeartbeat({ ...day(), contributors: bad }, ENV)).toBe(false);
+  });
+
+  it('does not carry over to the next day', () => {
+    expect(nextDay(recordContributors(day(), '2-3'), '2026-09-25').contributors).toBeUndefined();
   });
 });
 

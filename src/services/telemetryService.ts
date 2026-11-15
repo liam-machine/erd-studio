@@ -45,6 +45,7 @@ import {
   recordAssistants,
   recordHarnesses,
   recordPhysicalTooling,
+  recordContributors,
   heartbeatDue,
   nextDay,
   recordActivation,
@@ -78,6 +79,7 @@ import {
   type TelemetryAssistant,
   type TelemetryHarness,
   type TelemetryPhysicalTool,
+  type ContributorBucket,
   type TelemetryPlatform,
   type TrailEvent,
   type TrailMarker,
@@ -699,6 +701,10 @@ export const telemetry = {
   /** How the open workspace builds its physical tables (`detectPhysicalTooling()` flags). */
   physicalTooling(found: { tools: readonly TelemetryPhysicalTool[]; platforms: readonly TelemetryPlatform[] }): void {
     active?.update(s => recordPhysicalTooling(s, found));
+  },
+  /** How many people committed to the open project's ERD Studio files lately, as a bucket (`detectContributors()`). */
+  contributors(found: ContributorBucket): void {
+    active?.update(s => recordContributors(s, found));
   },
   /** Whether anything would be recorded now, so a caller can skip work whose only use is telemetry. */
   enabled(): boolean {

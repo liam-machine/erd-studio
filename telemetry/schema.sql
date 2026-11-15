@@ -47,6 +47,8 @@ CREATE TABLE IF NOT EXISTS heartbeats (
   trail_dropped INTEGER,
   -- Added by migrations/0006_diagram_use.sql. NULL on a day no diagram was used.
   diagrams TEXT,                 -- JSON array of [id, opens, edits]; id is a random number per diagram
+  -- Added by migrations/0007_contributors.sql. NULL when not counted that day.
+  contributors TEXT,             -- bucket of distinct commit authors under .erd-studio/, last 90 days
   PRIMARY KEY (install_id, day)
 );
 CREATE INDEX IF NOT EXISTS idx_heartbeats_day ON heartbeats(day);

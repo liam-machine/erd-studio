@@ -44,6 +44,7 @@ const TELEMETRY_MODULES = [
   'src/services/knownFixesService.ts',
   'src/services/relationshipHealth.ts',
   'src/services/physicalTooling.ts',
+  'src/services/contributorCount.ts',
 ];
 
 describe('the ERD Studio log stays out of telemetry', () => {

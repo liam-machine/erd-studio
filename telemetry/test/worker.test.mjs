@@ -446,7 +446,7 @@ describe('validation — acceptance and normalisation', () => {
     const flat = JSON.stringify(params);
     assert.ok(!flat.includes('secret-laptop'));
     assert.ok(!flat.includes('10.0.0.1'));
-    assert.equal(params.length, 32);
+    assert.equal(params.length, 33);
   });
 
   it('drops unknown feature and error keys, and zero counts', async () => {
@@ -636,6 +636,8 @@ describe('validation — acceptance and normalisation', () => {
       null,
       // And use per diagram (migrations/0006).
       null,
+      // And the contributors bucket (migrations/0007).
+      null,
     ]);
   });
 });
@@ -767,7 +769,7 @@ describe('the onboarding trail', () => {
 
   it('stores it in order as JSON, with the dropped count', async () => {
     const params = await storedParams(heartbeat({ trail: TRAIL, trailDropped: 3 }));
-    assert.equal(params.length, 32);
+    assert.equal(params.length, 33);
     assert.deepEqual(JSON.parse(params[29]), TRAIL);
     assert.equal(params[30], 3);
   });
@@ -816,6 +818,33 @@ describe('the onboarding trail', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Contributors (migrations/0007)
+// ---------------------------------------------------------------------------
+
+describe('contributors bucket', () => {
+  for (const value of ['0', '1', '2-3', '4-10', '10+']) {
+    it(`stores ${value}, last`, async () => {
+      const params = await storedParams(heartbeat({ contributors: value }));
+      assert.equal(params.length, 33);
+      assert.equal(params[32], value);
+    });
+  }
+
+  it('stores NULL when the client sends none', async () => {
+    assert.equal((await storedParams(heartbeat({})))[32], null);
+  });
+
+  for (const value of ['11', 3, ['1'], 'someone@example.com', '']) {
+    it(`refuses contributors = ${JSON.stringify(value)} with 400 and no heartbeat`, async () => {
+      const env = makeEnv();
+      const response = await post(heartbeat({ contributors: value }), env);
+      assert.equal(response.status, 400);
+      assert.equal(env.DB.statements.filter((s) => /INSERT INTO heartbeats/.test(s.sql)).length, 0);
+    });
+  }
+});
+
+// ---------------------------------------------------------------------------
 // Use per diagram (migrations/0006)
 // ---------------------------------------------------------------------------
 
@@ -823,7 +852,7 @@ describe('use per diagram', () => {
   it('stores [id, opens, edits] entries as JSON, last', async () => {
     const diagrams = [[41822, 3, 12], [7, 1, 0], [0, 2, 5]];
     const params = await storedParams(heartbeat({ diagrams }));
-    assert.equal(params.length, 32);
+    assert.equal(params.length, 33);
     assert.deepEqual(JSON.parse(params[31]), diagrams);
   });
 
