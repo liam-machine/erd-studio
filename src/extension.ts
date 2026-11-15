@@ -729,9 +729,10 @@ const CONTRIBUTORS_DAY_KEY = 'erdStudio.telemetry.contributorsDay';
 /**
  * Usage telemetry: whether this project's ERD Studio files are one person's or
  * a team's, as a bucket of distinct commit authors under the semantic
- * directory in the last 90 days (`detectContributors()`). Once per workspace
+ * directory in the last 90 days, and the repository key that lets the installs
+ * in one repository be counted (`detectContributors()`). Once per workspace
  * per UTC day, only in a trusted workspace that has the directory, and not at
- * all while telemetry is off. It runs one read-only `git log`; no name, email,
+ * all while telemetry is off. It runs read-only git commands; no name, email,
  * remote or path is kept or sent.
  */
 function recordContributorCount(context: vscode.ExtensionContext, semanticDirPath: string): void {
@@ -743,7 +744,7 @@ function recordContributorCount(context: vscode.ExtensionContext, semanticDirPat
       if (!fs.existsSync(semanticDirPath)) return;
       void detectContributors(semanticDirPath).then(found => {
         if (found === undefined) return;
-        telemetry.contributors(found);
+        telemetry.contributors(found.contributors, found.repoKey);
         void context.workspaceState.update(CONTRIBUTORS_DAY_KEY, today);
       }, () => { /* telemetry must never break activation */ });
     }, PHYSICAL_TOOLING_DELAY_MS);

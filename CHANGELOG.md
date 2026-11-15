@@ -12,7 +12,7 @@ heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that
 
 ### Added
 
-- **Usage telemetry can tell a one-person project from a team's.** If you have telemetry on, ERD Studio now counts how many different people committed to the project's `.erd-studio` folder in the last 90 days and sends only a range: 0, 1, 2-3, 4-10 or more than 10 (`contributors`). It is counted on your machine, at most once a day, from a read-only `git log`, and only in a workspace you trust. No name, email address, commit, branch, repository name or path is sent, so it cannot say which project or which people. `telemetry.json` lists the field.
+- **Usage telemetry can tell a one-person project from a team's, and count the installs in one repository.** If you have telemetry on, ERD Studio now sends two more things about a Git project that has an `.erd-studio` folder. `contributors` is how many different people committed to that folder in the last 90 days, as a range: 0, 1, 2-3, 4-10 or more than 10. `repoKey` is 12 letters and digits that are the same for everyone working in the same repository: the start of a one-way hash of the id of the repository's first commit. Both are made on your machine, at most once a day, with read-only git commands, and only in a workspace you trust. No name, email address, branch, repository name, remote, URL, path or file content is sent. `telemetry.json` lists both fields.
 
 ## 2.0.7 — 2026-11-14
 

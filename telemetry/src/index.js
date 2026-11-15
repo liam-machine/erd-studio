@@ -164,6 +164,8 @@ const RECENT_DAYS_VALUES = new Set(['0', '1', '2-3', '4-7', '8-14', '15-28']);
 const FIRST_CANVAS_VALUES = new Set(['never', '0', '1-7', '8-30', '31-90', '90+']);
 /** Distinct commit authors under the project's ERD Studio files in the last 90 days (migrations/0007). */
 const CONTRIBUTOR_VALUES = new Set(['0', '1', '2-3', '4-10', '10+']);
+/** The repository key: 12 hex characters of a one-way hash made by the extension (migrations/0007). */
+const REPO_KEY = /^[0-9a-f]{12}$/;
 /** Stored in this order, like STAGES. */
 const ASSISTANTS = ['claude', 'copilot', 'codex', 'gemini', 'cursor'];
 const HARNESSES = ['claude', 'agents', 'copilot', 'gemini', 'codex'];
@@ -1182,9 +1184,9 @@ const UPSERT_SQL = `INSERT INTO heartbeats (
   has_semantic_dir, domain_count, activations, canvas_opens, stages, schema_formats,
   model_count, manifest, catalog, features, errors,
   host, remote, dev, assistants, harnesses, active_days_28, canvas_days_28, first_canvas,
-  physical_tools, platforms, trail, trail_dropped, diagrams, contributors
+  physical_tools, platforms, trail, trail_dropped, diagrams, contributors, repo_key
 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19,
-  ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33)
+  ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34)
 ON CONFLICT(install_id, day) DO UPDATE SET
   received_day = excluded.received_day,
   ext_version = excluded.ext_version,
@@ -1216,7 +1218,8 @@ ON CONFLICT(install_id, day) DO UPDATE SET
   trail = excluded.trail,
   trail_dropped = excluded.trail_dropped,
   diagrams = excluded.diagrams,
-  contributors = excluded.contributors`;
+  contributors = excluded.contributors,
+  repo_key = excluded.repo_key`;
 
 const RETENTION_SQL = `DELETE FROM heartbeats WHERE received_day < date('now', '-${RETENTION_DAYS} days')`;
 
@@ -1244,7 +1247,7 @@ const LEDGER_RETENTION_SQL = `DELETE FROM worker_daily WHERE day < date('now', '
 const SHAPE_FIELDS = new Set([
   'installId', 'day', 'extVersion', 'vscodeMajor', 'os', 'tenure', 'activation', 'stages', 'schemaFormats',
   'modelCount', 'counts', 'features', 'errors', 'host', 'assistants', 'harnesses', 'physicalTools', 'platforms',
-  'trail', 'trailDropped', 'diagrams', 'contributors', 'other',
+  'trail', 'trailDropped', 'diagrams', 'contributors', 'repoKey', 'other',
 ]);
 
 /** `major.minor` of an extension version, one digit of major and at most two of minor. */
@@ -1397,6 +1400,7 @@ async function handleHeartbeat(request, env) {
       heartbeat.trailDropped,
       heartbeat.diagrams === null ? null : JSON.stringify(heartbeat.diagrams),
       heartbeat.contributors,
+      heartbeat.repoKey,
     )
     .run();
 
@@ -1543,6 +1547,7 @@ function validateHeartbeat(raw, now) {
   if (b.platforms !== undefined && !platforms) return refused('platforms');
   const contributors = optionalOneOf(b.contributors, CONTRIBUTOR_VALUES);
   if (contributors === INVALID) return refused('contributors');
+  if (b.repoKey !== undefined && (contributors === null || typeof b.repoKey !== 'string' || !REPO_KEY.test(b.repoKey))) return refused('repoKey');
 
   return {
     ok: true,
@@ -1581,6 +1586,7 @@ function validateHeartbeat(raw, now) {
       trailDropped: trail === null ? null : typeof b.trailDropped === 'number' ? b.trailDropped : 0,
       diagrams,
       contributors: /** @type {string | null} */ (contributors),
+      repoKey: typeof b.repoKey === 'string' ? b.repoKey : null,
     },
   };
 }
@@ -1921,6 +1927,7 @@ function errorName(err) {
  * @property {number | null} trailDropped
  * @property {Array<[number, number, number]> | null} diagrams
  * @property {string | null} contributors
+ * @property {string | null} repoKey
  */
 
 /**

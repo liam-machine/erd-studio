@@ -1292,6 +1292,12 @@ export type RecentDaysBucket = '0' | '1' | '2-3' | '4-7' | '8-14' | '15-28';
  */
 export const CONTRIBUTOR_BUCKETS = ['0', '1', '2-3', '4-10', '10+'] as const;
 export type ContributorBucket = (typeof CONTRIBUTOR_BUCKETS)[number];
+/**
+ * The repository key (`repoKeyOf()`, `src/services/contributorCount.ts`): 12
+ * hex characters of a one-way hash of the repository's first commit id, the
+ * same in every clone. Anything else is never stored or sent.
+ */
+export const REPO_KEY_PATTERN = /^[0-9a-f]{12}$/;
 /** Days from first activation to the first canvas open, or `never` (yet). */
 export type FirstCanvasBucket = TenureBucket | 'never';
 
@@ -1350,6 +1356,8 @@ export interface DailyCounters {
    * `physicalTools`.
    */
   contributors?: ContributorBucket;
+  /** The repository key ({@link REPO_KEY_PATTERN}) of the project `contributors` describes. Absent when git gave none. */
+  repoKey?: string;
   /**
    * The onboarding trail ({@link recordTrail}): the day's events in order, with
    * the seconds between them. Absent on a day it was not kept ({@link trailKept}).
@@ -1430,6 +1438,8 @@ export interface HeartbeatBody {
   platforms?: TelemetryPlatform[];
   /** Omitted when no project's commit authors were counted that day. */
   contributors?: ContributorBucket;
+  /** With `contributors`: that project's repository key. Omitted when git gave none. */
+  repoKey?: string;
   /** Use per diagram that day; omitted when no diagram was opened or edited. */
   diagrams?: DiagramUse[];
   /** The onboarding trail; omitted on a day it was not kept. */
@@ -1648,11 +1658,20 @@ export function recordPhysicalTooling(
   };
 }
 
-/** One project's commit authors were counted. A day with several projects keeps the largest bucket. */
-export function recordContributors(state: DailyCounters, found: ContributorBucket): DailyCounters {
+/**
+ * One project's commit authors were counted. A day with several projects keeps
+ * the largest bucket, and the repository key of the project it came from.
+ */
+export function recordContributors(state: DailyCounters, found: ContributorBucket, repoKey?: string): DailyCounters {
   if (!CONTRIBUTOR_BUCKETS.includes(found)) return state;
   const had = state.contributors === undefined ? -1 : CONTRIBUTOR_BUCKETS.indexOf(state.contributors);
-  return CONTRIBUTOR_BUCKETS.indexOf(found) > had ? { ...state, contributors: found } : state;
+  if (CONTRIBUTOR_BUCKETS.indexOf(found) <= had) return state;
+  const { repoKey: _previous, ...rest } = state;
+  return {
+    ...rest,
+    contributors: found,
+    ...(typeof repoKey === 'string' && REPO_KEY_PATTERN.test(repoKey) ? { repoKey } : {}),
+  };
 }
 
 /** `a ∪ b`, restricted to `order` and in its order. */
@@ -2024,7 +2043,10 @@ export function buildHeartbeat(state: DailyCounters, env: HeartbeatEnv): Heartbe
       : {}),
     ...(Array.isArray(state.platforms) ? { platforms: PLATFORMS.filter(p => state.platforms?.includes(p)) } : {}),
     ...(CONTRIBUTOR_BUCKETS.includes(state.contributors as ContributorBucket)
-      ? { contributors: state.contributors }
+      ? {
+          contributors: state.contributors,
+          ...(typeof state.repoKey === 'string' && REPO_KEY_PATTERN.test(state.repoKey) ? { repoKey: state.repoKey } : {}),
+        }
       : {}),
     ...(sentDiagrams(state.diagrams).length > 0 ? { diagrams: sentDiagrams(state.diagrams) } : {}),
     ...(Array.isArray(state.trail)

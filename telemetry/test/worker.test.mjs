@@ -446,7 +446,7 @@ describe('validation — acceptance and normalisation', () => {
     const flat = JSON.stringify(params);
     assert.ok(!flat.includes('secret-laptop'));
     assert.ok(!flat.includes('10.0.0.1'));
-    assert.equal(params.length, 33);
+    assert.equal(params.length, 34);
   });
 
   it('drops unknown feature and error keys, and zero counts', async () => {
@@ -636,7 +636,8 @@ describe('validation — acceptance and normalisation', () => {
       null,
       // And use per diagram (migrations/0006).
       null,
-      // And the contributors bucket (migrations/0007).
+      // And the contributors bucket and the repository key (migrations/0007).
+      null,
       null,
     ]);
   });
@@ -769,7 +770,7 @@ describe('the onboarding trail', () => {
 
   it('stores it in order as JSON, with the dropped count', async () => {
     const params = await storedParams(heartbeat({ trail: TRAIL, trailDropped: 3 }));
-    assert.equal(params.length, 33);
+    assert.equal(params.length, 34);
     assert.deepEqual(JSON.parse(params[29]), TRAIL);
     assert.equal(params[30], 3);
   });
@@ -825,7 +826,7 @@ describe('contributors bucket', () => {
   for (const value of ['0', '1', '2-3', '4-10', '10+']) {
     it(`stores ${value}, last`, async () => {
       const params = await storedParams(heartbeat({ contributors: value }));
-      assert.equal(params.length, 33);
+      assert.equal(params.length, 34);
       assert.equal(params[32], value);
     });
   }
@@ -833,6 +834,29 @@ describe('contributors bucket', () => {
   it('stores NULL when the client sends none', async () => {
     assert.equal((await storedParams(heartbeat({})))[32], null);
   });
+
+  it('stores the repository key beside the bucket, last', async () => {
+    const params = await storedParams(heartbeat({ contributors: '2-3', repoKey: '0a1b2c3d4e5f' }));
+    assert.deepEqual(params.slice(32), ['2-3', '0a1b2c3d4e5f']);
+    assert.equal((await storedParams(heartbeat({ contributors: '2-3' })))[33], null);
+  });
+
+  for (const [what, body] of [
+    ['a key without a bucket', { repoKey: '0a1b2c3d4e5f' }],
+    ['a name', { contributors: '1', repoKey: 'acme/warehouse' }],
+    ['a URL', { contributors: '1', repoKey: 'https://github.com/acme/warehouse' }],
+    ['a whole commit id', { contributors: '1', repoKey: '0a1b2c3d4e5f0a1b2c3d4e5f0a1b2c3d4e5f0a1b' }],
+    ['upper case', { contributors: '1', repoKey: '0A1B2C3D4E5F' }],
+    ['a number', { contributors: '1', repoKey: 123456789012 }],
+    ['an empty string', { contributors: '1', repoKey: '' }],
+  ]) {
+    it(`refuses ${what} as the repository key with 400 and no heartbeat`, async () => {
+      const env = makeEnv();
+      const response = await post(heartbeat(body), env);
+      assert.equal(response.status, 400);
+      assert.equal(env.DB.statements.filter((s) => /INSERT INTO heartbeats/.test(s.sql)).length, 0);
+    });
+  }
 
   for (const value of ['11', 3, ['1'], 'someone@example.com', '']) {
     it(`refuses contributors = ${JSON.stringify(value)} with 400 and no heartbeat`, async () => {
@@ -852,7 +876,7 @@ describe('use per diagram', () => {
   it('stores [id, opens, edits] entries as JSON, last', async () => {
     const diagrams = [[41822, 3, 12], [7, 1, 0], [0, 2, 5]];
     const params = await storedParams(heartbeat({ diagrams }));
-    assert.equal(params.length, 33);
+    assert.equal(params.length, 34);
     assert.deepEqual(JSON.parse(params[31]), diagrams);
   });
 

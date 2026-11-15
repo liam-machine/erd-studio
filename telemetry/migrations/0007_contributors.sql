@@ -1,10 +1,21 @@
--- Whether a project's ERD Studio files are one person's or a team's: the number
--- of distinct commit authors under its `.erd-studio/` directory in the last 90
--- days, as a bucket ('0', '1', '2-3', '4-10', '10+'). The extension counts them
--- on the device from `git log`; no name, email, remote, hash or path is sent,
--- so the bucket cannot say which project or which people. NULL when it was not
--- counted that day (no project, no git, an untrusted workspace) or from a
--- client that predates it.
--- Must be applied BEFORE the Worker that writes this column is deployed;
+-- Whether a project's ERD Studio files are one person's or a team's, and how
+-- many installs work in one repository.
+--
+-- `contributors`: the number of distinct commit authors under the project's
+-- `.erd-studio/` directory in the last 90 days, as a bucket ('0', '1', '2-3',
+-- '4-10', '10+'). The extension counts them on the device from `git log`; no
+-- name or email is sent.
+--
+-- `repo_key`: 12 hex characters of a one-way hash (SHA-256) of the
+-- repository's first commit id, made on the device and the same in every
+-- clone, so `COUNT(DISTINCT install_id) ... GROUP BY repo_key` is the installs
+-- in one repository. It is not made from a name, a remote, a URL, a path or a
+-- file's contents.
+--
+-- Both NULL when not counted that day (no project, no git, an untrusted
+-- workspace) or from a client that predates them; `repo_key` alone is NULL in
+-- a shallow clone.
+-- Must be applied BEFORE the Worker that writes these columns is deployed;
 -- deploy.yml applies migrations first.
 ALTER TABLE heartbeats ADD COLUMN contributors TEXT;
+ALTER TABLE heartbeats ADD COLUMN repo_key TEXT;

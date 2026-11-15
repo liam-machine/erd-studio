@@ -32,6 +32,7 @@ import {
   firstCanvasBucket,
   recordContributors,
   CONTRIBUTOR_BUCKETS,
+  REPO_KEY_PATTERN,
   type ContributorBucket,
   hostBucket,
   layoutFeature,
@@ -977,7 +978,37 @@ describe('contributors', () => {
   });
 
   it('does not carry over to the next day', () => {
-    expect(nextDay(recordContributors(day(), '2-3'), '2026-09-25').contributors).toBeUndefined();
+    const next = nextDay(recordContributors(day(), '2-3', '0a1b2c3d4e5f'), '2026-09-25');
+    expect(next.contributors).toBeUndefined();
+    expect(next.repoKey).toBeUndefined();
+  });
+
+  it('sends the repository key beside the bucket, and never alone', () => {
+    const body = buildHeartbeat(recordContributors(day(), '2-3', '0a1b2c3d4e5f'), ENV);
+    expect(body.repoKey).toBe('0a1b2c3d4e5f');
+    expect('repoKey' in buildHeartbeat(recordContributors(day(), '1'), ENV)).toBe(false);
+    expect('repoKey' in buildHeartbeat({ ...day(), repoKey: '0a1b2c3d4e5f' }, ENV)).toBe(false);
+  });
+
+  it('keeps the key of the project the bucket came from', () => {
+    let s = recordContributors(day(), '2-3', 'aaaaaaaaaaaa');
+    s = recordContributors(s, '1', 'bbbbbbbbbbbb');
+    expect(s.repoKey).toBe('aaaaaaaaaaaa');
+    s = recordContributors(s, '10+');
+    expect(s.contributors).toBe('10+');
+    expect(s.repoKey).toBeUndefined();
+  });
+
+  it('never lets anything but 12 hex characters through as the key', () => {
+    for (const bad of ['acme/warehouse', 'https://x.io/a', '0A1B2C3D4E5F', '0a1b2c3d4e5f0', '', '0a1b2c3d4e5']) {
+      expect(recordContributors(day(), '1', bad).repoKey).toBeUndefined();
+      expect('repoKey' in buildHeartbeat({ ...day(), contributors: '1', repoKey: bad }, ENV)).toBe(false);
+    }
+  });
+
+  it('the key pattern matches the Worker', () => {
+    const worker = fs.readFileSync(path.join(__dirname, '../../telemetry/src/index.js'), 'utf8');
+    expect(worker).toContain(`const REPO_KEY = ${String(REPO_KEY_PATTERN)};`);
   });
 });
 

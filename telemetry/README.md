@@ -34,7 +34,8 @@ behalf (its `telemetry.json` lists every field):
 1. **Store only the validated body fields, and the Worker's own counts of
    them.** A `heartbeats` row is the fields in `schema.sql`, every one of them
    an enum, a bucket, a bounded integer, a date, a strictly matched version
-   string or the install id — plus `received_day`, the UTC date the Worker
+   string, the install id or the repository key (12 hex characters of a
+   one-way hash, "One person or a team" below) — plus `received_day`, the UTC date the Worker
    received it. There is no free text anywhere in the schema. Unknown keys in
    the body are **dropped**, not stored. The one ordered field, `trail` (an
    install's first week, the 7 days after a major update and days the guide
@@ -369,7 +370,7 @@ npx wrangler d1 execute erd-studio-telemetry --remote --command \
 ```
 
 Prefer aggregates. There is rarely a reason to look at individual rows, and
-none to copy `install_id` anywhere.
+none to copy `install_id` or `repo_key` anywhere.
 
 ### What "active" means
 
@@ -421,7 +422,7 @@ with `diagrams` NULL is a day without a diagram, or a client from before the
 field; the Worker that predates migration 0006 drops the field, so deploy
 the Worker before the extension release that sends it.
 
-### One person or a team (migrations/0007)
+### One person or a team, and installs per repository (migrations/0007)
 
 `contributors` says whether a project's ERD Studio files are one person's or a
 team's: how many different people committed under its `.erd-studio/` folder in
@@ -430,10 +431,19 @@ counts them on the device (`src/services/contributorCount.ts`), at most once a
 day per workspace, about 15 seconds after activation, from one read-only
 `git log --since=90.days.ago --format=%aE -- .` run inside the folder, and
 only in a trusted workspace. The author list stays in memory and only the
-bucket is sent: no name, email, hash, commit, branch, remote or path, so a row
-cannot say which project or which people, and two installs in one repository
-cannot be joined (each just reports the same bucket). Never add a repository
-id or a hash of a remote to do that.
+bucket is sent: no name, email, commit, branch, remote or path.
+
+`repo_key` (`repoKey` in the body, sent only beside `contributors`) is what
+lets the installs in one repository be counted: 12 hex characters that are the
+same in every clone. The extension makes it on the device as the first 12
+characters of `SHA-256("erd-studio-repo:" + <first commit id>)`, from
+`git rev-list --max-parents=0 HEAD` (the smallest id when joined histories
+left several). It is one-way, and it is not made from the repository's name,
+its remote or URL, a branch, a path or any file. A shallow clone sends none
+(its oldest commit is not the repository's first), so its row has the bucket
+and a NULL key. Keep it made from the first commit only: never hash a remote,
+a URL or a folder name into it, and treat it like `install_id`: group by it,
+count it, and do not copy it anywhere.
 
 Read it knowing what it counts: **commit authors, not installs.** A teammate
 who edits the files by hand or through an AI assistant counts; a teammate who
@@ -453,11 +463,24 @@ npx wrangler d1 execute erd-studio-telemetry --remote --command \
 # New installs that joined a team's project: first seen in a project with 2+ contributors, by week
 npx wrangler d1 execute erd-studio-telemetry --remote --command \
   "WITH first AS (SELECT install_id, MIN(day) AS d0 FROM heartbeats WHERE COALESCE(dev, 0) = 0 GROUP BY install_id) SELECT strftime('%Y-%W', f.d0) AS week, COUNT(*) AS new_installs, SUM(h.contributors IS NOT NULL) AS counted, SUM(h.contributors IN ('2-3', '4-10', '10+')) AS joined_a_team FROM first f JOIN heartbeats h ON h.install_id = f.install_id AND h.day = f.d0 GROUP BY 1 ORDER BY 1"
+
+# Installs per repository over 28 days: how many repositories have 1, 2, 3… installs, and how many of those opened a diagram
+npx wrangler d1 execute erd-studio-telemetry --remote --command \
+  "WITH per AS (SELECT repo_key, COUNT(DISTINCT install_id) AS installs, COUNT(DISTINCT CASE WHEN canvas_opens > 0 THEN install_id END) AS active FROM heartbeats WHERE day >= date('now','-28 days') AND COALESCE(dev, 0) = 0 AND repo_key IS NOT NULL GROUP BY repo_key) SELECT installs, COUNT(*) AS repositories, SUM(active) AS active_installs FROM per GROUP BY installs ORDER BY installs"
+
+# Spread inside repositories: by week, the installs that were the 2nd, 3rd… to appear in a repository
+npx wrangler d1 execute erd-studio-telemetry --remote --command \
+  "WITH firsts AS (SELECT repo_key, install_id, MIN(day) AS d0 FROM heartbeats WHERE COALESCE(dev, 0) = 0 AND repo_key IS NOT NULL GROUP BY repo_key, install_id), ranked AS (SELECT d0, ROW_NUMBER() OVER (PARTITION BY repo_key ORDER BY d0, install_id) AS nth FROM firsts) SELECT strftime('%Y-%W', d0) AS week, SUM(nth = 1) AS new_repositories, SUM(nth > 1) AS joined_existing FROM ranked GROUP BY 1 ORDER BY 1"
 ```
 
-Read the second beside `firstRunHasDiagrams` (a first run in a project that
-already had diagrams): together they are the nearest thing to "a teammate
-shared it".
+`joined_existing` is the organic-growth number: an install that turned up in
+a repository where another install already was. Read it knowing its limits.
+One person with two machines or two VS Code profiles is two installs in one
+repository. A fork or a copy that keeps the history shares the key, and so do
+two ERD Studio projects in one monorepo. Rows older than 90 days are gone, so
+an install that was first in its repository before then looks like a later
+one's first. Read it beside `firstRunHasDiagrams` (a first run in a project
+that already had diagrams).
 
 ### Native DBML storage (2.0)
 
@@ -1845,7 +1868,7 @@ must stay green in a clone that has never touched this directory.
 
 > Moved from the root `CLAUDE.md`. Read before touching `src/services/telemetryPayload.ts`, `telemetryService.ts` or any `telemetry.*` call site.
 
-One anonymous heartbeat per UTC day, describing the **previous** day, plus (2.0) at most `MAX_PROVISIONAL_SENDS` = 3 same-day interim copies of today (B2, below). The body is a contract with the Worker in `telemetry/` — `v`, `installId`, `day`, `extVersion`, `vscodeMajor`, `os`, `tenure`, `activation`, `hasSemanticDir`, `domainCount`, `activations`, `canvasOpens`, `stages`, `schemaFormats`, `modelCount`, `manifest`, `catalog`, `features`, `errors`, plus the **optional** 1.6.3 fields `host`, `remote`, `dev`, `assistants`, `harnesses`, `activeDays28`, `canvasDays28`, `firstCanvas` (the Worker stores NULL when a client omits them), and the optional `physicalTools` / `platforms` (migration `0003`; omitted on a day no detection ran, `[]` when it ran and found nothing) and the optional `contributors` (migration `0007`; a bucket of distinct commit authors under the semantic directory, omitted when not counted) — and a field or allowed value changes in both places, in one PR. **Evolve the contract additively:** the Worker rejects a heartbeat whose `v` it does not know but drops unknown top-level and `features` / `errors` keys, so new fields are optional, new keys are appended, `HEARTBEAT_VERSION` stays `1`, and the Worker (plus any `telemetry/migrations/*.sql` D1 migration, applied first) is deployed before the release that sends them — `deploy.yml` does both, in that order, for a Worker change merged in the same PR as the extension change or earlier. `telemetry.json` (repo root, VS Code's format) lists every field and must be kept in step. The README deliberately does not mention telemetry — do not add a section back.
+One anonymous heartbeat per UTC day, describing the **previous** day, plus (2.0) at most `MAX_PROVISIONAL_SENDS` = 3 same-day interim copies of today (B2, below). The body is a contract with the Worker in `telemetry/` — `v`, `installId`, `day`, `extVersion`, `vscodeMajor`, `os`, `tenure`, `activation`, `hasSemanticDir`, `domainCount`, `activations`, `canvasOpens`, `stages`, `schemaFormats`, `modelCount`, `manifest`, `catalog`, `features`, `errors`, plus the **optional** 1.6.3 fields `host`, `remote`, `dev`, `assistants`, `harnesses`, `activeDays28`, `canvasDays28`, `firstCanvas` (the Worker stores NULL when a client omits them), and the optional `physicalTools` / `platforms` (migration `0003`; omitted on a day no detection ran, `[]` when it ran and found nothing) and the optional `contributors` / `repoKey` (migration `0007`; a bucket of distinct commit authors under the semantic directory and the repository key, omitted when not counted) — and a field or allowed value changes in both places, in one PR. **Evolve the contract additively:** the Worker rejects a heartbeat whose `v` it does not know but drops unknown top-level and `features` / `errors` keys, so new fields are optional, new keys are appended, `HEARTBEAT_VERSION` stays `1`, and the Worker (plus any `telemetry/migrations/*.sql` D1 migration, applied first) is deployed before the release that sends them — `deploy.yml` does both, in that order, for a Worker change merged in the same PR as the extension change or earlier. `telemetry.json` (repo root, VS Code's format) lists every field and must be kept in step. The README deliberately does not mention telemetry — do not add a section back.
 
 - **`src/services/telemetryPayload.ts`** is pure (no `vscode`, no Node built-ins): `FEATURES` and `ERROR_CODES` (typed unions — an unlisted key cannot be recorded; as with the getting-started funnel keys, user cancels and routes such as `drawCancelScope` / `setupHelperCancelled` / `openClaudeCli` are FEATURES, and only something that broke (`drawWriteFailed`, `firstLayoutFailed`, `launcherRuntimeUnverified`, …) is an ERROR_CODE, which a test enforces; and a test fails if the Worker's lists in `telemetry/src/index.js` differ key for key or in order — a new key is harmless to an old Worker, which drops unknown `features` keys one at a time, but redeploy it before the extension ships or the new counts are lost), the bucket helpers, `DailyCounters`, the `record*` reducers (caps: activations 50, canvasOpens 200, each feature/error 100), `heartbeatDue()` (skips a day with nothing counted and a day older than the Worker's 7-day window) and `buildHeartbeat()`, which rebuilds the body field by field from the allowlists so nothing stray in stored state reaches the wire. There is no field that can hold a name, path or message — keep it that way; `test/unit/telemetryPayload.test.ts` feeds real-looking names and paths through every recorder and asserts none appear in the JSON.
 - **`src/services/telemetryService.ts`** owns globalState (counters, the random `installId` — `crypto.randomUUID()`, minted once per VS Code profile and **never rotated** (it was, every 30 days, until 1.6.2), **never** `vscode.env.machineId` — the first-seen day for `tenure`, and the on-device retention state: recent active / canvas days (`rememberDay`, 28-day window) and the first canvas day, sent only as buckets and cleared by `discard()`). Every `update()` stamps the counters with the running `CounterEnv` (`stampEnv`: ext / VS Code version, `hostBucket(appName)`, `remoteBucket(remoteName, uiKind)`, `dev` from `extensionMode`), so a day is labelled with the build that counted it, the day rollover (on activation and an hourly `setInterval`, cleared on dispose), and the send: `vscode.env.createTelemetryLogger(sender, { ignoreBuiltInCommonProperties: true })` → `logUsage('heartbeat', …)`. VS Code's logger prefixes the event name and clones/scrubs the data, so the sender posts the body `buildHeartbeat()` produced (held in `outgoing`) rather than what arrives through it; `sendErrorData` is a no-op. POST to `TELEMETRY_ENDPOINT` with a 5 s `AbortController`; every failure is swallowed — no retry, toast or log (a retry for the final is deferred to after 2.0). Bodies wait in an in-order queue (`outgoing`) and are queued only while `logger.isUsageEnabled`, so an interim copy never replaces a final waiting to be posted and nothing is posted on its own later. The URL passes through `safeBaseUrl()` (exported from `feedbackAnalysisService`) — one https rule for every outbound base URL. `setTelemetryEndpointForTests()` is the test seam.

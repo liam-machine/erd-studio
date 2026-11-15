@@ -702,9 +702,9 @@ export const telemetry = {
   physicalTooling(found: { tools: readonly TelemetryPhysicalTool[]; platforms: readonly TelemetryPlatform[] }): void {
     active?.update(s => recordPhysicalTooling(s, found));
   },
-  /** How many people committed to the open project's ERD Studio files lately, as a bucket (`detectContributors()`). */
-  contributors(found: ContributorBucket): void {
-    active?.update(s => recordContributors(s, found));
+  /** How many people committed to the open project's ERD Studio files lately, as a bucket, and its repository key (`detectContributors()`). */
+  contributors(found: ContributorBucket, repoKey?: string): void {
+    active?.update(s => recordContributors(s, found, repoKey));
   },
   /** Whether anything would be recorded now, so a caller can skip work whose only use is telemetry. */
   enabled(): boolean {
