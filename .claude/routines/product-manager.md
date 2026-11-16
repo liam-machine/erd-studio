@@ -96,7 +96,7 @@ For Liam's own issues: no replies; just use them as context.
 
 ### STEP L — Launch watch (the 21 days after 2.0.0 is published)
 
-**When.** Day 0 is the date 2.0.0 was published: the date on the `## 2.0.0 — <date>` heading in `CHANGELOG.md` on `origin/main` (cross-check the 2.0.0 entry in `npx @vscode/vsce show liamwynne.erd-studio --json` and take the earlier date if they differ). Run this step on **every run** from day 0 to day 20 inclusive, straight after STEP 1 and before anything else, so a long run can never skip it. Before day 0, or with no `2.0.0` heading on main, skip it with one journal line. On the first run after day 20, write a closing digest to the journal (the three weeks against the 1.x baseline), take `launch-alert` off any of your issues that no longer need Liam now, and say in the summary that the routine can go back to Tuesdays and Thursdays.
+**When.** Day 0 is the date 2.0.0 was published: the date on the `## 2.0.0 — <date>` heading in `CHANGELOG.md` on `origin/main` (cross-check the 2.0.0 entry in `npx @vscode/vsce show liamwynne.erd-studio --json` and take the earlier date if they differ). Run this step on **every run** from day 0 to day 20 inclusive, straight after STEP 1 and before anything else, so a long run can never skip it. Before day 0, or with no `2.0.0` heading on main, skip it with one journal line. On the first run after day 20, write a closing digest to the journal (the three weeks against the 1.x baseline, and STEP 5's Use numbers against the bar below), take `launch-alert` off any of your issues that no longer need Liam now, and say in the summary that the routine can go back to Tuesdays and Thursdays.
 
 **Cadence.** If this run and the previous in-window run (journal → **Launch watch**) are more than 30 hours apart, the schedule has not been switched to daily yet: open, once, a `launch-alert` issue "Launch watch: switch the product manager routine to daily for 2.0" (slug `cadence`) and close it yourself once two runs in a row are a day apart.
 
@@ -134,6 +134,21 @@ For Liam's own issues: no replies; just use them as context.
 - **Related** issues and PRs.
 
 Write the journal's **Launch watch** section every in-window run: day N of 21, this run's headline numbers against the baselines, and each open alert with its state (opened, updated, unchanged, cleared). In the summary, put the launch watch first.
+
+**The closing digest's bar: SUGGESTED, NOT confirmed. Liam sets it (#326).** Until this paragraph says "Confirmed by Liam on <date>", it is a suggestion, written down before the data came in so the closing digest has something to be read against. Liam confirms or changes it by editing this file, which is reviewed like code; a comment cannot do it, because you post as the same account. Until then:
+
+- the closing digest prints each item's number beside it with "meets" or "misses", followed by "(suggested bar, not confirmed)";
+- it may sum up as "held" (all three met) or "bump" (any missed) only with the same words beside it;
+- nothing in this bar ever opens, edits or labels a `launch-alert` issue: a missed bar is a reading for Liam, not an alert;
+- the bar and the repeat-use question in item 3 stay under the journal's **Decisions waiting on Liam**.
+
+Suggested, in this order (numbers from STEP 5 → Use):
+
+1. **The pre-2.0 base comes back.** Of the 29 installs that opened a diagram on 1.x stable in the 28 days before 2.0 (Use item 4), at least half (15) have opened a diagram on 2.x. When #326 was written: 2.
+2. **Use holds after the release week.** Active installs on final rows (Use item 2, by week) stay at or above 12 a week in the weeks of 11-16 and 11-23. The four weeks before 2.0 averaged about 10.
+3. **Repeat use does not fall.** Installs with a diagram on two or more days in 28 do not fall below 19. The 19 is #326's reading: each install's latest row received since 11-07, interim rows included. Use item 3 reads final rows over the last 7 finished days, which gave 13 on 2026-11-16. Liam to pick which measure the bar uses; until he does, print both.
+
+The week of 11-23 ends on Sunday 11-29. The first run after day 20 (12-01, 08:50 Sydney, which is 11-30 in UTC) cannot read that week as finished yet. So print item 2 for that week as provisional in the closing digest, and score it on the first run where the week is finished, under the closing digest in **Launch watch**.
 
 ### STEP 2.0 — Is 2.0 getting through, and is it worse than 1.x?
 
@@ -214,11 +229,158 @@ For every candidate from STEPs 1–2, find exactly what the user sees: trace fro
 
 Users on an old version who hit a bug that is already fixed should be told to update. Work on that from both ends:
 
-1. **Version lag:** the share of active installs (last 7 days) on each version, by host (`host`: VS Code, Cursor, …) and registry. A host lagging behind (e.g. Open VSX builds such as Cursor or VSCodium) or a large share stuck more than one release behind is a `product` issue. Hypothesise why: auto-update off, Open VSX lag, a pending reload.
+1. **Version lag:** the share of reporting installs (installs that sent a heartbeat in the last 7 days, whether or not they opened a diagram; `telemetry/README.md` → *What "active" means*) on each version, by host (`host`: VS Code, Cursor, …) and registry. A host lagging behind (e.g. Open VSX builds such as Cursor or VSCodium) or a large share stuck more than one release behind is a `product` issue. Hypothesise why: auto-update off, Open VSX lag, a pending reload.
 2. **Fixed-but-still-hit:** for each code seen only on versions older than its fix, count the installs still hitting it in the window. Those are the users an update prompt would help; record the numbers in the journal.
 3. **Known-fixes registry:** once `telemetry/known-fixes.json` exists on develop (the in-extension "a newer version fixes this — Update" prompt reads it), make sure every fixed error code and every fixed user-reported problem that maps to a code has an entry, in the format its README documents. Open one PR per run into develop adding missing entries (labels `telemetry`, `known-fixes`); while the `telemetry/**` freeze on `main` holds (Setup), those entries reach users only with the 2.0.0 release, so say so in the PR. Until it exists, list the entries it *would* need in the journal under **Known fixes (pending registry)**.
 
 ### STEP 5 — Journeys and adoption
+
+#### Use (every run: the top of every digest)
+
+Every digest answers "is ERD Studio being used more?" the same way (#326). The words follow `telemetry/README.md` → *What "active" means*:
+
+- an install is **active** when it opened a diagram (`canvas_opens > 0`);
+- an install that only sent a heartbeat is **reporting**.
+
+Never call reporting installs "active", in the digest, the journal or an issue.
+
+Rules for every Use number:
+
+- **Final rows, finished days.** This is the 2.0 reading rule from Setup, not a second one. A day counts only when `day < date('now','-1 day')`. An install is active on final rows only when a row without `heartbeatProvisional` has `canvas_opens > 0`. 1.x never sent interim copies, so only final rows compare with the weeks before 2.0. Print the interim-only count (installs whose only diagram rows never got a final) beside the active count, never inside it.
+- **Aggregates only**, as everywhere. Never select, store or list an `install_id`, not even to follow the pre-2.0 base from run to run: the journal is public, and the SQL recomputes the base each time.
+- **Split one way only:** dbt project / no dbt project. Never add `os`, `host` or `ext_version` to a Use split.
+- **A week is scored only once it is finished** (its Sunday is before `date('now','-1 day')`). Print an unfinished week as provisional.
+- **Budget.** These six queries are their own budget, separate from STEP L's ten.
+
+**Where it goes.** During the launch watch, the digest opens with the launch watch and the Use block comes straight after it. Otherwise the Use block opens the digest. Give the date range beside every figure. Then write the numbers to the journal's **Metric baselines → Use** (see Journal).
+
+1. **Active installs, rolling 7 and 28 days, on final rows.** Print them as follows:
+   - the interim-only count beside the active count, and reporting installs beside both;
+   - the active count split by **dbt project / no dbt project**, each as active of reporting. An install counts as dbt when any of its rows in the window has `dbt` in `physical_tools`. "No dbt project" includes installs that never looked;
+   - **installs in a folder with a model** (`has_semantic_dir = 1`), the steadier series;
+   - **installs that made a design edit** on a final row: `editModel`, `editColumn`, `editKey`, `editDetails`, `editRelationship`, `addModel` and `addRelationship`. Never `editLayout`, because automatic layout records it too.
+
+   ```sql
+   WITH w AS (SELECT 7 AS n UNION ALL SELECT 28),
+   h AS (SELECT w.n, install_id, canvas_opens, has_semantic_dir, physical_tools,
+           json_extract(features,'$.heartbeatProvisional') IS NOT NULL AS interim,
+           EXISTS (SELECT 1 FROM json_each(heartbeats.features) j
+                   WHERE j.key IN ('editModel','editColumn','editKey','editDetails','editRelationship','addModel','addRelationship')) AS designed
+         FROM w JOIN heartbeats ON day >= date('now','-1 day','-' || w.n || ' days') AND day < date('now','-1 day')
+         WHERE COALESCE(dev,0)=0),
+   per AS (SELECT n, install_id,
+             MAX(canvas_opens > 0 AND NOT interim) AS active_final,
+             MAX(canvas_opens > 0) AS active_any,
+             MAX(has_semantic_dir = 1) AS model_folder,
+             MAX(designed AND NOT interim) AS design_edit,
+             MAX(instr(COALESCE(physical_tools,''), '"dbt"') > 0) AS dbt
+           FROM h GROUP BY n, install_id)
+   SELECT n AS days, SUM(active_final) AS active_final, SUM(active_any AND NOT active_final) AS active_interim_only,
+     COUNT(*) AS reporting, SUM(model_folder) AS model_folder, SUM(design_edit) AS design_edit,
+     SUM(active_final AND dbt) AS active_dbt, SUM(dbt) AS reporting_dbt,
+     SUM(active_final AND NOT dbt) AS active_no_dbt, SUM(NOT dbt) AS reporting_no_dbt
+   FROM per GROUP BY n ORDER BY n
+   ```
+
+2. **By week** (Monday to Sunday, the last eight weeks), the series the launch watch's bar is read on. Columns: reporting, in a folder with a model, active on final rows, interim-only, design edit, diagram opens, and active on final rows again the next week. The current week has `finished = 0`, so print it as provisional. Write each finished week to **Metric baselines → Use** once, and never rewrite a week already written. D1 deletes rows 90 days after they arrive, so a recomputed early week shrinks and would look like a drop.
+
+   ```sql
+   WITH h AS (SELECT install_id, canvas_opens, has_semantic_dir, date(day,'weekday 0','-6 days') AS wk,
+       json_extract(features,'$.heartbeatProvisional') IS NOT NULL AS interim,
+       EXISTS (SELECT 1 FROM json_each(heartbeats.features) j
+               WHERE j.key IN ('editModel','editColumn','editKey','editDetails','editRelationship','addModel','addRelationship')) AS designed
+     FROM heartbeats WHERE COALESCE(dev,0)=0 AND day >= date('now','-1 day','weekday 0','-55 days') AND day < date('now','-1 day')),
+   per AS (SELECT wk, install_id, MAX(canvas_opens > 0 AND NOT interim) AS active_final, MAX(canvas_opens > 0) AS active_any,
+       MAX(has_semantic_dir = 1) AS model_folder, MAX(designed AND NOT interim) AS design_edit, SUM(canvas_opens) AS opens
+     FROM h GROUP BY wk, install_id),
+   nxt AS (SELECT a.wk, COUNT(*) AS again FROM per a JOIN per b ON b.install_id = a.install_id AND b.wk = date(a.wk,'+7 days')
+     WHERE a.active_final AND b.active_final GROUP BY a.wk)
+   SELECT per.wk, date(per.wk,'+6 days') < date('now','-1 day') AS finished, COUNT(*) AS reporting, SUM(model_folder) AS model_folder,
+     SUM(active_final) AS active_final, SUM(active_any AND NOT active_final) AS active_interim_only, SUM(design_edit) AS design_edit,
+     SUM(opens) AS diagram_opens, COALESCE(nxt.again, 0) AS active_again_next_week
+   FROM per LEFT JOIN nxt ON nxt.wk = per.wk GROUP BY per.wk ORDER BY per.wk
+   ```
+
+3. **Repeat use.** Take each install's latest final row in the last 7 finished days and read `canvas_days_28`: installs with a diagram on two or more days in 28. `canvas_days_28` is text, so match the buckets by name, never with `>=`. `'15-28'` sorts below `'2'`, so a `>=` would drop the most active installs. NULL means a client from before 1.6.3.
+
+   ```sql
+   WITH h AS (SELECT install_id, day, canvas_days_28 FROM heartbeats
+       WHERE COALESCE(dev,0)=0 AND day >= date('now','-8 days') AND day < date('now','-1 day')
+         AND json_extract(features,'$.heartbeatProvisional') IS NULL),
+   l AS (SELECT h.canvas_days_28 FROM h JOIN (SELECT install_id, MAX(day) AS d FROM h GROUP BY install_id) m
+         ON m.install_id = h.install_id AND m.d = h.day)
+   SELECT COUNT(*) AS installs,
+     SUM(canvas_days_28 IN ('2-3','4-7','8-14','15-28')) AS diagram_2plus_days,
+     SUM(canvas_days_28 = '1') AS diagram_1_day, SUM(canvas_days_28 = '0') AS diagram_no_day,
+     SUM(canvas_days_28 IS NULL) AS not_sent
+   FROM l
+   ```
+
+4. **The pre-2.0 active base.** These are the installs that opened a diagram on 1.x stable in the 28 days before 2.0 (10-13 → 11-09; there were 29). Report how many of them have reported on 2.x, and how many of those opened a diagram there, on any rows and on final rows. It is the cleanest test of 2.0, because nothing about how 2.x reports can inflate it.
+   - Recompute it by this SQL each run. Never keep its ids anywhere.
+   - Its rows start leaving D1 about 2027-01-11 (90 days after they arrived). From then on, print the last figures stored in **Metric baselines → Use** with "(last measured <date>: the base's rows are past D1's 90 days)", and stop querying it.
+
+   ```sql
+   WITH base AS (SELECT DISTINCT install_id FROM heartbeats
+       WHERE COALESCE(dev,0)=0 AND day BETWEEN '2026-10-13' AND '2026-11-09' AND canvas_opens > 0
+         AND ext_version NOT LIKE '2.%' AND ext_version NOT LIKE '1.9.%'),
+   v2 AS (SELECT install_id, MAX(canvas_opens > 0) AS active,
+       MAX(canvas_opens > 0 AND json_extract(features,'$.heartbeatProvisional') IS NULL) AS active_final
+     FROM heartbeats WHERE COALESCE(dev,0)=0 AND ext_version LIKE '2.%' GROUP BY install_id)
+   SELECT (SELECT COUNT(*) FROM base) AS base, COUNT(v2.install_id) AS base_on_2x,
+     COALESCE(SUM(v2.active), 0) AS base_opened_on_2x, COALESCE(SUM(v2.active_final), 0) AS base_opened_on_2x_final
+   FROM base LEFT JOIN v2 USING (install_id)
+   ```
+
+5. **New installs per week**, and of those, **arrivals into an existing model**. A new install's first row is at tenure `'0'` with no `extUpdatedMajor` (not an upgrader). Arrivals use #332's approximation: the first day already had diagrams, and nothing on it could have made them (no New Diagram, Import from dbt, kept draft, sample or example). Read it beside item 6's exact arrival count once that count has rows.
+
+   ```sql
+   WITH h AS (SELECT install_id, day, tenure, domain_count, features, date(day,'weekday 0','-6 days') AS wk
+     FROM heartbeats WHERE COALESCE(dev,0)=0),
+   f AS (SELECT install_id, MIN(day) AS d0 FROM h GROUP BY install_id),
+   fr AS (SELECT h.wk,
+       (h.domain_count <> '0' AND json_extract(h.features,'$.domainCreated') IS NULL
+         AND json_extract(h.features,'$.drawFromDbt') IS NULL AND json_extract(h.features,'$.draftKept') IS NULL
+         AND json_extract(h.features,'$.trySample') IS NULL AND json_extract(h.features,'$.exampleOpened') IS NULL) AS arrived
+     FROM h JOIN f ON f.install_id = h.install_id AND f.d0 = h.day
+     WHERE h.tenure = '0' AND json_extract(h.features,'$.extUpdatedMajor') IS NULL)
+   SELECT wk, COUNT(*) AS new_installs, SUM(arrived) AS arrived_approx FROM fr
+   WHERE wk >= date('now','-1 day','weekday 0','-55 days') GROUP BY wk ORDER BY wk
+   ```
+
+6. **Team sharing (#332, with #329's `modelChangedExternalGit`).** Liam has named this the key metric. Print, per week:
+   - **arrivals** (`sharedModelFirstOpened`), also without the days that cloned the sample project (`trySampleCloned` the same day: README → *Whether models are shared*);
+   - installs whose model folder is in Git (`modelInGit`), of which with a remote (`modelRepoHasRemote`), and not in Git (`modelNotInGit`). An install can carry both `modelInGit` and `modelNotInGit`, so never subtract one from the other;
+   - installs where Git changed a model (`modelChangedExternalGit`: a pull or checkout brought someone's edits in).
+
+   "Shared models" in the sense of models with more than one author is **not measured**: #332 left commit authors to Liam. Print "not measured (#332)" there, never a number.
+
+   **Until the keys are sent, print "not sent yet", never 0.** Find the first versioned heading in `CHANGELOG.md` on `origin/main` whose notes name `sharedModelFirstOpened`:
+   - if there is none, print "not sent yet: no release carries #332";
+   - if there is one but the query has no rows from that version on, read the ledger's `dropped_features` for that family (STEP 2.0 item 1). A Worker that predates the keys drops them. Print "sent from <v>, no rows yet", with the reason if the ledger shows it.
+
+   ```sql
+   WITH h AS (SELECT install_id, date(day,'weekday 0','-6 days') AS wk, features FROM heartbeats
+     WHERE COALESCE(dev,0)=0 AND day >= date('now','-1 day','weekday 0','-27 days') AND day < date('now','-1 day'))
+   SELECT wk,
+     COUNT(DISTINCT CASE WHEN json_extract(features,'$.sharedModelFirstOpened') IS NOT NULL THEN install_id END) AS arrivals,
+     COUNT(DISTINCT CASE WHEN json_extract(features,'$.sharedModelFirstOpened') IS NOT NULL
+                          AND json_extract(features,'$.trySampleCloned') IS NULL THEN install_id END) AS arrivals_not_sample,
+     COUNT(DISTINCT CASE WHEN json_extract(features,'$.modelInGit') IS NOT NULL THEN install_id END) AS model_in_git,
+     COUNT(DISTINCT CASE WHEN json_extract(features,'$.modelRepoHasRemote') IS NOT NULL THEN install_id END) AS with_remote,
+     COUNT(DISTINCT CASE WHEN json_extract(features,'$.modelNotInGit') IS NOT NULL THEN install_id END) AS model_not_in_git,
+     COUNT(DISTINCT CASE WHEN json_extract(features,'$.modelChangedExternalGit') IS NOT NULL THEN install_id END) AS changed_by_git
+   FROM h GROUP BY wk ORDER BY wk
+   ```
+
+**Readouts to add to the block once their data exists** (one line each until then, saying what each one waits for):
+
+- **Opens and edits per diagram** (`diagrams`, sent from 2.0.6). Use the two queries in `telemetry/README.md` → *Use per diagram*, on rows with `diagrams IS NOT NULL` only. The field is NULL on older clients, and averaging those rows in as zero drags every figure down. Add it once 2.0.6 and later have a full finished week of rows, and read 2.0.6 and later apart from earlier 2.x: every surface Use measures changed on 11-13 and 11-14.
+- **Marketplace installs beside reporting installs**, so reach has a denominator. Use the `install` statistic from `npx @vscode/vsce show liamwynne.erd-studio --json`. If the call fails, print "unavailable", never an estimate.
+- **Uninstalls** are only on the publisher's own Marketplace page, which needs Liam's sign-in. Say so; never estimate them.
+- **Not a readout:** time with a diagram open, read from the trail. The trail is kept only for an install's first `TRAIL_DAYS` (7) days, the 7 days after a major update, and days the guide runs (`src/services/telemetryPayload.ts`), so it cannot describe established users.
+
+#### Journeys
 
 Using the fields in `telemetry.json`, compare this window against the baselines in the journal:
 
@@ -229,7 +391,7 @@ Using the fields in `telemetry.json`, compare this window against the baselines 
 - Import from dbt, add from dbt, empty canvas;
 - AI-helper setup and harness installs;
 - getting-started video progress;
-- retention (`activeDays28`, `canvasDays28`);
+- retention (`activeDays28`, `canvasDays28`; repeat use itself is Use item 3);
 - first-run failures (`firstLayoutFailed`, …);
 - from 2.0.0: STEP 2.0's first-day numbers (time to first draft and diagram, bounces, why the automatic draft did not show) and import quality per source; slow first loads (`activationOver10s` with the stretch that held it, `activationSlowDbtSearch` / `activationSlowWalk` / `activationSlowDiscovery` / `activationSlowServices`; `dbtSearchTimedOut` read beside `dbtSearchSkipped`, the windows that no longer wait for the search; `canvasLoadOver20s` and, after 2.0.7 (#333), the slowest open's range `canvasLoadUnder1s` / `canvasLoad1to5s` / `canvasLoad5to20s` with `canvasLoadCold` and `canvasPaintUnder1s` / `canvasPaint1to5s` / `canvasPaintOver5s`, read beside `diagramTables*` and `os`; `firstLayoutOver5s`, `draftLayoutOver5s`, `draftFitZoomUnder30`); Convert to DBML outcomes (`convertRefused*`, `convertStop*`, `convertNothingToDo`, `convertLeftAsIs`) and storage mix (`storageYaml` / `storageDbml` / `storageMixed`); known-fix prompt answers (`knownFixOffered` → `knownFixUpdate` / `knownFixReload` / `knownFixDismissed`); skipped AI-helper hooks (`hookSkipped*`).
 
@@ -322,14 +484,14 @@ The journal issue body holds these sections; rewrite them in place each run:
 - **Last run** (date, versions seen)
 - **Launch watch** (from 2.0.0 to day 21: day N, headline numbers, each open alert and its state; then the closing digest)
 - **Watchlist**
-- **Metric baselines** (with dates)
+- **Metric baselines** (with dates). It opens with **Use**: the Use block's latest numbers, each with the date range it covers, then the by-week series, one row per finished week, each written once and never recomputed (STEP 5 → Use item 2). The pre-2.0 base is stored as its size and its counts, never as ids. Name every install count by what it is: the baseline once labelled "Active installs" counts installs that sent a heartbeat, so it is **Reporting installs**. Rename it in place, with the date, the next time you write this section, and keep "active" for installs that opened a diagram.
 - **Open hypotheses**
 - **Known fixes (pending registry)**
 - **Message audit** (site → last audited)
-- **Decisions waiting on Liam**
+- **Decisions waiting on Liam** (until Liam confirms it in this file, this includes the launch watch's suggested bar from STEP L, and which repeat-use measure item 3 of that bar uses)
 - **Lessons**
 
-Then add a comment with this run's digest.
+Then add a comment with this run's digest. It opens with the launch watch during the window, then STEP 5's Use block; outside the window, the Use block comes first.
 
 ## Finish
 
@@ -337,6 +499,7 @@ Write the journal, then end with a short summary:
 
 - during the launch watch: day N of 21, alerts opened, updated and cleared (links), and "nothing needs you now" when none fired;
 - top three things Liam should know, most important first;
+- the Use headline in one line: active installs on final rows over the last 7 finished days, beside reporting installs and the interim-only count, and the change since the last run;
 - issues opened and commented on (links);
 - user replies posted (links);
 - PRs opened;
