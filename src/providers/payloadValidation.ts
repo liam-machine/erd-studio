@@ -1072,6 +1072,21 @@ export function validateDropShownPayload(value: unknown): value is { trace: numb
     && (renderMs === undefined || (typeof renderMs === 'number' && Number.isFinite(renderMs) && renderMs >= 0 && renderMs <= DROP_SHOWN_MAX_RENDER_MS));
 }
 
+/** The longest `ms` a `canvasPainted` may carry (ten minutes, as `dropShown`'s `renderMs`): anything longer is not a paint time. */
+export const CANVAS_PAINTED_MAX_MS = 600_000;
+
+/**
+ * `canvasPainted` (#333; timing only): `ms`, a whole or fractional number of
+ * milliseconds from 0 to {@link CANVAS_PAINTED_MAX_MS}, the page's own time
+ * from receiving its first diagram to the first paint with it drawn. Nothing
+ * else is read.
+ */
+export function validateCanvasPaintedPayload(value: unknown): value is { ms: number } {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const { ms } = value as { ms?: unknown };
+  return typeof ms === 'number' && Number.isFinite(ms) && ms >= 0 && ms <= CANVAS_PAINTED_MAX_MS;
+}
+
 /** `webviewError` (usage telemetry only, 2.0 B13): a `kind` and an `area` from their fixed lists, nothing else read. */
 export function validateWebviewErrorPayload(value: unknown): value is WebviewErrorPayload {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;

@@ -13,7 +13,8 @@ import * as path from 'path';
 
 import { DraftApp } from '../../webview-draft/DraftApp';
 import { getDraftHost } from '../../webview-draft/lib/draftHost';
-import type { DraftToHost, DraftToWebview, DraftView } from '../../src/types/draft';
+import { parseDraftToHost, type DraftToHost, type DraftToWebview, type DraftView } from '../../src/types/draft';
+import { draftGuideSteps, guideTargetSelector } from '../../src/types/onboardingGuide';
 import type { DisplaySubjectArea } from '../../src/types/display';
 import type { NodePosition } from '../../src/types/semantic';
 
@@ -326,11 +327,11 @@ describe('example with no folder open', () => {
     expect(posts.at(-1)).toEqual({ type: 'otherStart', start: 'openFolder' });
   });
 
-  it('example in a folder: New Diagram… primary, Import Your Data Model… beside it, Keep This Example quiet, Import… in the menu', () => {
+  it('example in a folder: Import Your Data Model… primary (#328), New Diagram… beside it, Keep This Example quiet, Import… in the menu; the guide\'s marks are all there', () => {
     const base = fixture('example-no-folder');
     const view: DraftView = {
       ...base,
-      banner: { ...base.banner, keepLabel: 'Keep This Example', primary: 'blank', shownStarts: ['guide'] },
+      banner: { ...base.banner, keepLabel: 'Keep This Example', primary: 'guide', shownStarts: ['blank'] },
       otherStarts: [
         { id: 'blank', label: 'New Diagram…' },
         { id: 'guide', label: 'Import Your Data Model…' },
@@ -339,13 +340,23 @@ describe('example with no folder open', () => {
     };
     const { container, posts } = renderPage(view, vi.fn<Layout>(async () => ({})));
     expect(primaries(container)).toHaveLength(1);
-    expect(primaries(container)[0].textContent).toBe('New Diagram…');
+    expect(primaries(container)[0].textContent).toBe('Import Your Data Model…');
+    // Show Me Around's steps on this draft (withdrawn from #328's scope: unchanged) each find their mark.
+    for (const step of draftGuideSteps({ view, semanticDir: '.erd-studio', nothingFound: true })) {
+      if (step.anchor.kind !== 'target') continue;
+      expect(step.anchor.targets.some((t) => container.querySelector(guideTargetSelector(t))), step.id).toBe(true);
+    }
     const keep = screen.getByRole('button', { name: 'Keep This Example' });
     expect(keep.classList.contains('draft-button--quiet')).toBe(true);
     fireEvent.click(keep);
     expect(posts.at(-1)).toEqual({ type: 'keep' });
-    fireEvent.click(screen.getByRole('button', { name: 'Import Your Data Model…' }));
+    fireEvent.click(screen.getByRole('button', { name: 'New Diagram…' }));
+    expect(posts.at(-1)).toEqual({ type: 'otherStart', start: 'blank' });
+    fireEvent.click(primaries(container)[0]);
     expect(posts.at(-1)).toEqual({ type: 'otherStart', start: 'guide' });
+    // Every button's message is one the host accepts (it takes only the starts the draft offers).
+    const allowed = { keepable: true, changeOptions: false, importReport: false, otherStarts: new Set(view.otherStarts.map((s) => s.id)), scopeIds: new Set<string>() };
+    for (const m of posts) expect(parseDraftToHost(m, allowed), JSON.stringify(m)).toEqual(m);
     fireEvent.click(screen.getByRole('button', { name: /More ways to start/ }));
     expect(screen.getAllByRole('menuitem').map((i) => i.textContent)).toEqual(['Import…']);
   });

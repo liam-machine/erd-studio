@@ -327,7 +327,7 @@ describe('the start surfaces in package.json', () => {
   const words = (text: string) => text.split(/\s+/).filter(Boolean).length;
 
   /**
-   * `waiting`: the empty Diagrams view shows "Loading diagrams…" until the look publishes the suggestion.
+   * `waiting`: the empty Diagrams view shows "Looking at your folder…" until the look publishes the suggestion (#328).
    * `hasTables`: the library holds a table (`erdStudio.hasTables`) though no diagram shows one yet.
    */
   interface Window { name: string; keys: WhenContext; ctx: StartContext; starts: StartAction[]; waiting?: boolean; hasTables?: boolean }
@@ -414,8 +414,10 @@ describe('the start surfaces in package.json', () => {
   it.each(windows)('the empty Diagrams view: Import Your Data Model… first in an empty project, Convert in an older one: $name', (w) => {
     const shown = diagramsWelcome.filter((e) => evalWhen(e.when, w.keys));
     if (w.waiting) {
-      // Until the suggestion is published: Loading, and no sentence that may change under the cursor.
-      expect(shown.map((e) => e.contents)).toEqual(['Loading diagrams…']);
+      // Until the suggestion is published: Looking at your folder…, and no sentence that may change under the cursor.
+      expect(shown.map((e) => e.contents)).toEqual(['Looking at your folder…']);
+      // While the tree lists, Loading diagrams… alone, never both.
+      expect(diagramsWelcome.filter((e) => evalWhen(e.when, { ...w.keys, 'erdStudio.diagramsLoading': true })).map((e) => e.contents)).toEqual(['Loading diagrams…']);
       return;
     }
     expect(shown).toHaveLength(1);
