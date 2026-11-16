@@ -129,6 +129,17 @@ describe('the files on disk', () => {
     expect(modelRepoOnDisk(project('b'))).toEqual({ inRepo: false, hasRemote: undefined });
   });
 
+  it('a remote section in any case counts (git reads section names case-insensitively); a commented-out one does not', () => {
+    const upper = project(path.join('upper', 'p'));
+    fs.mkdirSync(path.join(root, 'upper', '.git'));
+    fs.writeFileSync(path.join(root, 'upper', '.git', 'config'), '[core]\n\tbare = false\n[Remote "origin"]\n\turl = x\n');
+    expect(modelRepoOnDisk(upper)).toEqual({ inRepo: true, hasRemote: true });
+    const commented = project(path.join('commented', 'p'));
+    fs.mkdirSync(path.join(root, 'commented', '.git'));
+    fs.writeFileSync(path.join(root, 'commented', '.git', 'config'), '[core]\n\tbare = false\n# [remote "origin"]\n;[remote "old"]\n');
+    expect(modelRepoOnDisk(commented)).toEqual({ inRepo: true, hasRemote: false });
+  });
+
   it('a repository in a parent folder (the dbt project is a sub-folder of its repo)', () => {
     const model = project(path.join('repo', 'analytics', 'dbt'));
     fs.mkdirSync(path.join(root, 'repo', '.git'));

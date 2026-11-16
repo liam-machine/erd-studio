@@ -1832,7 +1832,7 @@ or a path. Commit authors are not read (that part of #332 is left to Liam).
 - `sharedModelFirstOpened` — the first ERD Studio activation in a workspace (on this machine) whose project already has a model: diagrams, or tables in the Table Library. Nothing this machine did in ERD Studio made it, so it came with the folder: the **arrival** count. Decided once per workspace (`erdStudio.telemetry.sharedModelDecided` in `workspaceState`, written on every machine whether telemetry is on or not, so turning it on later cannot produce a false arrival). Unlike `firstRunHasDiagrams` it need not be the machine's first run. On the onboarding trail.
 - `modelInGit` — once a day per workspace, about 20 s after activation: the model folder (`.erd-studio`) is in a Git repository. Off the trail.
 - `modelNotInGit` — the model folder is in no Git repository: no `.git` from it upwards, and the Git extension has none open there. Off the trail.
-- `modelRepoHasRemote` — with `modelInGit`: that repository names a remote (the Git extension lists one, or its config has a `[remote "…"]` section; only that the section exists is read). Off the trail.
+- `modelRepoHasRemote` — with `modelInGit`: that repository names a remote (the Git extension lists one, or its config has a `[remote "…"]` section, in any case, as git reads section names; only that the section exists is read). Off the trail.
 
 How the repository is read: the built-in Git extension is asked first, only
 when it is already running (ERD Studio never activates it and never calls

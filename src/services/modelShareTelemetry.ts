@@ -70,14 +70,15 @@ export function modelRepoFeatures(repo: ModelRepo | undefined): TelemetryFeature
 }
 
 /**
- * Whether a repository's config names a remote: a `[remote "…"]` section.
- * Only the section's presence is read, never its URL. `undefined` when the
- * config cannot be read.
+ * Whether a repository's config names a remote: a `[remote "…"]` section
+ * (in any case: git reads section names case-insensitively). Only the
+ * section's presence is read, never its URL. `undefined` when the config
+ * cannot be read.
  */
 export function configHasRemote(commonDir: string): boolean | undefined {
   let text: string;
   try { text = fs.readFileSync(path.join(commonDir, 'config'), 'utf8'); } catch { return undefined; }
-  return /^\s*\[remote\s+"/m.test(text);
+  return /^\s*\[remote\s+"/im.test(text);
 }
 
 /**
