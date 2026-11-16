@@ -41,7 +41,7 @@ import {
   tableSearchSubject,
   type SearchSubject,
 } from '../services/treeSearch';
-import { oursFailure } from '../services/diagramCommandErrors';
+import { knownCauseOrOurs } from '../services/diagramCommandErrors';
 import { log } from '../services/logger';
 import { showCommandFailure } from './commandFailure';
 
@@ -298,11 +298,11 @@ export async function goToTableCommand(deps: GoToTableDeps, query?: string): Pro
   let action: Promise<void> | undefined;
   let closed = false;
   let fill: ReturnType<typeof setTimeout> | undefined;
-  // A row's action failing is ERD Studio's (#335): never the exception's text, which goes in Send Feedback's report.
+  // A row's action failing is ERD Studio's unless its cause is known (a file it may not open, a full disk) (#335): never the exception's text, which goes in Send Feedback's report.
   const run = (fn: () => Promise<void>, doing = 'while opening that table', outcome = 'nothing was opened'): void => {
     action = fn().catch((err: unknown) => {
       log.error(`[ERD Studio] ${GO_TO_TABLE_TITLE} failed:`, err);
-      showCommandFailure(oursFailure(GO_TO_TABLE_TITLE, doing, outcome, false), err);
+      showCommandFailure(knownCauseOrOurs(GO_TO_TABLE_TITLE, err, { doing, outcome, retry: false }), err);
     });
     quickPick.hide();
   };

@@ -341,6 +341,41 @@ describe("#335 table 2: VS Code didn't accept the edit", () => {
     await vi.waitFor(() => expect(applied).toHaveLength(2));
   });
 
+  it.runIf(process.platform !== 'win32' && process.getuid?.() !== 0)(
+    "New Table: when the schema folder can't be written, the toast says that and asks for no report", async () => {
+      const folder = path.join(sem, 'gold', 'tables', 'sales');
+      fs.mkdirSync(folder, { recursive: true });
+      fs.chmodSync(folder, 0o555);
+      try {
+        const deps = newTableDeps({
+          tableLibraryService: {
+            listTableFiles: () => [], listDbmlLayerFolders: () => ['gold'], tableTakingName: () => undefined,
+            planDbmlBatch: () => ({
+              writes: [{ kind: 'create', path: path.join(folder, 'dim_new.dbml'), text: 'Table sales.dim_new {\n}\n' }],
+              plan: { createdTablePaths: ['gold/tables/sales/dim_new.dbml'], resolveTable: () => undefined },
+            }),
+          } as unknown as NewTableDeps['tableLibraryService'],
+          applyWrites: async () => ({ ok: false, unsaved: [], unrestored: [] }),
+        });
+        await createDbmlTable(deps, { layer: 'gold', schema: 'sales' }, 'dim_new');
+        const { message, buttons } = onlyError();
+        expect(message).toBe("New Table: ERD Studio isn't allowed to write to .erd-studio/gold/tables/sales, so nothing was created. Check its permissions, then try again.");
+        expect(buttons).toEqual(['Show Folder', 'Try Again']);
+        expect(oursCount()).toBe(0);
+      } finally {
+        fs.chmodSync(folder, 0o755);
+      }
+    });
+
+  it('Move Table: a planner that hits a file it may not open says so, with no Send Feedback and nothing counted as ours', async () => {
+    planners.tableMoves = Object.assign(new Error("EACCES: permission denied, open 'x'"), { code: 'EACCES', path: orderTable().filePath });
+    await moveDbmlTables(moveDeps(), [orderTable()], { layer: 'silver', schema: 'sales' });
+    const { message, buttons } = onlyError();
+    expect(message).toBe("Move Table: ERD Studio isn't allowed to open .erd-studio/gold/tables/sales/fct_order.dbml, so nothing was moved. Check its permissions, then try again.");
+    expect(buttons).toEqual(['Show File', 'Try Again']);
+    expect(oursCount()).toBe(0);
+  });
+
   it("New Table: Send Feedback's report says what happened, with no undefined in it", async () => {
     const deps = newTableDeps({
       tableLibraryService: {
