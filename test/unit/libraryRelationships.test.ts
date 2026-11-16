@@ -53,6 +53,19 @@ describe('usesLibraryRelationships — opt-in per project, the default for a new
   it('counts a model file that holds relationships but does not parse, so a broken file cannot switch it off', () => {
     expect(usesLibraryRelationships([fct()], 3, true)).toBe(true);
   });
+  it('lists the models only when nothing cheaper has decided it (listing them reads every table file)', () => {
+    let listed = 0;
+    const list = (): SemanticTable[] => { listed += 1; return [fct([STORED])]; };
+    // No diagram holds a relationship, a model file does not parse, a DBML library: each decides it alone.
+    expect(usesLibraryRelationships(list, 0)).toBe(true);
+    expect(usesLibraryRelationships(list, 3, true)).toBe(true);
+    expect(usesLibraryRelationships(list, 3, false, true)).toBe(true);
+    expect(listed).toBe(0);
+    // Diagrams hold relationships and nothing else decides: now the library is asked, once.
+    expect(usesLibraryRelationships(list, 3)).toBe(true);
+    expect(listed).toBe(1);
+    expect(usesLibraryRelationships(() => [fct()], 3)).toBe(false);
+  });
 });
 
 describe('library relationship edits', () => {
