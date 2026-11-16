@@ -66,7 +66,7 @@ Buttons (Title Case, one primary):
 |---|---|---|
 | A find (`sqlDdl`, `semanticModel`, `dbml`) | **Keep as Diagram** | **More ways to start ▾** (New Diagram… · Import… · Import Your Data Model… · Open an Example…), **Discard** |
 | `dbt` | **Keep as Diagram** | **More ways to start ▾** (New Diagram… · Import… · Open an Example…), **Discard** |
-| `example`, folder open | **New Diagram…** | **Import Your Data Model…**, `Keep This Example` (a quiet link-style button), **More ways to start ▾** (Import…), **Discard** |
+| `example`, folder open | **Import Your Data Model…** (#328: toward the user's own model; the detail line says so, `EXAMPLE_IMPORT_LEAD`) | **New Diagram…**, `Keep This Example` (a quiet link-style button), **More ways to start ▾** (Import…), **Discard** |
 | `example`, no folder | **Open Folder…** | **Discard** |
 | `exampleProject` | **Save This Example…** | **New Diagram…** and **Import Your Data Model…** (folder open) or **Open Folder…** (no folder), **Discard** |
 
@@ -150,7 +150,7 @@ The **nothing-found notification** (`runNothingFoundPrompt`) is removed: a folde
 | Workspace | What the user meets | Keep writes |
 |---|---|---|
 | **No folder** | First run: the walkthrough (Open Folder, Open an Example…). The Diagrams view: **Open Folder**, `Open an example` link. Open an Example… → the coffee-shop example draft, primary **Open Folder…**; the switcher's projects offer **Save This Example…** | An example project, in a folder of its own (new window) |
-| **Empty folder** (plain, nothing found) | ERD Studio icon → the example draft once per machine (**New Diagram…**, **Import Your Data Model…**, `Keep This Example`). Later: the sidebar's **Import Your Data Model…** button, with **New Diagram…** as a link | `Keep This Example`: the coffee-shop diagram into this folder (`importDbml` source `example`); `.erd-studio/` and `layers.json` only then |
+| **Empty folder** (plain, nothing found) | ERD Studio icon → the example draft once per machine (**Import Your Data Model…**, **New Diagram…**, `Keep This Example`). Later: the sidebar's **Import Your Data Model…** button, with **New Diagram…** as a link | `Keep This Example`: the coffee-shop diagram into this folder (`importDbml` source `example`); `.erd-studio/` and `layers.json` only then |
 | **SQL scripts** | Activation: the popup (Show Me). Or the icon: the draft directly. The draft of every CREATE TABLE script (the quick path's files and dialect) | `importDbml` source `sql` (quick answers: layer, name) |
 | **Power BI / Fabric** | As SQL; several models: the first, with the `Model` switcher | `importDbml` source `semanticModel` |
 | **A DBML file** | As SQL (`findDefaultFile`) | `importDbml` source `file` |

@@ -39,6 +39,36 @@ export function nearestExisting(p: string): string {
 }
 
 /**
+ * The first of an edit's paths this account may not write, when one is the
+ * known cause of VS Code not applying it (#335): an existing file that is
+ * read-only, or the folder a file would be made in, moved from or deleted
+ * from (the nearest one that exists). Undefined when all can be written.
+ * Only a path in `root` (the project) counts: a folder above it says nothing
+ * about this edit.
+ */
+export function firstUnwritable(paths: readonly string[], root: string): string | undefined {
+  const inRoot = (p: string): boolean => {
+    const rel = path.relative(root, p);
+    return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
+  };
+  const writable = (p: string): boolean => {
+    try {
+      fs.accessSync(p, fs.constants.W_OK);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  for (const p of paths) {
+    if (!inRoot(p)) continue;
+    if (fs.existsSync(p) && !writable(p)) return p;
+    const folder = nearestExisting(path.dirname(p));
+    if (inRoot(folder) && !writable(folder)) return folder;
+  }
+  return undefined;
+}
+
+/**
  * Show a diagram or layer command's failure (#229): the builder in
  * `diagramCommandErrors.ts` chose the words and buttons, this gives each
  * button its action. Never awaited: the command resolves while the toast is
@@ -47,13 +77,21 @@ export function nearestExisting(p: string): string {
 export function showCommandFailure(
   failure: CommandFailure,
   err: unknown,
-  extra: { retry?: () => unknown; showTab?: () => unknown; chooseAnother?: () => unknown; openIt?: () => unknown } = {},
+  extra: {
+    retry?: () => unknown;
+    showTab?: () => unknown;
+    chooseAnother?: () => unknown;
+    openIt?: () => unknown;
+    /** The command's own buttons, by label (an Explorer move's Move It Back). */
+    actions?: ErrorActions;
+  } = {},
 ): void {
   recordCommandFailure(failure, err);
   const target = failure.target;
   const reveal = target ? () => vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(nearestExisting(target))) : undefined;
   const available: Record<string, (() => unknown) | undefined> = {
-    [SEND_FEEDBACK_BUTTON]: () => vscode.commands.executeCommand('erdStudio.reportBug', feedbackPrefill(failure.title, failure.doing ?? '', err)),
+    ...extra.actions,
+    [SEND_FEEDBACK_BUTTON]: () => vscode.commands.executeCommand('erdStudio.reportBug', feedbackPrefill(failure.title, failure.doing ?? failure.reportDoing ?? '', err)),
     [TRY_AGAIN_BUTTON]: extra.retry,
     [SHOW_FOLDER_BUTTON]: reveal,
     [SHOW_FILE_BUTTON]: extra.showTab ?? reveal,

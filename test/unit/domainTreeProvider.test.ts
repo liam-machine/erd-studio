@@ -57,6 +57,8 @@ import type { SubjectAreaService } from '../../src/services/domainService';
 import { LayersFileUnreadableError, type LayerService } from '../../src/services/layerService';
 import type { LayerConfig } from '../../src/types/layer';
 import type { SubjectAreaSummary, UnifiedSubjectArea, StageData } from '../../src/types/semantic';
+import { telemetry } from '../../src/services/telemetryService';
+import { DbmlEditRefused } from '@erd-studio/core/dbml';
 
 /**
  * The tests here check the full rows (`erdStudio.sidebar.rowDetails: full`,
@@ -626,15 +628,71 @@ describe('SubjectAreaTreeProvider', () => {
         info.mockRestore();
       });
 
-      it('a failed add is said, never thrown', async () => {
+      // #335: a failure that is ours never shows the exception's text, and offers Send Feedback and Try Again.
+      it('a failed add is said, never thrown, and never in the exception\'s own words', async () => {
         const vscode = await import('vscode');
-        const error = vi.spyOn(vscode.window, 'showErrorMessage');
-        provider.setTablesDropHandler(async () => { throw new Error('The file is read-only.'); });
+        const error = vi.spyOn(vscode.window, 'showErrorMessage').mockResolvedValue(undefined);
+        const ours = vi.spyOn(telemetry, 'error');
+        provider.setTablesDropHandler(async () => { throw new Error('boom: cannot read properties of undefined'); });
         const transfer = new vscode.DataTransfer();
         transfer.set(MIME, new vscode.DataTransferItem(['kunde']));
         await expect(provider.handleDrop(diagram(), transfer as never, {} as never)).resolves.toBeUndefined();
-        expect(error.mock.calls[0][0]).toBe("ERD Studio: The tables weren't added to finance. The file is read-only.");
+        expect(error.mock.calls[0]).toEqual([
+          "Add to Diagram hit a problem in ERD Studio while adding the tables, so nothing was added to finance. This isn't something you did. Please send us a report.",
+          'Send Feedback', 'Try Again',
+        ]);
+        expect(ours.mock.calls.filter((c) => c[0] === 'commandFailedOurs')).toHaveLength(1);
         error.mockRestore();
+        ours.mockRestore();
+      });
+
+      it('Try Again adds the same tables again, telling the handler it is a retry', async () => {
+        const vscode = await import('vscode');
+        const error = vi.spyOn(vscode.window, 'showErrorMessage').mockResolvedValueOnce('Try Again' as never).mockResolvedValue(undefined);
+        const calls: unknown[][] = [];
+        provider.setTablesDropHandler(async (...args: unknown[]) => {
+          calls.push(args);
+          if (calls.length === 1) throw new Error('boom');
+          return true;
+        });
+        const transfer = new vscode.DataTransfer();
+        transfer.set(MIME, new vscode.DataTransferItem(['kunde']));
+        await provider.handleDrop(diagram(), transfer as never, {} as never);
+        await vi.waitFor(() => expect(calls).toHaveLength(2));
+        expect(calls[0]).toEqual(['/p/.erd-studio/gold/diagrams/finance.dbml', ['kunde'], []]);
+        expect(calls[1]).toEqual(['/p/.erd-studio/gold/diagrams/finance.dbml', ['kunde'], [], true]);
+        // The drop's own array, so the handler tells this drop from a later one.
+        expect(calls[1][1]).toBe(calls[0][1]);
+        error.mockRestore();
+      });
+
+      it('a refusal written for the user keeps its own words, and is not counted', async () => {
+        const vscode = await import('vscode');
+        const error = vi.spyOn(vscode.window, 'showErrorMessage').mockResolvedValue(undefined);
+        const ours = vi.spyOn(telemetry, 'error');
+        provider.setTablesDropHandler(async () => { throw new DbmlEditRefused('gold/diagrams/finance.dbml', 'The diagram has a mistake on line 4.', 4); });
+        const transfer = new vscode.DataTransfer();
+        transfer.set(MIME, new vscode.DataTransferItem(['kunde']));
+        await provider.handleDrop(diagram(), transfer as never, {} as never);
+        expect(error.mock.calls[0]).toEqual(["ERD Studio: The tables weren't added to finance. The diagram has a mistake on line 4."]);
+        expect(ours.mock.calls.filter((c) => c[0] === 'commandFailedOurs')).toHaveLength(0);
+        error.mockRestore();
+        ours.mockRestore();
+      });
+
+      it('a folder ERD Studio may not write is said in words, with Show Folder, and not counted as ours', async () => {
+        const vscode = await import('vscode');
+        const error = vi.spyOn(vscode.window, 'showErrorMessage').mockResolvedValue(undefined);
+        const ours = vi.spyOn(telemetry, 'error');
+        provider.setTablesDropHandler(async () => { throw Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' }); });
+        const transfer = new vscode.DataTransfer();
+        transfer.set(MIME, new vscode.DataTransferItem(['kunde']));
+        await provider.handleDrop(diagram(), transfer as never, {} as never);
+        expect(String(error.mock.calls[0][0])).toMatch(/^Add to Diagram: ERD Studio isn't allowed to write to .*Nothing was added to finance\.$/);
+        expect(error.mock.calls[0].slice(1)).toEqual(['Show Folder', 'Try Again']);
+        expect(ours.mock.calls.filter((c) => c[0] === 'commandFailedOurs')).toHaveLength(0);
+        error.mockRestore();
+        ours.mockRestore();
       });
 
       it('the view declares the Table Library drag as a drop type (its names\' type and its tree type)', () => {

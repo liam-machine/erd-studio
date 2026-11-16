@@ -191,7 +191,7 @@ describe('the 257-table SQL draft (large)', () => {
 });
 
 describe('the coffee shop', () => {
-  it('in a folder: New Diagram… leads, Keep This Example is quiet', () => {
+  it('in a folder: Import Your Data Model… leads toward the user\'s own model (#328), New Diagram… beside it, Keep This Example is quiet', () => {
     const plan = planOf(EXAMPLE_DBML, 'coffee-shop', 'gold');
     const draft = draftFromImportPlan(importInput(plan, {
       importSource: 'example',
@@ -203,10 +203,15 @@ describe('the coffee shop', () => {
     expect(draft.source).toBe('example');
     expect(draft.title).toBe('Example: Coffee shop');
     expect(draft.banner.headline).toBe(`Example: a coffee-shop star schema · 6 tables, ${plan.report.relationships} relationships · not saved`);
-    expect(draft.banner.primary).toBe('blank');
+    expect(draft.banner.primary).toBe('guide');
     expect(draft.banner.keepLabel).toBe(KEEP_THIS_EXAMPLE);
-    expect(draft.banner.shownStarts).toEqual(['guide']);
+    expect(draft.banner.shownStarts).toEqual(['blank']);
+    // Every start the banner draws is one the draft offers (validateDraftMessage accepts only those).
     expect(draft.otherStarts.map((s) => s.id)).toEqual(['blank', 'guide', 'import']);
+    expect(draft.banner.detail).toBe(
+      'Import Your Data Model… brings in your own: SQL scripts, DBML, Power BI and more. '
+      + 'Keep This Example saves this one as coffee-shop in the Gold layer (.erd-studio/gold/diagrams/coffee-shop.dbml).',
+    );
     expect(draft.keep).toMatchObject({ writer: 'importDbml', importSource: 'example' });
     expect(draft.summary.tables).toBe(EXAMPLE_COFFEE_SHOP_TABLES);
     noDbtWord(draft);

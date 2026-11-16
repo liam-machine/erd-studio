@@ -25,7 +25,8 @@ import type { SubjectAreaSummary, Layer } from '../types/semantic';
 import { SubjectAreaService, subjectAreaTableNames } from '../services/domainService';
 import type { LayerService } from '../services/layerService';
 import { createLogger, elapsedMs, log, plural } from '../services/logger';
-import { layersFailure } from '../services/diagramCommandErrors';
+import { layersFailure, writeFailure } from '../services/diagramCommandErrors';
+import { isRefusedWrite } from '../services/newSubjectAreaWriter';
 import { showCommandFailure } from '../commands/commandFailure';
 import type { DbmlFileIconResolver } from './dbmlFileKinds';
 import { ADD_EXISTING_TABLES_LIMIT, TABLE_LIBRARY_DRAG_MIME, TABLE_LIBRARY_NAMES_MIME } from '../types/messages';
@@ -71,13 +72,19 @@ export function dropNamedNoTableMessage(diagram: string): string {
   return `ERD Studio: Nothing was added to ${diagram}: the drop named no table in the Table Library. Right-click the tables and choose Add to Diagram… instead.`;
 }
 
+/** Send Feedback's title for tables dropped on a diagram's row that were not added. */
+export const ADD_TO_DIAGRAM_TITLE = 'Add to Diagram';
+
 /**
  * Adds dropped Table Library rows to the diagram at `filePath` (the
  * extension's Add to Diagram write): `tables` are the dragged names (possibly
  * none, when the drop's names could not be read), `uris` the dragged files.
- * Answers `false` when it found no table to add.
+ * Answers `false` when it found no table to add. `again`: Try Again after
+ * that add failed (#335), so the same tables are added once more, without
+ * using up or timing a drag again. A retry passes the very `tables` array of
+ * the drop it retries, so the handler can tell that drop from a later one.
  */
-export type TablesDropHandler = (filePath: string, tables: string[], uris: string[]) => Promise<boolean | void>;
+export type TablesDropHandler = (filePath: string, tables: string[], uris: string[], again?: boolean) => Promise<boolean | void>;
 
 /**
  * The table names a Table Library drag carries (`TableLibraryDragController`
@@ -459,19 +466,29 @@ export class SubjectAreaTreeProvider
    * else the user is told where to drop. Never silent: a drop whose tables
    * cannot be told says so, with the route that needs no drag.
    */
-  private async dropTables(target: TreeElement | undefined, tables: string[], uris: string[]): Promise<void> {
+  private async dropTables(target: TreeElement | undefined, tables: string[], uris: string[], again = false): Promise<void> {
     if (!this.tablesDropHandler) return;
     if (!target || target.type !== 'domain') {
       void vscode.window.showInformationMessage(DROP_ON_DIAGRAM_ROW_MESSAGE);
       return;
     }
     try {
-      const found = await this.tablesDropHandler(target.summary.filePath, tables, uris);
+      const filePath = target.summary.filePath;
+      const found = await (again ? this.tablesDropHandler(filePath, tables, uris, true) : this.tablesDropHandler(filePath, tables, uris));
       if (found === false) void vscode.window.showInformationMessage(dropNamedNoTableMessage(target.summary.domain));
     } catch (err) {
       log.error('[DomainTreeProvider] Adding dropped tables to a diagram failed:', err);
-      const message = err instanceof Error ? err.message : String(err);
-      void vscode.window.showErrorMessage(`ERD Studio: The tables weren't added to ${target.summary.domain}. ${message}`);
+      const domain = target.summary.domain;
+      // A refusal written for the user keeps its words.
+      if (isRefusedWrite(err)) {
+        void vscode.window.showErrorMessage(`ERD Studio: The tables weren't added to ${domain}. ${err.message}`);
+        return;
+      }
+      // A folder ERD Studio may not write, or a full disk, in words; anything else is ours (#335), never the exception's text.
+      showCommandFailure(writeFailure(ADD_TO_DIAGRAM_TITLE, err, {
+        workspaceRoot: this.projectPath, target: target.summary.filePath, doing: 'while adding the tables',
+        outcome: `Nothing was added to ${domain}.`, retry: true,
+      }), err, { retry: () => this.dropTables(target, tables, uris, true) });
     }
   }
 

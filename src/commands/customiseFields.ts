@@ -15,9 +15,13 @@ import * as vscode from 'vscode';
 
 import { FIELDS_FILE_NAME, STARTING_FIELD_LIST, renderFieldsText } from '@erd-studio/core';
 
+import { classifyWriteFailure } from '../services/commandErrors';
+import { oursFailure, writeFailure, type CommandFailure } from '../services/diagramCommandErrors';
 import { log } from '../services/logger';
+import { showCommandFailure } from './commandFailure';
 
 export const CUSTOMISE_FIELDS_COMMAND = 'erdStudio.customiseFields';
+export const CUSTOMISE_FIELDS_TITLE = 'Customise Fields';
 
 /** What the command needs from VS Code, injectable for tests. */
 export interface CustomiseFieldsDeps {
@@ -26,6 +30,11 @@ export interface CustomiseFieldsDeps {
   showErrorMessage(message: string): Thenable<unknown>;
   /** The untitled-document Uri that saves to `filePath`. */
   untitledUri(filePath: string): vscode.Uri;
+  /**
+   * Show a failure with its buttons (#335); `retry` runs the command again.
+   * Default: `showCommandFailure`, which also counts it.
+   */
+  showFailure?(failure: CommandFailure, err: unknown, retry: () => unknown): void;
 }
 
 const DEFAULT_DEPS: CustomiseFieldsDeps = {
@@ -33,6 +42,7 @@ const DEFAULT_DEPS: CustomiseFieldsDeps = {
   showTextDocument: (document, options) => vscode.window.showTextDocument(document, options),
   showErrorMessage: (message) => vscode.window.showErrorMessage(message),
   untitledUri: (filePath) => vscode.Uri.file(filePath).with({ scheme: 'untitled' }),
+  showFailure: (failure, err, retry) => showCommandFailure(failure, err, { retry }),
 };
 
 /** The starting set as a fields.yml, the text an unsaved fields.yml opens with. */
@@ -75,9 +85,16 @@ export async function customiseFields(
     }
     return 'untitled';
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    log.error(`[ERD Studio] Customise Fields failed: ${message}`);
-    await deps.showErrorMessage(`Customise Fields: could not open ${FIELDS_FILE_NAME} (${message}).`);
+    log.error('[ERD Studio] Customise Fields failed:', err);
+    // A folder ERD Studio may not use, or a full disk, is the user's to fix, said in words (with the
+    // folder); anything else is ours, never the exception's text, which goes in Send Feedback's report (#335).
+    const doing = `while opening ${FIELDS_FILE_NAME}`;
+    const failure = classifyWriteFailure(err) === 'other'
+      ? oursFailure(CUSTOMISE_FIELDS_TITLE, doing, 'nothing was created', false)
+      : writeFailure(CUSTOMISE_FIELDS_TITLE, err, {
+        workspaceRoot: path.dirname(semanticRoot), target: filePath, doing, outcome: 'Nothing was created.', retry: true,
+      });
+    (deps.showFailure ?? DEFAULT_DEPS.showFailure!)(failure, err, () => customiseFields(semanticRoot, deps));
     return 'failed';
   }
 }

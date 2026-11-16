@@ -12,6 +12,7 @@ import type * as vscode from 'vscode';
 import { STARTING_FIELD_LIST, parseFieldsText } from '@erd-studio/core';
 import { CUSTOMISE_FIELDS_COMMAND, customiseFields, startingFieldsText, type CustomiseFieldsDeps } from '../../src/commands/customiseFields';
 import { NO_LEGACY_ALIAS, PRE_REGISTERED_COMMANDS } from '../../src/extension';
+import type { CommandFailure } from '../../src/services/diagramCommandErrors';
 
 let root: string;
 let semantic: string;
@@ -104,10 +105,56 @@ describe('Customise Fields…', () => {
     expect(r.errors).toEqual(['Customise Fields: fields.yml in .erd-studio is not a file. Remove it or rename it, then try again.']);
   });
 
-  it('a document that cannot be opened is reported, not thrown', async () => {
+  // #335: never the exception's own text. Ours offers Send Feedback; a folder ERD Studio may not use says so, with the folder.
+  it('a document that cannot be opened is reported, not thrown, and never in the exception\'s words', async () => {
     const r = recorder();
-    r.deps.openTextDocument = async () => { throw new Error('denied'); };
+    const shown: Array<{ failure: CommandFailure; err: unknown }> = [];
+    r.deps.showFailure = (failure, err) => { shown.push({ failure, err }); };
+    r.deps.openTextDocument = async () => { throw new Error('boom'); };
     expect(await customiseFields(semantic, r.deps)).toBe('failed');
-    expect(r.errors).toEqual(['Customise Fields: could not open fields.yml (denied).']);
+    expect(shown).toHaveLength(1);
+    expect(shown[0].failure.message).toBe(
+      "Customise Fields hit a problem in ERD Studio while opening fields.yml, so nothing was created. This isn't something you did. Please send us a report.",
+    );
+    expect(shown[0].failure.buttons).toEqual(['Send Feedback']);
+    // Ours: counted once by showCommandFailure, and the exception goes in Send Feedback's report.
+    expect(shown[0].failure.doing).toBe('while opening fields.yml');
+    expect((shown[0].err as Error).message).toBe('boom');
+    expect(r.errors).toEqual([]);
+  });
+
+  it('a folder it may not write: said in words, naming the folder, with Show Folder and Try Again, not counted as ours', async () => {
+    const r = recorder();
+    const shown: Array<{ failure: CommandFailure; retry: () => unknown }> = [];
+    r.deps.showFailure = (failure, _err, retry) => { shown.push({ failure, retry }); };
+    let opens = 0;
+    r.deps.openTextDocument = async (uri) => {
+      if (++opens === 1) throw new Error(`EACCES: permission denied, open '${uri.fsPath}'`);
+      r.opened.push(`${uri.scheme}:${uri.fsPath}`);
+      return { getText: () => 'x' } as unknown as vscode.TextDocument;
+    };
+    expect(await customiseFields(semantic, r.deps)).toBe('failed');
+    expect(shown[0].failure.message).toBe(
+      "Customise Fields: ERD Studio isn't allowed to write to .erd-studio/. Check the folder's permissions, then try again. Nothing was created.",
+    );
+    expect(shown[0].failure.buttons).toEqual(['Show Folder', 'Try Again']);
+    expect(shown[0].failure.target).toBe(semantic);
+    expect(shown[0].failure.doing).toBeUndefined();
+    // Try Again runs the command again.
+    expect(await shown[0].retry()).toBe('untitled');
+    expect(r.opened).toEqual([`untitled:${path.join(semantic, 'fields.yml')}`]);
+  });
+
+  it('by default the failure is shown with its buttons, never the raw text', async () => {
+    const vs = await import('vscode');
+    const error = vi.spyOn(vs.window, 'showErrorMessage').mockResolvedValue(undefined);
+    const r = recorder();
+    delete r.deps.showFailure;
+    r.deps.openTextDocument = async () => { throw new Error('boom'); };
+    expect(await customiseFields(semantic, r.deps)).toBe('failed');
+    expect(error.mock.calls[0]).toEqual([
+      "Customise Fields hit a problem in ERD Studio while opening fields.yml, so nothing was created. This isn't something you did. Please send us a report.",
+      'Send Feedback',
+    ]);
   });
 });

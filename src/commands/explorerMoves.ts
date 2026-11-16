@@ -30,12 +30,14 @@ import * as vscode from 'vscode';
 import { isReservedLayerName, type ProjectStorage } from '@erd-studio/core';
 
 import { getErdStudioSetting } from '../services/configService';
-import { projectRelative } from '../services/commandErrors';
+import { SEND_FEEDBACK_BUTTON, classifyWriteFailure, projectRelative } from '../services/commandErrors';
+import { editNotAccepted, editNotAppliedError, knownCauseOrOurs, type CommandFailure } from '../services/diagramCommandErrors';
 import type { FileWrite } from '../services/fileWrites';
 import type { TableLibraryService } from '../services/logicalModelService';
 import { isRefusedWrite } from '../services/newSubjectAreaWriter';
 import { log } from '../services/logger';
 import { TABLE_NAME_RULE } from '../types/naming';
+import { firstUnwritable, showCommandFailure } from './commandFailure';
 import { planDbmlExplorerMoves, type DbmlExplorerMovesPlan, type MovedDbmlFile } from './dbmlLifecycle';
 
 /** The setting (under `erdStudio.`): `prompt`, `always` or `never`. */
@@ -175,6 +177,30 @@ export function backButtonFor(renames: ReadonlyArray<{ from: string; to: string 
   return isFolder(renames[0].to) ? RENAME_FOLDER_BACK_BUTTON : RENAME_FILE_BACK_BUTTON;
 }
 
+/** What the back button does, in words: "move it back", "rename the file back", "rename the folder back". */
+function backPhrase(button: string): string {
+  return button === MOVE_IT_BACK_BUTTON ? 'move it back' : button === RENAME_FOLDER_BACK_BUTTON ? 'rename the folder back' : 'rename the file back';
+}
+
+/** Send Feedback's title for a failed update of the files that point at a moved file. */
+export const UPDATE_REFERENCES_TITLE = 'Update References on Move';
+
+/**
+ * Updating the files that point at `subject` failed, and not for a reason
+ * written for the user (#335): ERD Studio's, so never the exception's text.
+ * `button` puts the renames back.
+ */
+export function explorerUpdateFailed(subject: string, button: string): CommandFailure {
+  const back = backPhrase(button);
+  return {
+    title: UPDATE_REFERENCES_TITLE,
+    message: `ERD Studio hit a problem while updating the files that point at ${subject}, so nothing else was changed. ` +
+      `This isn't something you did. ${back.charAt(0).toUpperCase()}${back.slice(1)}, or send us a report.`,
+    buttons: [button, SEND_FEEDBACK_BUTTON],
+    doing: 'while updating the files that point at a moved file',
+  };
+}
+
 /** The rule a layer folder's name breaks, for a message. */
 function layerRule(name: string): string {
   return isReservedLayerName(name)
@@ -193,7 +219,7 @@ export function describeExplorerRefusal(
   renames: ReadonlyArray<{ from: string; to: string }>,
 ): { message: string; button: string } {
   const button = backButtonFor(renames);
-  const back = button === MOVE_IT_BACK_BUTTON ? 'move it back' : button === RENAME_FOLDER_BACK_BUTTON ? 'rename the folder back' : 'rename the file back';
+  const back = backPhrase(button);
   // A folder renamed in place may take another name; a moved file may go back or on to its place.
   const backOr = (place: string): string => (button === RENAME_FOLDER_BACK_BUTTON ? `${back}, or give it a name that fits` : button === MOVE_IT_BACK_BUTTON ? `${back}, or ${place}` : back);
   if (plan.kind === 'badName') {
@@ -280,16 +306,34 @@ async function undoRenames(deps: ExplorerMoveDeps, renames: ReadonlyArray<{ from
   await deps.afterUpdated(back.flatMap((r) => [{ path: r.from }, { path: r.to }]));
 }
 
-/** Plan, turning a failure into a warning (with Move It Back) unless `quiet`. Undefined when it failed. */
+/**
+ * Plan, turning a failure into a toast (with Move It Back) unless `quiet`.
+ * Undefined when it failed. A refusal written for the user is a warning in
+ * its own words; anything else is ERD Studio's (#335): an error that never
+ * shows the exception's text, counted once. `quiet` ("never") says nothing
+ * and counts nothing.
+ */
 function planOrWarn(deps: ExplorerMoveDeps, moves: readonly MovedDbmlFile[], renames: ReadonlyArray<{ from: string; to: string }>, quiet = false): DbmlExplorerMovesPlan | undefined {
   try {
     return planDbmlExplorerMoves({ semanticRoot: deps.semanticRoot, tableLibraryService: deps.tableLibraryService, moves, readText: deps.readText });
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    if (!isRefusedWrite(err)) log.error('[ERD Studio] Updating the files that point at a moved file failed:', err);
+    const refused = isRefusedWrite(err);
+    if (!refused) log.error('[ERD Studio] Updating the files that point at a moved file failed:', err);
     if (quiet) return undefined;
     const subject = moves.length === 1 ? path.basename(moves[0].to) : `the ${moves.length} moved files`;
     const button = backButtonFor(renames);
+    if (!refused) {
+      // A file ERD Studio may not open, or a full disk, is the user's to fix: said so, with no Send Feedback.
+      const failure = classifyWriteFailure(err) === 'other'
+        ? explorerUpdateFailed(subject, button)
+        : knownCauseOrOurs(UPDATE_REFERENCES_TITLE, err, {
+          doing: '', outcome: `the files that point at ${subject} were not updated and nothing else was changed`,
+          retry: false, workspaceRoot: deps.workspaceRoot, prefix: '', extra: [button],
+        });
+      showCommandFailure(failure, err, { actions: { [button]: () => undoRenames(deps, renames) } });
+      return undefined;
+    }
+    const message = err.message;
     void vscode.window.showWarningMessage(
       `ERD Studio could not update the files that point at ${subject}: ${message.replace(/\.?$/, '.')} Nothing else was changed.`,
       button,
@@ -335,7 +379,6 @@ export async function onDbmlFilesRenamed(deps: ExplorerMoveDeps, files: Readonly
     return;
   }
 
-  let plan = first;
   const asked = mode === 'prompt';
   if (asked) {
     const choice = await vscode.window.showInformationMessage(describeExplorerUpdate(first).question, UPDATE_BUTTON, ALWAYS_BUTTON, NEVER_BUTTON);
@@ -349,9 +392,27 @@ export async function onDbmlFilesRenamed(deps: ExplorerMoveDeps, files: Readonly
     }
   }
 
+  // The files may have changed while a question was open: plan again from what is there now.
+  await applyExplorerUpdate(deps, moves, renames, first, asked, note);
+}
+
+/**
+ * Apply the update `first` planned, as one edit: planned again first when
+ * `replan` (a question was open, or Try Again: never an old plan's text over
+ * a file changed since), and asked again while a file it changes has unsaved
+ * edits.
+ */
+async function applyExplorerUpdate(
+  deps: ExplorerMoveDeps,
+  moves: readonly MovedDbmlFile[],
+  renames: ReadonlyArray<{ from: string; to: string }>,
+  first: Extract<DbmlExplorerMovesPlan, { kind: 'update' }>,
+  replan: boolean,
+  note: string | undefined,
+): Promise<void> {
+  let plan = first;
   for (let attempt = 0; ; attempt++) {
-    // The files may have changed while a question was open: plan again from what is there now.
-    if (asked || attempt > 0) {
+    if (replan || attempt > 0) {
       deps.tableLibraryService.invalidateCache();
       const again = planOrWarn(deps, moves, renames);
       if (!again || again.kind !== 'update') return;
@@ -367,7 +428,18 @@ export async function onDbmlFilesRenamed(deps: ExplorerMoveDeps, files: Readonly
   }
   const result = await deps.applyWrites(plan.writes);
   if (!result.ok) {
-    if (result.unrestored.length === 0) void vscode.window.showErrorMessage(`ERD Studio: VS Code rejected the update of the files that point at ${subjectOf(plan)}; nothing else was changed.`);
+    if (result.unrestored.length === 0) {
+      const button = backButtonFor(renames);
+      const unwritable = firstUnwritable(plan.writes.map((w) => w.path), deps.workspaceRoot);
+      showCommandFailure(
+        editNotAccepted(UPDATE_REFERENCES_TITLE, `the update of the files that point at ${subjectOf(plan)}`, 'nothing else was changed', {
+          prefix: 'ERD Studio', extra: [button],
+          ...(unwritable ? { unwritable: { path: unwritable, workspaceRoot: deps.workspaceRoot } } : {}),
+        }),
+        editNotAppliedError(),
+        { retry: () => applyExplorerUpdate(deps, moves, renames, plan, true, note), actions: { [button]: () => undoRenames(deps, renames) } },
+      );
+    }
     return;
   }
   await deps.afterUpdated(plan.writes);

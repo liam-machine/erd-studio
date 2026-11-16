@@ -48,8 +48,11 @@ import {
   heartbeatDue,
   nextDay,
   recordActivation,
+  recordCanvasLoad,
   recordCanvasOpen,
+  recordCanvasPaint,
   recordDiagramUse,
+  recordLibraryTables,
   daysBetween,
   MAX_DIAGRAM_ID,
   recordCatalog,
@@ -84,6 +87,7 @@ import {
   TRAIL_DAYS,
   MAX_PROVISIONAL_SENDS,
 } from './telemetryPayload';
+import { canvasLoadFeature, canvasPaintFeature } from './telemetryCanvas';
 import { invariantErrorCodes, surveyFeatures } from './relationshipHealth';
 import type { RelationshipInvariant, RelationshipSurvey } from './relationshipHealth';
 
@@ -699,6 +703,35 @@ export const telemetry = {
   /** How the open workspace builds its physical tables (`detectPhysicalTooling()` flags). */
   physicalTooling(found: { tools: readonly TelemetryPhysicalTool[]; platforms: readonly TelemetryPlatform[] }): void {
     active?.update(s => recordPhysicalTooling(s, found));
+  },
+  /**
+   * #331: the Table Library holds `count` tables, when a window with an ERD
+   * folder opens. Recorded as one range key (the day's largest), never the
+   * count, and off the onboarding trail.
+   */
+  libraryTables(count: number): void {
+    active?.update(s => recordLibraryTables(s, count));
+  },
+  /**
+   * #333: a canvas open took `ms` from `ready` to its diagram posted; `cold`
+   * when it read at least one table file from disk. Recorded as one range
+   * key (the day's slowest) and the cold flag, never the time. Off the
+   * onboarding trail, except the day's first `canvasLoadOver20s`, which kept
+   * its trail event from 2.0.0 (it was a `featureOnce`).
+   */
+  canvasLoad(ms: number, cold: boolean): void {
+    const key = canvasLoadFeature(ms);
+    const service = active;
+    if (!key || !service) return;
+    service.update((s) => {
+      const next = recordCanvasLoad(s, key, cold);
+      return key === 'canvasLoadOver20s' && !s.features.canvasLoadOver20s ? service.withTrail(next, key, Date.now()) : next;
+    });
+  },
+  /** #333: a canvas's first paint came `ms` after its first diagram arrived. One range key (the day's slowest), off the trail. */
+  canvasPaint(ms: number): void {
+    const key = canvasPaintFeature(ms);
+    if (key) active?.update((s) => recordCanvasPaint(s, key));
   },
   /** Whether anything would be recorded now, so a caller can skip work whose only use is telemetry. */
   enabled(): boolean {

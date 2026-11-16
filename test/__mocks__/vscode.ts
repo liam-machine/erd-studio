@@ -1457,10 +1457,12 @@ export function createMockSecretStorage(): MockSecretStorage {
   };
 }
 
-/** Minimal mock of vscode.Memento — `get` / `update` only, as production uses. */
+/** Minimal mock of vscode.Memento — `get` / `update` / `keys`, as production uses. */
 export interface MockMemento {
   get<T>(key: string, defaultValue?: T): T | undefined;
   update(key: string, value: unknown): Promise<void>;
+  /** Every key stored (#332 reads it once at activation). */
+  keys(): readonly string[];
   /** Test helper: seed a value without going through update(). */
   _seed(key: string, value: unknown): void;
 }
@@ -1474,6 +1476,7 @@ export function createMockMemento(seed?: Iterable<readonly [string, unknown]>): 
     update: async (key: string, value: unknown) => {
       store.set(key, value);
     },
+    keys: () => [...store.keys()],
     _seed: (key: string, value: unknown) => {
       store.set(key, value);
     },
