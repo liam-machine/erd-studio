@@ -894,6 +894,18 @@ const FEATURES = [
   'readyAfterNoReady',
   'readyLate30to60s',
   'readyLateOver60s',
+  // Added after 2.0.6 (#331): how big the project is, as fixed ranges, never a count.
+  // The Table Library's size when a window with an ERD folder opens, and the largest
+  // diagram of more than 50 tables opened that day (beside model_count '51+').
+  'libraryTablesNone',
+  'libraryTables1to10',
+  'libraryTables11to50',
+  'libraryTables51to199',
+  'libraryTables200to499',
+  'libraryTables500Plus',
+  'diagramTables51to199',
+  'diagramTables200to499',
+  'diagramTables500Plus',
 ];
 
 /** The only keys `errors` may carry; anything else is dropped. */

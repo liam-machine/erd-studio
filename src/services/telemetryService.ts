@@ -50,6 +50,7 @@ import {
   recordActivation,
   recordCanvasOpen,
   recordDiagramUse,
+  recordLibraryTables,
   daysBetween,
   MAX_DIAGRAM_ID,
   recordCatalog,
@@ -699,6 +700,14 @@ export const telemetry = {
   /** How the open workspace builds its physical tables (`detectPhysicalTooling()` flags). */
   physicalTooling(found: { tools: readonly TelemetryPhysicalTool[]; platforms: readonly TelemetryPlatform[] }): void {
     active?.update(s => recordPhysicalTooling(s, found));
+  },
+  /**
+   * #331: the Table Library holds `count` tables, when a window with an ERD
+   * folder opens. Recorded as one range key (the day's largest), never the
+   * count, and off the onboarding trail.
+   */
+  libraryTables(count: number): void {
+    active?.update(s => recordLibraryTables(s, count));
   },
   /** Whether anything would be recorded now, so a caller can skip work whose only use is telemetry. */
   enabled(): boolean {

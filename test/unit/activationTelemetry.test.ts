@@ -211,3 +211,38 @@ describe('B16: AI helper installs', () => {
     expect(hookSkippedFeatures(result.skippedHooks)).toEqual(['hookSkippedJsonc', 'hookSkippedCopilot']);
   });
 });
+
+describe('#331: the Table Library\'s size, once at activation', () => {
+  const activations = (spy: { mock: { calls: unknown[][] } }) => spy.mock.calls.map((c) => [c[0], c[1]]);
+
+  it('a project with an ERD folder records its library\'s table count once, beside project_found', async () => {
+    fs.cpSync(FIXTURE_ROOT, root, { recursive: true });
+    vscode.workspace.workspaceFolders = [{ uri: vscode.Uri.file(root), name: 'p', index: 0 }];
+    const activation = vi.spyOn(telemetry, 'activation');
+    const libraryTables = vi.spyOn(telemetry, 'libraryTables');
+    await activate(context);
+    expect(activations(activation)).toEqual([['project_found', true]]);
+    // The fixture's logical-models/ holds nine tables.
+    const tables = fs.readdirSync(path.join(root, '.erd-studio', 'logical-models')).filter((f) => f.endsWith('.yml'));
+    expect(libraryTables.mock.calls).toEqual([[tables.length]]);
+  });
+
+  it('a project with no ERD folder records no library size (has_semantic_dir says so)', async () => {
+    fs.writeFileSync(path.join(root, 'README.md'), '# nothing here\n');
+    vscode.workspace.workspaceFolders = [{ uri: vscode.Uri.file(root), name: 'p', index: 0 }];
+    const activation = vi.spyOn(telemetry, 'activation');
+    const libraryTables = vi.spyOn(telemetry, 'libraryTables');
+    await activate(context);
+    expect(activations(activation)).toEqual([['project_found', false]]);
+    expect(libraryTables).not.toHaveBeenCalled();
+  });
+
+  it('a window with no folder records no library size', async () => {
+    vi.useFakeTimers();
+    const activation = vi.spyOn(telemetry, 'activation');
+    const libraryTables = vi.spyOn(telemetry, 'libraryTables');
+    await activate(context);
+    expect(activations(activation)).toEqual([['no_project', false]]);
+    expect(libraryTables).not.toHaveBeenCalled();
+  });
+});

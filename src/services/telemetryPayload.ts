@@ -792,6 +792,20 @@ export const FEATURES = [
   'readyAfterNoReady',
   'readyLate30to60s',
   'readyLateOver60s',
+  // #331: how big the project is, as fixed ranges (never a count). The
+  // Table Library's size when a window with an ERD folder opens
+  // (recordLibraryTables), and the largest diagram of more than 50 tables
+  // opened that day, beside modelCount '51+' (recordCanvasOpen). One key per
+  // family per day: the largest range wins. Off the onboarding trail.
+  'libraryTablesNone',
+  'libraryTables1to10',
+  'libraryTables11to50',
+  'libraryTables51to199',
+  'libraryTables200to499',
+  'libraryTables500Plus',
+  'diagramTables51to199',
+  'diagramTables200to499',
+  'diagramTables500Plus',
 ] as const;
 export type TelemetryFeature = (typeof FEATURES)[number];
 
@@ -1462,6 +1476,64 @@ export function tableCountBucket(count: number): TableCountBucket {
 
 const TABLE_COUNT_ORDER: readonly TableCountBucket[] = ['none', '1-10', '11-50', '51+'];
 
+/** #331: the Table Library's size ranges, smallest first. Below 51 the edges are {@link tableCountBucket}'s. */
+export const LIBRARY_TABLE_FEATURES = [
+  'libraryTablesNone',
+  'libraryTables1to10',
+  'libraryTables11to50',
+  'libraryTables51to199',
+  'libraryTables200to499',
+  'libraryTables500Plus',
+] as const satisfies readonly TelemetryFeature[];
+
+/** #331: a diagram's size past `model_count`'s `51+`, smallest first. */
+export const LARGE_DIAGRAM_FEATURES = [
+  'diagramTables51to199',
+  'diagramTables200to499',
+  'diagramTables500Plus',
+] as const satisfies readonly TelemetryFeature[];
+
+/** The range key for a Table Library of `count` tables. */
+export function libraryTablesFeature(count: number): (typeof LIBRARY_TABLE_FEATURES)[number] {
+  if (count <= 0) return 'libraryTablesNone';
+  if (count <= 10) return 'libraryTables1to10';
+  if (count <= 50) return 'libraryTables11to50';
+  if (count <= 199) return 'libraryTables51to199';
+  if (count <= 499) return 'libraryTables200to499';
+  return 'libraryTables500Plus';
+}
+
+/**
+ * The range key for a diagram of `count` tables, or `undefined` when
+ * {@link tableCountBucket} already says it (50 or fewer): a key exists
+ * exactly when `model_count` is `51+`.
+ */
+export function largeDiagramFeature(count: number): (typeof LARGE_DIAGRAM_FEATURES)[number] | undefined {
+  if (tableCountBucket(count) !== '51+') return undefined;
+  if (count <= 199) return 'diagramTables51to199';
+  if (count <= 499) return 'diagramTables200to499';
+  return 'diagramTables500Plus';
+}
+
+/**
+ * `key` as the day's one member of `family` (a list of ranges, smallest
+ * first): unchanged when a larger range is already there, otherwise every
+ * smaller one is removed and `key` set to 1. A later interim copy replaces an
+ * earlier one at the Worker, so the day ends with the largest range only.
+ */
+function recordLargestOf(state: DailyCounters, family: readonly TelemetryFeature[], key: TelemetryFeature): DailyCounters {
+  const at = family.indexOf(key);
+  if (family.some((f, i) => i >= at && state.features[f])) return state;
+  const features = { ...state.features };
+  for (const f of family) delete features[f];
+  return { ...state, features: { ...features, [key]: 1 } };
+}
+
+/** #331: the Table Library holds `count` tables (a window with an ERD folder opened). The largest range of the day wins. */
+export function recordLibraryTables(state: DailyCounters, count: number): DailyCounters {
+  return recordLargestOf(state, LIBRARY_TABLE_FEATURES, libraryTablesFeature(count));
+}
+
 export function recentDaysBucket(count: number): RecentDaysBucket {
   if (count <= 0) return '0';
   if (count === 1) return '1';
@@ -1654,8 +1726,11 @@ export function recordCanvasOpen(
 ): DailyCounters {
   const seen = tableCountBucket(info.modelCount);
   const largest = TABLE_COUNT_ORDER.indexOf(seen) > TABLE_COUNT_ORDER.indexOf(state.modelCount) ? seen : state.modelCount;
+  // #331: past '51+', the largest diagram's range (both stages, as modelCount).
+  const large = largeDiagramFeature(info.modelCount);
+  const sized = large ? recordLargestOf(state, LARGE_DIAGRAM_FEATURES, large) : state;
   return {
-    ...state,
+    ...sized,
     canvasOpens: Math.min(state.canvasOpens + 1, MAX_CANVAS_OPENS),
     stages: addOnce(state.stages, info.stage),
     schemaFormats: addOnce(state.schemaFormats, info.format),
@@ -2138,8 +2213,18 @@ export function heartbeatBytes(body: HeartbeatBody): number {
   return new TextEncoder().encode(JSON.stringify(body)).byteLength;
 }
 
-/** Never dropped by {@link trimHeartbeat}: they describe the send itself. */
-const UNTRIMMED_FEATURES: ReadonlySet<string> = new Set(['heartbeatProvisional', 'heartbeatTrimmed']);
+/**
+ * Never dropped by {@link trimHeartbeat}: the send markers describe the send
+ * itself; the project's size ranges (#331, at most one of each family a day)
+ * are the newest keys, so the trim would take them first, and an oversized
+ * day is most likely a large project's.
+ */
+const UNTRIMMED_FEATURES: ReadonlySet<string> = new Set<string>([
+  'heartbeatProvisional',
+  'heartbeatTrimmed',
+  ...LIBRARY_TABLE_FEATURES,
+  ...LARGE_DIAGRAM_FEATURES,
+]);
 
 /**
  * `body` cut down to `limit` bytes, marked `heartbeatTrimmed`, or `body`

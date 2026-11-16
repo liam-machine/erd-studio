@@ -557,6 +557,24 @@ describe('validation — acceptance and normalisation', () => {
     assert.equal(params[18], '{}');
   });
 
+  it('keeps the project size ranges (#331), and drops a look-alike, a raw count or an error-side copy', async () => {
+    const features = {
+      libraryTablesNone: 1, libraryTables1to10: 1, libraryTables11to50: 1,
+      libraryTables51to199: 1, libraryTables200to499: 1, libraryTables500Plus: 1,
+      diagramTables51to199: 1, diagramTables200to499: 1, diagramTables500Plus: 1,
+    };
+    const params = await storedParams(
+      heartbeat({
+        modelCount: '51+',
+        features: { ...features, libraryTables42: 1, diagramTables51plus: 1, diagramTables1100: 1, libraryTables: 250 },
+        errors: { diagramTables500Plus: 1 },
+      }),
+    );
+    assert.deepEqual(JSON.parse(params[17]), features);
+    assert.deepEqual(Object.keys(JSON.parse(params[17])), WORKER_FEATURES.slice(WORKER_FEATURES.indexOf('libraryTablesNone'), WORKER_FEATURES.indexOf('diagramTables500Plus') + 1));
+    assert.equal(params[18], '{}');
+  });
+
   it('keeps the automatic draft\'s time-limit drop key, after the import outcome keys', async () => {
     const params = await storedParams(heartbeat({ features: { draftDropTimeLimit: 1, importCauseTimeLimit: 1, draftDropTimeLimits: 1 } }));
     assert.equal(params[17], '{"importCauseTimeLimit":1,"draftDropTimeLimit":1}');

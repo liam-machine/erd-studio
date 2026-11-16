@@ -18,6 +18,7 @@ import { CodeOwnersReader } from './services/codeOwners';
 import { tableHomesById, tableHomesOf, type TableHome } from './services/tableHomes';
 import { tableUsageOf, type TableUsageKeys } from './services/sidebarTables';
 import { tablesOfTreeDrop } from './services/tableDrop';
+import { distinctTableCount } from './services/tableLibraryIndex';
 import { FileWatcherService } from './watchers/FileWatcherService';
 import { HarnessService, HARNESS_TARGETS, HARNESS_VERSION, extractHarnessVersion, recommendedHookAssistants, type HarnessInstallResult, type HarnessTarget } from './services/harnessService';
 import { SelectorsService } from './services/selectorsService';
@@ -2358,7 +2359,18 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     if (!target) { return; }
     await vscode.commands.executeCommand('erdStudio.openDomain', target);
   };
-  telemetry.activation('project_found', fs.existsSync(fullSemanticDirPath), subjectAreaService.listSubjectAreas(workspaceRoot, semanticDir).length);
+  const activatedWithSemanticDir = fs.existsSync(fullSemanticDirPath);
+  telemetry.activation('project_found', activatedWithSemanticDir, subjectAreaService.listSubjectAreas(workspaceRoot, semanticDir).length);
+  // #331: the Table Library's size, as a range, once per window (never on a
+  // refresh). Only where an ERD folder exists, so libraryTablesNone means an
+  // empty library rather than a folder with no ERD Studio in it.
+  if (activatedWithSemanticDir) {
+    try {
+      telemetry.libraryTables(distinctTableCount(tableLibraryService.listTableFiles()));
+    } catch (err) {
+      log.warn('[ERD Studio] Counting the Table Library for usage telemetry failed:', err);
+    }
+  }
   // Every window's outcome, not only the day's last (`activation`).
   telemetry.feature(hasDbt ? 'activatedDbt' : 'activatedLogical');
   // A presence flag, once a day: activation resolved a root without dbt_project.yml.
