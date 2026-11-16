@@ -227,6 +227,19 @@ describe('#331: the Table Library\'s size, once at activation', () => {
     expect(libraryTables.mock.calls).toEqual([[tables.length]]);
   });
 
+  it('counts tables, not files: a second copy of a table in a library folder is not counted again', async () => {
+    fs.cpSync(FIXTURE_ROOT, root, { recursive: true });
+    const library = path.join(root, '.erd-studio', 'logical-models');
+    const tables = fs.readdirSync(library).filter((f) => f.endsWith('.yml'));
+    // The same name one folder down: listed (shadowed by the top-level file), never a second table.
+    fs.mkdirSync(path.join(library, 'gold'));
+    fs.copyFileSync(path.join(library, 'dim_customer.yml'), path.join(library, 'gold', 'dim_customer.yml'));
+    vscode.workspace.workspaceFolders = [{ uri: vscode.Uri.file(root), name: 'p', index: 0 }];
+    const libraryTables = vi.spyOn(telemetry, 'libraryTables');
+    await activate(context);
+    expect(libraryTables.mock.calls).toEqual([[tables.length]]);
+  });
+
   it('a project with no ERD folder records no library size (has_semantic_dir says so)', async () => {
     fs.writeFileSync(path.join(root, 'README.md'), '# nothing here\n');
     vscode.workspace.workspaceFolders = [{ uri: vscode.Uri.file(root), name: 'p', index: 0 }];
