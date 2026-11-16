@@ -146,7 +146,7 @@ Suggested, in this order (numbers from STEP 5 → Use):
 
 1. **The pre-2.0 base comes back.** Of the 29 installs that opened a diagram on 1.x stable in the 28 days before 2.0 (Use item 4), at least half (15) have opened a diagram on 2.x. When #326 was written: 2.
 2. **Use holds after the release week.** Active installs on final rows (Use item 2, by week) stay at or above 12 a week in the weeks of 11-16 and 11-23. The four weeks before 2.0 averaged about 10.
-3. **Repeat use does not fall.** Installs with a diagram on two or more days in 28 do not fall below 19. The 19 is #326's reading: each install's latest row received since 11-07, interim rows included. Use item 3 reads final rows over the last 7 finished days, which gave 13 on 2026-11-16. Liam to pick which measure the bar uses; until he does, print both.
+3. **Repeat use does not fall.** Installs with a diagram on two or more days in 28 do not fall below 19. The 19 is #326's reading: each install's latest row received since 11-07, interim rows included. Use item 3 returns that reading (20 on 2026-11-16) and the final-rows reading over the last 7 finished days (13 on 2026-11-16). Liam to pick which measure the bar uses; until he does, print both, and say beside them that only #326's reading compares with 19 (the final-rows reading has no 11-14 figure).
 
 The week of 11-23 ends on Sunday 11-29. The first run after day 20 (12-01, 08:50 Sydney, which is 11-30 in UTC) cannot read that week as finished yet. So print item 2 for that week as provisional in the closing digest, and score it on the first run where the week is finished, under the closing digest in **Launch watch**.
 
@@ -282,7 +282,7 @@ Rules for every Use number:
    FROM per GROUP BY n ORDER BY n
    ```
 
-2. **By week** (Monday to Sunday, the last eight weeks), the series the launch watch's bar is read on. Columns: reporting, in a folder with a model, active on final rows, interim-only, design edit, diagram opens, and active on final rows again the next week. The current week has `finished = 0`, so print it as provisional. Write each finished week to **Metric baselines → Use** once, and never rewrite a week already written. D1 deletes rows 90 days after they arrive, so a recomputed early week shrinks and would look like a drop.
+2. **By week** (Monday to Sunday, the last eight weeks), the series the launch watch's bar is read on. Columns: reporting, in a folder with a model, active on final rows, interim-only, design edit, diagram opens, and active on final rows again the next week. The current week has `finished = 0`, so print it as provisional. Write each finished week to **Metric baselines → Use** once, and never rewrite a week already written. D1 deletes rows 90 days after they arrive, so a recomputed early week shrinks and would look like a drop. The one exception is "active again the next week": it reads the following week, so while `next_finished = 0` write that cell as "pending", and fill it in once, on the first run where `next_finished = 1`. Never store a pending count as the week's figure.
 
    ```sql
    WITH h AS (SELECT install_id, canvas_opens, has_semantic_dir, date(day,'weekday 0','-6 days') AS wk,
@@ -295,25 +295,35 @@ Rules for every Use number:
      FROM h GROUP BY wk, install_id),
    nxt AS (SELECT a.wk, COUNT(*) AS again FROM per a JOIN per b ON b.install_id = a.install_id AND b.wk = date(a.wk,'+7 days')
      WHERE a.active_final AND b.active_final GROUP BY a.wk)
-   SELECT per.wk, date(per.wk,'+6 days') < date('now','-1 day') AS finished, COUNT(*) AS reporting, SUM(model_folder) AS model_folder,
+   SELECT per.wk, date(per.wk,'+6 days') < date('now','-1 day') AS finished,
+     date(per.wk,'+13 days') < date('now','-1 day') AS next_finished, COUNT(*) AS reporting, SUM(model_folder) AS model_folder,
      SUM(active_final) AS active_final, SUM(active_any AND NOT active_final) AS active_interim_only, SUM(design_edit) AS design_edit,
      SUM(opens) AS diagram_opens, COALESCE(nxt.again, 0) AS active_again_next_week
    FROM per LEFT JOIN nxt ON nxt.wk = per.wk GROUP BY per.wk ORDER BY per.wk
    ```
 
-3. **Repeat use.** Take each install's latest final row in the last 7 finished days and read `canvas_days_28`: installs with a diagram on two or more days in 28. `canvas_days_28` is text, so match the buckets by name, never with `>=`. `'15-28'` sorts below `'2'`, so a `>=` would drop the most active installs. NULL means a client from before 1.6.3.
+3. **Repeat use.** Read `canvas_days_28` from each install's latest row: installs with a diagram on two or more days in 28. The query returns two readings, one row each, and the digest prints both until Liam picks one for the bar (STEP L item 3):
+   - **final rows, last 7 finished days**: the like-for-like reading, by the rule above;
+   - **#326's reading**: the latest row in the last 7 days, interim rows and today included. This is how the bar's 19 was measured (each install's latest row received since 11-07, read on 11-14), so only this row compares with it.
+
+   `canvas_days_28` is text, so match the buckets by name, never with `>=`. `'15-28'` sorts below `'2'`, so a `>=` would drop the most active installs. NULL means a client from before 1.6.3.
 
    ```sql
-   WITH h AS (SELECT install_id, day, canvas_days_28 FROM heartbeats
-       WHERE COALESCE(dev,0)=0 AND day >= date('now','-8 days') AND day < date('now','-1 day')
-         AND json_extract(features,'$.heartbeatProvisional') IS NULL),
-   l AS (SELECT h.canvas_days_28 FROM h JOIN (SELECT install_id, MAX(day) AS d FROM h GROUP BY install_id) m
-         ON m.install_id = h.install_id AND m.d = h.day)
-   SELECT COUNT(*) AS installs,
+   WITH h AS (SELECT install_id, day, canvas_days_28,
+       json_extract(features,'$.heartbeatProvisional') IS NULL AS is_final
+     FROM heartbeats WHERE COALESCE(dev,0)=0 AND day >= date('now','-8 days')),
+   f AS (SELECT * FROM h WHERE is_final AND day < date('now','-1 day')),
+   r AS (SELECT * FROM h WHERE day >= date('now','-7 days')),
+   l AS (SELECT 'final rows, last 7 finished days' AS reading, f.canvas_days_28 FROM f
+           JOIN (SELECT install_id, MAX(day) AS d FROM f GROUP BY install_id) m ON m.install_id = f.install_id AND m.d = f.day
+         UNION ALL
+         SELECT '#326: latest row, last 7 days, interim included', r.canvas_days_28 FROM r
+           JOIN (SELECT install_id, MAX(day) AS d FROM r GROUP BY install_id) m ON m.install_id = r.install_id AND m.d = r.day)
+   SELECT reading, COUNT(*) AS installs,
      SUM(canvas_days_28 IN ('2-3','4-7','8-14','15-28')) AS diagram_2plus_days,
      SUM(canvas_days_28 = '1') AS diagram_1_day, SUM(canvas_days_28 = '0') AS diagram_no_day,
      SUM(canvas_days_28 IS NULL) AS not_sent
-   FROM l
+   FROM l GROUP BY reading ORDER BY reading DESC
    ```
 
 4. **The pre-2.0 active base.** These are the installs that opened a diagram on 1.x stable in the 28 days before 2.0 (10-13 → 11-09; there were 29). Report how many of them have reported on 2.x, and how many of those opened a diagram there, on any rows and on final rows. It is the cleanest test of 2.0, because nothing about how 2.x reports can inflate it.
@@ -344,28 +354,30 @@ Rules for every Use number:
          AND json_extract(h.features,'$.trySample') IS NULL AND json_extract(h.features,'$.exampleOpened') IS NULL) AS arrived
      FROM h JOIN f ON f.install_id = h.install_id AND f.d0 = h.day
      WHERE h.tenure = '0' AND json_extract(h.features,'$.extUpdatedMajor') IS NULL)
-   SELECT wk, COUNT(*) AS new_installs, SUM(arrived) AS arrived_approx FROM fr
+   SELECT wk, date(wk,'+6 days') < date('now','-1 day') AS finished, COUNT(*) AS new_installs, SUM(arrived) AS arrived_approx FROM fr
    WHERE wk >= date('now','-1 day','weekday 0','-55 days') GROUP BY wk ORDER BY wk
    ```
 
 6. **Team sharing (#332, with #329's `modelChangedExternalGit`).** Liam has named this the key metric. Print, per week:
-   - **arrivals** (`sharedModelFirstOpened`), also without the days that cloned the sample project (`trySampleCloned` the same day: README → *Whether models are shared*);
+   - **arrivals** (`sharedModelFirstOpened`), also without the arrivals that may be a clone of the sample project: the README (→ *Whether models are shared*) says to read arrivals beside `trySampleCloned` on the same install, so leave out an arrival when that install recorded `trySampleCloned` on the arrival's day or the 7 days before;
    - installs whose model folder is in Git (`modelInGit`), of which with a remote (`modelRepoHasRemote`), and not in Git (`modelNotInGit`). An install can carry both `modelInGit` and `modelNotInGit`, so never subtract one from the other;
    - installs where Git changed a model (`modelChangedExternalGit`: a pull or checkout brought someone's edits in).
 
    "Shared models" in the sense of models with more than one author is **not measured**: #332 left commit authors to Liam. Print "not measured (#332)" there, never a number.
 
-   **Until the keys are sent, print "not sent yet", never 0.** Find the first versioned heading in `CHANGELOG.md` on `origin/main` whose notes name `sharedModelFirstOpened`:
-   - if there is none, print "not sent yet: no release carries #332";
+   **Until the keys are sent, print "not sent yet", never 0.** Check each family on its own, because #329 and #332 can ship in different releases: find the first versioned heading in `CHANGELOG.md` on `origin/main` whose notes name `sharedModelFirstOpened` (#332: the arrival and Git columns), and separately the first that names `modelChangedExternalGit` (#329: the changed-by-Git column). For each family:
+   - if there is none, print "not sent yet: no release carries #332" (or #329) in its columns;
    - if there is one but the query has no rows from that version on, read the ledger's `dropped_features` for that family (STEP 2.0 item 1). A Worker that predates the keys drops them. Print "sent from <v>, no rows yet", with the reason if the ledger shows it.
 
    ```sql
-   WITH h AS (SELECT install_id, date(day,'weekday 0','-6 days') AS wk, features FROM heartbeats
+   WITH h AS (SELECT install_id, day, date(day,'weekday 0','-6 days') AS wk, features FROM heartbeats
      WHERE COALESCE(dev,0)=0 AND day >= date('now','-1 day','weekday 0','-27 days') AND day < date('now','-1 day'))
-   SELECT wk,
+   SELECT wk, date(wk,'+6 days') < date('now','-1 day') AS finished,
      COUNT(DISTINCT CASE WHEN json_extract(features,'$.sharedModelFirstOpened') IS NOT NULL THEN install_id END) AS arrivals,
      COUNT(DISTINCT CASE WHEN json_extract(features,'$.sharedModelFirstOpened') IS NOT NULL
-                          AND json_extract(features,'$.trySampleCloned') IS NULL THEN install_id END) AS arrivals_not_sample,
+       AND NOT EXISTS (SELECT 1 FROM heartbeats s WHERE s.install_id = h.install_id
+         AND s.day BETWEEN date(h.day,'-7 days') AND h.day
+         AND json_extract(s.features,'$.trySampleCloned') IS NOT NULL) THEN install_id END) AS arrivals_not_sample,
      COUNT(DISTINCT CASE WHEN json_extract(features,'$.modelInGit') IS NOT NULL THEN install_id END) AS model_in_git,
      COUNT(DISTINCT CASE WHEN json_extract(features,'$.modelRepoHasRemote') IS NOT NULL THEN install_id END) AS with_remote,
      COUNT(DISTINCT CASE WHEN json_extract(features,'$.modelNotInGit') IS NOT NULL THEN install_id END) AS model_not_in_git,

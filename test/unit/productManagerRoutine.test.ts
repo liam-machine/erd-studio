@@ -149,6 +149,34 @@ describe('product manager routine: the Use block (#326)', () => {
     }
   });
 
+  it('every by-week query says which weeks are finished, and a next-week count waits for the next week', () => {
+    const weekly = sqlFences.filter((s) => s.includes("'weekday 0'"));
+    expect(weekly.length).toBeGreaterThanOrEqual(3);
+    for (const sql of weekly) expect(sql, sql).toMatch(/\bAS finished\b/);
+    // "Active again the next week" reads the following week: a week written once must not freeze a partial count.
+    const again = weekly.filter((s) => s.includes('active_again_next_week'));
+    expect(again.length).toBe(1);
+    expect(again[0]).toMatch(/'\+13 days'\) < date\('now','-1 day'\) AS next_finished/);
+    expect(useBlock).toMatch(/while `next_finished = 0` write that cell as "pending"/);
+  });
+
+  it('repeat use returns both readings the suggested bar needs', () => {
+    const repeat = sqlFences.filter((s) => s.includes('canvas_days_28'));
+    expect(repeat.length).toBe(1);
+    // #326's 19 was each install's latest row with interim rows included; the like-for-like reading is final rows only.
+    expect(repeat[0]).toMatch(/'final rows, last 7 finished days'/);
+    expect(repeat[0]).toMatch(/'#326: latest row, last 7 days, interim included'/);
+    expect(stepL).toMatch(/only #326's reading compares with 19/);
+  });
+
+  it('team sharing guards each key family on its own release', () => {
+    expect(useBlock).toMatch(/first that names `modelChangedExternalGit`/);
+    expect(useBlock).toMatch(/whose notes name `sharedModelFirstOpened`/);
+    // The sample-clone exclusion is per install (README → Whether models are shared), not only the same row.
+    const sharing = sqlFences.find((s) => s.includes('sharedModelFirstOpened'));
+    expect(sharing).toMatch(/s\.install_id = h\.install_id[\s\S]*'\$\.trySampleCloned'/);
+  });
+
   it('calls a heartbeat alone reporting, everywhere', () => {
     // The journal's old baseline label (a count of installs that sent a heartbeat) may only
     // appear where the routine is told to rename it.
