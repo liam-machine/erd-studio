@@ -447,7 +447,10 @@ describe('Move Table…', () => {
       answerMove();
       vi.spyOn(vscode.workspace, 'applyEdit').mockResolvedValue(false);
       await vscode.commands.executeCommand('erdStudio.moveTable', row('gold/tables/gold/fct_order.dbml'));
-      expect(errors).toHaveBeenCalledWith('Move Table: VS Code rejected the file moves; nothing was changed.');
+      expect(errors).toHaveBeenCalledWith(
+        "Move Table: VS Code didn't accept the move, so nothing was changed. This is usually a file another program has open or a folder you can't write to.",
+        'Try Again', 'Send Feedback',
+      );
       expect(fs.existsSync(erd('silver', 'tables', 'crm'))).toBe(false);
       expect(bytes()).toEqual(before);
     });
@@ -561,7 +564,10 @@ describe('Move Diagram to Layer…', () => {
     (vscode.window.tabGroups as unknown as { close: unknown }).close = vi.fn(async () => true);
     const exec = vi.spyOn(vscode.commands, 'executeCommand');
     await vscode.commands.executeCommand('erdStudio.moveDiagram', vscode.Uri.file(salesPath()));
-    expect(errors).toHaveBeenCalledWith('Move Diagram to Layer: VS Code rejected the move; nothing was changed.');
+    expect(errors).toHaveBeenCalledWith(
+      "Move Diagram to Layer: VS Code didn't accept the move, so nothing was changed. This is usually a file another program has open or a folder you can't write to.",
+      'Try Again', 'Send Feedback',
+    );
     expect(fs.existsSync(erd('platinum'))).toBe(false);
     expect(bytes()).toEqual(before);
     expect(exec).toHaveBeenCalledWith('vscode.openWith', expect.objectContaining({ fsPath: salesPath() }), 'default', { viewColumn: 1, preserveFocus: true });

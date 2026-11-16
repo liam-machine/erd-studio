@@ -3558,14 +3558,24 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
       // Table Library rows dropped on a diagram's row in the Diagrams view: the same write as Add to Diagram….
       // Where two schema folders share a name, the dragged rows' files say which tables.
       // The drag is used up here, so a later canvas drop never adds it again; it is the fallback when the drop names nothing.
-      treeProvider.setTablesDropHandler(async (filePath, tables, uris) => {
-        const remembered = editorProvider.takeRememberedLibraryDrag();
+      // The tables each drop found, for Try Again after its add failed (#335): the drag is used up by then.
+      // Keyed by the drop's own `tables` array, which Try Again hands back, so a retry from an older toast
+      // adds that drop's tables, never a later drop's. A retry never takes or times a drag again.
+      const treeDropsFound = new WeakMap<string[], { names: string[]; files?: string[] }>();
+      treeProvider.setTablesDropHandler(async (filePath, tables, uris, again) => {
+        const before = again ? treeDropsFound.get(tables) : undefined;
+        if (before) {
+          await addToDiagramDeps.addTables(filePath, before.names, before.files);
+          return true;
+        }
+        const remembered = again ? undefined : editorProvider.takeRememberedLibraryDrag();
         const found = tablesOfTreeDrop({ tables, uris }, tableLibraryService.listTableFiles(), {
           byFile: tableLibraryService.hasSharedNames(),
           ...(remembered ? { remembered } : {}),
         });
         if (!found) return false;
-        editorProvider.noteDropSeen('diagramsRow', filePath);
+        treeDropsFound.set(tables, { names: found.names, ...(found.files ? { files: found.files } : {}) });
+        if (!again) editorProvider.noteDropSeen('diagramsRow', filePath);
         await addToDiagramDeps.addTables(filePath, found.names, found.files);
         return true;
       });

@@ -315,7 +315,8 @@ export function classifyWriteFailure(err: unknown): WriteFailure {
   if (DISK_FULL_CODES.has(code)) return 'disk-full';
   const message = err instanceof Error ? err.message : '';
   if (/\b(?:ENOSPC|EDQUOT)\b/.test(message)) return 'disk-full';
-  if (/\b(?:EACCES|EPERM|EROFS)\b/.test(message)) return 'permission';
+  // `openTextDocument` wraps a `FileSystemError` in a plain Error: only its message says NoPermissions.
+  if (/\b(?:EACCES|EPERM|EROFS|NoPermissions)\b/.test(message)) return 'permission';
   return 'other';
 }
 
