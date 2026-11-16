@@ -10,6 +10,10 @@ heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that
 
 ## Unreleased
 
+### Added
+
+- **Double-click a diagram in the glass side panel to open its file.** A click still opens the diagram; a double-click opens the diagram's file as text (its DBML, or its JSON in a project from before 2.0), as a double-click on a table already opens the table's file. The standard side panel is unchanged: a diagram's row opens the diagram there on a click or a double-click.
+
 ### Changed
 
 - **A diagram that opens late is no longer reloaded by the "didn't open" notification.** On a slow start, a diagram or the draft preview can take more than 30 seconds to appear, and ERD Studio has by then shown "This diagram didn't open." with **Reload** and **Send Feedback**. If the diagram has opened since, **Reload** on that notification now leaves it alone instead of loading it again, and **Send Feedback** opens the ordinary feedback form instead of a report that says the diagram did not open. A diagram that really did not open reloads as before. Usage telemetry, if you have it on, also counts when a panel opened after that notification (`readyAfterNoReady`, with `readyLate30to60s` or `readyLateOver60s` beside it), so slow starts can be told from broken ones. (#320)

@@ -610,6 +610,15 @@ export class SubjectAreaTreeProvider
     this._onDidChangeTreeData.fire(undefined);
   }
 
+  /**
+   * A row's double-click, for a view that has one (the glass sidebar): a
+   * diagram's file as text, where its click opens the diagram.
+   */
+  secondaryCommand(element: TreeElement): vscode.Command | undefined {
+    if (element.type !== 'domain') return undefined;
+    return { command: 'erdStudio.openDiagramFile', title: 'Open File', arguments: [element, { doubleClick: true }] };
+  }
+
   getTreeItem(element: TreeElement): vscode.TreeItem {
     switch (element.type) {
       case 'project':

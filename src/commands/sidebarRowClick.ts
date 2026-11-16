@@ -25,6 +25,11 @@
  * row's file. The glass page has a real `dblclick`: it reaches the same
  * {@link RowActivations.settle} through the row's secondary command.
  *
+ * **A diagram row** (the glass sidebar): its click opens the diagram, and
+ * its double-click opens the diagram's file as text ({@link openDiagramFile}).
+ * The click's open may still be under way when the double-click arrives, so
+ * {@link PendingOpens} lets the text wait for it and land on top.
+ *
  * No `vscode` value at import time beyond the CancellationTokenSource the
  * tracker makes, so the decision is a pure function the tests drive.
  */
@@ -150,6 +155,55 @@ export class RowActivations {
     activation.source.cancel();
     let timer: ReturnType<typeof setTimeout> | undefined;
     await Promise.race([activation.done, new Promise<void>((resolve) => { timer = setTimeout(resolve, SETTLE_WAIT_MS); })]);
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
+/** VS Code's own text editor, as `vscode.openWith` names it: the way past a custom editor that claims the file. */
+export const TEXT_EDITOR_ID = 'default';
+
+/** The file of a Diagrams view diagram row, else undefined. */
+export function diagramRowFile(node: unknown): string | undefined {
+  if (typeof node !== 'object' || node === null || (node as { type?: unknown }).type !== 'domain') return undefined;
+  const filePath = (node as { summary?: { filePath?: unknown } }).summary?.filePath;
+  return typeof filePath === 'string' && filePath !== '' ? filePath : undefined;
+}
+
+/**
+ * Open a diagram's file as text (a diagram row's double-click in the glass
+ * sidebar): the DBML, or the JSON of a project from before 2.0, in VS Code's
+ * text editor rather than on the canvas. The tab is kept, as the Explorer's
+ * double-click keeps it. Writes nothing.
+ */
+export async function openDiagramFile(node: unknown): Promise<void> {
+  const filePath = diagramRowFile(node);
+  if (filePath === undefined) {
+    void vscode.window.showErrorMessage('Open File: No diagram selected. Double-click a diagram in the ERD Studio side panel.');
+    return;
+  }
+  await vscode.commands.executeCommand('vscode.openWith', vscode.Uri.file(filePath), TEXT_EDITOR_ID, { preview: false });
+}
+
+/**
+ * The opens still under way (a diagram row's click opening its canvas), so
+ * that what a double-click opens next can wait for them and is not covered
+ * by a canvas that lands late. One per window.
+ */
+export class PendingOpens {
+  private readonly pending = new Set<Promise<unknown>>();
+
+  /** Remember `open` until it settles; returns it unchanged. */
+  track<T>(open: Promise<T>): Promise<T> {
+    const done: Promise<unknown> = open.then(() => undefined, () => undefined).then(() => { this.pending.delete(done); });
+    this.pending.add(done);
+    return open;
+  }
+
+  /** Resolves once every open under way has settled, or after `waitMs` at most. At once when none is. */
+  async settle(waitMs = SETTLE_WAIT_MS): Promise<void> {
+    if (this.pending.size === 0) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    await Promise.race([Promise.all([...this.pending]), new Promise<void>((resolve) => { timer = setTimeout(resolve, waitMs); })]);
     if (timer !== undefined) clearTimeout(timer);
   }
 }

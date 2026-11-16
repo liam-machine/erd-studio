@@ -443,6 +443,19 @@ describe('SubjectAreaTreeProvider', () => {
       });
     });
 
+    it('a diagram row\'s double-click (the glass sidebar) opens its file as text; no other row has one', () => {
+      const element: TreeElement = {
+        type: 'domain',
+        summary: { domain: 'sales', layer: 'gold', filePath: '/p/.erd-studio/gold/diagrams/sales.dbml' },
+        modelCount: 0,
+      };
+      expect(provider.secondaryCommand(element)).toEqual({ command: 'erdStudio.openDiagramFile', title: 'Open File', arguments: [element, { doubleClick: true }] });
+      // Its click still opens the diagram.
+      expect(provider.getTreeItem(element).command?.command).toBe('erdStudio.openDomain');
+      expect(provider.secondaryCommand({ type: 'layer', layer: 'gold' } as TreeElement)).toBeUndefined();
+      expect(provider.secondaryCommand({ type: 'newDomain', layer: 'gold' } as TreeElement)).toBeUndefined();
+    });
+
     it('creates New Domain item with add icon and createDomain command', () => {
       const item = provider.getTreeItem({ type: 'newDomain', layer: 'gold', first: true });
 

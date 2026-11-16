@@ -157,7 +157,7 @@ import { registerRowDetails } from './providers/rowDetails';
 import { installContextKeyRecorder } from './providers/glassSidebar/contextKeys';
 import { FOCUS_GLASS_SEARCH_COMMAND, TOGGLE_GLASS_SIDEBAR_COMMAND, glassSidebarEnabled, registerGlassSidebar } from './providers/glassSidebar/GlassSidebarProvider';
 import { diagramsShowing, openInDiagram, openRelationshipSource, openTableFile, type RelationshipsViewDeps } from './commands/relationshipsView';
-import { RowActivations, diagramTheClickChooses, rowActivationKey } from './commands/sidebarRowClick';
+import { PendingOpens, RowActivations, diagramTheClickChooses, openDiagramFile, rowActivationKey } from './commands/sidebarRowClick';
 import {
   ADD_TO_DIAGRAM_COMMAND,
   ADD_TO_OPEN_DIAGRAM_COMMAND,
@@ -876,6 +876,7 @@ export const NO_LEGACY_ALIAS = new Set([
   'erdStudio.openRelationshipSource',
   'erdStudio.openInDiagram',
   'erdStudio.openTableFile',
+  'erdStudio.openDiagramFile',
   'erdStudio.showOnAnotherDiagram',
   'erdStudio.groupRelationshipsByFile',
   'erdStudio.groupRelationshipsByTable',
@@ -2101,6 +2102,8 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     void context.workspaceState.update(RELATIONSHIPS_GROUPING_KEY, grouping);
     void vscode.commands.executeCommand('setContext', 'erdStudio.relationshipsGrouping', grouping);
   };
+  // Diagram opens under way: a diagram row's double-click (its file as text) waits for its click's canvas.
+  const diagramOpens = new PendingOpens();
   const editorProvider = new SemanticEditorProvider(
     context,
     subjectAreaService,
@@ -4238,15 +4241,21 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
       // diagrams reuses one tab until an edit pins it. Without the option
       // `openWith` pins every tab. VS Code still pins it when the user has
       // `workbench.editor.enablePreview` off.
-      await vscode.commands.executeCommand(
+      // Tracked, so a diagram row's double-click (its file as text) waits for this open and lands on top of it.
+      await diagramOpens.track(Promise.resolve(vscode.commands.executeCommand(
         'vscode.openWith',
         fileUri,
         SUBJECT_AREA_EDITOR_VIEW_TYPE,
         { preview: true },
-      );
+      )));
       if (stage === 'physical') {
         editorProvider.switchStageForUri(fileUri, 'physical');
       }
+    }),
+    // A diagram row's double-click in the glass sidebar (`{ doubleClick: true }`): its file as text, once the click's own open has landed.
+    vscode.commands.registerCommand('erdStudio.openDiagramFile', async (node?: unknown, options?: unknown) => {
+      if (typeof options === 'object' && options !== null && (options as { doubleClick?: unknown }).doubleClick === true) await diagramOpens.settle();
+      await openDiagramFile(node);
     }),
     // Customise Fields…: open <semanticDir>/fields.yml, or an unsaved one
     // holding the starting set. Writes nothing (the user saves it).

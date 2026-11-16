@@ -154,6 +154,10 @@ describe('sidebar views', () => {
       expect(contributes.commands.find((c) => c.command === command)?.category).toBe('ERD Studio');
       expect(NO_LEGACY_ALIAS.has(command)).toBe(true);
     }
+    // A diagram row's double-click (the glass sidebar): a command of its own, in no menu and not in the palette.
+    expect(entries('erdStudio.openDiagramFile')).toEqual([]);
+    expect(contributes.menus.commandPalette).toContainEqual({ command: 'erdStudio.openDiagramFile', when: 'false' });
+    expect(NO_LEGACY_ALIAS.has('erdStudio.openDiagramFile')).toBe(true);
   });
 
   it('Reveal in Explorer reveals a table\'s file, a schema\'s, layer\'s or folder\'s folder, and a diagram\'s file; nothing else', () => {
