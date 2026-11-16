@@ -31,9 +31,15 @@ const same = (a: string, b: string): boolean => a.toLowerCase() === b.toLowerCas
  * has no per-domain convention to keep. A project that keeps relationships in
  * its domain files carries on doing so — a teammate on a version before this
  * one would not see an edge stored in the library.
+ *
+ * `models` may be a function that lists them: it is called only when nothing
+ * cheaper has decided the answer, so a caller that would have to read every
+ * table file of the library to list them (a first canvas open, before the
+ * background read has finished) does not read it for an answer the listing
+ * already gives.
  */
 export function usesLibraryRelationships(
-  models: readonly SemanticTable[],
+  models: readonly SemanticTable[] | (() => readonly SemanticTable[]),
   domainFileRelationshipCount: number,
   /** A model file that does not parse still lists some (`hasUnreadableRelationships`). */
   unreadableModelRelationships = false,
@@ -44,8 +50,8 @@ export function usesLibraryRelationships(
    */
   dbmlLibrary = false,
 ): boolean {
-  return dbmlLibrary || domainFileRelationshipCount === 0 || unreadableModelRelationships
-    || models.some((m) => (m.relationships?.length ?? 0) > 0);
+  if (dbmlLibrary || domainFileRelationshipCount === 0 || unreadableModelRelationships) return true;
+  return (typeof models === 'function' ? models() : models).some((m) => (m.relationships?.length ?? 0) > 0);
 }
 
 /**

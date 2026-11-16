@@ -792,6 +792,53 @@ export const FEATURES = [
   'readyAfterNoReady',
   'readyLate30to60s',
   'readyLateOver60s',
+  // #331: how big the project is, as fixed ranges (never a count). The
+  // Table Library's size when a window with an ERD folder opens
+  // (recordLibraryTables), and the largest diagram of more than 50 tables
+  // opened that day, beside modelCount '51+' (recordCanvasOpen). One key per
+  // family per day: the largest range wins. Off the onboarding trail.
+  'libraryTablesNone',
+  'libraryTables1to10',
+  'libraryTables11to50',
+  'libraryTables51to199',
+  'libraryTables200to499',
+  'libraryTables500Plus',
+  'diagramTables51to199',
+  'diagramTables200to499',
+  'diagramTables500Plus',
+  // #329: where a change ERD Studio did not write came from (src/services/outsideChange.ts),
+  // as presence flags, once a day, off the onboarding trail. A diagram file that appeared
+  // (domainCreatedExternal stays the total): HEAD moved with it, it did not, or no
+  // repository could be read. An existing table, relationships or diagram file changed or
+  // went: Git, NoGit, saved (or renamed or deleted) in this window, or written on disk.
+  'domainCreatedExternalGit',
+  'domainCreatedExternalLocal',
+  'domainCreatedExternalNoGit',
+  'modelChangedExternalGit',
+  'modelChangedExternalNoGit',
+  'modelChangedExternalEditor',
+  'modelChangedExternalDisk',
+  // #332: whether models are shared (src/services/modelShareTelemetry.ts), as presence
+  // flags, off the onboarding trail except the arrival. The first ERD Studio activation in
+  // a workspace that already has a model (diagrams or tables); then, once a day, whether
+  // the model folder is in a Git repository and whether that has a remote. No answer
+  // sends neither modelInGit nor modelNotInGit.
+  'sharedModelFirstOpened',
+  'modelInGit',
+  'modelNotInGit',
+  'modelRepoHasRemote',
+  // #333: how long a diagram takes to open, as fixed ranges (never a time),
+  // once a day for the slowest open (recordCanvasLoad / recordCanvasPaint).
+  // The host's ready → diagram posted, with canvasLoadOver20s (2.0.0) as the
+  // top rung; whether that slowest open read table files from disk; and the
+  // webview's first diagram received → first paint. Off the onboarding trail.
+  'canvasLoadUnder1s',
+  'canvasLoad1to5s',
+  'canvasLoad5to20s',
+  'canvasLoadCold',
+  'canvasPaintUnder1s',
+  'canvasPaint1to5s',
+  'canvasPaintOver5s',
 ] as const;
 export type TelemetryFeature = (typeof FEATURES)[number];
 
@@ -1462,6 +1509,109 @@ export function tableCountBucket(count: number): TableCountBucket {
 
 const TABLE_COUNT_ORDER: readonly TableCountBucket[] = ['none', '1-10', '11-50', '51+'];
 
+/** #331: the Table Library's size ranges, smallest first. Below 51 the edges are {@link tableCountBucket}'s. */
+export const LIBRARY_TABLE_FEATURES = [
+  'libraryTablesNone',
+  'libraryTables1to10',
+  'libraryTables11to50',
+  'libraryTables51to199',
+  'libraryTables200to499',
+  'libraryTables500Plus',
+] as const satisfies readonly TelemetryFeature[];
+
+/** #331: a diagram's size past `model_count`'s `51+`, smallest first. */
+export const LARGE_DIAGRAM_FEATURES = [
+  'diagramTables51to199',
+  'diagramTables200to499',
+  'diagramTables500Plus',
+] as const satisfies readonly TelemetryFeature[];
+
+/** The range key for a Table Library of `count` tables. */
+export function libraryTablesFeature(count: number): (typeof LIBRARY_TABLE_FEATURES)[number] {
+  if (count <= 0) return 'libraryTablesNone';
+  if (count <= 10) return 'libraryTables1to10';
+  if (count <= 50) return 'libraryTables11to50';
+  if (count <= 199) return 'libraryTables51to199';
+  if (count <= 499) return 'libraryTables200to499';
+  return 'libraryTables500Plus';
+}
+
+/**
+ * The range key for a diagram of `count` tables, or `undefined` when
+ * {@link tableCountBucket} already says it (50 or fewer): a key exists
+ * exactly when `model_count` is `51+`.
+ */
+export function largeDiagramFeature(count: number): (typeof LARGE_DIAGRAM_FEATURES)[number] | undefined {
+  if (tableCountBucket(count) !== '51+') return undefined;
+  if (count <= 199) return 'diagramTables51to199';
+  if (count <= 499) return 'diagramTables200to499';
+  return 'diagramTables500Plus';
+}
+
+/**
+ * `key` as the day's one member of `family` (a list of ranges, smallest
+ * first): unchanged when a larger range is already there, otherwise every
+ * smaller one is removed and `key` set to 1. A later interim copy replaces an
+ * earlier one at the Worker, so the day ends with the largest range only.
+ */
+function recordLargestOf(state: DailyCounters, family: readonly TelemetryFeature[], key: TelemetryFeature): DailyCounters {
+  const at = family.indexOf(key);
+  if (family.some((f, i) => i >= at && state.features[f])) return state;
+  const features = { ...state.features };
+  for (const f of family) delete features[f];
+  return { ...state, features: { ...features, [key]: 1 } };
+}
+
+/** #331: the Table Library holds `count` tables (a window with an ERD folder opened). The largest range of the day wins. */
+export function recordLibraryTables(state: DailyCounters, count: number): DailyCounters {
+  return recordLargestOf(state, LIBRARY_TABLE_FEATURES, libraryTablesFeature(count));
+}
+
+/**
+ * #333: how long a canvas took from `ready` to its diagram posted, fastest
+ * first. `canvasLoadOver20s` (2.0.0) is the top rung, so one key a day says
+ * the slowest open and the old key keeps its meaning. The ranges are
+ * `canvasLoadFeature`'s (telemetryCanvas.ts).
+ */
+export const CANVAS_LOAD_FEATURES = [
+  'canvasLoadUnder1s',
+  'canvasLoad1to5s',
+  'canvasLoad5to20s',
+  'canvasLoadOver20s',
+] as const satisfies readonly TelemetryFeature[];
+export type CanvasLoadFeature = (typeof CANVAS_LOAD_FEATURES)[number];
+
+/** #333: how long a canvas took from receiving its first diagram to the first paint with its tables drawn, fastest first. */
+export const CANVAS_PAINT_FEATURES = [
+  'canvasPaintUnder1s',
+  'canvasPaint1to5s',
+  'canvasPaintOver5s',
+] as const satisfies readonly TelemetryFeature[];
+export type CanvasPaintFeature = (typeof CANVAS_PAINT_FEATURES)[number];
+
+/**
+ * #333: one canvas open whose load fell in `key`'s range; `cold` when it
+ * read at least one table file from disk. The day keeps only its slowest
+ * range (as {@link recordLargestOf}), and `canvasLoadCold` describes the
+ * opens in that range: a slower range replaces the flag with this open's, the
+ * same range adds it, a faster one changes nothing (the same object back, so
+ * nothing is written). Never a time.
+ */
+export function recordCanvasLoad(state: DailyCounters, key: CanvasLoadFeature, cold: boolean): DailyCounters {
+  const at = CANVAS_LOAD_FEATURES.indexOf(key);
+  const top = CANVAS_LOAD_FEATURES.reduce((max, f, i) => (state.features[f] ? i : max), -1);
+  if (at < top) return state;
+  if (at === top) return cold ? recordFeatureOnce(state, 'canvasLoadCold') : state;
+  const raised = recordLargestOf(state, CANVAS_LOAD_FEATURES, key);
+  const { canvasLoadCold: _cold, ...features } = raised.features;
+  return { ...raised, features: cold ? { ...features, canvasLoadCold: 1 } : features };
+}
+
+/** #333: one canvas's first paint fell in `key`'s range. The slowest range of the day wins. */
+export function recordCanvasPaint(state: DailyCounters, key: CanvasPaintFeature): DailyCounters {
+  return recordLargestOf(state, CANVAS_PAINT_FEATURES, key);
+}
+
 export function recentDaysBucket(count: number): RecentDaysBucket {
   if (count <= 0) return '0';
   if (count === 1) return '1';
@@ -1654,8 +1804,11 @@ export function recordCanvasOpen(
 ): DailyCounters {
   const seen = tableCountBucket(info.modelCount);
   const largest = TABLE_COUNT_ORDER.indexOf(seen) > TABLE_COUNT_ORDER.indexOf(state.modelCount) ? seen : state.modelCount;
+  // #331: past '51+', the largest diagram's range (both stages, as modelCount).
+  const large = largeDiagramFeature(info.modelCount);
+  const sized = large ? recordLargestOf(state, LARGE_DIAGRAM_FEATURES, large) : state;
   return {
-    ...state,
+    ...sized,
     canvasOpens: Math.min(state.canvasOpens + 1, MAX_CANVAS_OPENS),
     stages: addOnce(state.stages, info.stage),
     schemaFormats: addOnce(state.schemaFormats, info.format),
@@ -2138,8 +2291,53 @@ export function heartbeatBytes(body: HeartbeatBody): number {
   return new TextEncoder().encode(JSON.stringify(body)).byteLength;
 }
 
-/** Never dropped by {@link trimHeartbeat}: they describe the send itself. */
-const UNTRIMMED_FEATURES: ReadonlySet<string> = new Set(['heartbeatProvisional', 'heartbeatTrimmed']);
+/**
+ * #329: where an outside change came from (src/services/outsideChange.ts),
+ * each a presence flag. Seven small keys, newer than everything the trim
+ * would otherwise keep: a large project's busy day, the likeliest to be
+ * trimmed, is also the likeliest to hold a pull or an assistant's burst.
+ */
+export const OUTSIDE_CHANGE_SOURCE_FEATURES = [
+  'domainCreatedExternalGit',
+  'domainCreatedExternalLocal',
+  'domainCreatedExternalNoGit',
+  'modelChangedExternalGit',
+  'modelChangedExternalNoGit',
+  'modelChangedExternalEditor',
+  'modelChangedExternalDisk',
+] as const satisfies readonly TelemetryFeature[];
+
+/**
+ * #332: whether models are shared (src/services/modelShareTelemetry.ts): the
+ * arrival and the model repository's three flags, each at most once a day.
+ */
+export const MODEL_SHARE_FEATURES = [
+  'sharedModelFirstOpened',
+  'modelInGit',
+  'modelNotInGit',
+  'modelRepoHasRemote',
+] as const satisfies readonly TelemetryFeature[];
+
+/**
+ * Never dropped by {@link trimHeartbeat}: the send markers describe the send
+ * itself; the project's size ranges (#331, at most one of each family a day),
+ * where outside changes came from (#329, seven presence flags), whether
+ * the model is shared (#332, four) and how long the slowest open took (#333,
+ * at most one of each family a day, and the cold flag) are the newest keys,
+ * so the trim would take them first, and an oversized day is most likely a
+ * large project's.
+ */
+const UNTRIMMED_FEATURES: ReadonlySet<string> = new Set<string>([
+  'heartbeatProvisional',
+  'heartbeatTrimmed',
+  ...LIBRARY_TABLE_FEATURES,
+  ...LARGE_DIAGRAM_FEATURES,
+  ...OUTSIDE_CHANGE_SOURCE_FEATURES,
+  ...MODEL_SHARE_FEATURES,
+  ...CANVAS_LOAD_FEATURES,
+  'canvasLoadCold',
+  ...CANVAS_PAINT_FEATURES,
+]);
 
 /**
  * `body` cut down to `limit` bytes, marked `heartbeatTrimmed`, or `body`

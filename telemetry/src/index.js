@@ -894,6 +894,46 @@ const FEATURES = [
   'readyAfterNoReady',
   'readyLate30to60s',
   'readyLateOver60s',
+  // Added after 2.0.7 (#331): how big the project is, as fixed ranges, never a count.
+  // The Table Library's size when a window with an ERD folder opens, and the largest
+  // diagram of more than 50 tables opened that day (beside model_count '51+').
+  'libraryTablesNone',
+  'libraryTables1to10',
+  'libraryTables11to50',
+  'libraryTables51to199',
+  'libraryTables200to499',
+  'libraryTables500Plus',
+  'diagramTables51to199',
+  'diagramTables200to499',
+  'diagramTables500Plus',
+  // Added after 2.0.7 (#329): where a change ERD Studio did not write came from, as
+  // presence flags. A diagram file that appeared (domainCreatedExternal stays the
+  // total), and an existing table, relationships or diagram file that changed or went.
+  'domainCreatedExternalGit',
+  'domainCreatedExternalLocal',
+  'domainCreatedExternalNoGit',
+  'modelChangedExternalGit',
+  'modelChangedExternalNoGit',
+  'modelChangedExternalEditor',
+  'modelChangedExternalDisk',
+  // Added after 2.0.7 (#332): whether models are shared, as presence flags. The first
+  // ERD Studio activation in a workspace that already has a model; whether the model
+  // folder is in a Git repository (neither key: unknown) and whether that has a remote.
+  'sharedModelFirstOpened',
+  'modelInGit',
+  'modelNotInGit',
+  'modelRepoHasRemote',
+  // Added after 2.0.7 (#333): how long a diagram takes to open, as fixed ranges, never a
+  // time, once a day for the slowest open. ready → diagram posted (canvasLoadOver20s,
+  // above, is the top range); whether that open read table files from disk; and the
+  // webview's first diagram received → first paint.
+  'canvasLoadUnder1s',
+  'canvasLoad1to5s',
+  'canvasLoad5to20s',
+  'canvasLoadCold',
+  'canvasPaintUnder1s',
+  'canvasPaint1to5s',
+  'canvasPaintOver5s',
 ];
 
 /** The only keys `errors` may carry; anything else is dropped. */

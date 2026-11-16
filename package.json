@@ -338,6 +338,12 @@
         "icon": "$(go-to-file)"
       },
       {
+        "command": "erdStudio.openDiagramFile",
+        "title": "Open Diagram File",
+        "category": "ERD Studio",
+        "icon": "$(go-to-file)"
+      },
+      {
         "command": "erdStudio.showOnAnotherDiagram",
         "title": "Show on Another Diagram…",
         "category": "ERD Studio"
@@ -600,7 +606,12 @@
       {
         "view": "erdStudio.domainTree",
         "contents": "Loading diagrams…",
-        "when": "erdStudio.hasProject && (erdStudio.diagramsLoading || (!erdStudio.hasDbtProject && erdStudio.storage != yaml && erdStudio.storage != mixed && !erdStudio.startIntent))"
+        "when": "erdStudio.hasProject && erdStudio.diagramsLoading"
+      },
+      {
+        "view": "erdStudio.domainTree",
+        "contents": "Looking at your folder…",
+        "when": "erdStudio.hasProject && !erdStudio.diagramsLoading && !erdStudio.hasDbtProject && erdStudio.storage != yaml && erdStudio.storage != mixed && !erdStudio.startIntent"
       },
       {
         "view": "erdStudio.domainTree",
@@ -1383,6 +1394,10 @@
         },
         {
           "command": "erdStudio.openTableFile",
+          "when": "false"
+        },
+        {
+          "command": "erdStudio.openDiagramFile",
           "when": "false"
         },
         {

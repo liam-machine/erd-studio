@@ -557,6 +557,79 @@ describe('validation — acceptance and normalisation', () => {
     assert.equal(params[18], '{}');
   });
 
+  it('keeps the project size ranges (#331), and drops a look-alike, a raw count or an error-side copy', async () => {
+    const features = {
+      libraryTablesNone: 1, libraryTables1to10: 1, libraryTables11to50: 1,
+      libraryTables51to199: 1, libraryTables200to499: 1, libraryTables500Plus: 1,
+      diagramTables51to199: 1, diagramTables200to499: 1, diagramTables500Plus: 1,
+    };
+    const params = await storedParams(
+      heartbeat({
+        modelCount: '51+',
+        features: { ...features, libraryTables42: 1, diagramTables51plus: 1, diagramTables1100: 1, libraryTables: 250 },
+        errors: { diagramTables500Plus: 1 },
+      }),
+    );
+    assert.deepEqual(JSON.parse(params[17]), features);
+    assert.deepEqual(Object.keys(JSON.parse(params[17])), WORKER_FEATURES.slice(WORKER_FEATURES.indexOf('libraryTablesNone'), WORKER_FEATURES.indexOf('diagramTables500Plus') + 1));
+    assert.equal(params[18], '{}');
+  });
+
+  it('keeps where outside changes came from (#329), after the size ranges, and drops a look-alike or an error-side copy', async () => {
+    const features = {
+      domainCreatedExternal: 3,
+      domainCreatedExternalGit: 1, domainCreatedExternalLocal: 1, domainCreatedExternalNoGit: 1,
+      modelChangedExternalGit: 1, modelChangedExternalNoGit: 1, modelChangedExternalEditor: 1, modelChangedExternalDisk: 1,
+    };
+    const params = await storedParams(
+      heartbeat({
+        features: { ...features, modelChangedExternalAssistant: 1, domainCreatedExternalRemote: 1, modelChangedExternal: 1 },
+        errors: { modelChangedExternalDisk: 1 },
+      }),
+    );
+    assert.deepEqual(JSON.parse(params[17]), features);
+    assert.deepEqual(
+      WORKER_FEATURES.slice(WORKER_FEATURES.indexOf('diagramTables500Plus') + 1, WORKER_FEATURES.indexOf('modelChangedExternalDisk') + 1),
+      ['domainCreatedExternalGit', 'domainCreatedExternalLocal', 'domainCreatedExternalNoGit',
+        'modelChangedExternalGit', 'modelChangedExternalNoGit', 'modelChangedExternalEditor', 'modelChangedExternalDisk'],
+    );
+    assert.equal(params[18], '{}');
+  });
+
+  it('keeps whether models are shared (#332), after where outside changes came from, and drops a look-alike, an author range or an error-side copy', async () => {
+    const features = { sharedModelFirstOpened: 1, modelInGit: 1, modelNotInGit: 1, modelRepoHasRemote: 1 };
+    const params = await storedParams(
+      heartbeat({
+        features: { ...features, modelAuthors2to3: 1, modelInGitRemote: 1, sharedModel: 1, modelRepoUrl: 1 },
+        errors: { modelInGit: 1 },
+      }),
+    );
+    assert.deepEqual(JSON.parse(params[17]), features);
+    assert.deepEqual(
+      WORKER_FEATURES.slice(WORKER_FEATURES.indexOf('modelChangedExternalDisk') + 1, WORKER_FEATURES.indexOf('modelRepoHasRemote') + 1),
+      ['sharedModelFirstOpened', 'modelInGit', 'modelNotInGit', 'modelRepoHasRemote'],
+    );
+    assert.equal(params[18], '{}');
+  });
+
+  it('keeps how long a diagram took to open (#333), after whether models are shared, and drops a time, a look-alike or an error-side copy', async () => {
+    const features = { canvasLoad5to20s: 1, canvasLoadCold: 1, canvasPaint1to5s: 1 };
+    const params = await storedParams(
+      heartbeat({
+        features: { ...features, canvasLoadMs: 7321, canvasLoad5to15s: 1, canvasPaintUnder1: 1, canvasLoadWarm: 1 },
+        errors: { canvasLoadCold: 1 },
+      }),
+    );
+    assert.deepEqual(JSON.parse(params[17]), features);
+    assert.deepEqual(
+      WORKER_FEATURES.slice(WORKER_FEATURES.indexOf('modelRepoHasRemote') + 1),
+      ['canvasLoadUnder1s', 'canvasLoad1to5s', 'canvasLoad5to20s', 'canvasLoadCold', 'canvasPaintUnder1s', 'canvasPaint1to5s', 'canvasPaintOver5s'],
+    );
+    // canvasLoadOver20s, the top range, is still the 2.0.0 key.
+    assert.ok(WORKER_FEATURES.indexOf('canvasLoadOver20s') < WORKER_FEATURES.indexOf('draftDropTimeLimit'));
+    assert.equal(params[18], '{}');
+  });
+
   it('keeps the automatic draft\'s time-limit drop key, after the import outcome keys', async () => {
     const params = await storedParams(heartbeat({ features: { draftDropTimeLimit: 1, importCauseTimeLimit: 1, draftDropTimeLimits: 1 } }));
     assert.equal(params[17], '{"importCauseTimeLimit":1,"draftDropTimeLimit":1}');

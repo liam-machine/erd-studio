@@ -37,6 +37,12 @@ export interface CommandFailure {
   buttons: string[];
   /** What was happening, for Send Feedback's report; set when the failure is ours. */
   doing?: string;
+  /**
+   * What was happening, for Send Feedback's report alone, on a failure that is
+   * not counted as ours (VS Code did not apply an edit: usually the user's
+   * environment). `doing` wins when both are set.
+   */
+  reportDoing?: string;
   /** The folder Show Folder reveals, the file Show File reveals or Open File opens. */
   target?: string;
   /** Where Open File puts the cursor. */
@@ -210,11 +216,115 @@ export function renameRefused(oldName: string, newName: string): CommandFailure 
   };
 }
 
+/**
+ * A failure of ERD Studio's own while a command worked out or made its
+ * change (#335): never the exception's text, which goes in Send Feedback's
+ * report. `outcome` follows "so" ("nothing was created").
+ */
+export function oursFailure(title: string, doing: string, outcome: string, retry: boolean): CommandFailure {
+  return { title, message: oursMessage(title, doing, outcome), buttons: [SEND_FEEDBACK_BUTTON, ...(retry ? [TRY_AGAIN_BUTTON] : [])], doing };
+}
+
+/**
+ * A command's unexpected failure, by its cause (#335): a file or folder
+ * ERD Studio may not open, or a full disk, is the user's to fix, so the
+ * toast says that and offers no Send Feedback and counts nothing as ours;
+ * only a failure with no known cause is ERD Studio's (`oursFailure`).
+ * `prefix` starts the toast (the title by default, `''` for none), and
+ * `extra` buttons follow Try Again.
+ */
+export function knownCauseOrOurs(
+  title: string,
+  err: unknown,
+  ctx: { doing: string; outcome: string; retry: boolean; workspaceRoot?: string; prefix?: string; extra?: readonly string[] },
+): CommandFailure {
+  const cause = classifyWriteFailure(err);
+  if (cause === 'other') return oursFailure(title, ctx.doing, ctx.outcome, ctx.retry);
+  const lead = ctx.prefix === '' ? '' : `${ctx.prefix ?? title}: `;
+  const after = [...(ctx.retry ? [TRY_AGAIN_BUTTON] : []), ...(ctx.extra ?? [])];
+  if (cause === 'disk-full') {
+    return { title, message: sentence(`${lead}the disk is full, so ${ctx.outcome}. Free up some space, then try again.`), buttons: after };
+  }
+  const at = failedPath(err);
+  const where = at === undefined
+    ? 'a file or folder it needs'
+    : ctx.workspaceRoot !== undefined ? projectRelative(ctx.workspaceRoot, at) : path.basename(at);
+  return {
+    title,
+    message: sentence(`${lead}ERD Studio isn't allowed to open ${where}, so ${ctx.outcome}. Check its permissions, then try again.`),
+    buttons: [...(at !== undefined ? [SHOW_FILE_BUTTON] : []), ...after],
+    ...(at !== undefined ? { target: at } : {}),
+  };
+}
+
+/**
+ * The error Send Feedback's report names when VS Code did not apply an edit
+ * (`applyEdit` resolved false, nothing to put back): there is no exception.
+ */
+export function editNotAppliedError(): Error {
+  return new Error('VS Code did not apply the edit (applyEdit returned false).');
+}
+
+/**
+ * VS Code did not apply a command's edit, and nothing was left to put back
+ * (#335; Convert to DBML's words for the same event). Usually a file another
+ * program has open or a folder the user may not write, so it is not counted
+ * as ours (no `doing`); Send Feedback is still offered, unless `unwritable`
+ * names the file or folder that is the cause. `what` names the edit
+ * ("the move"), `outcome` follows "so", `prefix` starts the toast (the
+ * title, by default), and `extra` buttons go between Try Again and Send
+ * Feedback.
+ */
+export function editNotAccepted(
+  title: string,
+  what: string,
+  outcome: string,
+  options: { prefix?: string; extra?: readonly string[]; unwritable?: { path: string; workspaceRoot: string } } = {},
+): CommandFailure {
+  // A file or folder of the edit that this account may not write (checked on
+  // disk by the caller): the cause is known and the user's to fix, so the
+  // toast says so and offers no Send Feedback.
+  if (options.unwritable) {
+    const { path: at, workspaceRoot } = options.unwritable;
+    const rel = path.relative(workspaceRoot, at);
+    return {
+      title,
+      // "ERD Studio: ERD Studio isn't…" would say the name twice.
+      message: `${options.prefix === 'ERD Studio' ? '' : `${options.prefix ?? title}: `}ERD Studio isn't allowed to write to ${rel ? projectRelative(workspaceRoot, at) : 'the project folder'}, so ${outcome}. ` +
+        'Check its permissions, then try again.',
+      buttons: [SHOW_FOLDER_BUTTON, TRY_AGAIN_BUTTON, ...(options.extra ?? [])],
+      target: at,
+    };
+  }
+  return {
+    title,
+    message: `${options.prefix ?? title}: VS Code didn't accept ${what}, so ${outcome}. ` +
+      "This is usually a file another program has open or a folder you can't write to.",
+    buttons: [TRY_AGAIN_BUTTON, ...(options.extra ?? []), SEND_FEEDBACK_BUTTON],
+    reportDoing: `while applying ${what}`,
+  };
+}
+
+/** A file the command needs could not be read (#335): Show File reveals it, Try Again runs the command again. */
+export function fileUnreadable(title: string, shown: string, filePath: string, outcome: string): CommandFailure {
+  return {
+    title,
+    message: `${title}: ${shown} could not be read, so ${outcome}. Check the file still exists and that VS Code can open it.`,
+    buttons: [SHOW_FILE_BUTTON, TRY_AGAIN_BUTTON],
+    target: filePath,
+  };
+}
+
 /** A project-relative folder with a trailing `/`; the project itself is `the project folder`. */
 function shownFolder(workspaceRoot: string, folder: string): string {
   const rel = path.relative(workspaceRoot, folder);
   if (!rel) return 'the project folder';
   return `${projectRelative(workspaceRoot, folder)}/`;
+}
+
+/** `text` with its first letter in upper case. */
+function sentence(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
 /** "Nothing was created." as the clause "nothing was created", to follow "so". */

@@ -180,7 +180,6 @@ import {
   dbmlDiagramFeatures,
   isUserFileProblem,
   loaderWarningFeatures,
-  slowCanvasLoad,
   subjectAreaLoadDetailCode,
   webviewErrorCodes,
 } from '../services/telemetryCanvas';
@@ -663,6 +662,7 @@ import {
   validateDropTablesPayload,
   validateCanvasFramePayload,
   validateDragReleasePayload,
+  validateCanvasPaintedPayload,
   validateDropShownPayload,
   validateOpenModelFilePayload,
   validateGoToTablePayload,
@@ -1034,6 +1034,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * a rewind that left the diagram's text as it was still redraws (#274).
    */
   private readonly deletedTablePaths = new Map<string, Set<string>>();
+  /** When a canvas's undo or redo was last flushed (#329: the files it brought back or removed are not an outside change). */
+  private undoRedoFlushedAt: number | undefined;
 
   /** Tables changed outside ERD Studio, waiting for one batched canvas refresh (see queueTableRefresh). */
   private readonly queuedTableRefresh = new Set<string>();
@@ -1890,6 +1892,16 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   private importsSettle: Promise<void> = Promise.resolve();
 
   /**
+   * When a canvas's undo or redo was last flushed, if one was. Its file
+   * operations (a table file a canvas created or deleted, back or gone again)
+   * reach the watcher with no own write recorded; usage telemetry (#329) does
+   * not count the changes around it as anyone else's.
+   */
+  lastUndoRedoAt(): number | undefined {
+    return this.undoRedoFlushedAt;
+  }
+
+  /**
    * A text document was saved in this window (`workspace.onDidSaveTextDocument`,
    * wired in `extension.ts`). When it is a relationships file, the open
    * logical canvases whose diagrams now need to import it are settled
@@ -2585,6 +2597,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           'webviewError',
           // Timing only: a timed drop's tables are on the canvas.
           'dropShown',
+          // Timing only (#333): the canvas's first paint after its first diagram.
+          'canvasPainted',
           // The crash screen's Reload / Send Feedback: reloads the page or opens Send Feedback; writes nothing.
           'crashFallback',
           // The toolbar's Curved / Hops switch: a view preference (a user setting), not a schema
@@ -2627,6 +2641,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             }
             {
               const readyAt = Date.now();
+              // Table files read before this load: the difference after it says a cold open from a warm one (#333).
+              const readsAtReady = this.tableLibraryService.tableFileReads();
               canvasLog.info(`Opening ${document.uri.fsPath}`);
               // Answer at once, before reading anything: the webview's
               // "Canvas disconnected" timer stops, and it says how many
@@ -2637,11 +2653,15 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
               // The initial load is the one refresh path allowed to persist
               // auto-computed positions for models that lack them.
               const posted = await this.sendSubjectAreaData(document, webviewPanel.webview, panelKey, { persistPositions: true });
+              const loadMs = Date.now() - readyAt;
+              const filesRead = this.tableLibraryService.tableFileReads() - readsAtReady;
               canvasLog.info(posted === undefined
                 ? `Opening ${document.uri.fsPath} ended without a diagram after ${elapsedMs(readyAt)} ms`
-                : `Opened ${document.uri.fsPath}: ${plural(posted, 'table')} posted ${elapsedMs(readyAt)} ms after ready`);
-              // A large diagram that took long to read (2.0 B17): once a day.
-              if (posted !== undefined && slowCanvasLoad(Date.now() - readyAt)) telemetry.featureOnce('canvasLoadOver20s');
+                : `Opened ${document.uri.fsPath}: ${plural(posted, 'table')} posted ${elapsedMs(readyAt)} ms after ready; ${plural(filesRead, 'table file')} read from disk`);
+              // How long the diagram took to read and post (#333; over 20 s was 2.0 B17's
+              // canvasLoadOver20s): a range for the day's slowest open, and whether
+              // it read table files from disk. A load that posted no diagram records nothing.
+              if (posted !== undefined) telemetry.canvasLoad(loadMs, filesRead > 0);
               const entry = this.openPanels.get(panelKey);
               if (posted !== undefined && entry?.webview === webviewPanel.webview) {
                 entry.loaded = true;
@@ -2792,6 +2812,16 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             // Timing only: a timed drop's tables are on the canvas (the log and fixed telemetry keys). Writes nothing.
             const payload = (message as { payload?: unknown }).payload;
             if (validateDropShownPayload(payload)) this.dropTimer.shown(payload.trace, payload.renderMs);
+            break;
+          }
+          case 'canvasPainted': {
+            // Timing only (#333): the page's first paint with its first diagram drawn
+            // (the log and a fixed telemetry range). Writes nothing, so it is on the physical allowlist.
+            const payload = (message as { payload?: unknown }).payload;
+            if (validateCanvasPaintedPayload(payload)) {
+              canvasLog.info(`Drew ${document.uri.fsPath}: first paint ${Math.round(payload.ms)} ms after the diagram arrived`);
+              telemetry.canvasPaint(payload.ms);
+            }
             break;
           }
           case 'showLogs':
@@ -4042,16 +4072,30 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   /**
    * Whether this project keeps relationships in the model library (#126) —
    * see `usesLibraryRelationships` for the opt-in rule.
+   *
+   * `models` may be a function that lists the library's tables. Listing them
+   * reads every table file, so a caller that has not read them yet passes the
+   * function, and it runs only when the rule needs it: never in a DBML
+   * library (the rule's first clause, answered from the file listing), and
+   * never in a project whose diagrams hold no relationships. A first canvas
+   * open asks this through `maybeOfferRelationshipMove`, straight after the
+   * diagram is posted; reading the library there held the extension host for
+   * as long as every table takes to parse.
    */
-  private relationshipsInLibrary(models: readonly SemanticTable[], document?: vscode.TextDocument): boolean {
+  private relationshipsInLibrary(
+    models: readonly SemanticTable[] | (() => readonly SemanticTable[]),
+    document?: vscode.TextDocument,
+  ): boolean {
     // A DBML diagram holds no relationships (D5): they live in the table library.
     if (document && this.isDbmlDocument(document)) return true;
+    // The rule's DBML clause decides it alone, so nothing is read for the other clauses.
+    const dbmlLibrary = this.libraryHoldsDbml();
     const semanticDir = path.relative(this.workspaceRoot, path.dirname(this.tableLibraryService.getTablesDir()));
     return usesLibraryRelationships(
       models,
-      this.subjectAreaService.countSubjectAreaFileRelationships(this.workspaceRoot, semanticDir),
-      this.tableLibraryService.hasUnreadableRelationships(),
-      this.libraryHoldsDbml(),
+      dbmlLibrary ? 0 : this.subjectAreaService.countSubjectAreaFileRelationships(this.workspaceRoot, semanticDir),
+      dbmlLibrary ? false : this.tableLibraryService.hasUnreadableRelationships(),
+      dbmlLibrary,
     );
   }
 
@@ -4137,7 +4181,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       const unstored = describeUnstoredRelationships(kept);
       return { kept: [], saves: [...newModels, ...changed.filter((m) => !newModels.includes(m))], ...(unstored ? { unstored } : {}) };
     }
-    if (added.length === 0 || !this.relationshipsInLibrary(this.tableLibraryService.listTables())) {
+    if (added.length === 0 || !this.relationshipsInLibrary(() => this.tableLibraryService.listTables())) {
       return { kept: [...added], saves: [...newModels] };
     }
     // A link another diagram still draws from its own copy stays in this
@@ -4163,7 +4207,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     this.relationshipMoveOffered = true;
     try {
       if (this.context.workspaceState?.get<boolean>(RELATIONSHIP_MOVE_DECLINED_KEY)) return false;
-      if (this.relationshipsInLibrary(this.tableLibraryService.listTables())) return false;
+      if (this.relationshipsInLibrary(() => this.tableLibraryService.listTables())) return false;
       const semanticDir = path.relative(this.workspaceRoot, path.dirname(this.tableLibraryService.getTablesDir()));
       const shared = sharedRelationshipCount(readSubjectAreaRelationships(this.subjectAreaService, this.workspaceRoot, semanticDir));
       if (shared === 0) return false;
@@ -5003,6 +5047,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * the model files this canvas wrote, then redraw — one refresh for the step.
    */
   private async flushUndoRedo(document: vscode.TextDocument, webview: vscode.Webview, panelKey: string): Promise<void> {
+    this.undoRedoFlushedAt = Date.now();
     // Cmd+Z on a canvas whose file was deleted outside ERD Studio rewinds the
     // document in memory only; saving it would recreate the file (#161).
     if (!fs.existsSync(document.uri.fsPath)) return;

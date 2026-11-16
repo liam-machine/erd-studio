@@ -20,7 +20,8 @@
  *                         openNotedFile, addRelationshipsImports, reloadFromDisk
  *                         (the "not shown" strip's file links and buttons),
  *                         canvasFrame (where the canvas sits on screen)
- *                         dropShown (a timed drop's table is on screen; timing only)
+ *                         dropShown (a timed drop's table is on screen; timing only),
+ *                         canvasPainted (the first diagram's first paint; timing only)
  *
  * All message types use a discriminated union pattern with a `type` field,
  * enabling exhaustive switch handling in message handlers.
@@ -1322,6 +1323,23 @@ export interface DropShownMessage {
 }
 
 /**
+ * #333: the page's first paint with its first diagram drawn. `ms`: the
+ * page's own time (`performance.now()`) from receiving that `domainLoaded` to
+ * the paint after React Flow measured its tables. Sent at most once per page
+ * load, and not at all when the page was hidden in between (a hidden page
+ * does not paint). Timing only (the ERD Studio log and a fixed telemetry
+ * range); writes nothing, so it is on the physical-stage allowlist. The
+ * Confluence viewer never sends it: the sender lives in `webview/`, not in
+ * `packages/renderer`.
+ */
+export interface CanvasPaintedMessage {
+  type: 'canvasPainted';
+  payload: {
+    ms: number;
+  };
+}
+
+/**
  * Request to export this diagram as Mermaid or DBML — the canvas toolbar's
  * **Export** button. No payload: the host runs `erdStudio.exportDiagram` with
  * the panel's document, which asks for the format and what to do with the
@@ -1496,6 +1514,7 @@ export type WebviewMessage =
   | OpenGettingStartedMessage
   | ShowLogsMessage
   | DropShownMessage
+  | CanvasPaintedMessage
   | ExportDiagramMessage
   | GenerateSyncPlanMessage
   | RunDbtCompileMessage

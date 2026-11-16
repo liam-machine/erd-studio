@@ -16,7 +16,7 @@ import {
   type TableLoadErrorKind,
 } from '@erd-studio/core';
 
-import type { TelemetryErrorCode, TelemetryFeature } from './telemetryPayload';
+import type { CanvasLoadFeature, CanvasPaintFeature, TelemetryErrorCode, TelemetryFeature } from './telemetryPayload';
 import {
   layoutFailureDuration,
   layoutFailureSummary,
@@ -73,6 +73,27 @@ export const LAYOUT_SLOW_MS = 5_000;
 /** Whether a canvas load of `ms` (ready → diagram posted) was slow: `canvasLoadOver20s`. */
 export function slowCanvasLoad(ms: number): boolean {
   return Number.isFinite(ms) && ms > CANVAS_LOAD_SLOW_MS;
+}
+
+/**
+ * #333: the range of a canvas load of `ms` (ready → diagram posted), with the
+ * layout keys' edges (`layoutFeature`: under 1 s, up to 5 s) and
+ * {@link slowCanvasLoad} as the top rung; undefined for a time that is not one.
+ */
+export function canvasLoadFeature(ms: number): CanvasLoadFeature | undefined {
+  if (!Number.isFinite(ms) || ms < 0) return undefined;
+  if (slowCanvasLoad(ms)) return 'canvasLoadOver20s';
+  if (ms < 1000) return 'canvasLoadUnder1s';
+  if (ms <= 5000) return 'canvasLoad1to5s';
+  return 'canvasLoad5to20s';
+}
+
+/** #333: the range of a canvas's first paint, `ms` after its first diagram arrived; undefined for a time that is not one. */
+export function canvasPaintFeature(ms: number): CanvasPaintFeature | undefined {
+  if (!Number.isFinite(ms) || ms < 0) return undefined;
+  if (ms < 1000) return 'canvasPaintUnder1s';
+  if (ms <= 5000) return 'canvasPaint1to5s';
+  return 'canvasPaintOver5s';
 }
 
 const LAYOUT_FAILURE_CODES: Record<LayoutFailure, TelemetryErrorCode> = {

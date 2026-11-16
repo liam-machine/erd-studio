@@ -198,6 +198,7 @@ export const HANDLER_GROUP: Record<WebviewMessageType, HandlerGroup> = {
   openGettingStarted: 'other',
   showLogs: 'other',
   dropShown: 'other',
+  canvasPainted: 'other',
   exportDiagram: 'other',
   generateSyncPlan: 'compare',
   runDbtCompile: 'other',

@@ -618,6 +618,13 @@ export class TableLibraryService {
    * never read.
    */
   private readonly yamlReadSignatures = new Map<string, string>();
+  /**
+   * How many times a table file has been read from disk (a cache miss in
+   * {@link readTableFile} or {@link readDbmlTableFile}), ever. A canvas open
+   * takes the difference across its load to tell a cold open from a warm one
+   * (#333's `canvasLoadCold`) without a look at the library of its own.
+   */
+  private tableFileReadCount = 0;
   /** DBML reader warnings already logged, by path and signature, so a refresh does not repeat them. */
   private readonly loggedDbmlProblems = new Set<string>();
 
@@ -1103,6 +1110,7 @@ export class TableLibraryService {
     if (this.cache.delete(filePath)) this.tableCacheGeneration++;
     // This version of the file has been read now, whatever the read finds (`peekTableFileError`).
     this.yamlReadSignatures.set(filePath, signature);
+    this.tableFileReadCount++;
     const content = fs.readFileSync(filePath, 'utf-8');
     // A key written twice is read as dbt reads it, the last copy winning; the
     // model carries a loadWarning and writes are refused (loadEditableDocument).
@@ -1153,6 +1161,7 @@ export class TableLibraryService {
     const cached = this.dbmlCache.get(filePath);
     if (cached && cached.signature === signature) return cached.reading;
     this.tableCacheGeneration++;
+    this.tableFileReadCount++;
     let reading: DbmlTableReading;
     try {
       // Its schema folder is the schema of an unqualified Table (§1.2), as core's loader reads it.
@@ -2624,6 +2633,15 @@ export class TableLibraryService {
       });
     }
     return previews;
+  }
+
+  /**
+   * How many table files have been read from disk so far (every cache miss,
+   * whoever asked). Free to call: it touches no file. The difference across a
+   * canvas load says whether that load read any (#333).
+   */
+  tableFileReads(): number {
+    return this.tableFileReadCount;
   }
 
   /** The library's table files (shadowed copies skipped) not read in their current version. */

@@ -41,6 +41,9 @@ import {
   tableSearchSubject,
   type SearchSubject,
 } from '../services/treeSearch';
+import { knownCauseOrOurs } from '../services/diagramCommandErrors';
+import { log } from '../services/logger';
+import { showCommandFailure } from './commandFailure';
 
 export const GO_TO_TABLE_COMMAND = 'erdStudio.goToTable';
 export const ADD_TO_DIAGRAM_COMMAND = 'erdStudio.addToDiagram';
@@ -295,9 +298,11 @@ export async function goToTableCommand(deps: GoToTableDeps, query?: string): Pro
   let action: Promise<void> | undefined;
   let closed = false;
   let fill: ReturnType<typeof setTimeout> | undefined;
-  const run = (fn: () => Promise<void>): void => {
+  // A row's action failing is ERD Studio's unless its cause is known (a file it may not open, a full disk) (#335): never the exception's text, which goes in Send Feedback's report.
+  const run = (fn: () => Promise<void>, doing = 'while opening that table', outcome = 'nothing was opened'): void => {
     action = fn().catch((err: unknown) => {
-      void vscode.window.showErrorMessage(`Go to Table: ${err instanceof Error ? err.message : String(err)}`);
+      log.error(`[ERD Studio] ${GO_TO_TABLE_TITLE} failed:`, err);
+      showCommandFailure(knownCauseOrOurs(GO_TO_TABLE_TITLE, err, { doing, outcome, retry: false }), err);
     });
     quickPick.hide();
   };
@@ -339,7 +344,10 @@ export async function goToTableCommand(deps: GoToTableDeps, query?: string): Pro
     quickPick.onDidTriggerItemButton((event) => {
       const item = event.item;
       if (event.button === OPEN_FILE_BUTTON) run(() => deps.openFile(item.filePath));
-      else if (event.button === SHOW_RELATIONSHIPS_BUTTON) run(() => (byFile ? deps.showRelationships(item.table, item.filePath) : deps.showRelationships(item.table)));
+      else if (event.button === SHOW_RELATIONSHIPS_BUTTON) {
+        run(() => (byFile ? deps.showRelationships(item.table, item.filePath) : deps.showRelationships(item.table)),
+          "while showing that table's relationships", 'nothing was shown');
+      }
       else run(() => openInDiagram(item));
     });
     quickPick.onDidHide(() => {
