@@ -371,6 +371,18 @@ npx wrangler d1 execute erd-studio-telemetry --remote --command \
 Prefer aggregates. There is rarely a reason to look at individual rows, and
 none to copy `install_id` anywhere.
 
+**Reading `domain_count`.** It is counted when a window activates, and the
+day's last activation wins: a window with no project reports `0`, and so does
+one opened before the project's first diagram was made. A day with a diagram
+open can therefore read `0`. Per install, take the **largest** value over its
+rows rather than any one day's, and the same for `model_count` and the
+`libraryTables*` / `diagramTables*` ranges (#331):
+
+```bash
+npx wrangler d1 execute erd-studio-telemetry --remote --command \
+  "SELECT d, COUNT(*) AS installs FROM (SELECT install_id, MAX(CASE domain_count WHEN '0' THEN 0 WHEN '1-3' THEN 1 WHEN '4-10' THEN 2 ELSE 3 END) AS d FROM heartbeats WHERE COALESCE(dev, 0) = 0 GROUP BY install_id) GROUP BY d ORDER BY d"
+```
+
 ### What "active" means
 
 **An install is active on a day it opened a diagram** (`canvas_opens > 0`),
@@ -1454,7 +1466,8 @@ Each loss-ledger cause class the import's ledger holds, once per import (with an
 Appended to `FEATURES` after the 2.0.0 list above (in
 `src/services/telemetryPayload.ts` and `src/index.js`, in the same order), on
 the same terms: fixed keys, never a name, a path, a message or a count of
-tables (a failed layout's size is one of four fixed ranges, below). Deploy the
+tables (a size is one of a few fixed ranges: a failed layout's, below, and the
+project's, #331, at the end). Deploy the
 Worker before the extension release that records them, or their counts are
 dropped. The failed-layout codes, the dbt search failure reasons and the canvas
 handler failure steps in this section are appended to `ERROR_CODES` in the
@@ -1738,6 +1751,35 @@ count the slow ones:
 - `readyAfterNoReady` — a canvas, draft page or Welcome panel reported ready after its `webviewNoReady*` had already been recorded (#320): it was slow, not broken. An install-day's `webviewNoReady*` minus its `readyAfterNoReady` is the panels that never came up (a late ready just after midnight UTC lands on the next day's row). Not counted for the ready of a page the user reloaded from the no-ready notification (that day has `crashFallbackReload`). It is not a subset of `readySlowOver10s`: a panel hidden and shown again after the 30 s restarts that clock.
 - `readyLate30to60s` — beside `readyAfterNoReady`: the ready came less than 60 s after the panel was shown (by the clock from the show whose 30 s ran out, hidden or not since). A 60 s limit would not have reported it.
 - `readyLateOver60s` — beside `readyAfterNoReady`: the ready came 60 s or more after the panel was shown.
+
+**How big the project is** (added after 2.0.7, #331). `model_count` is the
+largest diagram opened that day and stops at `51+`, and nothing counted the
+Table Library, so a 60-table diagram and a 1,100-table one sent the same day,
+and a project with tables but no diagram said nothing about them. Two families
+of fixed ranges, never a count. Each day carries at most one key of each
+family, the largest range seen that day (a later interim copy replaces the
+earlier one, so the stored row has only the largest). Both are kept by the
+size guard (`trimHeartbeat`), and neither carries over to the next day.
+
+- `libraryTablesNone` — a window opened on a project with an ERD folder (`.erd-studio`) whose Table Library holds no table. Recorded once per window at activation, never on a refresh, and never for a window with no project or a project with no ERD folder (`has_semantic_dir` says that), so `None` means an empty library, not "no ERD Studio here".
+- `libraryTables1to10` — the library holds 1 to 10 tables (the same edges as `model_count`'s `1-10`).
+- `libraryTables11to50` — it holds 11 to 50.
+- `libraryTables51to199` — it holds 51 to 199.
+- `libraryTables200to499` — it holds 200 to 499.
+- `libraryTables500Plus` — it holds 500 or more. Tables are counted once per identity: a YAML table copied into both `logical-models/` and `tables/` counts once; two DBML schemas' tables of one name count twice. Tables kept only inside a v4 domain file, or declared inside a DBML diagram's own file and not linked into the project (`dbmlEmbeddedTablesShown`), are not in the library and are not counted.
+- `diagramTables51to199` — beside `model_count = '51+'`: the largest diagram opened that day had 51 to 199 tables. Logical and physical opens both count, as for `model_count`. Present exactly when `model_count` is `51+`, except on a `versionMixed` day, where a window of an older version may have opened the large diagram without recording it.
+- `diagramTables200to499` — it had 200 to 499 tables.
+- `diagramTables500Plus` — it had 500 or more.
+
+```bash
+# Project sizes over the last 28 days: installs with each range, and how many of them opened a diagram
+npx wrangler d1 execute erd-studio-telemetry --remote --command \
+  "SELECT j.key, COUNT(DISTINCT h.install_id) AS installs, COUNT(DISTINCT CASE WHEN h.canvas_opens > 0 THEN h.install_id END) AS opened_a_diagram FROM heartbeats h, json_each(h.features) j WHERE COALESCE(h.dev, 0) = 0 AND h.day >= date('now','-28 days') AND (j.key LIKE 'libraryTables%' OR j.key LIKE 'diagramTables%') GROUP BY 1 ORDER BY 1"
+```
+
+Per install, take the largest range over its rows, as for `domain_count`
+(see Querying). A day with no window opened on a project has no
+`libraryTables*` key, even when a window stayed open across midnight.
 
 ## The local archive
 

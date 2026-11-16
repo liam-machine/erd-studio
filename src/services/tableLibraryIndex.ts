@@ -275,6 +275,15 @@ function distinctIdentities(entries: readonly TableFileEntry[]): TableFileEntry[
   });
 }
 
+/**
+ * How many tables `entries` (a library listing) holds: one per identity, so a
+ * copy of a YAML table in both libraries counts once and two DBML schemas'
+ * tables of one name count twice (#331's `libraryTables*`).
+ */
+export function distinctTableCount(entries: readonly TableFileEntry[]): number {
+  return distinctIdentities(entries).length;
+}
+
 /** Whether `filePath` (a symbolic link) points at a file. */
 function isFileTarget(filePath: string): boolean {
   try {

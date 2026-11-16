@@ -696,6 +696,8 @@ describe('allowlists agree with the Worker', () => {
       'dropShownUnder1s', 'dropShown1to5s', 'dropShown5to15s', 'dropShownOver15s', 'dropShownNever',
       'dropSlowOpen', 'dropSlowWait', 'dropSlowPrepare', 'dropSlowPlan', 'dropSlowEdit', 'dropSlowSave', 'dropSlowRedraw', 'dropSlowCanvas',
       'readyAfterNoReady', 'readyLate30to60s', 'readyLateOver60s',
+      'libraryTablesNone', 'libraryTables1to10', 'libraryTables11to50', 'libraryTables51to199', 'libraryTables200to499', 'libraryTables500Plus',
+      'diagramTables51to199', 'diagramTables200to499', 'diagramTables500Plus',
     ]);
     // #262's per-step load codes follow the logged-error ones and close the 2.0.0 error list;
     // what a failed layout was like (after 2.0.4) is appended after them.
@@ -711,10 +713,15 @@ describe('allowlists agree with the Worker', () => {
       'handlerFailedAtRead', 'handlerFailedAtMutate', 'handlerFailedAtLayoutWrite', 'handlerFailedAtStorageWrite',
       'handlerFailedAtJsonWrite', 'handlerFailedAtSave', 'handlerFailedAtOther', 'handlerFailedDbml', 'handlerFailedJson',
     ]);
-    // Liam's decision for B6: no table-count bucket is ever a key of a draft or a canvas open.
-    // The one exception is a layout that failed (four fixed ranges, as error codes).
+    // Liam's decision for B6: no table-count bucket is ever a key of a draft. A canvas open's
+    // size is model_count, plus (#331) one fixed range past its 51+; the Table Library's
+    // size is one fixed range at activation. Those two families are the only size keys;
+    // the other exception is a layout that failed (four fixed ranges, as error codes).
     expect(FEATURES.filter((f) => /^draftTables/.test(f))).toEqual([]);
-    expect(FEATURES.filter((f) => /Tables\d|Rels\d|TablesUnder|RelsUnder/.test(f))).toEqual([]);
+    expect(FEATURES.filter((f) => /Tables\d|Rels\d|TablesUnder|RelsUnder|TablesNone|TablesPlus|\d+Plus$/.test(f))).toEqual([
+      'libraryTablesNone', 'libraryTables1to10', 'libraryTables11to50', 'libraryTables51to199', 'libraryTables200to499', 'libraryTables500Plus',
+      'diagramTables51to199', 'diagramTables200to499', 'diagramTables500Plus',
+    ]);
     expect(ERROR_CODES.filter((c) => /Tables|Rels/.test(c)).every((c) => c.startsWith('layoutFailed'))).toBe(true);
   });
 
@@ -754,6 +761,8 @@ describe('allowlists agree with the Worker', () => {
       'dropShownUnder1s', 'dropShown1to5s', 'dropShown5to15s', 'dropShownOver15s', 'dropShownNever',
       'dropSlowOpen', 'dropSlowWait', 'dropSlowPrepare', 'dropSlowPlan', 'dropSlowEdit', 'dropSlowSave', 'dropSlowRedraw', 'dropSlowCanvas',
       'readyAfterNoReady', 'readyLate30to60s', 'readyLateOver60s',
+      'libraryTablesNone', 'libraryTables1to10', 'libraryTables11to50', 'libraryTables51to199', 'libraryTables200to499', 'libraryTables500Plus',
+      'diagramTables51to199', 'diagramTables200to499', 'diagramTables500Plus',
     ]);
     for (const key of added) expect(section, key).toMatch(new RegExp(`^- \`${key}\` `, 'm'));
     // The error codes appended after the 2.0.0 list (a failed layout's class, size, duration and fallbacks;
