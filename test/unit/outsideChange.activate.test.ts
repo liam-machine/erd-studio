@@ -16,6 +16,8 @@ import { activate, _resetFirstRunGuardForTests } from '../../src/extension';
 import { telemetry } from '../../src/services/telemetryService';
 import type { SemanticEditorProvider } from '../../src/providers/SemanticEditorProvider';
 import { LOOK_DELAY_MS } from '../../src/services/outsideChange';
+import { ConvertToDbmlPanel } from '../../src/providers/ConvertToDbmlPanel';
+import { saveDocumentByUri } from '../../src/providers/documentSave';
 import { OUTSIDE_CHANGE_SOURCE_FEATURES } from '../../src/services/telemetryPayload';
 
 const REPO_ROOT = path.resolve(__dirname, '../..');
@@ -137,6 +139,19 @@ describe('outside changes, by where they came from (#329)', () => {
     expect(recorded()).toEqual([['modelChangedExternalEditor', true]]);
   });
 
+  it('ERD Studio\'s own save of a file is not the editor\'s: a disk change to it just after is Disk', async () => {
+    await start({ git: true });
+    const target = path.join(ws, '.erd-studio', 'tables', 'customer.yml');
+    const saves = vi.fn();
+    vscode.workspace.onDidSaveTextDocument(saves);
+    expect(await saveDocumentByUri(vscode.Uri.file(target))).toBe(true);
+    expect(saves).toHaveBeenCalled();
+    fs.appendFileSync(target, '# an assistant in a terminal\n');
+    tables()._simulateChange(file('tables', 'customer.yml'));
+    await settle();
+    expect(recorded()).toEqual([['modelChangedExternalDisk', true]]);
+  });
+
   it('a diagram file deleted in this window (the Explorer) is Editor too', async () => {
     await start({ git: true });
     const target = path.join(ws, '.erd-studio', 'gold', 'sales.json');
@@ -189,6 +204,48 @@ describe('outside changes, by where they came from (#329)', () => {
     const provider = registerEditor.mock.calls[0][1] as unknown as SemanticEditorProvider;
     vi.spyOn(provider, 'lastUndoRedoAt').mockReturnValue(Date.now());
     tables()._simulateCreate(file('tables', 'customer.yml'));
+    await settle();
+    expect(recorded()).toEqual([]);
+  });
+
+  it('a relationships file changed on disk: modelChangedExternalDisk', async () => {
+    await start({ git: true });
+    const rels = path.join(ws, '.erd-studio', 'gold', 'relationships', 'sales.dbml');
+    fs.mkdirSync(path.dirname(rels), { recursive: true });
+    fs.writeFileSync(rels, 'Ref: gold.order.customer_id > gold.customer.id\n');
+    semantic()._simulateChange(vscode.Uri.file(rels));
+    await settle();
+    expect(recorded()).toEqual([['modelChangedExternalDisk', true]]);
+  });
+
+  it('Edit > Undo of Convert Project to DBML (the .yml back, the .dbml gone) is ERD Studio\'s own: nothing recorded', async () => {
+    await start({ git: true });
+    // Convert, clicked in its panel.
+    const real = ConvertToDbmlPanel.show.bind(ConvertToDbmlPanel);
+    vi.spyOn(ConvertToDbmlPanel, 'show').mockImplementation((content) => {
+      const choice = real(content);
+      const panel = vscode.window._webviewPanels.at(-1)!;
+      setTimeout(() => { void panel._simulateMessage({ type: 'convert' }); }, 0);
+      return choice;
+    });
+    const sourceYml = path.join(ws, '.erd-studio', 'tables', 'customer.yml');
+    const ymlText = fs.readFileSync(sourceYml, 'utf-8');
+    const converting = vscode.commands.executeCommand('erdStudio.convertProjectToDbml');
+    for (let i = 0; i < 50 && fs.existsSync(sourceYml); i++) await vi.advanceTimersByTimeAsync(200);
+    await converting;
+    expect(fs.existsSync(sourceYml)).toBe(false);
+    const dbmlTables = fs.readdirSync(path.join(ws, '.erd-studio'), { recursive: true, encoding: 'utf-8' })
+      .filter((p) => p.endsWith('customer.dbml')).map((p) => path.join(ws, '.erd-studio', p));
+    expect(dbmlTables).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(LOOK_DELAY_MS + 1_000);
+    quiet.mockClear();
+
+    // Edit > Undo: the .yml comes back and the .dbml goes, written by VS Code with no own write recorded.
+    fs.mkdirSync(path.dirname(sourceYml), { recursive: true });
+    fs.writeFileSync(sourceYml, ymlText);
+    fs.rmSync(dbmlTables[0]);
+    for (const w of vscode._mockFileWatchers) w._simulateDelete(vscode.Uri.file(dbmlTables[0]));
+    tables()._simulateCreate(vscode.Uri.file(sourceYml));
     await settle();
     expect(recorded()).toEqual([]);
   });
