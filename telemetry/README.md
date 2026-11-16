@@ -1811,6 +1811,7 @@ Limits to keep in mind when reading them:
 
 - An assistant that commits its own work moves HEAD, and its change counts as Git, not Local. So does any change written on disk within 30 s after a commit, pull or checkout (a save in this window stays Editor).
 - `git stash pop`, `git restore` and the Source Control view's Discard change files without moving HEAD: they count as Local (Disk). A merge that stops on a conflict writes its files before HEAD moves, so those count as Local too.
+- `git stash` (the push, not the pop) resets the files through HEAD and writes its reflog, so it counts as Git. `git gc` and `git reflog expire` rewrite that reflog without moving HEAD: a change within 30 s after one also counts as Git (rare: an automatic gc runs only when the repository has thousands of loose objects).
 - A diagram file that appeared is never split into Editor and Disk: both are Local.
 - A busy day (an oversized body) keeps them: the size guard (`trimHeartbeat`) never drops them.
 

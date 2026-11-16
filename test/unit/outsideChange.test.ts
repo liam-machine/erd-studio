@@ -431,6 +431,13 @@ describe.runIf(hasGit)('with real git', () => {
     expect(verdict(path.join(repo, '.erd-studio'))).toBe('disk');
   });
 
+  it('git stash (the push) resets the files through HEAD and writes its reflog: Git, as the README says', () => {
+    fs.appendFileSync(path.join(repo, '.erd-studio', 'tables', 'dim_customer.yml'), 'description: x\n');
+    ageGitFiles(repo);
+    git(repo, 'stash', '-q');
+    expect(verdict(path.join(repo, '.erd-studio'))).toBe('git');
+  });
+
   it('an assistant that commits its own edit moves HEAD: Git, as the README says', () => {
     fs.appendFileSync(path.join(repo, '.erd-studio', 'tables', 'dim_customer.yml'), 'description: x\n');
     const eventAt = Date.now();

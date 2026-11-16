@@ -125,7 +125,9 @@ export function findGitDirs(startDir: string): { gitDir: string; commonDir: stri
  * mtime of `HEAD`, `logs/HEAD` (the per-worktree reflog, which every move
  * appends to), the loose ref HEAD names, and a reftable repository's
  * `tables.list`. `packed-refs` is left out: `git gc` rewrites it without a
- * move. No repository, or a HEAD that is not something git writes, is
+ * move. (`git gc` and `git reflog expire` also rewrite `logs/HEAD`, so a
+ * change just after one reads as git; the telemetry README lists it as a
+ * limit.) No repository, or a HEAD that is not something git writes, is
  * `{ repo: false }`.
  */
 export function lookAtHead(startDir: string): HeadLook {
