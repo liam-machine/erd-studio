@@ -5621,7 +5621,9 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     if (!alreadyDecided) {
       try {
         const hasModel = existingDiagrams.length > 0 || tableLibraryService.listTableFiles().length > 0;
-        if (isSharedModelArrival({ ranHereBefore, hasModel, alreadyDecided })) telemetry.featureOnce('sharedModelFirstOpened');
+        // The example's own window (its hand-off is read again, and cleared, below).
+        const openedAsExample = takePendingExample(context.globalState.get(PENDING_EXAMPLE_OPEN_KEY), workspaceRoot, Date.now()) !== undefined;
+        if (isSharedModelArrival({ ranHereBefore, hasModel, alreadyDecided, openedAsExample })) telemetry.featureOnce('sharedModelFirstOpened');
       } catch { /* telemetry must never break activation */ }
       await context.workspaceState.update(SHARED_MODEL_DECIDED_KEY, true);
     }

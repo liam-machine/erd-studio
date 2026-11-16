@@ -40,11 +40,13 @@ export const GIT_API_WAIT_MS = 5_000;
 /**
  * Whether this activation is an arrival: the project has a model, ERD
  * Studio had never run in this workspace before (no `workspaceState` from an
- * earlier activation, including an older version's), and the workspace's
- * answer has not been given already.
+ * earlier activation, including an older version's), the workspace's answer
+ * has not been given already, and the folder is not the one Open an Example
+ * Project… just wrote and opened (`openedAsExample`: ERD Studio made that
+ * model itself, in a folder new to this machine).
  */
-export function isSharedModelArrival(input: { ranHereBefore: boolean; hasModel: boolean; alreadyDecided: boolean }): boolean {
-  return input.hasModel && !input.ranHereBefore && !input.alreadyDecided;
+export function isSharedModelArrival(input: { ranHereBefore: boolean; hasModel: boolean; alreadyDecided: boolean; openedAsExample?: boolean }): boolean {
+  return input.hasModel && !input.ranHereBefore && !input.alreadyDecided && input.openedAsExample !== true;
 }
 
 /** Whether the model folder is in a repository and whether it has a remote (`undefined`: could not be read). */

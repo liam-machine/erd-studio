@@ -3547,6 +3547,19 @@ describe("a model this machine did not start, opened for the first time (#332: s
     expect(arrivals(featureOnce)).toHaveLength(0);
   });
 
+  it('never counts the window Open an Example Project… opened: ERD Studio wrote that model itself', async () => {
+    // The example's folder is new to this machine (no workspaceState) and has a model:
+    // without the hand-off check it would read as a teammate's clone.
+    const globalState = seenMachine();
+    globalState.set('erdStudio.pendingExampleOpen', { folder: root, diagram: '.erd-studio/silver/showcase.json', at: Date.now() });
+    const workspaceState = new Map<string, unknown>();
+    context = makeContext(root, { globalState, workspaceState });
+    const featureOnce = vi.spyOn(telemetry, 'featureOnce');
+    await activate(context);
+    expect(arrivals(featureOnce)).toHaveLength(0);
+    expect(workspaceState.get(SHARED_MODEL_DECIDED_KEY)).toBe(true);
+  });
+
   it('a Memento without keys() reads as "ran here before": no count, activation unharmed', async () => {
     const workspaceState = new Map<string, unknown>();
     context = makeContext(root, { globalState: seenMachine(), workspaceState });

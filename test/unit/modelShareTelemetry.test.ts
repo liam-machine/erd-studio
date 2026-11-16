@@ -79,6 +79,10 @@ describe('the arrival (sharedModelFirstOpened)', () => {
     expect(isSharedModelArrival({ ranHereBefore: false, hasModel: true, alreadyDecided: true })).toBe(false);
   });
 
+  it('is not the folder Open an Example Project… just wrote and opened', () => {
+    expect(isSharedModelArrival({ ranHereBefore: false, hasModel: true, alreadyDecided: false, openedAsExample: true })).toBe(false);
+  });
+
   it('keeps its state under the erdStudio prefix', () => {
     expect(SHARED_MODEL_DECIDED_KEY.startsWith('erdStudio.')).toBe(true);
     expect(MODEL_REPO_DAY_KEY.startsWith('erdStudio.')).toBe(true);
