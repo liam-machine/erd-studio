@@ -338,6 +338,12 @@
         "icon": "$(go-to-file)"
       },
       {
+        "command": "erdStudio.openDiagramFile",
+        "title": "Open Diagram File",
+        "category": "ERD Studio",
+        "icon": "$(go-to-file)"
+      },
+      {
         "command": "erdStudio.showOnAnotherDiagram",
         "title": "Show on Another Diagram…",
         "category": "ERD Studio"
@@ -1388,6 +1394,10 @@
         },
         {
           "command": "erdStudio.openTableFile",
+          "when": "false"
+        },
+        {
+          "command": "erdStudio.openDiagramFile",
           "when": "false"
         },
         {

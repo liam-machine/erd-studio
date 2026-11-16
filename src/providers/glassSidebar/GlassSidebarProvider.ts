@@ -134,7 +134,7 @@ export interface BridgedTree<T = unknown> {
   readonly onDidFilter?: vscode.Event<unknown>;
   /**
    * A row's double-click, where it does something its click does not (a
-   * table's or a relationship's file, where the click goes to a diagram):
+   * table's, a relationship's or a diagram's file, where the click goes to a diagram):
    * the command to run. Undefined: a double-click is two clicks. The native
    * views reach the same action by a second activation of the row
    * (`sidebarRowClick.ts`).
