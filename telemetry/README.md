@@ -1752,7 +1752,7 @@ count the slow ones:
 - `readyLate30to60s` — beside `readyAfterNoReady`: the ready came less than 60 s after the panel was shown (by the clock from the show whose 30 s ran out, hidden or not since). A 60 s limit would not have reported it.
 - `readyLateOver60s` — beside `readyAfterNoReady`: the ready came 60 s or more after the panel was shown.
 
-**How big the project is** (added after 2.0.6, #331). `model_count` is the
+**How big the project is** (added after 2.0.7, #331). `model_count` is the
 largest diagram opened that day and stops at `51+`, and nothing counted the
 Table Library, so a 60-table diagram and a 1,100-table one sent the same day,
 and a project with tables but no diagram said nothing about them. Two families
@@ -1767,7 +1767,7 @@ size guard (`trimHeartbeat`), and neither carries over to the next day.
 - `libraryTables51to199` — it holds 51 to 199.
 - `libraryTables200to499` — it holds 200 to 499.
 - `libraryTables500Plus` — it holds 500 or more. Tables are counted once per identity: a YAML table copied into both `logical-models/` and `tables/` counts once; two DBML schemas' tables of one name count twice. Tables kept only inside a v4 domain file, or declared inside a DBML diagram's own file and not linked into the project (`dbmlEmbeddedTablesShown`), are not in the library and are not counted.
-- `diagramTables51to199` — beside `model_count = '51+'`: the largest diagram opened that day had 51 to 199 tables. Logical and physical opens both count, as for `model_count`. Present exactly when `model_count` is `51+`.
+- `diagramTables51to199` — beside `model_count = '51+'`: the largest diagram opened that day had 51 to 199 tables. Logical and physical opens both count, as for `model_count`. Present exactly when `model_count` is `51+`, except on a `versionMixed` day, where a window of an older version may have opened the large diagram without recording it.
 - `diagramTables200to499` — it had 200 to 499 tables.
 - `diagramTables500Plus` — it had 500 or more.
 
