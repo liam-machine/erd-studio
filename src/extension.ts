@@ -3558,13 +3558,20 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
       // Table Library rows dropped on a diagram's row in the Diagrams view: the same write as Add to Diagram….
       // Where two schema folders share a name, the dragged rows' files say which tables.
       // The drag is used up here, so a later canvas drop never adds it again; it is the fallback when the drop names nothing.
-      treeProvider.setTablesDropHandler(async (filePath, tables, uris) => {
+      // The tables of the last drop, for Try Again after its add failed (#335): the drag is used up by then.
+      let lastTreeDrop: { filePath: string; names: string[]; files?: string[] } | undefined;
+      treeProvider.setTablesDropHandler(async (filePath, tables, uris, again) => {
+        if (again && lastTreeDrop?.filePath === filePath) {
+          await addToDiagramDeps.addTables(filePath, lastTreeDrop.names, lastTreeDrop.files);
+          return true;
+        }
         const remembered = editorProvider.takeRememberedLibraryDrag();
         const found = tablesOfTreeDrop({ tables, uris }, tableLibraryService.listTableFiles(), {
           byFile: tableLibraryService.hasSharedNames(),
           ...(remembered ? { remembered } : {}),
         });
         if (!found) return false;
+        lastTreeDrop = { filePath, names: found.names, ...(found.files ? { files: found.files } : {}) };
         editorProvider.noteDropSeen('diagramsRow', filePath);
         await addToDiagramDeps.addTables(filePath, found.names, found.files);
         return true;

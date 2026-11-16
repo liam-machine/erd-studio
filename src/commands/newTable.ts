@@ -26,9 +26,12 @@ import { isDbmlLayerName, type ProjectStorage } from '@erd-studio/core';
 
 import { projectRelative } from '../services/commandErrors';
 import { isSchemaFolderName } from '../services/dbmlLibraryWrites';
-import type { FileWrite } from '../services/fileWrites';
+import { editNotAccepted, editNotAppliedError, oursFailure } from '../services/diagramCommandErrors';
+import { UnsavedFilesRefused, type FileWrite } from '../services/fileWrites';
 import type { TableLibraryService } from '../services/logicalModelService';
+import { log } from '../services/logger';
 import { isRefusedWrite } from '../services/newSubjectAreaWriter';
+import { showCommandFailure } from './commandFailure';
 import { validateNewDbmlTableName, validateTableName } from '../providers/payloadValidation';
 import { foldersMadeBy, moveLayersOf, removeFolders, validateNewSchemaName } from './moveDbml';
 import { showRefusedWrite } from './openModelFile';
@@ -218,13 +221,17 @@ export async function createDbmlTable(deps: NewTableDeps, home: NewTableHome, ra
   } catch (err) {
     if (isRefusedWrite(err)) {
       showRefusedWrite(NEW_TABLE_TITLE, err, { semanticRoot: deps.semanticRoot, workspaceRoot: deps.workspaceRoot, outcome: 'Nothing was created.' });
+    } else if (err instanceof UnsavedFilesRefused) {
+      // A diagram the new table settles into is open with unsaved edits: the user's to save (#335).
+      void vscode.window.showErrorMessage(`${NEW_TABLE_TITLE}: ${projectRelative(deps.workspaceRoot, err.filePaths[0])} has unsaved changes. Save or revert it, then try again. Nothing was created.`);
     } else {
-      void vscode.window.showErrorMessage(`${NEW_TABLE_TITLE}: ${err instanceof Error ? err.message : String(err)} Nothing was created.`);
+      newTablePlanFailed(deps, home, rawName, err);
     }
     return undefined;
   }
   if (filePath === undefined) {
-    void vscode.window.showErrorMessage(`${NEW_TABLE_TITLE}: could not work out where "${name}" goes. Nothing was created.`);
+    // The same failure: the plan came back without the new table's file.
+    newTablePlanFailed(deps, home, rawName, new Error('The plan for the new table named no file.'));
     return undefined;
   }
 
@@ -234,7 +241,9 @@ export async function createDbmlTable(deps: NewTableDeps, home: NewTableHome, ra
     // The reconcile's modal already named any file it could not put back.
     if (result.unrestored.length === 0) {
       removeFolders(made);
-      void vscode.window.showErrorMessage(`${NEW_TABLE_TITLE}: VS Code rejected the new file; nothing was created.`);
+      showCommandFailure(editNotAccepted(NEW_TABLE_TITLE, 'the new file', 'nothing was created'), editNotAppliedError(), {
+        retry: () => createDbmlTable(deps, home, rawName),
+      });
     }
     return undefined;
   }
@@ -247,6 +256,18 @@ export async function createDbmlTable(deps: NewTableDeps, home: NewTableHome, ra
     `Created ${projectRelative(deps.workspaceRoot, filePath)}. It is on no diagram yet: right-click it in the Table Library and choose Add to Diagram…`,
   );
   return filePath;
+}
+
+/**
+ * Working out the new table's file failed, and not for a reason written for
+ * the user (#335): ERD Studio's, so never the exception's text. Try Again
+ * creates the same name in the same schema folder.
+ */
+function newTablePlanFailed(deps: NewTableDeps, home: NewTableHome, rawName: string, err: unknown): void {
+  log.error(`[ERD Studio] ${NEW_TABLE_TITLE}: planning the new table failed:`, err);
+  showCommandFailure(oursFailure(NEW_TABLE_TITLE, "while working out the new table's file", 'nothing was created', true), err, {
+    retry: () => createDbmlTable(deps, home, rawName),
+  });
 }
 
 /** Ask for the table's name in `home` and create it. */

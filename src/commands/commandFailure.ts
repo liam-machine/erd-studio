@@ -47,13 +47,21 @@ export function nearestExisting(p: string): string {
 export function showCommandFailure(
   failure: CommandFailure,
   err: unknown,
-  extra: { retry?: () => unknown; showTab?: () => unknown; chooseAnother?: () => unknown; openIt?: () => unknown } = {},
+  extra: {
+    retry?: () => unknown;
+    showTab?: () => unknown;
+    chooseAnother?: () => unknown;
+    openIt?: () => unknown;
+    /** The command's own buttons, by label (an Explorer move's Move It Back). */
+    actions?: ErrorActions;
+  } = {},
 ): void {
   recordCommandFailure(failure, err);
   const target = failure.target;
   const reveal = target ? () => vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(nearestExisting(target))) : undefined;
   const available: Record<string, (() => unknown) | undefined> = {
-    [SEND_FEEDBACK_BUTTON]: () => vscode.commands.executeCommand('erdStudio.reportBug', feedbackPrefill(failure.title, failure.doing ?? '', err)),
+    ...extra.actions,
+    [SEND_FEEDBACK_BUTTON]: () => vscode.commands.executeCommand('erdStudio.reportBug', feedbackPrefill(failure.title, failure.doing ?? failure.reportDoing ?? '', err)),
     [TRY_AGAIN_BUTTON]: extra.retry,
     [SHOW_FOLDER_BUTTON]: reveal,
     [SHOW_FILE_BUTTON]: extra.showTab ?? reveal,

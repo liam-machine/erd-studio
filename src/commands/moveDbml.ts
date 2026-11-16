@@ -26,11 +26,13 @@ import { classifySemanticFile, dbmlTreePathOf, isDbmlLayerName } from '@erd-stud
 
 import { OPEN_IT_BUTTON, diagramNameTakenMessage, projectRelative, showErrorWithActions } from '../services/commandErrors';
 import { isSchemaFolderName } from '../services/dbmlLibraryWrites';
+import { editNotAccepted, editNotAppliedError, fileUnreadable, oursFailure } from '../services/diagramCommandErrors';
 import type { FileWrite } from '../services/fileWrites';
 import type { TableFileEntry, TableLibraryService } from '../services/logicalModelService';
 import { isRefusedWrite } from '../services/newSubjectAreaWriter';
 import { log } from '../services/logger';
 import { SUBJECT_AREA_EDITOR_VIEW_TYPE } from '../services/recoveryService';
+import { showCommandFailure } from './commandFailure';
 import { dbmlMoveTouches, planDbmlDiagramLayerMove, planDbmlTableMoves } from './dbmlLifecycle';
 import { showRefusedWrite } from './openModelFile';
 
@@ -329,7 +331,11 @@ export async function moveDbmlTables(
     if (isRefusedWrite(err)) {
       showRefusedWrite(MOVE_TABLE_TITLE, err, { semanticRoot: deps.semanticRoot, workspaceRoot: deps.workspaceRoot, outcome: 'Nothing was moved.' });
     } else {
-      void vscode.window.showErrorMessage(`${MOVE_TABLE_TITLE}: ${err instanceof Error ? err.message : String(err)} Nothing was moved.`);
+      // ERD Studio's own failure (#335): never the exception's text, which goes in Send Feedback's report.
+      log.error(`[ERD Studio] ${MOVE_TABLE_TITLE}: planning the move failed:`, err);
+      showCommandFailure(oursFailure(MOVE_TABLE_TITLE, 'while working out which files to change', 'nothing was moved', true), err, {
+        retry: () => moveDbmlTables(deps, tables, to),
+      });
     }
     return false;
   }
@@ -371,7 +377,10 @@ export async function moveDbmlTables(
     // The reconcile's modal already named any file it could not put back.
     if (result.unrestored.length === 0) {
       removeFolders(made);
-      void vscode.window.showErrorMessage(`${MOVE_TABLE_TITLE}: VS Code rejected the file moves; nothing was changed.`);
+      // Try Again plans the move afresh: the tabs are back on their files by the time it can be chosen.
+      showCommandFailure(editNotAccepted(MOVE_TABLE_TITLE, 'the move', 'nothing was changed'), editNotAppliedError(), {
+        retry: () => moveDbmlTables(deps, tables, to),
+      });
       for (const o of open) await reopen(o.tabs, o.table.filePath);
     }
     return false;
@@ -500,7 +509,9 @@ export async function moveDbmlDiagram(deps: MoveDbmlDeps, filePath: string, toLa
   }
   const text = deps.readText(filePath);
   if (text === null) {
-    void vscode.window.showErrorMessage(`${MOVE_DIAGRAM_TITLE}: ${projectRelative(deps.workspaceRoot, filePath)} could not be read. Nothing was moved.`);
+    showCommandFailure(fileUnreadable(MOVE_DIAGRAM_TITLE, projectRelative(deps.workspaceRoot, filePath), filePath, 'nothing was moved'), undefined, {
+      retry: () => moveDbmlDiagram(deps, filePath, toLayer),
+    });
     return undefined;
   }
   let planned: ReturnType<typeof planDbmlDiagramLayerMove>;
@@ -510,7 +521,10 @@ export async function moveDbmlDiagram(deps: MoveDbmlDeps, filePath: string, toLa
     if (isRefusedWrite(err)) {
       showRefusedWrite(MOVE_DIAGRAM_TITLE, err, { semanticRoot: deps.semanticRoot, workspaceRoot: deps.workspaceRoot, outcome: 'Nothing was moved.' });
     } else {
-      void vscode.window.showErrorMessage(`${MOVE_DIAGRAM_TITLE}: ${err instanceof Error ? err.message : String(err)} Nothing was moved.`);
+      log.error(`[ERD Studio] ${MOVE_DIAGRAM_TITLE}: planning the move failed:`, err);
+      showCommandFailure(oursFailure(MOVE_DIAGRAM_TITLE, 'while working out which files to change', 'nothing was moved', true), err, {
+        retry: () => moveDbmlDiagram(deps, filePath, toLayer),
+      });
     }
     return undefined;
   }
@@ -523,7 +537,9 @@ export async function moveDbmlDiagram(deps: MoveDbmlDeps, filePath: string, toLa
   if (!result.ok) {
     if (result.unrestored.length === 0) {
       removeFolders(made);
-      void vscode.window.showErrorMessage(`${MOVE_DIAGRAM_TITLE}: VS Code rejected the move; nothing was changed.`);
+      showCommandFailure(editNotAccepted(MOVE_DIAGRAM_TITLE, 'the move', 'nothing was changed'), editNotAppliedError(), {
+        retry: () => moveDbmlDiagram(deps, filePath, toLayer),
+      });
       await reopen(open, filePath);
     }
     return undefined;

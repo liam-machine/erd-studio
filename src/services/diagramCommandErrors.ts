@@ -37,6 +37,12 @@ export interface CommandFailure {
   buttons: string[];
   /** What was happening, for Send Feedback's report; set when the failure is ours. */
   doing?: string;
+  /**
+   * What was happening, for Send Feedback's report alone, on a failure that is
+   * not counted as ours (VS Code did not apply an edit: usually the user's
+   * environment). `doing` wins when both are set.
+   */
+  reportDoing?: string;
   /** The folder Show Folder reveals, the file Show File reveals or Open File opens. */
   target?: string;
   /** Where Open File puts the cursor. */
@@ -207,6 +213,57 @@ export function renameRefused(oldName: string, newName: string): CommandFailure 
     buttons: [TRY_AGAIN_BUTTON, SEND_FEEDBACK_BUTTON],
     doing: 'while renaming the file',
     code: 'renameDiagramFailed',
+  };
+}
+
+/**
+ * A failure of ERD Studio's own while a command worked out or made its
+ * change (#335): never the exception's text, which goes in Send Feedback's
+ * report. `outcome` follows "so" ("nothing was created").
+ */
+export function oursFailure(title: string, doing: string, outcome: string, retry: boolean): CommandFailure {
+  return { title, message: oursMessage(title, doing, outcome), buttons: [SEND_FEEDBACK_BUTTON, ...(retry ? [TRY_AGAIN_BUTTON] : [])], doing };
+}
+
+/**
+ * The error Send Feedback's report names when VS Code did not apply an edit
+ * (`applyEdit` resolved false, nothing to put back): there is no exception.
+ */
+export function editNotAppliedError(): Error {
+  return new Error('VS Code did not apply the edit (applyEdit returned false).');
+}
+
+/**
+ * VS Code did not apply a command's edit, and nothing was left to put back
+ * (#335; Convert to DBML's words for the same event). Usually a file another
+ * program has open or a folder the user may not write, so it is not counted
+ * as ours (no `doing`); Send Feedback is still offered. `what` names the edit
+ * ("the move"), `outcome` follows "so", `prefix` starts the toast (the
+ * title, by default), and `extra` buttons go between Try Again and Send
+ * Feedback.
+ */
+export function editNotAccepted(
+  title: string,
+  what: string,
+  outcome: string,
+  options: { prefix?: string; extra?: readonly string[] } = {},
+): CommandFailure {
+  return {
+    title,
+    message: `${options.prefix ?? title}: VS Code didn't accept ${what}, so ${outcome}. ` +
+      "This is usually a file another program has open or a folder you can't write to.",
+    buttons: [TRY_AGAIN_BUTTON, ...(options.extra ?? []), SEND_FEEDBACK_BUTTON],
+    reportDoing: `while applying ${what}`,
+  };
+}
+
+/** A file the command needs could not be read (#335): Show File reveals it, Try Again runs the command again. */
+export function fileUnreadable(title: string, shown: string, filePath: string, outcome: string): CommandFailure {
+  return {
+    title,
+    message: `${title}: ${shown} could not be read, so ${outcome}. Check the file still exists and that VS Code can open it.`,
+    buttons: [SHOW_FILE_BUTTON, TRY_AGAIN_BUTTON],
+    target: filePath,
   };
 }
 
