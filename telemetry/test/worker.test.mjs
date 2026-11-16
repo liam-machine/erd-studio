@@ -606,9 +606,27 @@ describe('validation — acceptance and normalisation', () => {
     );
     assert.deepEqual(JSON.parse(params[17]), features);
     assert.deepEqual(
-      WORKER_FEATURES.slice(WORKER_FEATURES.indexOf('modelChangedExternalDisk') + 1),
+      WORKER_FEATURES.slice(WORKER_FEATURES.indexOf('modelChangedExternalDisk') + 1, WORKER_FEATURES.indexOf('modelRepoHasRemote') + 1),
       ['sharedModelFirstOpened', 'modelInGit', 'modelNotInGit', 'modelRepoHasRemote'],
     );
+    assert.equal(params[18], '{}');
+  });
+
+  it('keeps how long a diagram took to open (#333), after whether models are shared, and drops a time, a look-alike or an error-side copy', async () => {
+    const features = { canvasLoad5to20s: 1, canvasLoadCold: 1, canvasPaint1to5s: 1 };
+    const params = await storedParams(
+      heartbeat({
+        features: { ...features, canvasLoadMs: 7321, canvasLoad5to15s: 1, canvasPaintUnder1: 1, canvasLoadWarm: 1 },
+        errors: { canvasLoadCold: 1 },
+      }),
+    );
+    assert.deepEqual(JSON.parse(params[17]), features);
+    assert.deepEqual(
+      WORKER_FEATURES.slice(WORKER_FEATURES.indexOf('modelRepoHasRemote') + 1),
+      ['canvasLoadUnder1s', 'canvasLoad1to5s', 'canvasLoad5to20s', 'canvasLoadCold', 'canvasPaintUnder1s', 'canvasPaint1to5s', 'canvasPaintOver5s'],
+    );
+    // canvasLoadOver20s, the top range, is still the 2.0.0 key.
+    assert.ok(WORKER_FEATURES.indexOf('canvasLoadOver20s') < WORKER_FEATURES.indexOf('draftDropTimeLimit'));
     assert.equal(params[18], '{}');
   });
 

@@ -1310,7 +1310,7 @@ mistake in it, a save VS Code refused) records no error code: only the
 
 **B17 — big diagrams: slow loads, layout failures and the draft layout.**
 
-- `canvasLoadOver20s` — a canvas took more than 20 s to load (once a day).
+- `canvasLoadOver20s` — a canvas took more than 20 s to load (once a day). Since #333 (added after 2.0.7) it is the top of the `canvasLoad*` ranges under "Keys added after 2.0.0": a day carries at most one of them, the slowest open's, so a day with this key carries no faster one. Its meaning is unchanged.
 - `layoutStackFallback` — an auto layout ran out of stack and was laid out again with the stack-safe placement.
 - `firstLayoutOver5s` — the first-open layout of a fresh diagram took more than 5 s.
 - `draftLayoutOver5s` — a draft page layout took more than 5 s.
@@ -1467,7 +1467,7 @@ Appended to `FEATURES` after the 2.0.0 list above (in
 `src/services/telemetryPayload.ts` and `src/index.js`, in the same order), on
 the same terms: fixed keys, never a name, a path, a message or a count of
 tables (a size is one of a few fixed ranges: a failed layout's, below, and the
-project's, #331, at the end). Deploy the
+project's, #331, near the end; a time is a fixed range too, #333, at the end). Deploy the
 Worker before the extension release that records them, or their counts are
 dropped. The failed-layout codes, the dbt search failure reasons and the canvas
 handler failure steps in this section are appended to `ERROR_CODES` in the
@@ -1858,6 +1858,37 @@ Limits to keep in mind when reading them:
 # Arrivals per week, and how many installs have a model in Git / with a remote (last 28 days)
 npx wrangler d1 execute erd-studio-telemetry --remote --command \
   "SELECT date(h.day,'weekday 0','-6 days') AS wk, j.key, COUNT(DISTINCT h.install_id) AS installs FROM heartbeats h, json_each(h.features) j WHERE COALESCE(h.dev, 0) = 0 AND h.day >= date('now','-28 days') AND j.key IN ('sharedModelFirstOpened','modelInGit','modelNotInGit','modelRepoHasRemote','modelChangedExternalGit') GROUP BY 1, 2 ORDER BY 1, 2"
+```
+
+**How long a diagram takes to open** (added after 2.0.7, #333). The only
+keys that saw a slow open fired past fixed limits (`canvasLoadOver20s` at
+20 s, `readySlowOver10s` at 10 s), so an open of 2 to 15 s, what a 500-table
+diagram takes on a slow machine, left no trace, and nothing said whether the
+open had to read the table files from disk. These keys say it, once a day
+for the **slowest** open of that day: one `canvasLoad*` key and at most one
+`canvasPaint*` key per install-day (a later interim copy replaces the earlier
+one, so the stored row has only the slowest), never a time. Off the
+onboarding trail, except the first `canvasLoadOver20s` of a day, which keeps
+its trail event from 2.0.0.
+
+- `canvasLoadUnder1s` — the slowest diagram open of the day took under 1 s on the extension host, from the page's `ready` to the diagram posted (the same span `canvasLoadOver20s` always measured). A load that posted no diagram (a file that does not read) records nothing; a Retry, or the page loaded again after a crash, is an open.
+- `canvasLoad1to5s` — it took 1 to 5 s (the layout keys' edges: 1,000 ms is here, 5,000 ms too).
+- `canvasLoad5to20s` — it took over 5 s and at most 20 s. Over 20 s is `canvasLoadOver20s`, above.
+- `canvasLoadCold` — with the day's `canvasLoad*` key: an open in that range read at least one table file from disk (a cache miss for a `.yml` or `.dbml` table file, counted by `TableLibraryService.tableFileReads()` across the load, so it costs no extra look at the library). Without it, every open in that range found its tables already read. A faster open never sets it. Two diagrams opening at once (a window restored with both) can each count the other's reads: both were slowed by them.
+- `canvasPaintUnder1s` — the slowest first paint of the day took under 1 s in the webview, from the page receiving its first diagram to the paint after React Flow measured its tables (the page's own clock, never compared with the host's). Once per page load: a refresh, an undo or a stage switch is not timed. A page hidden at any point in between (behind another tab, or the window hidden) sends nothing, so a diagram restored in a background tab does not read as slow.
+- `canvasPaint1to5s` — it took 1 to 5 s.
+- `canvasPaintOver5s` — it took over 5 s. The page sends at most 10 minutes; a longer time is sent as 10 minutes.
+
+Read them beside the size keys (#331, `diagramTables*` and `model_count`) and
+`os`: they say how long real diagrams of each size take on each OS. The
+paint is absent on a day whose only opens were hidden or failed; the
+Confluence viewer never sends one. A busy day (an oversized body) keeps them:
+the size guard (`trimHeartbeat`) never drops them.
+
+```bash
+# How long the slowest open took, per OS and diagram size, over the last 28 days (install-days with each range; for a load range, how many were cold)
+npx wrangler d1 execute erd-studio-telemetry --remote --command \
+  "SELECT h.os, h.model_count, j.key, COUNT(*) AS install_days, COUNT(DISTINCT h.install_id) AS installs, SUM(j.key LIKE 'canvasLoad%' AND json_extract(h.features,'$.canvasLoadCold') IS NOT NULL) AS cold_loads FROM heartbeats h, json_each(h.features) j WHERE COALESCE(h.dev, 0) = 0 AND h.day >= date('now','-28 days') AND (j.key LIKE 'canvasLoad%' OR j.key LIKE 'canvasPaint%') AND j.key <> 'canvasLoadCold' GROUP BY 1, 2, 3 ORDER BY 1, 2, 3"
 ```
 
 ## The local archive
