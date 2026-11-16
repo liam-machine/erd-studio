@@ -46,6 +46,7 @@ import { MAJOR_NOTICE_CATCH_UP_KEY, MAJOR_NOTICE_OWED_KEY, MAJOR_NOTICE_SHOWN_KE
 import { parseSubjectAreaDbml } from '@erd-studio/core/dbml';
 import { answerDraft, closeDraft, flush, nextDraft } from './helpers/draftDriver';
 import { DraftPreviewPanel } from '../../src/providers/DraftPreviewPanel';
+import { StartIntentTracker } from '../../src/commands/startIntent';
 import { DRAFT_SCOPE_EMPTY_NOTICE } from '../../src/services/draftModel';
 import { SHOW_RELATIONSHIPS_BUTTON } from '../../src/commands/goToTable';
 import { START_SUGGESTION_ALREADY_KEPT_MESSAGE } from '../../src/services/startSuggestion';
@@ -994,7 +995,8 @@ describe('activate() in a folder without dbt_project.yml (logical-only)', () => 
       expect(draft.source).toBe('example');
       expect(draft.trigger).toBe('example');
       expect(draft.banner.keepLabel).toBe('Keep This Example');
-      expect(draft.banner.primary).toBe('blank');
+      // #328: the example leads toward the user's own model, also when they asked for it.
+      expect(draft.banner.primary).toBe('guide');
       expect(draft.scopes?.label).toBe('Example');
       expect(draft.scopes?.current).toBe('example:coffee-shop');
       expect(draft.keep).toMatchObject({ writer: 'importDbml', importSource: 'example', target: { layer: 'main', name: 'coffee-shop' } });
@@ -4564,6 +4566,22 @@ describe('draft-first (docs/dev/draft-first.md)', () => {
     }) as never);
   });
 
+  it('#328: only the empty Diagrams view asks for the folder\'s suggestion on screen (it says "Looking at your folder…"); activation\'s asks stay unseen', async () => {
+    folderWith({ 'orders.sql': 'CREATE TABLE orders (id int primary key);\n' });
+    context = makeContext(root, {
+      globalState: new Map<string, unknown>([['erdStudio.gettingStartedShown', true]]),
+      workspaceState: new Map<string, unknown>([['erdStudio.harnessInstallPrompted', true]]),
+    });
+    const refresh = vi.spyOn(StartIntentTracker.prototype, 'refresh');
+    await activate(context);
+    await settle();
+    const onScreenAsks = () => refresh.mock.calls.filter((c) => (c[0] as { onScreen?: boolean } | undefined)?.onScreen === true).length;
+    expect(onScreenAsks()).toBe(0);
+    await openDiagramsView();
+    expect(onScreenAsks()).toBe(1);
+    closeDraft();
+  });
+
   it('an empty folder: nothing on activation; the ERD Studio icon opens exactly one example draft, its flag written first, focus left in the view, a progress bar there, the gate claimed — and only once per machine', async () => {
     const ws = folderWith({ 'notes.md': '# notes\n' });
     const globalState = new Map<string, unknown>([['erdStudio.gettingStartedShown', true]]);
@@ -4587,7 +4605,9 @@ describe('draft-first (docs/dev/draft-first.md)', () => {
     const draft = await nextDraft();
     expect(draft.source).toBe('example');
     expect(draft.trigger).toBe('sidebar');
-    expect(draft.banner.primary).toBe('blank');
+    // #328: Import Your Data Model… leads, toward the user's own model.
+    expect(draft.banner.primary).toBe('guide');
+    expect(draft.banner.detail).toMatch(/^Import Your Data Model… brings in your own: SQL scripts, DBML, Power BI and more\. Keep This Example saves this one as /);
     expect(draft.banner.keepLabel).toBe('Keep This Example');
     expect(flagWhenShown).toBe(true);
     expect(draftPanels()[0]._column).toMatchObject({ preserveFocus: true });

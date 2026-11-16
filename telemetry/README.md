@@ -1156,8 +1156,8 @@ The clause is matched on the device against fixed keywords: the line the parser 
 - `draftDropNoDialect` — a quiet draft was dropped: no SQL dialect could be chosen.
 - `draftDropNeedsChoice` — a quiet draft was dropped: several dialects or models need a choice.
 - `draftDropTimeLimit` — a quiet draft was dropped: the SQL import's time limit was reached before it read a table (appended after the import outcome keys).
-- `startLookTimeout` — the start screen look at the folder timed out.
-- `startLookGaveUp` — the start screen gave up looking at the folder.
+- `startLookTimeout` — the start screen look at the folder timed out. From the release after 2.0.7 (#328) the first look has 3 s instead of 1.5 s when the empty Diagrams view asks for it, and a timed-out look is retried in the same ask: read rates before and after that release apart.
+- `startLookGaveUp` — the start screen gave up looking at the folder: a second look this session ran out of time. From #328 that is almost always one ask's look and its retry (4.5 s unseen or 6 s on screen); it can also be a later look, more than a minute after a retry that answered, which then gets no retry of its own.
 - `startLookFailed` (error) — the start screen look at the folder threw (not our own abort).
 - `startContextFailed` (error) — refreshing the start screen context threw.
 
@@ -1667,7 +1667,7 @@ extension's start, or our own synchronous work), so its timer ran late too.
 What the start screen's first timeout cost, and the search activation no
 longer waits for:
 
-- `startLookLateSuggestion` — the start screen's look at the folder ran out of time, the blank-diagram suggestion was shown, and the retry (the next look that answered, with twice the time) found something to import, so the suggestion changed to an import. Decided on that one look only: a later look that finds a file added after it does not count. The retry runs at the next refresh, so a file saved between the timeout and the retry can still count; that should be rare. Read beside `startLookTimeout` (the installs whose first look ran out of time) and `startLookGaveUp`.
+- `startLookLateSuggestion` — the start screen's look at the folder ran out of time, and the retry (the next look that answered, with twice the time) found something to import: what the timeout cost, or would have cost. Up to 2.0.7 the blank-diagram suggestion was shown first and the retry ran at the next refresh, so a file saved between the timeout and the retry could still count (rare). From the release after 2.0.7 (#328) the retry runs straight away in the same ask and blank is never shown in between, so the key counts installs the retry saved rather than ones that saw blank first: read it by version. Decided on that one look only: a later look that finds a file added after it does not count. Read beside `startLookTimeout` (the installs whose first look ran out of time) and `startLookGaveUp`.
 - `dbtSearchSkipped` — activation did not wait for the host's search for a dbt_project.yml: no `erdStudio.projectPath`, no picked project, and the first dbt workspace folder already holds ERD data, so nothing the search could find changes the project that opens (`hostSearchCannotChangeRoot`). The search still runs, off activation's path, to count the workspace's dbt projects for **Select dbt Project**; if it fails, `dbtSearchFailed` and its reason are still recorded (with `dbtSearchFailedWalkFound`), but a timeout is not.
 - `activationSlowWalk` — the longest stretch of a start over 10 s was the synchronous walk of the workspace folders that finds the dbt project (up to 5,000 folders; `resolveWorkspaceProject`, timed on its own). `activationSlowDiscovery` is then the rest of Discovery, without the walk.
 

@@ -107,12 +107,13 @@ describe('package.json storage wording (native DBML storage, 2.0)', () => {
     expect(library?.contents).toContain('Each table is a file in .erd-studio/ you can commit and review like code.');
   });
 
-  it('the ERD Studio view says "Loading diagrams…" while it loads, and "No diagrams yet." only once loaded', () => {
+  it('the ERD Studio view says "Loading diagrams…" while it loads, "Looking at your folder…" while the folder is looked at, and "No diagrams yet." only once loaded', () => {
     const diagrams = (pkg.contributes.viewsWelcome as Array<{ view: string; contents: string; when?: string }>)
       .filter((w) => w.view === 'erdStudio.domainTree');
-    // Also while a folder without dbt waits for its suggested start (test/unit/startActions.test.ts).
-    expect(diagrams.find((w) => w.contents === 'Loading diagrams…')?.when).toBe(
-      'erdStudio.hasProject && (erdStudio.diagramsLoading || (!erdStudio.hasDbtProject && erdStudio.storage != yaml && erdStudio.storage != mixed && !erdStudio.startIntent))',
+    expect(diagrams.find((w) => w.contents === 'Loading diagrams…')?.when).toBe('erdStudio.hasProject && erdStudio.diagramsLoading');
+    // A folder without dbt waiting for its suggested start (#328; test/unit/startActions.test.ts, firstLookFinishes.test.ts).
+    expect(diagrams.find((w) => w.contents === 'Looking at your folder…')?.when).toBe(
+      'erdStudio.hasProject && !erdStudio.diagramsLoading && !erdStudio.hasDbtProject && erdStudio.storage != yaml && erdStudio.storage != mixed && !erdStudio.startIntent',
     );
     // An empty project: a folder without dbt (one per suggestion: nothing found, or a direct
     // import the folder suggests) and a dbt project; then a project with tables but no diagram.

@@ -1,8 +1,8 @@
 /**
  * StartIntentTracker (src/commands/startIntent.ts): the host's suggestion for
  * the open folder — when it looks at the folder (only when the files can
- * decide, never twice within a minute, once more after running out of
- * time, then not again), that a look is bounded and cancelled, that concurrent asks share one
+ * decide, never twice within a minute, once more straight away after running
+ * out of time, then not again), that a look is bounded and cancelled, that concurrent asks share one
  * look, that the context key is published only on a change, and that a
  * refresh asked for on activation's path is deferred.
  */
@@ -82,38 +82,37 @@ describe('StartIntentTracker', () => {
     expect(published).toEqual(['importSemanticModel']);
   });
 
-  it('cancels a look that runs out of time and suggests a blank diagram; tries once more (with twice the time) on the next refresh, then not again this session', async () => {
+  it('cancels a look that runs out of time and tries once more in the same ask (with twice the time); only then suggests a blank diagram, and never looks again this session', async () => {
     vi.useFakeTimers();
     const signals: AbortSignal[] = [];
     const look = vi.fn((s: AbortSignal) => { signals.push(s); return new Promise<ReadonlySet<DetectedImportSource>>(() => {}); });
     const { t, published, advance } = tracker({ look });
     const pending = t.refresh();
     await vi.advanceTimersByTimeAsync(START_LOOK_TIMEOUT_MS);
-    expect(await pending).toBe('blank');
     expect(signals[0]?.aborted).toBe(true);
-    expect(published).toEqual(['blank']);
+    expect(published).toEqual([]); // the retry runs: nothing published yet (#328)
     // The retry: twice the time.
-    const retry = t.refresh();
     await vi.advanceTimersByTimeAsync(START_LOOK_TIMEOUT_MS);
     expect(signals[1]?.aborted).toBe(false);
     await vi.advanceTimersByTimeAsync(START_LOOK_TIMEOUT_MS);
-    expect(await retry).toBe('blank');
+    expect(await pending).toBe('blank');
     expect(signals[1]?.aborted).toBe(true);
+    expect(published).toEqual(['blank']);
     expect(look).toHaveBeenCalledTimes(START_LOOK_ATTEMPTS);
     advance(10 * START_LOOK_FRESH_MS);
     await t.refresh();
     expect(look).toHaveBeenCalledTimes(START_LOOK_ATTEMPTS);
   });
 
-  it('a retried look that answers counts', async () => {
+  it('a retried look that answers counts, for the ask that timed out', async () => {
     vi.useFakeTimers();
     let calls = 0;
     const look = vi.fn(() => (++calls === 1 ? new Promise<ReadonlySet<DetectedImportSource>>(() => {}) : Promise.resolve(new Set<DetectedImportSource>(['sqlDdl']))));
-    const { t } = tracker({ look });
+    const { t, published } = tracker({ look });
     const first = t.refresh();
     await vi.advanceTimersByTimeAsync(START_LOOK_TIMEOUT_MS);
-    expect(await first).toBe('blank');
-    expect(await t.refresh()).toBe('importSqlDdl');
+    expect(await first).toBe('importSqlDdl');
+    expect(published).toEqual(['importSqlDdl']);
   });
 
   it('tells the host when the look saw a dbt_project.yml in a window without dbt (never in one with dbt)', async () => {
@@ -174,11 +173,9 @@ describe('StartIntentTracker telemetry (2.0 B9): fixed keys only, never what the
     const { t, advance } = tracker({ look, feature: r.feature, error: r.error });
     const first = t.refresh();
     await vi.advanceTimersByTimeAsync(START_LOOK_TIMEOUT_MS);
-    await first;
     expect(r.keys).toEqual(['startLookTimeout']);
-    const retry = t.refresh();
     await vi.advanceTimersByTimeAsync(2 * START_LOOK_TIMEOUT_MS);
-    await retry;
+    await first;
     expect(r.keys).toEqual(['startLookTimeout', 'startLookTimeout', 'startLookGaveUp']);
     advance(10 * START_LOOK_FRESH_MS);
     await t.refresh();
@@ -194,9 +191,12 @@ describe('StartIntentTracker telemetry (2.0 B9): fixed keys only, never what the
     const { t } = tracker({ look, feature: r.feature, error: r.error });
     const pending = t.refresh();
     await vi.advanceTimersByTimeAsync(START_LOOK_TIMEOUT_MS);
-    expect(await pending).toBe('blank');
     await vi.advanceTimersByTimeAsync(0);
     expect(r.keys).toEqual(['startLookTimeout']);
+    await vi.advanceTimersByTimeAsync(2 * START_LOOK_TIMEOUT_MS);
+    expect(await pending).toBe('blank');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(r.keys).toEqual(['startLookTimeout', 'startLookTimeout', 'startLookGaveUp']);
   });
 
   it('a real rejection records the error startLookFailed', async () => {
