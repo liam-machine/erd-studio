@@ -1157,7 +1157,7 @@ The clause is matched on the device against fixed keywords: the line the parser 
 - `draftDropNeedsChoice` — a quiet draft was dropped: several dialects or models need a choice.
 - `draftDropTimeLimit` — a quiet draft was dropped: the SQL import's time limit was reached before it read a table (appended after the import outcome keys).
 - `startLookTimeout` — the start screen look at the folder timed out. From the release after 2.0.7 (#328) the first look has 3 s instead of 1.5 s when the empty Diagrams view asks for it, and a timed-out look is retried in the same ask: read rates before and after that release apart.
-- `startLookGaveUp` — the start screen gave up looking at the folder (from #328: both attempts of one ask ran out of time, 4.5 s unseen or 6 s on screen).
+- `startLookGaveUp` — the start screen gave up looking at the folder: a second look this session ran out of time. From #328 that is almost always one ask's look and its retry (4.5 s unseen or 6 s on screen); it can also be a later look, more than a minute after a retry that answered, which then gets no retry of its own.
 - `startLookFailed` (error) — the start screen look at the folder threw (not our own abort).
 - `startContextFailed` (error) — refreshing the start screen context threw.
 
