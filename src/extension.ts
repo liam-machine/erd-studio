@@ -21,6 +21,17 @@ import { tablesOfTreeDrop } from './services/tableDrop';
 import { distinctTableCount } from './services/tableLibraryIndex';
 import { FileWatcherService, classifyWatchedSemanticPath } from './watchers/FileWatcherService';
 import { OutsideChangeRecorder, type OutsideChangeKind } from './services/outsideChange';
+import {
+  GIT_API_WAIT_MS,
+  MODEL_REPO_DAY_KEY,
+  MODEL_REPO_DELAY_MS,
+  SHARED_MODEL_DECIDED_KEY,
+  detectModelRepo,
+  isSharedModelArrival,
+  modelRepoCheckDue,
+  modelRepoFeatures,
+} from './services/modelShareTelemetry';
+import { askGitExtension } from './services/gitExtensionApi';
 import { HarnessService, HARNESS_TARGETS, HARNESS_VERSION, extractHarnessVersion, recommendedHookAssistants, type HarnessInstallResult, type HarnessTarget } from './services/harnessService';
 import { SelectorsService } from './services/selectorsService';
 import { LegacyTagCleanupService } from './services/legacyTagCleanupService';
@@ -724,6 +735,48 @@ function recordPhysicalTooling(context: vscode.ExtensionContext, session?: { roo
   } catch { /* telemetry must never break activation */ }
 }
 
+/**
+ * Usage telemetry (#332): whether the model folder is in a Git repository and
+ * whether that has a remote (`detectModelRepo()`), as fixed flags. Once per
+ * workspace per UTC day, off the activation path, only while telemetry is on
+ * and the model folder exists. The Git extension is asked only when it is
+ * already running; nothing in the project is written (only the day, in
+ * workspaceState), and no URL, path or name is sent.
+ */
+function recordModelRepo(context: vscode.ExtensionContext, modelDir: string): void {
+  try {
+    const today = new Date().toISOString().slice(0, 10);
+    const due = modelRepoCheckDue({
+      enabled: telemetry.enabled(),
+      folderExists: fs.existsSync(modelDir),
+      lastDay: context.workspaceState.get<string>(MODEL_REPO_DAY_KEY),
+      today,
+    });
+    if (!due) return;
+    setTimeout(() => {
+      void detectModelRepo(modelDir, { askGit: (dir) => askGitExtension(dir, GIT_API_WAIT_MS) }).then((repo) => {
+        const keys = modelRepoFeatures(repo);
+        if (keys.length === 0) return; // no answer: look again in a later window
+        for (const key of keys) telemetry.featureQuiet(key, true);
+        void context.workspaceState.update(MODEL_REPO_DAY_KEY, today);
+      }, () => { /* telemetry must never break activation */ });
+    }, MODEL_REPO_DELAY_MS);
+  } catch { /* telemetry must never break activation */ }
+}
+
+/**
+ * Whether an earlier activation (any version) left state in this workspace
+ * (#332's arrival never counts such a workspace). A Memento that cannot list
+ * its keys reads as "yes", so nothing is counted on a guess.
+ */
+function workspaceHasErdState(state: vscode.Memento): boolean {
+  try {
+    return state.keys().length > 0;
+  } catch {
+    return true;
+  }
+}
+
 function hostToolingProbe(): ToolingProbe {
   const exclude = toolingExclude(getErdStudioSetting('semanticDir', '.erd-studio'));
   return {
@@ -1355,6 +1408,9 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
   // The ERD Studio output channel (a LogOutputChannel: the user picks its
   // level). Plugged in first so every later line reaches it.
   const activationStart = Date.now();
+  // #332: read before anything below writes workspaceState, so the arrival
+  // (sharedModelFirstOpened) can tell this workspace's first activation apart.
+  const ranHereBefore = workspaceHasErdState(context.workspaceState);
   // The glass sidebar (prototype) evaluates the views' `when` clauses itself:
   // mirror every erdStudio.* setContext from here on (each still reaches VS
   // Code unchanged). Its view and toggle are registered below, before the
@@ -2396,6 +2452,7 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
   }
   recordDetectedAssistants();
   recordPhysicalTooling(context, { root: workspaceRoot, hasDbt });
+  recordModelRepo(context, fullSemanticDirPath);
 
   // Surface a broken layers.json once per distinct error. LayerService falls
   // back to default layers in memory but refuses to overwrite the file, so the
@@ -5554,6 +5611,21 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
   // unset, so they come in a folder that has something to work on.
   const quietActivation = !hasDbt && !fs.existsSync(fullSemanticDirPath);
   const existingDiagrams = subjectAreaService.listSubjectAreas(workspaceRoot, semanticDir);
+  // #332: the arrival. The first activation in this workspace, in a project
+  // that already has a model (diagrams or tables): it came with the folder,
+  // a teammate's clone most of the time. Decided once per workspace whether
+  // telemetry is on or not, so turning it on later never counts an old
+  // workspace; a workspace an earlier version ran in is never counted.
+  {
+    const alreadyDecided = context.workspaceState.get<boolean>(SHARED_MODEL_DECIDED_KEY) === true;
+    if (!alreadyDecided) {
+      try {
+        const hasModel = existingDiagrams.length > 0 || tableLibraryService.listTableFiles().length > 0;
+        if (isSharedModelArrival({ ranHereBefore, hasModel, alreadyDecided })) telemetry.featureOnce('sharedModelFirstOpened');
+      } catch { /* telemetry must never break activation */ }
+      await context.workspaceState.update(SHARED_MODEL_DECIDED_KEY, true);
+    }
+  }
   /** A first run in a folder with no diagram: the window is left for the draft (Draft-first §3.4). */
   let firstRunLeftForDraft = false;
   {

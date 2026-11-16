@@ -197,10 +197,11 @@ describe('classifyOutsideChange: the rule', () => {
     });
   });
 
-  it('the seven keys are appended at the very end of FEATURES, after #331\'s', () => {
+  it('the seven keys are appended to FEATURES after #331\'s, and only #332\'s follow them', () => {
     expect(FEATURES.slice(FEATURES.indexOf('diagramTables500Plus') + 1)).toEqual([
       'domainCreatedExternalGit', 'domainCreatedExternalLocal', 'domainCreatedExternalNoGit',
       'modelChangedExternalGit', 'modelChangedExternalNoGit', 'modelChangedExternalEditor', 'modelChangedExternalDisk',
+      'sharedModelFirstOpened', 'modelInGit', 'modelNotInGit', 'modelRepoHasRemote',
     ]);
     // The total stays where it was, and is still a 1.x key.
     expect(FEATURES.indexOf('domainCreatedExternal')).toBeLessThan(FEATURES.indexOf('heartbeatProvisional'));

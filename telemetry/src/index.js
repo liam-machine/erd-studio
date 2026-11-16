@@ -916,6 +916,13 @@ const FEATURES = [
   'modelChangedExternalNoGit',
   'modelChangedExternalEditor',
   'modelChangedExternalDisk',
+  // Added after 2.0.7 (#332): whether models are shared, as presence flags. The first
+  // ERD Studio activation in a workspace that already has a model; whether the model
+  // folder is in a Git repository (neither key: unknown) and whether that has a remote.
+  'sharedModelFirstOpened',
+  'modelInGit',
+  'modelNotInGit',
+  'modelRepoHasRemote',
 ];
 
 /** The only keys `errors` may carry; anything else is dropped. */
