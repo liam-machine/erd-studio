@@ -2063,8 +2063,10 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     emptyDiagramsViewShown = true;
     // Its start variants follow the suggestion, so look now (deferred: this
     // can be the first listing, still inside activation) and count what it shows.
+    // The view says "Looking at your folder…" meanwhile, so the look gets the
+    // longer on-screen time (#328), and stretches a look an unseen ask started.
     setTimeout(() => {
-      void startIntent.refresh().then((intent) => {
+      void startIntent.refresh({ onScreen: true }).then((intent) => {
         if (intent) recordStartSuggested(intent);
         onEmptyDiagramsViewShown();
       });

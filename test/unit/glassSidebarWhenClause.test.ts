@@ -258,7 +258,7 @@ describe("package.json: every sidebar clause is inside the evaluator's grammar",
 });
 
 describe('package.json clauses evaluate as VS Code would', () => {
-  it('the welcome "Loading diagrams…" clause (parentheses, !=, || inside &&)', () => {
+  it('a clause with parentheses, != and || inside && (the welcome "Loading diagrams…" clause before #328)', () => {
     const clause = 'erdStudio.hasProject && (erdStudio.diagramsLoading || (!erdStudio.hasDbtProject && erdStudio.storage != yaml && erdStudio.storage != mixed && !erdStudio.startIntent))';
     expect(evaluateWhen(clause, { 'erdStudio.hasProject': true, 'erdStudio.diagramsLoading': true, 'erdStudio.storage': 'yaml' })).toBe(true);
     expect(evaluateWhen(clause, { 'erdStudio.hasProject': true })).toBe(true);

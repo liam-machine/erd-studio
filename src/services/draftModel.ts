@@ -79,6 +79,13 @@ export const KEEP_AS_DIAGRAM = 'Keep as Diagram';
 export const KEEP_THIS_EXAMPLE = 'Keep This Example';
 export const SAVE_THIS_EXAMPLE = 'Save This Example…';
 
+/**
+ * The coffee-shop example's lead in a folder (#328): the way to the user's
+ * own model, named by its button. An example is someone else's tables; none
+ * of the first runs shown one kept it, so the banner says where theirs comes from.
+ */
+export const EXAMPLE_IMPORT_LEAD = `${IMPORT_GUIDE_LABEL} brings in your own: SQL scripts, DBML, Power BI and more.`;
+
 /** The notice a redrawn draft carries (Keep found the files changed since it was drawn, §5.1). */
 export const DRAFT_REDRAWN_NOTICE = 'Your ERD Studio files changed, so the draft was redrawn. Check it and keep it again.';
 
@@ -179,6 +186,8 @@ export interface DraftDetailInput {
   cap?: { drawn: number; available: number };
   /** The coffee shop with no folder open. */
   noFolderExample?: boolean;
+  /** The coffee shop in a folder: the import leads, and Keep is named by its own label. */
+  example?: boolean;
   /** A bundled example project (Save This Example…), with the project's table count when the diagram shows fewer. */
   exampleProject?: { shown: number; total?: number };
 }
@@ -192,9 +201,12 @@ export function draftDetail(input: DraftDetailInput): string {
     return `${SAVE_THIS_EXAMPLE} copies it to a folder of its own and opens it there.${part}`;
   }
   const parts: string[] = [];
+  if (input.example) parts.push(EXAMPLE_IMPORT_LEAD);
   if (input.keep) {
     const { name, layerLabel, diagramFile } = input.keep;
-    parts.push(`Keep saves it as ${name} in the ${layerLabel} layer (${diagramFile}).`);
+    parts.push(input.example
+      ? `${KEEP_THIS_EXAMPLE} saves this one as ${name} in the ${layerLabel} layer (${diagramFile}).`
+      : `Keep saves it as ${name} in the ${layerLabel} layer (${diagramFile}).`);
   }
   const reused = input.reusedTables ?? 0;
   if (reused > 0) {
@@ -440,7 +452,12 @@ const IMPORT_SOURCE_DRAFT: Readonly<Record<ImportPlanDraftInput['importSource'],
   example: 'example',
 };
 
-/** The banner for a coffee-shop example (in a folder, Keep This Example; without one, Open Folder…). */
+/**
+ * The banner for a coffee-shop example: without a folder, Open Folder…; in
+ * one, Import Your Data Model… leads toward the user's own model (#328), with
+ * New Diagram… beside it, Keep This Example as the quiet button and Import… in
+ * More ways to start ▾.
+ */
 function exampleBanner(headline: string, detail: string, hasFolder: boolean, notice?: string): { banner: DraftBanner; otherStarts: DraftOtherStartItem[] } {
   if (!hasFolder) {
     return {
@@ -449,7 +466,7 @@ function exampleBanner(headline: string, detail: string, hasFolder: boolean, not
     };
   }
   return {
-    banner: { headline, detail, keepLabel: KEEP_THIS_EXAMPLE, primary: 'blank', changeOptions: false, shownStarts: ['guide'], ...(notice ? { notice } : {}) },
+    banner: { headline, detail, keepLabel: KEEP_THIS_EXAMPLE, primary: 'guide', changeOptions: false, shownStarts: ['blank'], ...(notice ? { notice } : {}) },
     otherStarts: otherStartItems(['blank', 'guide', 'import']),
   };
 }
@@ -506,6 +523,7 @@ export function draftFromImportPlan(input: ImportPlanDraftInput): Draft {
     .filter((l): l is string => !!l))];
   const detail = draftDetail({
     keep: target,
+    ...(source === 'example' ? { example: true } : {}),
     reusedTables: summary.reusedTables,
     ...(reusedLayers.length > 0 ? { reusedLayers } : {}),
     keptOwnTables: inLibraryRenames(report.renamed).length,

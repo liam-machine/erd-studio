@@ -319,10 +319,11 @@ describe('real package.json: views and welcome content', () => {
     ]);
   });
 
-  it('a project still deciding: Loading diagrams…', () => {
+  it('a project still deciding: Loading diagrams… while it lists, Looking at your folder… while the folder is looked at', () => {
     const base = { workspaceFolderCount: 1, 'erdStudio.hasProject': true };
-    expect(welcomeOf(DIAGRAMS, base)).toEqual(['Loading diagrams…']);
-    expect(welcomeOf(DIAGRAMS, { ...base, 'erdStudio.storage': 'dbml' })).toEqual(['Loading diagrams…']);
+    expect(welcomeOf(DIAGRAMS, base)).toEqual(['Looking at your folder…']);
+    expect(welcomeOf(DIAGRAMS, { ...base, 'erdStudio.storage': 'dbml' })).toEqual(['Looking at your folder…']);
+    expect(welcomeOf(DIAGRAMS, { ...base, 'erdStudio.diagramsLoading': true })).toEqual(['Loading diagrams…']);
     expect(welcomeOf(DIAGRAMS, { ...base, 'erdStudio.diagramsLoading': true, 'erdStudio.storage': 'yaml' })).toEqual(['Loading diagrams…']);
   });
 
@@ -370,8 +371,8 @@ describe('real package.json: views and welcome content', () => {
     expect(welcomeOf(DIAGRAMS, { ...base, 'erdStudio.startIntent': 'blank' })).toEqual(expected);
     expect(welcomeOf(DIAGRAMS, { ...base, 'erdStudio.startIntent': 'importSqlDdl' })).toEqual(expected);
     expect(welcomeOf(DIAGRAMS, { ...base, 'erdStudio.hasDbtProject': true })).toEqual(expected);
-    // Still Loading until a folder without dbt has its suggestion.
-    expect(welcomeOf(DIAGRAMS, base)).toEqual(['Loading diagrams…']);
+    // Still looking until a folder without dbt has its suggestion.
+    expect(welcomeOf(DIAGRAMS, base)).toEqual(['Looking at your folder…']);
   });
 
   it('a dbt project: says so above Import Your Data Model…, plus Select dbt Project when there are several', () => {
