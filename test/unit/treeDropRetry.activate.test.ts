@@ -111,4 +111,50 @@ describe('#335: Try Again after tables dropped on a diagram row failed to be add
     expect(info.mock.calls.map((c) => String(c[0])).filter((m) => /named no table/.test(m))).toEqual([]);
     expect(errors).toHaveBeenCalledTimes(1);
   });
+
+  it("Try Again on an older failed drop adds that drop's tables, never a later drop's, and never times a drag again", async () => {
+    await activate(context);
+    const library = views.find((v) => v.id === 'erdStudio.modelLibrary')!.options.dragAndDropController!;
+    const diagrams = views.find((v) => v.id === 'erdStudio.domainTree')!.options.dragAndDropController!;
+    const diagram = path.join(ws, '.erd-studio', 'gold', 'diagrams', 'sales.dbml');
+    const table = path.join(ws, '.erd-studio', 'gold', 'tables', 'gold', 'fct_order.dbml');
+
+    vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined);
+    // The first drop's toast stays up until the second drop has failed too; then Try Again is chosen on it.
+    let chooseOnFirst: (choice: string | undefined) => void = () => undefined;
+    const errors = vi.spyOn(vscode.window, 'showErrorMessage')
+      .mockImplementationOnce((() => new Promise((resolve) => { chooseOnFirst = resolve; })) as never)
+      .mockResolvedValue(undefined);
+    const realExec = vscode.commands.executeCommand.bind(vscode.commands);
+    const opened: string[] = [];
+    vi.spyOn(vscode.commands, 'executeCommand').mockImplementation((async (command: string, ...args: unknown[]) => {
+      if (command === 'erdStudio.openDomain') {
+        opened.push(String(args[0]));
+        if (opened.length <= 2) throw new Error('boom');
+        return undefined;
+      }
+      return realExec(command, ...args);
+    }) as never);
+    const { SemanticEditorProvider } = await import('../../src/providers/SemanticEditorProvider');
+    const added = vi.spyOn(SemanticEditorProvider.prototype, 'addTablesToDiagram').mockResolvedValue([]);
+    const seen = vi.spyOn(SemanticEditorProvider.prototype, 'noteDropSeen');
+
+    // Drop 1: fct_order, its names lost on the way (found in the remembered drag).
+    library.handleDrag([{ type: 'model', name: 'fct_order', filePath: table, layer: 'gold', folder: 'gold', referencingDomains: [] }], new vscode.DataTransfer());
+    const first = new vscode.DataTransfer();
+    first.set(LIBRARY_TREE_MIME, new vscode.DataTransferItem('{"id":"erdStudio.modelLibrary","itemHandles":["0/0:x"]}'));
+    await diagrams.handleDrop({ type: 'domain', summary: { domain: 'sales', layer: 'gold', filePath: diagram }, modelCount: 1 }, first, {});
+    // Drop 2, on the same diagram: dim_region, named by the drop.
+    const second = new vscode.DataTransfer();
+    second.set(LIBRARY_TREE_MIME, new vscode.DataTransferItem(['dim_region']));
+    await diagrams.handleDrop({ type: 'domain', summary: { domain: 'sales', layer: 'gold', filePath: diagram }, modelCount: 1 }, second, {});
+    await vi.waitFor(() => expect(errors).toHaveBeenCalledTimes(2));
+    expect(seen).toHaveBeenCalledTimes(2);
+
+    chooseOnFirst('Try Again');
+    await vi.waitFor(() => expect(added).toHaveBeenCalledTimes(1));
+    expect(added.mock.calls[0][1]).toEqual(['fct_order']);
+    // A retry is the same drop: it never starts the drop timer again.
+    expect(seen).toHaveBeenCalledTimes(2);
+  });
 });

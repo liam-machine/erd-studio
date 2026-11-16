@@ -81,7 +81,8 @@ export const ADD_TO_DIAGRAM_TITLE = 'Add to Diagram';
  * none, when the drop's names could not be read), `uris` the dragged files.
  * Answers `false` when it found no table to add. `again`: Try Again after
  * that add failed (#335), so the same tables are added once more, without
- * using up or timing a drag again.
+ * using up or timing a drag again. A retry passes the very `tables` array of
+ * the drop it retries, so the handler can tell that drop from a later one.
  */
 export type TablesDropHandler = (filePath: string, tables: string[], uris: string[], again?: boolean) => Promise<boolean | void>;
 

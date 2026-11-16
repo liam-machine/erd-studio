@@ -648,6 +648,8 @@ describe('SubjectAreaTreeProvider', () => {
         await vi.waitFor(() => expect(calls).toHaveLength(2));
         expect(calls[0]).toEqual(['/p/.erd-studio/gold/diagrams/finance.dbml', ['kunde'], []]);
         expect(calls[1]).toEqual(['/p/.erd-studio/gold/diagrams/finance.dbml', ['kunde'], [], true]);
+        // The drop's own array, so the handler tells this drop from a later one.
+        expect(calls[1][1]).toBe(calls[0][1]);
         error.mockRestore();
       });
 
