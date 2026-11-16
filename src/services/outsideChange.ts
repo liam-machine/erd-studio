@@ -145,7 +145,8 @@ export function lookAtHead(startDir: string): HeadLook {
     ...(ref !== undefined ? [path.join(commonDir, ...ref.split('/'))] : []),
     path.join(commonDir, 'reftable', 'tables.list'),
   ].map(mtimeOf).filter((t): t is number => t !== undefined);
-  return { repo: true, movedAt: Math.max(...times) };
+  // Whole milliseconds: some file systems report an mtime a fraction under the one that was set.
+  return { repo: true, movedAt: Math.round(Math.max(...times)) };
 }
 
 /**
