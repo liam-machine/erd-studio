@@ -923,6 +923,17 @@ const FEATURES = [
   'modelInGit',
   'modelNotInGit',
   'modelRepoHasRemote',
+  // Added after 2.0.7 (#333): how long a diagram takes to open, as fixed ranges, never a
+  // time, once a day for the slowest open. ready → diagram posted (canvasLoadOver20s,
+  // above, is the top range); whether that open read table files from disk; and the
+  // webview's first diagram received → first paint.
+  'canvasLoadUnder1s',
+  'canvasLoad1to5s',
+  'canvasLoad5to20s',
+  'canvasLoadCold',
+  'canvasPaintUnder1s',
+  'canvasPaint1to5s',
+  'canvasPaintOver5s',
 ];
 
 /** The only keys `errors` may carry; anything else is dropped. */

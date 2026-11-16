@@ -44,6 +44,8 @@ import {
 } from '@erd-studio/renderer/editor';
 import { isStaleStageReply } from './lib/stageRequest';
 import { answerDropTrace, noteDomainLoaded } from './lib/dropTrace';
+import { notePayloadReceived } from './lib/paintTiming';
+import { useFirstPaintTiming } from './hooks/useFirstPaintTiming';
 import { useEditorStore, editorStoreApi } from './store/editorStore';
 import { vscodeCanvasHost } from './host/vscodeCanvasHost';
 import { DragLine } from './components/Graph/DragLine';
@@ -109,8 +111,14 @@ function applySubjectAreaPayload(payload: DisplaySubjectArea): void {
 }
 
 // ---------------------------------------------------------------------------
-// Inner component (must be inside ReactFlowProvider)
+// Inner components (must be inside ReactFlowProvider)
 // ---------------------------------------------------------------------------
+
+/** Says when the first diagram is drawn (#333). Its own component, so a change in React Flow's measuring re-renders only this. */
+function FirstPaintTiming(): null {
+  useFirstPaintTiming();
+  return null;
+}
 
 function EditorCanvas() {
   const domain = useEditorStore((s) => s.domain);
@@ -282,6 +290,8 @@ function EditorCanvas() {
           break;
         case 'domainLoaded':
           noteDomainLoaded();
+          // The page's first diagram starts the first-paint clock (#333); later ones do nothing.
+          notePayloadReceived();
           setHostLoading(null);
           applySubjectAreaPayload(msg.payload);
           // Set on a fresh domain (no stored positions), cleared by every other
@@ -1040,6 +1050,7 @@ export function App() {
         <ReactFlowProvider>
           <AreaErrorBoundary area="canvas">
             <EditorCanvas />
+            <FirstPaintTiming />
           </AreaErrorBoundary>
         </ReactFlowProvider>
       </CanvasEnvironmentProvider>

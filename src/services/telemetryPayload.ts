@@ -827,6 +827,18 @@ export const FEATURES = [
   'modelInGit',
   'modelNotInGit',
   'modelRepoHasRemote',
+  // #333: how long a diagram takes to open, as fixed ranges (never a time),
+  // once a day for the slowest open (recordCanvasLoad / recordCanvasPaint).
+  // The host's ready → diagram posted, with canvasLoadOver20s (2.0.0) as the
+  // top rung; whether that slowest open read table files from disk; and the
+  // webview's first diagram received → first paint. Off the onboarding trail.
+  'canvasLoadUnder1s',
+  'canvasLoad1to5s',
+  'canvasLoad5to20s',
+  'canvasLoadCold',
+  'canvasPaintUnder1s',
+  'canvasPaint1to5s',
+  'canvasPaintOver5s',
 ] as const;
 export type TelemetryFeature = (typeof FEATURES)[number];
 
@@ -1555,6 +1567,51 @@ export function recordLibraryTables(state: DailyCounters, count: number): DailyC
   return recordLargestOf(state, LIBRARY_TABLE_FEATURES, libraryTablesFeature(count));
 }
 
+/**
+ * #333: how long a canvas took from `ready` to its diagram posted, fastest
+ * first. `canvasLoadOver20s` (2.0.0) is the top rung, so one key a day says
+ * the slowest open and the old key keeps its meaning. The ranges are
+ * `canvasLoadFeature`'s (telemetryCanvas.ts).
+ */
+export const CANVAS_LOAD_FEATURES = [
+  'canvasLoadUnder1s',
+  'canvasLoad1to5s',
+  'canvasLoad5to20s',
+  'canvasLoadOver20s',
+] as const satisfies readonly TelemetryFeature[];
+export type CanvasLoadFeature = (typeof CANVAS_LOAD_FEATURES)[number];
+
+/** #333: how long a canvas took from receiving its first diagram to the first paint with its tables drawn, fastest first. */
+export const CANVAS_PAINT_FEATURES = [
+  'canvasPaintUnder1s',
+  'canvasPaint1to5s',
+  'canvasPaintOver5s',
+] as const satisfies readonly TelemetryFeature[];
+export type CanvasPaintFeature = (typeof CANVAS_PAINT_FEATURES)[number];
+
+/**
+ * #333: one canvas open whose load fell in `key`'s range; `cold` when it
+ * read at least one table file from disk. The day keeps only its slowest
+ * range (as {@link recordLargestOf}), and `canvasLoadCold` describes the
+ * opens in that range: a slower range replaces the flag with this open's, the
+ * same range adds it, a faster one changes nothing (the same object back, so
+ * nothing is written). Never a time.
+ */
+export function recordCanvasLoad(state: DailyCounters, key: CanvasLoadFeature, cold: boolean): DailyCounters {
+  const at = CANVAS_LOAD_FEATURES.indexOf(key);
+  const top = CANVAS_LOAD_FEATURES.reduce((max, f, i) => (state.features[f] ? i : max), -1);
+  if (at < top) return state;
+  if (at === top) return cold ? recordFeatureOnce(state, 'canvasLoadCold') : state;
+  const raised = recordLargestOf(state, CANVAS_LOAD_FEATURES, key);
+  const { canvasLoadCold: _cold, ...features } = raised.features;
+  return { ...raised, features: cold ? { ...features, canvasLoadCold: 1 } : features };
+}
+
+/** #333: one canvas's first paint fell in `key`'s range. The slowest range of the day wins. */
+export function recordCanvasPaint(state: DailyCounters, key: CanvasPaintFeature): DailyCounters {
+  return recordLargestOf(state, CANVAS_PAINT_FEATURES, key);
+}
+
 export function recentDaysBucket(count: number): RecentDaysBucket {
   if (count <= 0) return '0';
   if (count === 1) return '1';
@@ -2264,9 +2321,11 @@ export const MODEL_SHARE_FEATURES = [
 /**
  * Never dropped by {@link trimHeartbeat}: the send markers describe the send
  * itself; the project's size ranges (#331, at most one of each family a day),
- * where outside changes came from (#329, seven presence flags) and whether
- * the model is shared (#332, four) are the newest keys, so the trim would
- * take them first, and an oversized day is most likely a large project's.
+ * where outside changes came from (#329, seven presence flags), whether
+ * the model is shared (#332, four) and how long the slowest open took (#333,
+ * at most one of each family a day, and the cold flag) are the newest keys,
+ * so the trim would take them first, and an oversized day is most likely a
+ * large project's.
  */
 const UNTRIMMED_FEATURES: ReadonlySet<string> = new Set<string>([
   'heartbeatProvisional',
@@ -2275,6 +2334,9 @@ const UNTRIMMED_FEATURES: ReadonlySet<string> = new Set<string>([
   ...LARGE_DIAGRAM_FEATURES,
   ...OUTSIDE_CHANGE_SOURCE_FEATURES,
   ...MODEL_SHARE_FEATURES,
+  ...CANVAS_LOAD_FEATURES,
+  'canvasLoadCold',
+  ...CANVAS_PAINT_FEATURES,
 ]);
 
 /**

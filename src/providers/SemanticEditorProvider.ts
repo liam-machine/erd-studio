@@ -180,7 +180,6 @@ import {
   dbmlDiagramFeatures,
   isUserFileProblem,
   loaderWarningFeatures,
-  slowCanvasLoad,
   subjectAreaLoadDetailCode,
   webviewErrorCodes,
 } from '../services/telemetryCanvas';
@@ -663,6 +662,7 @@ import {
   validateDropTablesPayload,
   validateCanvasFramePayload,
   validateDragReleasePayload,
+  validateCanvasPaintedPayload,
   validateDropShownPayload,
   validateOpenModelFilePayload,
   validateGoToTablePayload,
@@ -2597,6 +2597,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           'webviewError',
           // Timing only: a timed drop's tables are on the canvas.
           'dropShown',
+          // Timing only (#333): the canvas's first paint after its first diagram.
+          'canvasPainted',
           // The crash screen's Reload / Send Feedback: reloads the page or opens Send Feedback; writes nothing.
           'crashFallback',
           // The toolbar's Curved / Hops switch: a view preference (a user setting), not a schema
@@ -2639,6 +2641,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             }
             {
               const readyAt = Date.now();
+              // Table files read before this load: the difference after it says a cold open from a warm one (#333).
+              const readsAtReady = this.tableLibraryService.tableFileReads();
               canvasLog.info(`Opening ${document.uri.fsPath}`);
               // Answer at once, before reading anything: the webview's
               // "Canvas disconnected" timer stops, and it says how many
@@ -2649,11 +2653,15 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
               // The initial load is the one refresh path allowed to persist
               // auto-computed positions for models that lack them.
               const posted = await this.sendSubjectAreaData(document, webviewPanel.webview, panelKey, { persistPositions: true });
+              const loadMs = Date.now() - readyAt;
+              const filesRead = this.tableLibraryService.tableFileReads() - readsAtReady;
               canvasLog.info(posted === undefined
                 ? `Opening ${document.uri.fsPath} ended without a diagram after ${elapsedMs(readyAt)} ms`
-                : `Opened ${document.uri.fsPath}: ${plural(posted, 'table')} posted ${elapsedMs(readyAt)} ms after ready`);
-              // A large diagram that took long to read (2.0 B17): once a day.
-              if (posted !== undefined && slowCanvasLoad(Date.now() - readyAt)) telemetry.featureOnce('canvasLoadOver20s');
+                : `Opened ${document.uri.fsPath}: ${plural(posted, 'table')} posted ${elapsedMs(readyAt)} ms after ready; ${plural(filesRead, 'table file')} read from disk`);
+              // How long the diagram took to read and post (#333; over 20 s was 2.0 B17's
+              // canvasLoadOver20s): a range for the day's slowest open, and whether
+              // it read table files from disk. A load that posted no diagram records nothing.
+              if (posted !== undefined) telemetry.canvasLoad(loadMs, filesRead > 0);
               const entry = this.openPanels.get(panelKey);
               if (posted !== undefined && entry?.webview === webviewPanel.webview) {
                 entry.loaded = true;
@@ -2804,6 +2812,16 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             // Timing only: a timed drop's tables are on the canvas (the log and fixed telemetry keys). Writes nothing.
             const payload = (message as { payload?: unknown }).payload;
             if (validateDropShownPayload(payload)) this.dropTimer.shown(payload.trace, payload.renderMs);
+            break;
+          }
+          case 'canvasPainted': {
+            // Timing only (#333): the page's first paint with its first diagram drawn
+            // (the log and a fixed telemetry range). Writes nothing, so it is on the physical allowlist.
+            const payload = (message as { payload?: unknown }).payload;
+            if (validateCanvasPaintedPayload(payload)) {
+              canvasLog.info(`Drew ${document.uri.fsPath}: first paint ${Math.round(payload.ms)} ms after the diagram arrived`);
+              telemetry.canvasPaint(payload.ms);
+            }
             break;
           }
           case 'showLogs':
