@@ -311,6 +311,20 @@ describe('OutsideChangeRecorder: one look per burst, presence keys only', () => 
     expect(recorded).toEqual([]);
   });
 
+  it('a long restore (Edit > Undo of Convert of a large project) skips its first files too, not only those near its last', async () => {
+    const { r, recorded } = recorder();
+    // Each batch the watcher reports brings back a converted file (noteRestored) and drops a .dbml;
+    // batches arrive under the look's wait apart, so the burst is classified in one flush.
+    for (let i = 0; i < 6; i++) {
+      r.noteRestored();
+      r.note('change', path.join(root, `restored_${i}.yml`));
+      r.note('change', path.join(root, `converted_${i}.dbml`));
+      await vi.advanceTimersByTimeAsync(LOOK_DELAY_MS - 500);
+    }
+    await vi.advanceTimersByTimeAsync(LOOK_DELAY_MS);
+    expect(recorded).toEqual([]);
+  });
+
   it('a look that throws never escapes, and counts as no readable repository', async () => {
     const { r, recorded } = recorder({ look: () => { throw new Error('EACCES'); } });
     expect(() => r.note('change', path.join(root, 'a.yml'))).not.toThrow();

@@ -191,7 +191,8 @@ export class OutsideChangeRecorder {
   private readonly handledHere = new Map<string, number>();
   private timer: ReturnType<typeof setTimeout> | undefined;
   private firstPendingAt = 0;
-  private ownRestoreAt: number | undefined;
+  /** When ERD Studio restored its own files, each time within reach of a change still waiting (a long restore notes many). */
+  private ownRestoresAt: number[] = [];
 
   constructor(private readonly options: OutsideChangeRecorderOptions) {}
 
@@ -211,7 +212,12 @@ export class OutsideChangeRecorder {
 
   /** ERD Studio is restoring files of its own (Edit > Undo of Convert brought one back): the changes around now are not counted. */
   noteRestored(): void {
-    this.ownRestoreAt = Date.now();
+    const now = Date.now();
+    // Kept as long as a waiting change could still be near it: a later
+    // restore must not replace one the first files of the burst were near.
+    const keepFrom = now - OWN_RESTORE_WINDOW_MS - MAX_LOOK_WAIT_MS;
+    this.ownRestoresAt = this.ownRestoresAt.filter((at) => at >= keepFrom);
+    this.ownRestoresAt.push(now);
   }
 
   /** An outside change to `fsPath`, as the watcher reported it. */
@@ -233,7 +239,7 @@ export class OutsideChangeRecorder {
     this.pending = [];
     try {
       if (batch.length === 0 || !this.options.enabled()) return;
-      const restored = [this.ownRestoreAt, this.options.restoredAt?.()].filter((t): t is number => t !== undefined);
+      const restored = [...this.ownRestoresAt, this.options.restoredAt?.()].filter((t): t is number => t !== undefined);
       const counted = batch.filter((c) => !restored.some((at) => Math.abs(c.eventAt - at) <= OWN_RESTORE_WINDOW_MS));
       if (counted.length === 0) return;
       let head: HeadLook;
@@ -265,5 +271,6 @@ export class OutsideChangeRecorder {
     this.timer = undefined;
     this.pending = [];
     this.handledHere.clear();
+    this.ownRestoresAt = [];
   }
 }
