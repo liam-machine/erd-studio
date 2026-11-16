@@ -377,11 +377,11 @@ export async function moveDbmlTables(
     // The reconcile's modal already named any file it could not put back.
     if (result.unrestored.length === 0) {
       removeFolders(made);
-      // Try Again plans the move afresh: the tabs are back on their files by the time it can be chosen.
+      for (const o of open) await reopen(o.tabs, o.table.filePath);
+      // Shown once the tabs are back on their files, so Try Again (which plans the move afresh) finds them there.
       showCommandFailure(editNotAccepted(MOVE_TABLE_TITLE, 'the move', 'nothing was changed'), editNotAppliedError(), {
         retry: () => moveDbmlTables(deps, tables, to),
       });
-      for (const o of open) await reopen(o.tabs, o.table.filePath);
     }
     return false;
   }
@@ -537,10 +537,11 @@ export async function moveDbmlDiagram(deps: MoveDbmlDeps, filePath: string, toLa
   if (!result.ok) {
     if (result.unrestored.length === 0) {
       removeFolders(made);
+      await reopen(open, filePath);
+      // Shown once the canvas is back on its file, so Try Again finds it there.
       showCommandFailure(editNotAccepted(MOVE_DIAGRAM_TITLE, 'the move', 'nothing was changed'), editNotAppliedError(), {
         retry: () => moveDbmlDiagram(deps, filePath, toLayer),
       });
-      await reopen(open, filePath);
     }
     return undefined;
   }
