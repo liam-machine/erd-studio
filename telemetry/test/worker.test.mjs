@@ -589,9 +589,25 @@ describe('validation — acceptance and normalisation', () => {
     );
     assert.deepEqual(JSON.parse(params[17]), features);
     assert.deepEqual(
-      WORKER_FEATURES.slice(WORKER_FEATURES.indexOf('diagramTables500Plus') + 1),
+      WORKER_FEATURES.slice(WORKER_FEATURES.indexOf('diagramTables500Plus') + 1, WORKER_FEATURES.indexOf('modelChangedExternalDisk') + 1),
       ['domainCreatedExternalGit', 'domainCreatedExternalLocal', 'domainCreatedExternalNoGit',
         'modelChangedExternalGit', 'modelChangedExternalNoGit', 'modelChangedExternalEditor', 'modelChangedExternalDisk'],
+    );
+    assert.equal(params[18], '{}');
+  });
+
+  it('keeps whether models are shared (#332), after where outside changes came from, and drops a look-alike, an author range or an error-side copy', async () => {
+    const features = { sharedModelFirstOpened: 1, modelInGit: 1, modelNotInGit: 1, modelRepoHasRemote: 1 };
+    const params = await storedParams(
+      heartbeat({
+        features: { ...features, modelAuthors2to3: 1, modelInGitRemote: 1, sharedModel: 1, modelRepoUrl: 1 },
+        errors: { modelInGit: 1 },
+      }),
+    );
+    assert.deepEqual(JSON.parse(params[17]), features);
+    assert.deepEqual(
+      WORKER_FEATURES.slice(WORKER_FEATURES.indexOf('modelChangedExternalDisk') + 1),
+      ['sharedModelFirstOpened', 'modelInGit', 'modelNotInGit', 'modelRepoHasRemote'],
     );
     assert.equal(params[18], '{}');
   });

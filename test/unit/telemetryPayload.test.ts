@@ -681,7 +681,7 @@ describe('allowlists agree with the Worker', () => {
     expect(FEATURES.indexOf('draftDropTimeLimit')).toBe(FEATURES.indexOf('importCauseOther') + 1);
     // It closes the 2.0.0 list: what follows was appended later (the Fabric card's keys, then the
     // major update notice's, the layout fallbacks', then the start suggestion's repeat and the canvas's Convert button, #305,
-    // ... then where outside changes came from, #329), never put before it.
+    // ... then where outside changes came from, #329, then whether models are shared, #332), never put before it.
     expect(FEATURES.slice(FEATURES.indexOf('draftDropTimeLimit') + 1)).toEqual([
       'importGuideActionFabricCatalog', 'importGuideCopiedFabricCatalog',
       'importFabricOutcomeClean', 'importFabricOutcomeRepaired', 'importFabricOutcomePartial',
@@ -701,6 +701,7 @@ describe('allowlists agree with the Worker', () => {
       'diagramTables51to199', 'diagramTables200to499', 'diagramTables500Plus',
       'domainCreatedExternalGit', 'domainCreatedExternalLocal', 'domainCreatedExternalNoGit',
       'modelChangedExternalGit', 'modelChangedExternalNoGit', 'modelChangedExternalEditor', 'modelChangedExternalDisk',
+      'sharedModelFirstOpened', 'modelInGit', 'modelNotInGit', 'modelRepoHasRemote',
     ]);
     // #262's per-step load codes follow the logged-error ones and close the 2.0.0 error list;
     // what a failed layout was like (after 2.0.4) is appended after them.
@@ -768,6 +769,7 @@ describe('allowlists agree with the Worker', () => {
       'diagramTables51to199', 'diagramTables200to499', 'diagramTables500Plus',
       'domainCreatedExternalGit', 'domainCreatedExternalLocal', 'domainCreatedExternalNoGit',
       'modelChangedExternalGit', 'modelChangedExternalNoGit', 'modelChangedExternalEditor', 'modelChangedExternalDisk',
+      'sharedModelFirstOpened', 'modelInGit', 'modelNotInGit', 'modelRepoHasRemote',
     ]);
     for (const key of added) expect(section, key).toMatch(new RegExp(`^- \`${key}\` `, 'm'));
     // The error codes appended after the 2.0.0 list (a failed layout's class, size, duration and fallbacks;

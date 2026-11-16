@@ -50,6 +50,7 @@ import { DRAFT_SCOPE_EMPTY_NOTICE } from '../../src/services/draftModel';
 import { SHOW_RELATIONSHIPS_BUTTON } from '../../src/commands/goToTable';
 import { START_SUGGESTION_ALREADY_KEPT_MESSAGE } from '../../src/services/startSuggestion';
 import { GlassSidebarProvider } from '../../src/providers/glassSidebar/GlassSidebarProvider';
+import { MODEL_REPO_DAY_KEY, MODEL_REPO_DELAY_MS, SHARED_MODEL_DECIDED_KEY } from '../../src/services/modelShareTelemetry';
 
 /** The message of the last "Found dbt project" line in the ERD Studio log (it no longer goes to console.log). */
 const lastFoundProjectLine = (): string | undefined =>
@@ -98,6 +99,7 @@ function makeContext(
     workspaceState: {
       get: (key: string) => workspaceState.get(key),
       update: async (key: string, value: unknown) => { workspaceState.set(key, value); },
+      keys: () => [...workspaceState.keys()],
     },
     secrets: vscode.createMockSecretStorage(),
   } as unknown as Context;
@@ -3482,6 +3484,151 @@ describe('first run, measured (onboarding funnel)', () => {
   });
 });
 
+describe("a model this machine did not start, opened for the first time (#332: sharedModelFirstOpened)", () => {
+  /** Not the machine's first run: ERD Studio has run before, in other folders. */
+  const seenMachine = () => new Map<string, unknown>([['lastActivatedVersion', '9.9.9'], [GETTING_STARTED_SHOWN_KEY, true]]);
+  const arrivals = (spy: ReturnType<typeof vi.spyOn>) => spy.mock.calls.filter((c) => c[0] === 'sharedModelFirstOpened');
+
+  beforeEach(() => {
+    fs.cpSync(FIXTURE_ROOT, root, { recursive: true });
+    openWorkspace(root);
+    vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);
+  });
+
+  it("counts a teammate's clone on a machine whose first run was elsewhere, once per workspace", async () => {
+    const workspaceState = new Map<string, unknown>();
+    context = makeContext(root, { globalState: seenMachine(), workspaceState });
+    const featureOnce = vi.spyOn(telemetry, 'featureOnce');
+
+    await activate(context);
+    expect(arrivals(featureOnce)).toHaveLength(1);
+    // Not the machine's first run, so the older key stays silent: the gap #332 closes.
+    expect(featureOnce.mock.calls.map((c) => c[0])).not.toContain('firstRunHasDiagrams');
+    expect(workspaceState.get(SHARED_MODEL_DECIDED_KEY)).toBe(true);
+
+    tearDownActivation();
+    featureOnce.mockClear();
+    await activate(context);
+    expect(arrivals(featureOnce)).toHaveLength(0);
+  });
+
+  it('counts a project with tables and no diagram yet', async () => {
+    for (const layer of ['silver', 'gold']) fs.rmSync(path.join(root, '.erd-studio', layer), { recursive: true, force: true });
+    context = makeContext(root, { globalState: seenMachine(), workspaceState: new Map<string, unknown>() });
+    const featureOnce = vi.spyOn(telemetry, 'featureOnce');
+    await activate(context);
+    expect(arrivals(featureOnce)).toHaveLength(1);
+  });
+
+  it("never counts an author upgrading: a workspace where an older ERD Studio left state is decided without a count", async () => {
+    // Any key an earlier version wrote here (the physical tooling day, from 1.7.2).
+    const workspaceState = new Map<string, unknown>([['erdStudio.telemetry.physicalToolingDay', '2026-11-01']]);
+    context = makeContext(root, { globalState: seenMachine(), workspaceState });
+    const featureOnce = vi.spyOn(telemetry, 'featureOnce');
+    await activate(context);
+    expect(arrivals(featureOnce)).toHaveLength(0);
+    expect(workspaceState.get(SHARED_MODEL_DECIDED_KEY)).toBe(true);
+  });
+
+  it('never counts a model that appears after ERD Studio first ran in the folder (made here, or pulled later)', async () => {
+    const model = path.join(root, '.erd-studio');
+    const aside = path.join(root, '..', `${path.basename(root)}-model`);
+    fs.renameSync(model, aside);
+    const workspaceState = new Map<string, unknown>();
+    context = makeContext(root, { globalState: seenMachine(), workspaceState });
+    const featureOnce = vi.spyOn(telemetry, 'featureOnce');
+    await activate(context);
+    expect(arrivals(featureOnce)).toHaveLength(0);
+    expect(workspaceState.get(SHARED_MODEL_DECIDED_KEY)).toBe(true);
+
+    tearDownActivation();
+    fs.renameSync(aside, model);
+    await activate(context);
+    expect(arrivals(featureOnce)).toHaveLength(0);
+  });
+
+  it('never counts the window Open an Example Project… opened: ERD Studio wrote that model itself', async () => {
+    // The example's folder is new to this machine (no workspaceState) and has a model:
+    // without the hand-off check it would read as a teammate's clone.
+    const globalState = seenMachine();
+    globalState.set('erdStudio.pendingExampleOpen', { folder: root, diagram: '.erd-studio/silver/showcase.json', at: Date.now() });
+    const workspaceState = new Map<string, unknown>();
+    context = makeContext(root, { globalState, workspaceState });
+    const featureOnce = vi.spyOn(telemetry, 'featureOnce');
+    await activate(context);
+    expect(arrivals(featureOnce)).toHaveLength(0);
+    expect(workspaceState.get(SHARED_MODEL_DECIDED_KEY)).toBe(true);
+  });
+
+  it('a Memento without keys() reads as "ran here before": no count, activation unharmed', async () => {
+    const workspaceState = new Map<string, unknown>();
+    context = makeContext(root, { globalState: seenMachine(), workspaceState });
+    delete (context.workspaceState as { keys?: unknown }).keys;
+    const featureOnce = vi.spyOn(telemetry, 'featureOnce');
+    await activate(context);
+    expect(arrivals(featureOnce)).toHaveLength(0);
+    expect(workspaceState.get(SHARED_MODEL_DECIDED_KEY)).toBe(true);
+  });
+});
+
+describe('whether the model sits in Git (#332: modelInGit / modelNotInGit / modelRepoHasRemote)', () => {
+  const REPO_KEYS = ['modelInGit', 'modelNotInGit', 'modelRepoHasRemote'];
+  const repoKeys = (spy: ReturnType<typeof vi.spyOn>) => spy.mock.calls.map((c) => c[0]).filter((k) => REPO_KEYS.includes(k as string));
+  /** The built-in Git extension, running, with one repository open (and one remote: never its URL). */
+  const runningGit = (remotes: unknown[]) => ({
+    id: 'vscode.git', isActive: true, packageJSON: {},
+    exports: { enabled: true, getAPI: () => ({ state: 'initialized', onDidChangeState: () => ({ dispose() {} }), getRepository: () => ({ state: { remotes } }) }) },
+  });
+
+  beforeEach(() => {
+    fs.cpSync(FIXTURE_ROOT, root, { recursive: true });
+    openWorkspace(root);
+    vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);
+  });
+
+  it('looks after activation has finished, once that day, asking the running Git extension (telemetry on)', async () => {
+    vi.spyOn(telemetry, 'enabled').mockReturnValue(true);
+    const featureQuiet = vi.spyOn(telemetry, 'featureQuiet');
+    const getExtension = vi.spyOn(vscode.extensions, 'getExtension').mockImplementation(((id: string) =>
+      (id === 'vscode.git' ? runningGit([{ name: 'origin', fetchUrl: 'https://example.invalid/secret-team/repo.git' }]) : undefined)) as never);
+    const workspaceState = new Map<string, unknown>();
+    context = makeContext(root, { workspaceState });
+
+    await activate(context);
+    // Activation never waits on Git: nothing has been asked yet.
+    expect(getExtension.mock.calls.filter((c) => c[0] === 'vscode.git')).toHaveLength(0);
+    expect(repoKeys(featureQuiet)).toEqual([]);
+
+    await vi.advanceTimersByTimeAsync(MODEL_REPO_DELAY_MS + 50);
+    expect(repoKeys(featureQuiet).sort()).toEqual(['modelInGit', 'modelRepoHasRemote']);
+    expect(featureQuiet.mock.calls.filter((c) => REPO_KEYS.includes(c[0] as string)).every((c) => c[1] === true)).toBe(true);
+    expect(workspaceState.get(MODEL_REPO_DAY_KEY)).toBe(new Date().toISOString().slice(0, 10));
+
+    // The same day, another window: not looked at again.
+    tearDownActivation();
+    featureQuiet.mockClear();
+    getExtension.mockClear();
+    await activate(context);
+    await vi.advanceTimersByTimeAsync(MODEL_REPO_DELAY_MS + 50);
+    expect(getExtension.mock.calls.filter((c) => c[0] === 'vscode.git')).toHaveLength(0);
+    expect(repoKeys(featureQuiet)).toEqual([]);
+  });
+
+  it('with telemetry off nothing is read: the Git extension is never asked and no day is written', async () => {
+    vi.spyOn(telemetry, 'enabled').mockReturnValue(false);
+    const featureQuiet = vi.spyOn(telemetry, 'featureQuiet');
+    const getExtension = vi.spyOn(vscode.extensions, 'getExtension');
+    const workspaceState = new Map<string, unknown>();
+    context = makeContext(root, { workspaceState });
+
+    await activate(context);
+    await vi.advanceTimersByTimeAsync(MODEL_REPO_DELAY_MS + 50);
+    expect(getExtension.mock.calls.filter((c) => c[0] === 'vscode.git')).toHaveLength(0);
+    expect(repoKeys(featureQuiet)).toEqual([]);
+    expect(workspaceState.has(MODEL_REPO_DAY_KEY)).toBe(false);
+  });
+});
+
 describe('Import…, Import SQL DDL… and Import Semantic Model…', () => {
   it('are registered once with a project (no legacy alias), and are open-a-folder stubs in an empty window', async () => {
     const ids = ['erdStudio.importModel', 'erdStudio.importSqlDdl', 'erdStudio.importSemanticModel'];
@@ -3658,7 +3805,8 @@ describe('the major update notice', () => {
 
   it('the first window after a major update says the new version has a guide: one sentence, three buttons, once per machine', async () => {
     const globalState = machine();
-    const workspaceState = new Map<string, unknown>([['erdStudio.harnessInstallPrompted', true], ['erdStudio.diagramsNudgeShown', true], SUGGESTIONS_ANSWERED]);
+    // A workspace ERD Studio ran in before (#332's arrival already decided), so any key written is the notice's.
+    const workspaceState = new Map<string, unknown>([['erdStudio.harnessInstallPrompted', true], ['erdStudio.diagramsNudgeShown', true], SUGGESTIONS_ANSWERED, [SHARED_MODEL_DECIDED_KEY, true]]);
     context = makeContext(root, { globalState, workspaceState });
     // Closed without a choice: the same as Not now.
     const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);

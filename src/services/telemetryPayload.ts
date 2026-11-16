@@ -818,6 +818,15 @@ export const FEATURES = [
   'modelChangedExternalNoGit',
   'modelChangedExternalEditor',
   'modelChangedExternalDisk',
+  // #332: whether models are shared (src/services/modelShareTelemetry.ts), as presence
+  // flags, off the onboarding trail except the arrival. The first ERD Studio activation in
+  // a workspace that already has a model (diagrams or tables); then, once a day, whether
+  // the model folder is in a Git repository and whether that has a remote. No answer
+  // sends neither modelInGit nor modelNotInGit.
+  'sharedModelFirstOpened',
+  'modelInGit',
+  'modelNotInGit',
+  'modelRepoHasRemote',
 ] as const;
 export type TelemetryFeature = (typeof FEATURES)[number];
 
@@ -2242,11 +2251,22 @@ export const OUTSIDE_CHANGE_SOURCE_FEATURES = [
 ] as const satisfies readonly TelemetryFeature[];
 
 /**
+ * #332: whether models are shared (src/services/modelShareTelemetry.ts): the
+ * arrival and the model repository's three flags, each at most once a day.
+ */
+export const MODEL_SHARE_FEATURES = [
+  'sharedModelFirstOpened',
+  'modelInGit',
+  'modelNotInGit',
+  'modelRepoHasRemote',
+] as const satisfies readonly TelemetryFeature[];
+
+/**
  * Never dropped by {@link trimHeartbeat}: the send markers describe the send
- * itself; the project's size ranges (#331, at most one of each family a day)
- * and where outside changes came from (#329, seven presence flags) are the
- * newest keys, so the trim would take them first, and an oversized day is
- * most likely a large project's.
+ * itself; the project's size ranges (#331, at most one of each family a day),
+ * where outside changes came from (#329, seven presence flags) and whether
+ * the model is shared (#332, four) are the newest keys, so the trim would
+ * take them first, and an oversized day is most likely a large project's.
  */
 const UNTRIMMED_FEATURES: ReadonlySet<string> = new Set<string>([
   'heartbeatProvisional',
@@ -2254,6 +2274,7 @@ const UNTRIMMED_FEATURES: ReadonlySet<string> = new Set<string>([
   ...LIBRARY_TABLE_FEATURES,
   ...LARGE_DIAGRAM_FEATURES,
   ...OUTSIDE_CHANGE_SOURCE_FEATURES,
+  ...MODEL_SHARE_FEATURES,
 ]);
 
 /**
