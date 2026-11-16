@@ -50,7 +50,7 @@ import { DRAFT_SCOPE_EMPTY_NOTICE } from '../../src/services/draftModel';
 import { SHOW_RELATIONSHIPS_BUTTON } from '../../src/commands/goToTable';
 import { START_SUGGESTION_ALREADY_KEPT_MESSAGE } from '../../src/services/startSuggestion';
 import { GlassSidebarProvider } from '../../src/providers/glassSidebar/GlassSidebarProvider';
-import { SHARED_MODEL_DECIDED_KEY } from '../../src/services/modelShareTelemetry';
+import { MODEL_REPO_DAY_KEY, MODEL_REPO_DELAY_MS, SHARED_MODEL_DECIDED_KEY } from '../../src/services/modelShareTelemetry';
 
 /** The message of the last "Found dbt project" line in the ERD Studio log (it no longer goes to console.log). */
 const lastFoundProjectLine = (): string | undefined =>
@@ -3568,6 +3568,64 @@ describe("a model this machine did not start, opened for the first time (#332: s
     await activate(context);
     expect(arrivals(featureOnce)).toHaveLength(0);
     expect(workspaceState.get(SHARED_MODEL_DECIDED_KEY)).toBe(true);
+  });
+});
+
+describe('whether the model sits in Git (#332: modelInGit / modelNotInGit / modelRepoHasRemote)', () => {
+  const REPO_KEYS = ['modelInGit', 'modelNotInGit', 'modelRepoHasRemote'];
+  const repoKeys = (spy: ReturnType<typeof vi.spyOn>) => spy.mock.calls.map((c) => c[0]).filter((k) => REPO_KEYS.includes(k as string));
+  /** The built-in Git extension, running, with one repository open (and one remote: never its URL). */
+  const runningGit = (remotes: unknown[]) => ({
+    id: 'vscode.git', isActive: true, packageJSON: {},
+    exports: { enabled: true, getAPI: () => ({ state: 'initialized', onDidChangeState: () => ({ dispose() {} }), getRepository: () => ({ state: { remotes } }) }) },
+  });
+
+  beforeEach(() => {
+    fs.cpSync(FIXTURE_ROOT, root, { recursive: true });
+    openWorkspace(root);
+    vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);
+  });
+
+  it('looks after activation has finished, once that day, asking the running Git extension (telemetry on)', async () => {
+    vi.spyOn(telemetry, 'enabled').mockReturnValue(true);
+    const featureQuiet = vi.spyOn(telemetry, 'featureQuiet');
+    const getExtension = vi.spyOn(vscode.extensions, 'getExtension').mockImplementation(((id: string) =>
+      (id === 'vscode.git' ? runningGit([{ name: 'origin', fetchUrl: 'https://example.invalid/secret-team/repo.git' }]) : undefined)) as never);
+    const workspaceState = new Map<string, unknown>();
+    context = makeContext(root, { workspaceState });
+
+    await activate(context);
+    // Activation never waits on Git: nothing has been asked yet.
+    expect(getExtension.mock.calls.filter((c) => c[0] === 'vscode.git')).toHaveLength(0);
+    expect(repoKeys(featureQuiet)).toEqual([]);
+
+    await vi.advanceTimersByTimeAsync(MODEL_REPO_DELAY_MS + 50);
+    expect(repoKeys(featureQuiet).sort()).toEqual(['modelInGit', 'modelRepoHasRemote']);
+    expect(featureQuiet.mock.calls.filter((c) => REPO_KEYS.includes(c[0] as string)).every((c) => c[1] === true)).toBe(true);
+    expect(workspaceState.get(MODEL_REPO_DAY_KEY)).toBe(new Date().toISOString().slice(0, 10));
+
+    // The same day, another window: not looked at again.
+    tearDownActivation();
+    featureQuiet.mockClear();
+    getExtension.mockClear();
+    await activate(context);
+    await vi.advanceTimersByTimeAsync(MODEL_REPO_DELAY_MS + 50);
+    expect(getExtension.mock.calls.filter((c) => c[0] === 'vscode.git')).toHaveLength(0);
+    expect(repoKeys(featureQuiet)).toEqual([]);
+  });
+
+  it('with telemetry off nothing is read: the Git extension is never asked and no day is written', async () => {
+    vi.spyOn(telemetry, 'enabled').mockReturnValue(false);
+    const featureQuiet = vi.spyOn(telemetry, 'featureQuiet');
+    const getExtension = vi.spyOn(vscode.extensions, 'getExtension');
+    const workspaceState = new Map<string, unknown>();
+    context = makeContext(root, { workspaceState });
+
+    await activate(context);
+    await vi.advanceTimersByTimeAsync(MODEL_REPO_DELAY_MS + 50);
+    expect(getExtension.mock.calls.filter((c) => c[0] === 'vscode.git')).toHaveLength(0);
+    expect(repoKeys(featureQuiet)).toEqual([]);
+    expect(workspaceState.has(MODEL_REPO_DAY_KEY)).toBe(false);
   });
 });
 
