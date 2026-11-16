@@ -1034,6 +1034,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * a rewind that left the diagram's text as it was still redraws (#274).
    */
   private readonly deletedTablePaths = new Map<string, Set<string>>();
+  /** When a canvas's undo or redo was last flushed (#329: the files it brought back or removed are not an outside change). */
+  private undoRedoFlushedAt: number | undefined;
 
   /** Tables changed outside ERD Studio, waiting for one batched canvas refresh (see queueTableRefresh). */
   private readonly queuedTableRefresh = new Set<string>();
@@ -1888,6 +1890,16 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   private savedRelationshipsTimer: ReturnType<typeof setTimeout> | undefined;
   /** The settle under way (tests await it). */
   private importsSettle: Promise<void> = Promise.resolve();
+
+  /**
+   * When a canvas's undo or redo was last flushed, if one was. Its file
+   * operations (a table file a canvas created or deleted, back or gone again)
+   * reach the watcher with no own write recorded; usage telemetry (#329) does
+   * not count the changes around it as anyone else's.
+   */
+  lastUndoRedoAt(): number | undefined {
+    return this.undoRedoFlushedAt;
+  }
 
   /**
    * A text document was saved in this window (`workspace.onDidSaveTextDocument`,
@@ -5003,6 +5015,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * the model files this canvas wrote, then redraw — one refresh for the step.
    */
   private async flushUndoRedo(document: vscode.TextDocument, webview: vscode.Webview, panelKey: string): Promise<void> {
+    this.undoRedoFlushedAt = Date.now();
     // Cmd+Z on a canvas whose file was deleted outside ERD Studio rewinds the
     // document in memory only; saving it would recreate the file (#161).
     if (!fs.existsSync(document.uri.fsPath)) return;

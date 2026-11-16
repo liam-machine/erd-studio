@@ -575,6 +575,27 @@ describe('validation — acceptance and normalisation', () => {
     assert.equal(params[18], '{}');
   });
 
+  it('keeps where outside changes came from (#329), after the size ranges, and drops a look-alike or an error-side copy', async () => {
+    const features = {
+      domainCreatedExternal: 3,
+      domainCreatedExternalGit: 1, domainCreatedExternalLocal: 1, domainCreatedExternalNoGit: 1,
+      modelChangedExternalGit: 1, modelChangedExternalNoGit: 1, modelChangedExternalEditor: 1, modelChangedExternalDisk: 1,
+    };
+    const params = await storedParams(
+      heartbeat({
+        features: { ...features, modelChangedExternalAssistant: 1, domainCreatedExternalRemote: 1, modelChangedExternal: 1 },
+        errors: { modelChangedExternalDisk: 1 },
+      }),
+    );
+    assert.deepEqual(JSON.parse(params[17]), features);
+    assert.deepEqual(
+      WORKER_FEATURES.slice(WORKER_FEATURES.indexOf('diagramTables500Plus') + 1),
+      ['domainCreatedExternalGit', 'domainCreatedExternalLocal', 'domainCreatedExternalNoGit',
+        'modelChangedExternalGit', 'modelChangedExternalNoGit', 'modelChangedExternalEditor', 'modelChangedExternalDisk'],
+    );
+    assert.equal(params[18], '{}');
+  });
+
   it('keeps the automatic draft\'s time-limit drop key, after the import outcome keys', async () => {
     const params = await storedParams(heartbeat({ features: { draftDropTimeLimit: 1, importCauseTimeLimit: 1, draftDropTimeLimits: 1 } }));
     assert.equal(params[17], '{"importCauseTimeLimit":1,"draftDropTimeLimit":1}');

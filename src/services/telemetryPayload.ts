@@ -806,6 +806,18 @@ export const FEATURES = [
   'diagramTables51to199',
   'diagramTables200to499',
   'diagramTables500Plus',
+  // #329: where a change ERD Studio did not write came from (src/services/outsideChange.ts),
+  // as presence flags, once a day, off the onboarding trail. A diagram file that appeared
+  // (domainCreatedExternal stays the total): HEAD moved with it, it did not, or no
+  // repository could be read. An existing table, relationships or diagram file changed or
+  // went: Git, NoGit, saved (or renamed or deleted) in this window, or written on disk.
+  'domainCreatedExternalGit',
+  'domainCreatedExternalLocal',
+  'domainCreatedExternalNoGit',
+  'modelChangedExternalGit',
+  'modelChangedExternalNoGit',
+  'modelChangedExternalEditor',
+  'modelChangedExternalDisk',
 ] as const;
 export type TelemetryFeature = (typeof FEATURES)[number];
 
@@ -2214,16 +2226,34 @@ export function heartbeatBytes(body: HeartbeatBody): number {
 }
 
 /**
+ * #329: where an outside change came from (src/services/outsideChange.ts),
+ * each a presence flag. Seven small keys, newer than everything the trim
+ * would otherwise keep: a large project's busy day, the likeliest to be
+ * trimmed, is also the likeliest to hold a pull or an assistant's burst.
+ */
+export const OUTSIDE_CHANGE_SOURCE_FEATURES = [
+  'domainCreatedExternalGit',
+  'domainCreatedExternalLocal',
+  'domainCreatedExternalNoGit',
+  'modelChangedExternalGit',
+  'modelChangedExternalNoGit',
+  'modelChangedExternalEditor',
+  'modelChangedExternalDisk',
+] as const satisfies readonly TelemetryFeature[];
+
+/**
  * Never dropped by {@link trimHeartbeat}: the send markers describe the send
  * itself; the project's size ranges (#331, at most one of each family a day)
- * are the newest keys, so the trim would take them first, and an oversized
- * day is most likely a large project's.
+ * and where outside changes came from (#329, seven presence flags) are the
+ * newest keys, so the trim would take them first, and an oversized day is
+ * most likely a large project's.
  */
 const UNTRIMMED_FEATURES: ReadonlySet<string> = new Set<string>([
   'heartbeatProvisional',
   'heartbeatTrimmed',
   ...LIBRARY_TABLE_FEATURES,
   ...LARGE_DIAGRAM_FEATURES,
+  ...OUTSIDE_CHANGE_SOURCE_FEATURES,
 ]);
 
 /**

@@ -19,7 +19,8 @@ import { tableHomesById, tableHomesOf, type TableHome } from './services/tableHo
 import { tableUsageOf, type TableUsageKeys } from './services/sidebarTables';
 import { tablesOfTreeDrop } from './services/tableDrop';
 import { distinctTableCount } from './services/tableLibraryIndex';
-import { FileWatcherService } from './watchers/FileWatcherService';
+import { FileWatcherService, classifyWatchedSemanticPath } from './watchers/FileWatcherService';
+import { OutsideChangeRecorder, type OutsideChangeKind } from './services/outsideChange';
 import { HarnessService, HARNESS_TARGETS, HARNESS_VERSION, extractHarnessVersion, recommendedHookAssistants, type HarnessInstallResult, type HarnessTarget } from './services/harnessService';
 import { SelectorsService } from './services/selectorsService';
 import { LegacyTagCleanupService } from './services/legacyTagCleanupService';
@@ -233,7 +234,7 @@ import { onDbmlFilesRenamed, type ExplorerMoveDeps } from './commands/explorerMo
 import { semanticReadmeCreate } from './services/semanticReadme';
 import { applyFileWrites } from './providers/applyFileWrites';
 import type { FileWrite } from './services/fileWrites';
-import { saveDocumentByUri } from './providers/documentSave';
+import { isErdStudioSaving, saveDocumentByUri } from './providers/documentSave';
 import { dirtyFiles, openOrDiskText } from './providers/dirtyDocuments';
 import { log, elapsedMs, setLogSink } from './services/logger';
 import { registerDbmlFormatting } from './providers/dbmlFormattingProvider';
@@ -2508,10 +2509,29 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     await editorProvider.refreshAllOpenSubjectAreas();
   }));
 
+  // Usage telemetry (#329): where each outside change below came from (git,
+  // a save in this window, the disk, or no readable repository), as presence
+  // keys. One look at the repository's HEAD per burst, a few seconds after
+  // it; never throws into a refresh, and reads nothing while telemetry is off.
+  const outsideChanges = new OutsideChangeRecorder({
+    repoFrom: fullSemanticDirPath,
+    enabled: () => telemetry.enabled(),
+    record: (feature) => telemetry.featureQuiet(feature, true),
+    // A canvas's undo or redo brings back (or removes) files with no own write recorded.
+    restoredAt: () => editorProvider.lastUndoRedoAt(),
+  });
+  const noteOutsideChange = (kind: OutsideChangeKind, fsPath: string): void => {
+    // A file Convert Project to DBML deleted is back: Edit > Undo of Convert,
+    // which also deletes the .dbml files it wrote. None of it is counted.
+    if (convertedSourcesHere.has(path.resolve(fsPath))) outsideChanges.noteRestored();
+    outsideChanges.note(kind, fsPath);
+  };
+
   // A DBML relationships file changed externally: its Refs may belong to any
   // table (a Ref attaches wherever its owner is, from any file), so every open
   // canvas is redrawn (§5.4). Never a table event.
-  const relationshipsChangedSubscription = fileWatcherService.onRelationshipsChanged(guardRefresh('Table', async () => {
+  const relationshipsChangedSubscription = fileWatcherService.onRelationshipsChanged(guardRefresh('Table', async ({ uri }) => {
+    noteOutsideChange('change', uri.fsPath);
     draftGeneration.bump();
     tableLibraryService.invalidateRelationships();
     await editorProvider.refreshAllOpenSubjectAreas();
@@ -2567,7 +2587,15 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     // A domain file ERD Studio did not write appeared: an AI assistant, a hand
     // edit or a git pull. createDomain writes outside the own-write tracker,
     // so it marks its path in subjectAreasCreatedHere instead.
-    if (created && !subjectAreasCreatedHere.delete(uri.fsPath)) { telemetry.feature('domainCreatedExternal'); }
+    if (created) {
+      if (!subjectAreasCreatedHere.delete(uri.fsPath)) {
+        telemetry.feature('domainCreatedExternal');
+        noteOutsideChange('create', uri.fsPath);
+      }
+    } else if (classifyWatchedSemanticPath(fullSemanticDirPath, uri.fsPath) === 'domain') {
+      // An existing diagram file changed (a template or .sync-plan.json is not one).
+      noteOutsideChange('change', uri.fsPath);
+    }
     // A canvas showing "deleted or renamed" whose file is back redraws (#161).
     editorProvider.syncSubjectAreaFilePresence();
     // A canvas whose document is not following its file (left unsaved by a
@@ -2601,6 +2629,21 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     } catch (err) {
       log.warn('[ERD Studio] Could not check a saved file for relationships imports:', err);
     }
+    // #329: a file saved here that the watcher then reports is the editor's,
+    // not the disk's. ERD Studio's own saves are not.
+    if (document.uri.scheme === 'file' && !isErdStudioSaving(document.uri) && !ownWrites.isPending(document.uri.fsPath)) {
+      outsideChanges.noteHandledHere(document.uri.fsPath);
+    }
+  });
+  // #329: a file renamed or deleted in this window (the Explorer) is the editor's too.
+  const filesRenamedHereSubscription = vscode.workspace.onDidRenameFiles((event) => {
+    for (const { oldUri, newUri } of event.files) {
+      outsideChanges.noteHandledHere(oldUri.fsPath);
+      outsideChanges.noteHandledHere(newUri.fsPath);
+    }
+  });
+  const filesDeletedHereSubscription = vscode.workspace.onDidDeleteFiles((event) => {
+    for (const uri of event.files) outsideChanges.noteHandledHere(uri.fsPath);
   });
 
   // Rename Subject Area records its created and deleted files as own writes,
@@ -2755,6 +2798,7 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     // Project to DBML restores each .json as it deletes the .dbml) was not
     // removed: no selectors prompt for it.
     const removed = removedSubjectAreaPaths(uris.map((u) => u.fsPath), fs.existsSync);
+    for (const filePath of removed) noteOutsideChange('change', filePath);
     if (removed.length === 0) return;
     // selectors.yml is a dbt file: a plain folder has none to regenerate, and
     // the views above already show the diagram gone.
@@ -2802,6 +2846,8 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
   // reports 1,100 tables in one batch while it is still deleting files, and
   // per-table work listed the library again for every one of them.
   const logicalModelChangedSubscription = fileWatcherService.onTablesChanged(guardRefresh('Table', ({ tables: changed }) => {
+    // A created or deleted table file arrives here too: each is a change to the model.
+    for (const t of changed) noteOutsideChange('change', t.uri.fsPath);
     draftGeneration.bump();
     const names = changed.map((t) => t.modelName);
     // By name, and by each changed file's own path: a name two schema folders share is two files.
@@ -3429,6 +3475,9 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     foreignFormatSubscription,
     unreadFileSubscription,
     savedDocumentSubscription,
+    filesRenamedHereSubscription,
+    filesDeletedHereSubscription,
+    outsideChanges,
     { dispose: () => setRefreshFailureSink(undefined) },
     editorWroteSubscription,
     semanticDeletedSubscription,
