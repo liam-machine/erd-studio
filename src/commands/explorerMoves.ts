@@ -30,14 +30,14 @@ import * as vscode from 'vscode';
 import { isReservedLayerName, type ProjectStorage } from '@erd-studio/core';
 
 import { getErdStudioSetting } from '../services/configService';
-import { SEND_FEEDBACK_BUTTON, projectRelative } from '../services/commandErrors';
-import { editNotAccepted, editNotAppliedError, type CommandFailure } from '../services/diagramCommandErrors';
+import { SEND_FEEDBACK_BUTTON, classifyWriteFailure, projectRelative } from '../services/commandErrors';
+import { editNotAccepted, editNotAppliedError, knownCauseOrOurs, type CommandFailure } from '../services/diagramCommandErrors';
 import type { FileWrite } from '../services/fileWrites';
 import type { TableLibraryService } from '../services/logicalModelService';
 import { isRefusedWrite } from '../services/newSubjectAreaWriter';
 import { log } from '../services/logger';
 import { TABLE_NAME_RULE } from '../types/naming';
-import { showCommandFailure } from './commandFailure';
+import { firstUnwritable, showCommandFailure } from './commandFailure';
 import { planDbmlExplorerMoves, type DbmlExplorerMovesPlan, type MovedDbmlFile } from './dbmlLifecycle';
 
 /** The setting (under `erdStudio.`): `prompt`, `always` or `never`. */
@@ -323,7 +323,14 @@ function planOrWarn(deps: ExplorerMoveDeps, moves: readonly MovedDbmlFile[], ren
     const subject = moves.length === 1 ? path.basename(moves[0].to) : `the ${moves.length} moved files`;
     const button = backButtonFor(renames);
     if (!refused) {
-      showCommandFailure(explorerUpdateFailed(subject, button), err, { actions: { [button]: () => undoRenames(deps, renames) } });
+      // A file ERD Studio may not open, or a full disk, is the user's to fix: said so, with no Send Feedback.
+      const failure = classifyWriteFailure(err) === 'other'
+        ? explorerUpdateFailed(subject, button)
+        : knownCauseOrOurs(UPDATE_REFERENCES_TITLE, err, {
+          doing: '', outcome: `the files that point at ${subject} were not updated and nothing else was changed`,
+          retry: false, workspaceRoot: deps.workspaceRoot, prefix: '', extra: [button],
+        });
+      showCommandFailure(failure, err, { actions: { [button]: () => undoRenames(deps, renames) } });
       return undefined;
     }
     const message = err.message;
@@ -423,8 +430,12 @@ async function applyExplorerUpdate(
   if (!result.ok) {
     if (result.unrestored.length === 0) {
       const button = backButtonFor(renames);
+      const unwritable = firstUnwritable(plan.writes.map((w) => w.path), deps.workspaceRoot);
       showCommandFailure(
-        editNotAccepted(UPDATE_REFERENCES_TITLE, `the update of the files that point at ${subjectOf(plan)}`, 'nothing else was changed', { prefix: 'ERD Studio', extra: [button] }),
+        editNotAccepted(UPDATE_REFERENCES_TITLE, `the update of the files that point at ${subjectOf(plan)}`, 'nothing else was changed', {
+          prefix: 'ERD Studio', extra: [button],
+          ...(unwritable ? { unwritable: { path: unwritable, workspaceRoot: deps.workspaceRoot } } : {}),
+        }),
         editNotAppliedError(),
         { retry: () => applyExplorerUpdate(deps, moves, renames, plan, true, note), actions: { [button]: () => undoRenames(deps, renames) } },
       );
