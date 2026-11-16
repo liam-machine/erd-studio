@@ -906,6 +906,16 @@ const FEATURES = [
   'diagramTables51to199',
   'diagramTables200to499',
   'diagramTables500Plus',
+  // Added after 2.0.7 (#329): where a change ERD Studio did not write came from, as
+  // presence flags. A diagram file that appeared (domainCreatedExternal stays the
+  // total), and an existing table, relationships or diagram file that changed or went.
+  'domainCreatedExternalGit',
+  'domainCreatedExternalLocal',
+  'domainCreatedExternalNoGit',
+  'modelChangedExternalGit',
+  'modelChangedExternalNoGit',
+  'modelChangedExternalEditor',
+  'modelChangedExternalDisk',
 ];
 
 /** The only keys `errors` may carry; anything else is dropped. */
