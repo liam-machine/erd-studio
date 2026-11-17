@@ -371,6 +371,18 @@ npx wrangler d1 execute erd-studio-telemetry --remote --command \
 Prefer aggregates. There is rarely a reason to look at individual rows, and
 none to copy `install_id` anywhere.
 
+**Reading `domain_count`.** It is counted when a window activates, and the
+day's last activation wins: a window with no project reports `0`, and so does
+one opened before the project's first diagram was made. A day with a diagram
+open can therefore read `0`. Per install, take the **largest** value over its
+rows rather than any one day's, and the same for `model_count` and the
+`libraryTables*` / `diagramTables*` ranges (#331):
+
+```bash
+npx wrangler d1 execute erd-studio-telemetry --remote --command \
+  "SELECT d, COUNT(*) AS installs FROM (SELECT install_id, MAX(CASE domain_count WHEN '0' THEN 0 WHEN '1-3' THEN 1 WHEN '4-10' THEN 2 ELSE 3 END) AS d FROM heartbeats WHERE COALESCE(dev, 0) = 0 GROUP BY install_id) GROUP BY d ORDER BY d"
+```
+
 ### What "active" means
 
 **An install is active on a day it opened a diagram** (`canvas_opens > 0`),
@@ -559,7 +571,7 @@ appended after the native DBML keys:
 | Step | Keys |
 |---|---|
 | A true first run | `firstRun` (at most 1: the first activation on this machine, the one that owes the walkthrough; from the 2.0 release on). `tenure = '0'` alone is **not** a new install: see below |
-| Saw a start screen | `walkthroughOpened` (opened by ERD Studio on first run), `gettingStartedOpened`, `sidebarStartShown` (once a day: the empty Diagrams view, with its starts, was drawn), `diagramsNudgeShown` (a project that already had diagrams got "This project has N ERD Studio diagrams" instead: a teammate's clone's start screen; `firstRunHasDiagrams` marks such a first run; in a project from before 2.0 the notice leads with **Convert to DBML** and also counts `convertToDbmlOffered`, and closing it `convertToDbmlNotNow`; its **Show Me Around** button is `diagramsNudgeShowMeAround`) |
+| Saw a start screen | `walkthroughOpened` (opened by ERD Studio on first run), `gettingStartedOpened`, `sidebarStartShown` (once a day: the empty Diagrams view, with its starts, was drawn), `diagramsNudgeShown` (a project that already had diagrams got "This project has N ERD Studio diagrams" instead: a teammate's clone's start screen; `firstRunHasDiagrams` marks such a first run, and `sharedModelFirstOpened` (added after 2.0.7, #332) any install's first ERD Studio activation in a project that already has a model, first run or not; in a project from before 2.0 the notice leads with **Convert to DBML** and also counts `convertToDbmlOffered`, and closing it `convertToDbmlNotNow`; its **Show Me Around** button is `diagramsNudgeShowMeAround`) |
 | Owed but waited | `walkthroughWaited` (at most 1: the walkthrough was owed, but another prompt had this window. Since 2.0 that includes the start suggestion taking the walkthrough's place on a first run with an obvious start, so read it beside `suggestPromptShown`; without one it is expected near 0) |
 | Offered its start | `suggestPromptShown` (the **start suggestion**, `src/services/startSuggestion.ts`: one notification in a folder with no diagram whose start is obvious, "ERD Studio found CREATE TABLE scripts in this folder (24 tables). Show them as a diagram? Nothing is saved until you keep it.", once per folder (at most three times before the Simplify release); from #305 an upgrader, an install that was not new on its machine, is asked once per machine in all, unless Turn On asked for it in a folder; counts as having seen a start). `suggestPromptShownAgain`: a showing on a machine where it was already shown (another folder, or the same one after Turn On), counted beside `suggestPromptShown`. Its answer: `suggestPromptShowMe` (Show Me: the draft opens; from Draft-first on), `suggestPromptAccepted` (Convert to DBML…; before Draft-first also Create Diagram; counts as having chosen a start), `suggestPromptMore` (More Options…; no longer sent since Draft-first, whose draft has Other Ways to Start), `suggestPromptOff` (Don't Ask Again for This Folder), `suggestPromptDismissed` (closed without a choice; asked again in a later window only before the Simplify release). `startSuggestionsOff`: **Turn Off Start Suggestions for This Folder** was run, or (once a day) a folder with no diagram opened with `erdStudio.startSuggestions` false. What the look found, and the count it shows, never leave the machine: `startSuggested<Intent>` says which start it was |
 | Draft | the **Draft-first** start (`docs/dev/draft-first.md`): a read-only draft of the folder's logical model in an editor tab, nothing written until **Keep**. `draftShown` (a draft was shown, any source and trigger; a redraw of the page on show is not another), `draftShownAuto` (opened by the ERD Studio icon alone: the empty Diagrams view, once per folder for a find, once per machine for the example), `draftExampleShown` (an example: the coffee shop or a bundled project), `draftSourceSqlDdl` `draftSourceSemanticModel` `draftSourceDbml` `draftSourceDbt` (which kind of find, never a name, path or count). Its answer: `draftKept` (Keep wrote it, beside the source's own `importSqlDdl` / `importSemanticModel` / `importDbml` / `drawFromDbt` / `exampleDiagram` / `exampleOpened`; counts as having chosen a start), `draftChangeOptions` (Change options…: the step-by-step flow, ending in a draft again), `draftDiscarded` (Discard), `draftClosed` (the tab was closed without a choice), `draftOtherStart` (one of Other Ways to Start; the start's own key says which), `draftScopeChanged` (the Folder / Model / Example switcher), `draftDetailsOpened` (the schema panel or details drawer), `draftRefreshed` (Keep found the project's files changed and redrew). `draftAfterOpenFolder`: a draft's **Open Folder…** (the no-folder example's primary, the guide's *Open your folder*) reloaded the window into a folder and that folder's draft showed at once, in place of its start suggestion (the guide carries on, without More ways to start; with diagrams there, the guide carries on on the newest instead and this is not counted). `draftUnavailable`: the automatic draft could not be built (several dialects, nothing readable after all) and was dropped quietly, leaving the sidebar's starts; a quiet run never counts the import's `*Cancelled` or `*Invalid` keys. Errors: `draftBuildFailed` (building a draft threw: ours), `draftLayoutFailed` (the page's ELK layout failed; the fallback placement was drawn) |
@@ -1144,8 +1156,8 @@ The clause is matched on the device against fixed keywords: the line the parser 
 - `draftDropNoDialect` — a quiet draft was dropped: no SQL dialect could be chosen.
 - `draftDropNeedsChoice` — a quiet draft was dropped: several dialects or models need a choice.
 - `draftDropTimeLimit` — a quiet draft was dropped: the SQL import's time limit was reached before it read a table (appended after the import outcome keys).
-- `startLookTimeout` — the start screen look at the folder timed out.
-- `startLookGaveUp` — the start screen gave up looking at the folder.
+- `startLookTimeout` — the start screen look at the folder timed out. From the release after 2.0.7 (#328) the first look has 3 s instead of 1.5 s when the empty Diagrams view asks for it, and a timed-out look is retried in the same ask: read rates before and after that release apart.
+- `startLookGaveUp` — the start screen gave up looking at the folder: a second look this session ran out of time. From #328 that is almost always one ask's look and its retry (4.5 s unseen or 6 s on screen); it can also be a later look, more than a minute after a retry that answered, which then gets no retry of its own.
 - `startLookFailed` (error) — the start screen look at the folder threw (not our own abort).
 - `startContextFailed` (error) — refreshing the start screen context threw.
 
@@ -1298,7 +1310,7 @@ mistake in it, a save VS Code refused) records no error code: only the
 
 **B17 — big diagrams: slow loads, layout failures and the draft layout.**
 
-- `canvasLoadOver20s` — a canvas took more than 20 s to load (once a day).
+- `canvasLoadOver20s` — a canvas took more than 20 s to load (once a day). Since #333 (added after 2.0.7) it is the top of the `canvasLoad*` ranges under "Keys added after 2.0.0": a day carries at most one of them, the slowest open's, so a day with this key carries no faster one. Its meaning is unchanged.
 - `layoutStackFallback` — an auto layout ran out of stack and was laid out again with the stack-safe placement.
 - `firstLayoutOver5s` — the first-open layout of a fresh diagram took more than 5 s.
 - `draftLayoutOver5s` — a draft page layout took more than 5 s.
@@ -1454,7 +1466,8 @@ Each loss-ledger cause class the import's ledger holds, once per import (with an
 Appended to `FEATURES` after the 2.0.0 list above (in
 `src/services/telemetryPayload.ts` and `src/index.js`, in the same order), on
 the same terms: fixed keys, never a name, a path, a message or a count of
-tables (a failed layout's size is one of four fixed ranges, below). Deploy the
+tables (a size is one of a few fixed ranges: a failed layout's, below, and the
+project's, #331, near the end; a time is a fixed range too, #333, at the end). Deploy the
 Worker before the extension release that records them, or their counts are
 dropped. The failed-layout codes, the dbt search failure reasons and the canvas
 handler failure steps in this section are appended to `ERROR_CODES` in the
@@ -1654,7 +1667,7 @@ extension's start, or our own synchronous work), so its timer ran late too.
 What the start screen's first timeout cost, and the search activation no
 longer waits for:
 
-- `startLookLateSuggestion` — the start screen's look at the folder ran out of time, the blank-diagram suggestion was shown, and the retry (the next look that answered, with twice the time) found something to import, so the suggestion changed to an import. Decided on that one look only: a later look that finds a file added after it does not count. The retry runs at the next refresh, so a file saved between the timeout and the retry can still count; that should be rare. Read beside `startLookTimeout` (the installs whose first look ran out of time) and `startLookGaveUp`.
+- `startLookLateSuggestion` — the start screen's look at the folder ran out of time, and the retry (the next look that answered, with twice the time) found something to import: what the timeout cost, or would have cost. Up to 2.0.7 the blank-diagram suggestion was shown first and the retry ran at the next refresh, so a file saved between the timeout and the retry could still count (rare). From the release after 2.0.7 (#328) the retry runs straight away in the same ask and blank is never shown in between, so the key counts installs the retry saved rather than ones that saw blank first: read it by version. Decided on that one look only: a later look that finds a file added after it does not count. Read beside `startLookTimeout` (the installs whose first look ran out of time) and `startLookGaveUp`.
 - `dbtSearchSkipped` — activation did not wait for the host's search for a dbt_project.yml: no `erdStudio.projectPath`, no picked project, and the first dbt workspace folder already holds ERD data, so nothing the search could find changes the project that opens (`hostSearchCannotChangeRoot`). The search still runs, off activation's path, to count the workspace's dbt projects for **Select dbt Project**; if it fails, `dbtSearchFailed` and its reason are still recorded (with `dbtSearchFailedWalkFound`), but a timeout is not.
 - `activationSlowWalk` — the longest stretch of a start over 10 s was the synchronous walk of the workspace folders that finds the dbt project (up to 5,000 folders; `resolveWorkspaceProject`, timed on its own). `activationSlowDiscovery` is then the rest of Discovery, without the walk.
 
@@ -1739,6 +1752,145 @@ count the slow ones:
 - `readyLate30to60s` — beside `readyAfterNoReady`: the ready came less than 60 s after the panel was shown (by the clock from the show whose 30 s ran out, hidden or not since). A 60 s limit would not have reported it.
 - `readyLateOver60s` — beside `readyAfterNoReady`: the ready came 60 s or more after the panel was shown.
 
+**How big the project is** (added after 2.0.7, #331). `model_count` is the
+largest diagram opened that day and stops at `51+`, and nothing counted the
+Table Library, so a 60-table diagram and a 1,100-table one sent the same day,
+and a project with tables but no diagram said nothing about them. Two families
+of fixed ranges, never a count. Each day carries at most one key of each
+family, the largest range seen that day (a later interim copy replaces the
+earlier one, so the stored row has only the largest). Both are kept by the
+size guard (`trimHeartbeat`), and neither carries over to the next day.
+
+- `libraryTablesNone` — a window opened on a project with an ERD folder (`.erd-studio`) whose Table Library holds no table. Recorded once per window at activation, never on a refresh, and never for a window with no project or a project with no ERD folder (`has_semantic_dir` says that), so `None` means an empty library, not "no ERD Studio here".
+- `libraryTables1to10` — the library holds 1 to 10 tables (the same edges as `model_count`'s `1-10`).
+- `libraryTables11to50` — it holds 11 to 50.
+- `libraryTables51to199` — it holds 51 to 199.
+- `libraryTables200to499` — it holds 200 to 499.
+- `libraryTables500Plus` — it holds 500 or more. Tables are counted once per identity: a YAML table copied into both `logical-models/` and `tables/` counts once; two DBML schemas' tables of one name count twice. Tables kept only inside a v4 domain file, or declared inside a DBML diagram's own file and not linked into the project (`dbmlEmbeddedTablesShown`), are not in the library and are not counted.
+- `diagramTables51to199` — beside `model_count = '51+'`: the largest diagram opened that day had 51 to 199 tables. Logical and physical opens both count, as for `model_count`. Present exactly when `model_count` is `51+`, except on a `versionMixed` day, where a window of an older version may have opened the large diagram without recording it.
+- `diagramTables200to499` — it had 200 to 499 tables.
+- `diagramTables500Plus` — it had 500 or more.
+
+```bash
+# Project sizes over the last 28 days: installs with each range, and how many of them opened a diagram
+npx wrangler d1 execute erd-studio-telemetry --remote --command \
+  "SELECT j.key, COUNT(DISTINCT h.install_id) AS installs, COUNT(DISTINCT CASE WHEN h.canvas_opens > 0 THEN h.install_id END) AS opened_a_diagram FROM heartbeats h, json_each(h.features) j WHERE COALESCE(h.dev, 0) = 0 AND h.day >= date('now','-28 days') AND (j.key LIKE 'libraryTables%' OR j.key LIKE 'diagramTables%') GROUP BY 1 ORDER BY 1"
+```
+
+Per install, take the largest range over its rows, as for `domain_count`
+(see Querying). A day with no window opened on a project has no
+`libraryTables*` key, even when a window stayed open across midnight.
+
+**Where outside changes come from** (added after 2.0.7, #329). ERD Studio's
+pitch is a model the user's own AI assistant reads and writes, and an
+assistant that edits the files without opening a diagram left no key at all:
+`domainCreatedExternal` counts only new diagram files, and cannot tell an
+assistant from a hand edit or a git pull. These keys say, once a day each
+(presence, not a count, and off the onboarding trail), where a change that
+ERD Studio did not write came from. ERD Studio's own writes are dropped by the
+watcher first, and so are the files its own undo brings back (a canvas's
+Cmd+Z, Edit > Undo of Convert Project to DBML).
+
+Whether git did it is read from the repository's own files, never by running
+git or through the Git extension: the newest mtime of `HEAD`, `logs/HEAD` and
+the loose ref HEAD names (a linked worktree's own HEAD, its refs in
+`commondir`; a reftable repository's `tables.list`), a few seconds after the
+burst of changes, since git writes the files and moves the ref last. HEAD
+moved from 30 s before the change onwards: Git. `.git` is looked for from the
+ERD folder upwards, as git does. Nothing is read while telemetry is off.
+
+- `domainCreatedExternalGit` — a diagram file appeared that ERD Studio did not write (it is in `domainCreatedExternal` too, which stays the total), and the repository's HEAD moved with it: a pull, checkout, merge, rebase or reset.
+- `domainCreatedExternalLocal` — a diagram file appeared and HEAD did not move: an assistant, a hand edit or a script.
+- `domainCreatedExternalNoGit` — a diagram file appeared in a workspace with no repository above the ERD folder, or one whose HEAD could not be read (a `.git` file naming nothing, a HEAD git would not write). Without it those would read as Local.
+- `modelChangedExternalGit` — an existing table, relationships or diagram file changed, appeared or went outside ERD Studio's own writes, and HEAD moved with it. Also the "a teammate's change arrived" signal #332 needs.
+- `modelChangedExternalNoGit` — the same in a workspace with no readable repository.
+- `modelChangedExternalEditor` — HEAD did not move, and this window saved the file (or renamed or deleted it, or a folder holding it, in the Explorer) in the 10 s before: a hand edit, or an assistant working inside the editor. ERD Studio's own saves are not counted as the editor's.
+- `modelChangedExternalDisk` — HEAD did not move and nothing in this window saved the file: an assistant or a script in a terminal, another program, or another window (two windows on one repository: the other window's canvas edits read as Disk here).
+
+Limits to keep in mind when reading them:
+
+- An assistant that commits its own work moves HEAD, and its change counts as Git, not Local. So does any change written on disk within 30 s after a commit, pull or checkout (a save in this window stays Editor).
+- `git stash pop`, `git restore` and the Source Control view's Discard change files without moving HEAD: they count as Local (Disk). A merge that stops on a conflict writes its files before HEAD moves, so those count as Local too.
+- `git stash` (the push, not the pop) resets the files through HEAD and writes its reflog, so it counts as Git. `git gc` and `git reflog expire` rewrite that reflog without moving HEAD: a change within 30 s after one also counts as Git (rare: an automatic gc runs only when the repository has thousands of loose objects).
+- A diagram file that appeared is never split into Editor and Disk: both are Local.
+- A busy day (an oversized body) keeps them: the size guard (`trimHeartbeat`) never drops them.
+
+```bash
+# Where outside changes came from over the last 28 days, and on how many of those days no diagram was opened
+npx wrangler d1 execute erd-studio-telemetry --remote --command \
+  "SELECT j.key, COUNT(DISTINCT h.install_id) AS installs, COUNT(*) AS install_days, SUM(h.canvas_opens = 0) AS days_without_a_diagram FROM heartbeats h, json_each(h.features) j WHERE COALESCE(h.dev, 0) = 0 AND h.day >= date('now','-28 days') AND (j.key LIKE 'domainCreatedExternal_%' OR j.key LIKE 'modelChangedExternal%') GROUP BY 1 ORDER BY 1"
+```
+
+**Whether models are shared** (added after 2.0.7, #332). `firstRunHasDiagrams`
+sees only a machine's very first run, so a teammate who opened any other
+folder first was never counted, and nothing said whether a model sits in Git
+at all. Four presence flags, from `src/services/modelShareTelemetry.ts`
+(vscode-free) and `src/services/gitExtensionApi.ts`. Nothing leaves but
+which key applies: never a remote URL, a branch, a commit, an author, a name
+or a path. Commit authors are not read (that part of #332 is left to Liam).
+
+- `sharedModelFirstOpened` — the first ERD Studio activation in a workspace (on this machine) whose project already has a model: diagrams, or tables in the Table Library. Nothing this machine did in ERD Studio made it, so it came with the folder: the **arrival** count. Decided once per workspace (`erdStudio.telemetry.sharedModelDecided` in `workspaceState`, written on every machine whether telemetry is on or not, so turning it on later cannot produce a false arrival). Unlike `firstRunHasDiagrams` it need not be the machine's first run. On the onboarding trail.
+- `modelInGit` — once a day per workspace, about 20 s after activation: the model folder (`.erd-studio`) is in a Git repository. Off the trail.
+- `modelNotInGit` — the model folder is in no Git repository: no `.git` from it upwards, and the Git extension has none open there. Off the trail.
+- `modelRepoHasRemote` — with `modelInGit`: that repository names a remote (the Git extension lists one, or its config has a `[remote "…"]` section, in any case, as git reads section names; only that the section exists is read). Off the trail.
+
+How the repository is read: the built-in Git extension is asked first, only
+when it is already running (ERD Studio never activates it and never calls
+`openRepository`), waiting at most 5 s for its start-up; then the
+repository's own files, walking up from the model folder as git does (shared
+with #329's look; a linked worktree's or submodule's `.git` file is followed
+to its config). The files answer for the repositories the extension has not
+opened: a dbt project in a sub-folder of its repo while
+`git.openRepositoryInParentFolders` is still waiting on its prompt, automatic
+detection off, Git turned off or missing. Nothing is read while telemetry is
+off or when the workspace has no model folder.
+
+Limits to keep in mind when reading them:
+
+- **An arrival is "ERD Studio had never run in this workspace before", not "someone else wrote it".** A second clone of your own repository counts, and so does a model your AI assistant wrote before ERD Studio ever ran in that folder. The window **Open an Example Project…** opens is never one (ERD Studio wrote that model itself: its hand-off record is checked); a clone of the sample repository from **Try the Sample Project** is (nothing in the new window can tell it apart without reading the remote's URL), so read arrivals beside `trySampleCloned` on the same install. A folder where ERD Studio ran before the model was committed or pulled never counts (that undercounts teammates who opened the repository early).
+- **The release week is not a spike.** A workspace where any earlier ERD Studio left state (every workspace it ran in with telemetry on since 1.7.2 has the physical tooling day) is decided without a count, so upgrading authors are not arrivals.
+- Neither `modelInGit` nor `modelNotInGit` means unknown: the Git extension gave no answer and the repository's files could not be read. It is never reported as not in Git.
+- A gitignored `.erd-studio` inside a repository still counts as `modelInGit`: the flag says the folder sits in a repository, not that it is committed. A repository tracking a whole home folder makes every project under it `modelInGit`.
+- One day can carry both `modelInGit` and `modelNotInGit` (two workspaces, one in a repository): count installs per key, never assume they exclude each other.
+- A busy day (an oversized body) keeps them: the size guard (`trimHeartbeat`) never drops them.
+
+```bash
+# Arrivals per week, and how many installs have a model in Git / with a remote (last 28 days)
+npx wrangler d1 execute erd-studio-telemetry --remote --command \
+  "SELECT date(h.day,'weekday 0','-6 days') AS wk, j.key, COUNT(DISTINCT h.install_id) AS installs FROM heartbeats h, json_each(h.features) j WHERE COALESCE(h.dev, 0) = 0 AND h.day >= date('now','-28 days') AND j.key IN ('sharedModelFirstOpened','modelInGit','modelNotInGit','modelRepoHasRemote','modelChangedExternalGit') GROUP BY 1, 2 ORDER BY 1, 2"
+```
+
+**How long a diagram takes to open** (added after 2.0.7, #333). The only
+keys that saw a slow open fired past fixed limits (`canvasLoadOver20s` at
+20 s, `readySlowOver10s` at 10 s), so an open of 2 to 15 s, what a 500-table
+diagram takes on a slow machine, left no trace, and nothing said whether the
+open had to read the table files from disk. These keys say it, once a day
+for the **slowest** open of that day: one `canvasLoad*` key and at most one
+`canvasPaint*` key per install-day (a later interim copy replaces the earlier
+one, so the stored row has only the slowest), never a time. Off the
+onboarding trail, except the first `canvasLoadOver20s` of a day, which keeps
+its trail event from 2.0.0.
+
+- `canvasLoadUnder1s` — the slowest diagram open of the day took under 1 s on the extension host, from the page's `ready` to the diagram posted (the same span `canvasLoadOver20s` always measured). A load that posted no diagram (a file that does not read) records nothing; a Retry, or the page loaded again after a crash, is an open.
+- `canvasLoad1to5s` — it took 1 to 5 s (the layout keys' edges: 1,000 ms is here, 5,000 ms too).
+- `canvasLoad5to20s` — it took over 5 s and at most 20 s. Over 20 s is `canvasLoadOver20s`, above.
+- `canvasLoadCold` — with the day's `canvasLoad*` key: an open in that range read at least one table file from disk (a cache miss for a `.yml` or `.dbml` table file, counted by `TableLibraryService.tableFileReads()` across the load, so it costs no extra look at the library). Without it, every open in that range found its tables already read. A faster open never sets it. Two diagrams opening at once (a window restored with both) can each count the other's reads: both were slowed by them.
+- `canvasPaintUnder1s` — the slowest first paint of the day took under 1 s in the webview, from the page receiving its first diagram to the paint after React Flow measured its tables (the page's own clock, never compared with the host's). Once per page load: a refresh, an undo or a stage switch is not timed. A page hidden at any point in between (behind another tab, or the window hidden) sends nothing, so a diagram restored in a background tab does not read as slow.
+- `canvasPaint1to5s` — it took 1 to 5 s.
+- `canvasPaintOver5s` — it took over 5 s. The page sends at most 10 minutes; a longer time is sent as 10 minutes.
+
+Read them beside the size keys (#331, `diagramTables*` and `model_count`) and
+`os`: they say how long real diagrams of each size take on each OS. The
+paint is absent on a day whose only opens were hidden or failed; the
+Confluence viewer never sends one. A busy day (an oversized body) keeps them:
+the size guard (`trimHeartbeat`) never drops them.
+
+```bash
+# How long the slowest open took, per OS and diagram size, over the last 28 days (install-days with each range; for a load range, how many were cold)
+npx wrangler d1 execute erd-studio-telemetry --remote --command \
+  "SELECT h.os, h.model_count, j.key, COUNT(*) AS install_days, COUNT(DISTINCT h.install_id) AS installs, SUM(j.key LIKE 'canvasLoad%' AND json_extract(h.features,'$.canvasLoadCold') IS NOT NULL) AS cold_loads FROM heartbeats h, json_each(h.features) j WHERE COALESCE(h.dev, 0) = 0 AND h.day >= date('now','-28 days') AND (j.key LIKE 'canvasLoad%' OR j.key LIKE 'canvasPaint%') AND j.key <> 'canvasLoadCold' GROUP BY 1, 2, 3 ORDER BY 1, 2, 3"
+```
+
 ## The local archive
 
 Because D1 keeps raw rows for only 90 days, the operator's machine keeps
@@ -1817,8 +1969,9 @@ One anonymous heartbeat per UTC day, describing the **previous** day, plus (2.0)
 - **Size guard (2.0, B3).** Every body passes `trimHeartbeat()` before `logUsage`: over `HEARTBEAT_SOFT_LIMIT` = 15,000 bytes (under the Worker's old 16,384 cap as well as the new 32,768), it loses `trail` and `trailDropped` together (the Worker refuses one without the other), then feature keys counted once, then other feature keys, then error codes, each newest first, until it fits, and gains `heartbeatTrimmed`. The flag is set in the body only: today's counters describe a different day from the one trimmed.
 - **Updates and internal installs (2.0, B5).** `notePendingUpdate()` runs in `activate()` before the update reload can return, and stores `erdStudio.telemetry.pendingUpdate` = `{ major }` (never a version); the next `start()` clears it and counts `extUpdated` (plus `extUpdatedMajor`). `stampEnv` runs before each reducer and sets `versionMixed` when another extension version had already counted something today (the env `nextDay` carries over to an empty day does not count). `process.env.ERD_STUDIO_INTERNAL === '1'`, read once in the constructor, is ORed into `dev`; there is no setting. A major update (`{ major: true }`) also stores `erdStudio.telemetry.majorSeenDay` = that start's UTC day (never a version, never sent; only while telemetry is on, cleared on opt-out with the rest): `trailKept` and `onboardingWindowDay` keep the trail and the onboarding interim copies for `TRAIL_DAYS` from it (`withinTrailDays`), with the same codes and caps as a first week. A minor or patch update never writes it; a later major update moves it to its own day. One reader outside telemetry: `majorUpdateRecorded()` tells the major update notice's one catch-up look (`src/services/majorUpdateNotice.ts`) whether the day is set, for a machine that updated before the notice existed; only that it is set is used, nothing is sent, and the notice's own rule (the version last activated) never depends on telemetry.
 - **Time to first draft and diagram (2.0, B15).** `featureOnce('firstRun')` stores `erdStudio.telemetry.firstRunAt` (epoch ms, never sent). The first `draftSource*` feature (`FIRST_DRAFT_FEATURES`, the draft preview's non-example sources) and the first `canvasOpened` with tables each record one `ttf*` bucket (`ttfFeature`), once per install (`firstDraftDone` / `firstDiagramDone`); installs without a `firstRunAt` (from before 2.0) are never timed. `withTrail` puts `dayContinued` first when today's trail begins in a window activated on an earlier UTC day. `discard()` also clears the interim record, the pending update, `firstRunAt` and both done flags.
-- **Call sites** use the `telemetry` facade — one short line each, taking only fixed keys, booleans and counts, and a no-op while no service exists (tests, the CLI, the MCP server). Canvas edit kinds are counted in one place, the `EDIT_FEATURES` map in `SemanticEditorProvider` (one per accepted message, after the physical guard); layout timing comes from the webview's `layoutFinished` message (telemetry only, physical allowlist) and video progress from the Welcome panel's `videoProgress`. Detected assistants (`detectAiAssistants()`, deferred off the activation path) and version-marked harness targets are recorded on activation; `domainCreatedExternal` comes from the semantic watcher's `created` flag, with `subjectAreasCreatedHere` excluding createDomain / renameDomain, which write outside the own-write tracker. They live in `extension.ts` (activation outcome, Draw from dbt via `src/commands/drawFromDbt.ts`, Export Diagram via `src/commands/exportDiagram.ts`, harness installs via `recordHarnessInstalls`, `migrateToV5`, `layersInvalid`, the no-canvas Send Feedback), `SemanticEditorProvider` (canvas open on `ready` with stage / format / model count / manifest state / catalog, physical stage, compare, sync plan, dbt compile, Execute with Claude, notes, host-requested auto layout, add model / relationship, `addModelsFromDbt` (`addFromDbt`), a logical canvas opening on zero models (`emptyCanvas`), feedback dialog open, `domainLoad`, `editRejected`) and `GettingStartedPanel` (the Claude setup-skill install). Services the CLI and MCP server share stay vscode-free: `ManifestService` (`onLoadFailure`: missing / malformed / timeout — `ManifestParseTimeoutError`), `CatalogService` (`onReadFailure`) and `TableLibraryService` (`onParseFailure`, once per broken file) take a plain callback that only `activate()` sets. The generic `agents` harness target is counted as `harnessInstallAgents`. `runDbtParse` / `runDbtCompile` record fixed outcome and category keys only (`DBT_PARSE_FAILURE_FEATURES`, `NO_CREDS_ADAPTER_FEATURES`); dbt's output stays in memory and in the user's terminal, and their own errors are `dbtRunFailed` with nothing but `err.name` in the log.
+- **Call sites** use the `telemetry` facade — one short line each, taking only fixed keys, booleans and counts, and a no-op while no service exists (tests, the CLI, the MCP server). Canvas edit kinds are counted in one place, the `EDIT_FEATURES` map in `SemanticEditorProvider` (one per accepted message, after the physical guard); layout timing comes from the webview's `layoutFinished` message (telemetry only, physical allowlist) and video progress from the Welcome panel's `videoProgress`. Detected assistants (`detectAiAssistants()`, deferred off the activation path) and version-marked harness targets are recorded on activation; `domainCreatedExternal` comes from the semantic watcher's `created` flag, with `subjectAreasCreatedHere` excluding createDomain / renameDomain, which write outside the own-write tracker. Where an outside change came from (#329: `domainCreatedExternalGit` / `Local` / `NoGit` beside it, and `modelChangedExternal*` for the table, relationships and diagram watchers' other outside changes) is `OutsideChangeRecorder` (`src/services/outsideChange.ts`, no `vscode`), fed by those four watcher listeners, by `onDidSaveTextDocument` (skipping ERD Studio's own saves) and by `onDidRenameFiles` / `onDidDeleteFiles`: one look at HEAD's files per burst, three seconds after it, recorded with `featureQuiet(key, true)`. They live in `extension.ts` (activation outcome, Draw from dbt via `src/commands/drawFromDbt.ts`, Export Diagram via `src/commands/exportDiagram.ts`, harness installs via `recordHarnessInstalls`, `migrateToV5`, `layersInvalid`, the no-canvas Send Feedback), `SemanticEditorProvider` (canvas open on `ready` with stage / format / model count / manifest state / catalog, physical stage, compare, sync plan, dbt compile, Execute with Claude, notes, host-requested auto layout, add model / relationship, `addModelsFromDbt` (`addFromDbt`), a logical canvas opening on zero models (`emptyCanvas`), feedback dialog open, `domainLoad`, `editRejected`) and `GettingStartedPanel` (the Claude setup-skill install). Services the CLI and MCP server share stay vscode-free: `ManifestService` (`onLoadFailure`: missing / malformed / timeout — `ManifestParseTimeoutError`), `CatalogService` (`onReadFailure`) and `TableLibraryService` (`onParseFailure`, once per broken file) take a plain callback that only `activate()` sets. The generic `agents` harness target is counted as `harnessInstallAgents`. `runDbtParse` / `runDbtCompile` record fixed outcome and category keys only (`DBT_PARSE_FAILURE_FEATURES`, `NO_CREDS_ADAPTER_FEATURES`); dbt's output stays in memory and in the user's terminal, and their own errors are `dbtRunFailed` with nothing but `err.name` in the log.
 - **Physical tooling** — how the workspaces ERD Studio is used in build their tables, so the Physical stage learns the most-used non-dbt sources first. `src/services/physicalTooling.ts` (pure, vscode-free, every file access through an injected `ToolingProbe`) returns subsets of `PHYSICAL_TOOLS` / `PLATFORMS` and nothing else: marker file names (`dbt_project.yml`, `databricks.yml`, `*.sqlproj`, Fabric `<item>.<Type>/.platform`, `*.pbip`, `flyway.conf`, `schema.prisma`, …), plus a fixed pattern in the head of a few small files — `CREATE TABLE` in up to 40 `.sql` files (not under `macros/`), a Databricks notebook header, SQLMesh's `gateways:` / `model_defaults:`, a SQL project's `<DSP>`, a `dbt-<adapter>` package, a `.dbml` that is not our own export. The dbt warehouse comes from the first 8 KB of `manifest.json` (`metadata.adapter_type`); dbt's `profiles.yml` (credentials) is never read. `recordPhysicalTooling(context)` in `extension.ts` runs it 15 s after both activation outcomes (`no_project` too: outside dbt repos ERD Studio activates only when someone opens it), once per workspace per UTC day (`erdStudio.telemetry.physicalToolingDay` in `workspaceState`), and not at all while `telemetry.enabled()` is false; `vscode.workspace.findFiles` with `TOOLING_EXCLUDE` (dependencies, build output, virtual environments, `.erd-studio`). Unlike `assistants`, `nextDay` does not carry it over — it describes workspaces, not the machine. `test/unit/physicalTooling.test.ts` drives it over an in-memory workspace through the real globs and asserts nothing but allowlisted values comes back.
+- **Whether models are shared (#332)** — `src/services/modelShareTelemetry.ts` (vscode-free: the arrival rule, the key mapping, and the repository's files through #329's `findGitDirs`, reading only whether the config has a `[remote "…"]` section) and `src/services/gitExtensionApi.ts` (the built-in Git extension's API, typed by the three members used; used only when the extension is already running and `enabled`; never `activate()`, never `openRepository`). `extension.ts` snapshots `workspaceState.keys()` at the top of `activateInner` (any earlier ERD Studio state means "ran here before"; a Memento that cannot list its keys reads the same way), decides the arrival once after the diagrams are listed (never in the window an Example Project's hand-off opened: `takePendingExample`) and writes `erdStudio.telemetry.sharedModelDecided`; `recordModelRepo()` looks 20 s after activation, once per workspace per UTC day (`erdStudio.telemetry.modelRepoDay`), only while `telemetry.enabled()` and the model folder exists. `test/unit/modelShareTelemetry.test.ts` pins the rules and that no URL or path reaches a heartbeat.
 - **Relationship health (#133)** — `src/services/relationshipHealth.ts` (pure, vscode-free, linear, never throws, returns fixed codes and counts only): `commitRelationshipWrite` runs `auditRelationshipWrite(op, input, plan)` on the planned result inside the `applySubjectAreaEdit` mutator, **before** `applyEdit` — broken invariants go to `telemetry.relationshipInvariants` (`relInv*` errors) plus one `console.warn` of codes; it **never blocks or alters the edit** — and, on success, the behaviours used to `telemetry.relationshipUsage` (`relDragTurned` = a one-to-many drawn in a library project, stored turned; `relDirectionAsked` / `relCreateAnyway` are read at the host from the payload and key evidence, so no telemetry message was added). The Move runs `checkLibraryRewrite` before writing and records `moveUsage(plan)` on completion; `recordCanvasOpen` (logical) records `surveyLibrary` as once-a-day `relState*` presence flags. Refusals the user is told about throw `EditRefused` (provider) or `RelationshipsRewriteRefused` (`TableLibraryService`, which also calls `onSyncRefused` → `relSyncRefused`); only other throws in a relationship handler count as `relHandlerFailed`. `planRelationshipWrite`'s keys-win refusal carries `reason: 'keysWin'` (→ `relSwapRefusedKey`). Invariant groups come from what the canvas draws (as `drawnGroupOf`), so `relationshipHealth.statespace.test.ts` holds the check silent over the exhaustive checker's universes — a new false positive fails CI. Monitoring queries and the release checklist are in `telemetry/README.md`.
 - **Known fixes ("a newer version fixes this").** `telemetry/known-fixes.json` (format in `telemetry/README.md` → Known-fixes registry; `test/unit/knownFixesRegistry.test.ts` validates it) lists `{ code, fixedIn, summary, issue? }` entries; the Worker bundles it and serves it at `GET /known-fixes` (static, never logged), so a merged entry goes live with the next Worker deploy, no extension release. `src/services/knownFixes.ts` (pure, vscode-free, every dependency injected: `KnownFixesChecker`, `parseKnownFixes`, `fixFor` — newest unfixed entry wins, `knownFixProblem`) and `src/services/knownFixesService.ts` (`startKnownFixes`, called right after the `TelemetryService` in `activate()`, `KNOWN_FIXES_ENDPOINT`, `installedVersions` — sibling `liamwynne.erd-studio-*` folders minus `.obsolete`, for **Reload Window** instead of **Update**). The telemetry facade calls `setErrorCodeListener`'s listener from `telemetry.error()` and `relationshipInvariants()` **before** the telemetry switches are consulted: the check sends nothing about the user (one GET of the whole list, no query, once per session, 24 h `globalState` cache, 3 s timeout, every failure silent), so its only switch is `erdStudio.checkKnownFixes`. At most one notification per code per running version (`erdStudio.knownFixes.shown`). Only entries with `fixedIn` after the first release carrying the prompt can ever fire.
 - **`telemetry/`** is the Cloudflare Worker behind `TELEMETRY_ENDPOINT` — separate from `proxy/`, on the same terms except deployment: `deploy.yml`'s `telemetry-worker` job applies its tracked D1 migrations (`wrangler d1 migrations apply`, recorded in `d1_migrations`; `schema.sql` is the reference shape, held to `migrations/` and the Worker's `INSERT` by `telemetry/test/schema.test.mjs`) and deploys it whenever `main`'s `telemetry/` differs from the `telemetry-worker-deployed` tag, before and as a gate on the extension release (secrets `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`; manual fallback in its README), a D1 database (`erd-studio-telemetry`) with a daily cron that deletes raw rows older than 90 days (only per-day aggregates without install ids are archived), no IP / user-agent / header ever stored, excluded from the VSIX by `.vscodeignore`, and never a dependency of `esbuild.js`, the tsconfigs, vitest or the npm scripts.

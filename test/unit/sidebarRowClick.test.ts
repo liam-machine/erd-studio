@@ -10,7 +10,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import * as vscode from 'vscode';
 
-import { DOUBLE_CLICK_MS, RowActivations, chooseDiagram, diagramTheClickChooses, rowActivationKey } from '../../src/commands/sidebarRowClick';
+import { DOUBLE_CLICK_MS, PendingOpens, RowActivations, TEXT_EDITOR_ID, chooseDiagram, diagramRowFile, diagramTheClickChooses, openDiagramFile, rowActivationKey } from '../../src/commands/sidebarRowClick';
 import { noDiagramYetMessage, openInDiagram, openTableFile, type RelationshipsViewDeps } from '../../src/commands/relationshipsView';
 import type { RelationshipNode } from '../../src/providers/RelationshipsTreeProvider';
 import type { TableLibraryTableNode } from '../../src/providers/ModelLibraryTreeProvider';
@@ -262,5 +262,58 @@ describe('RowActivations: a double-click in a view without one', () => {
     expect(rel('p1')).toBe(rel('p1'));
     expect(rel('p1')).not.toBe(rel('p2'));
     expect(rowActivationKey({ type: 'layer' })).toBeUndefined();
+  });
+});
+
+describe('a diagram row\'s double-click: its file as text', () => {
+  const row = { type: 'domain', summary: { domain: 'sales', layer: 'gold', filePath: SALES }, modelCount: 3 };
+
+  beforeEach(() => { vi.restoreAllMocks(); });
+
+  it('opens the diagram\'s file in the text editor, never the canvas, and keeps the tab', async () => {
+    const exec = vi.spyOn(vscode.commands, 'executeCommand').mockResolvedValue(undefined);
+    await openDiagramFile(row);
+    expect(exec).toHaveBeenCalledTimes(1);
+    const [command, uri, editor, options] = exec.mock.calls[0] as [string, vscode.Uri, string, unknown];
+    expect(command).toBe('vscode.openWith');
+    expect(uri.fsPath).toBe(SALES);
+    expect(editor).toBe(TEXT_EDITOR_ID);
+    expect(editor).toBe('default');
+    expect(options).toEqual({ preview: false });
+  });
+
+  it('only a diagram row has a file to open: anything else says how, and opens nothing', async () => {
+    expect(diagramRowFile(row)).toBe(SALES);
+    for (const other of [undefined, null, 'x', { type: 'layer', layer: 'gold' }, { type: 'model', filePath: '/p/a.dbml' }, { type: 'domain' }, { type: 'domain', summary: { filePath: '' } }]) {
+      expect(diagramRowFile(other)).toBeUndefined();
+    }
+    const exec = vi.spyOn(vscode.commands, 'executeCommand').mockResolvedValue(undefined);
+    const error = vi.spyOn(vscode.window, 'showErrorMessage');
+    await openDiagramFile({ type: 'layer', layer: 'gold' });
+    expect(exec).not.toHaveBeenCalled();
+    expect(String(error.mock.calls[0][0])).toContain('Double-click a diagram');
+  });
+
+  it('PendingOpens: the text waits for the click\'s canvas to land, at once when nothing is opening, and never for ever', async () => {
+    const opens = new PendingOpens();
+    await opens.settle();
+    const order: string[] = [];
+    let land!: () => void;
+    const canvas = opens.track(new Promise<void>((resolve) => { land = () => { order.push('canvas'); resolve(); }; }));
+    const text = opens.settle().then(() => { order.push('text'); });
+    await Promise.resolve();
+    expect(order).toEqual([]);
+    land();
+    await canvas;
+    await text;
+    expect(order).toEqual(['canvas', 'text']);
+    // Settled opens are forgotten; a failed open is not waited on either.
+    await opens.track(Promise.reject(new Error('no'))).catch(() => undefined);
+    await opens.settle();
+    // An open that never lands holds the text only as long as the wait.
+    void opens.track(new Promise<void>(() => undefined));
+    const t = Date.now();
+    await opens.settle(30);
+    expect(Date.now() - t).toBeLessThan(1000);
   });
 });

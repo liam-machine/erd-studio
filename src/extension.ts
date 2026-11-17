@@ -18,7 +18,20 @@ import { CodeOwnersReader } from './services/codeOwners';
 import { tableHomesById, tableHomesOf, type TableHome } from './services/tableHomes';
 import { tableUsageOf, type TableUsageKeys } from './services/sidebarTables';
 import { tablesOfTreeDrop } from './services/tableDrop';
-import { FileWatcherService } from './watchers/FileWatcherService';
+import { distinctTableCount } from './services/tableLibraryIndex';
+import { FileWatcherService, classifyWatchedSemanticPath } from './watchers/FileWatcherService';
+import { OutsideChangeRecorder, type OutsideChangeKind } from './services/outsideChange';
+import {
+  GIT_API_WAIT_MS,
+  MODEL_REPO_DAY_KEY,
+  MODEL_REPO_DELAY_MS,
+  SHARED_MODEL_DECIDED_KEY,
+  detectModelRepo,
+  isSharedModelArrival,
+  modelRepoCheckDue,
+  modelRepoFeatures,
+} from './services/modelShareTelemetry';
+import { askGitExtension } from './services/gitExtensionApi';
 import { HarnessService, HARNESS_TARGETS, HARNESS_VERSION, extractHarnessVersion, recommendedHookAssistants, type HarnessInstallResult, type HarnessTarget } from './services/harnessService';
 import { SelectorsService } from './services/selectorsService';
 import { LegacyTagCleanupService } from './services/legacyTagCleanupService';
@@ -157,7 +170,7 @@ import { registerRowDetails } from './providers/rowDetails';
 import { installContextKeyRecorder } from './providers/glassSidebar/contextKeys';
 import { FOCUS_GLASS_SEARCH_COMMAND, TOGGLE_GLASS_SIDEBAR_COMMAND, glassSidebarEnabled, registerGlassSidebar } from './providers/glassSidebar/GlassSidebarProvider';
 import { diagramsShowing, openInDiagram, openRelationshipSource, openTableFile, type RelationshipsViewDeps } from './commands/relationshipsView';
-import { RowActivations, diagramTheClickChooses, rowActivationKey } from './commands/sidebarRowClick';
+import { PendingOpens, RowActivations, diagramTheClickChooses, openDiagramFile, rowActivationKey } from './commands/sidebarRowClick';
 import {
   ADD_TO_DIAGRAM_COMMAND,
   ADD_TO_OPEN_DIAGRAM_COMMAND,
@@ -232,7 +245,7 @@ import { onDbmlFilesRenamed, type ExplorerMoveDeps } from './commands/explorerMo
 import { semanticReadmeCreate } from './services/semanticReadme';
 import { applyFileWrites } from './providers/applyFileWrites';
 import type { FileWrite } from './services/fileWrites';
-import { saveDocumentByUri } from './providers/documentSave';
+import { isErdStudioSaving, saveDocumentByUri } from './providers/documentSave';
 import { dirtyFiles, openOrDiskText } from './providers/dirtyDocuments';
 import { log, elapsedMs, setLogSink } from './services/logger';
 import { registerDbmlFormatting } from './providers/dbmlFormattingProvider';
@@ -722,6 +735,48 @@ function recordPhysicalTooling(context: vscode.ExtensionContext, session?: { roo
   } catch { /* telemetry must never break activation */ }
 }
 
+/**
+ * Usage telemetry (#332): whether the model folder is in a Git repository and
+ * whether that has a remote (`detectModelRepo()`), as fixed flags. Once per
+ * workspace per UTC day, off the activation path, only while telemetry is on
+ * and the model folder exists. The Git extension is asked only when it is
+ * already running; nothing in the project is written (only the day, in
+ * workspaceState), and no URL, path or name is sent.
+ */
+function recordModelRepo(context: vscode.ExtensionContext, modelDir: string): void {
+  try {
+    const today = new Date().toISOString().slice(0, 10);
+    const due = modelRepoCheckDue({
+      enabled: telemetry.enabled(),
+      folderExists: fs.existsSync(modelDir),
+      lastDay: context.workspaceState.get<string>(MODEL_REPO_DAY_KEY),
+      today,
+    });
+    if (!due) return;
+    setTimeout(() => {
+      void detectModelRepo(modelDir, { askGit: (dir) => askGitExtension(dir, GIT_API_WAIT_MS) }).then((repo) => {
+        const keys = modelRepoFeatures(repo);
+        if (keys.length === 0) return; // no answer: look again in a later window
+        for (const key of keys) telemetry.featureQuiet(key, true);
+        void context.workspaceState.update(MODEL_REPO_DAY_KEY, today);
+      }, () => { /* telemetry must never break activation */ });
+    }, MODEL_REPO_DELAY_MS);
+  } catch { /* telemetry must never break activation */ }
+}
+
+/**
+ * Whether an earlier activation (any version) left state in this workspace
+ * (#332's arrival never counts such a workspace). A Memento that cannot list
+ * its keys reads as "yes", so nothing is counted on a guess.
+ */
+function workspaceHasErdState(state: vscode.Memento): boolean {
+  try {
+    return state.keys().length > 0;
+  } catch {
+    return true;
+  }
+}
+
 function hostToolingProbe(): ToolingProbe {
   const exclude = toolingExclude(getErdStudioSetting('semanticDir', '.erd-studio'));
   return {
@@ -876,6 +931,7 @@ export const NO_LEGACY_ALIAS = new Set([
   'erdStudio.openRelationshipSource',
   'erdStudio.openInDiagram',
   'erdStudio.openTableFile',
+  'erdStudio.openDiagramFile',
   'erdStudio.showOnAnotherDiagram',
   'erdStudio.groupRelationshipsByFile',
   'erdStudio.groupRelationshipsByTable',
@@ -1353,6 +1409,9 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
   // The ERD Studio output channel (a LogOutputChannel: the user picks its
   // level). Plugged in first so every later line reaches it.
   const activationStart = Date.now();
+  // #332: read before anything below writes workspaceState, so the arrival
+  // (sharedModelFirstOpened) can tell this workspace's first activation apart.
+  const ranHereBefore = workspaceHasErdState(context.workspaceState);
   // The glass sidebar (prototype) evaluates the views' `when` clauses itself:
   // mirror every erdStudio.* setContext from here on (each still reaches VS
   // Code unchanged). Its view and toggle are registered below, before the
@@ -2005,8 +2064,10 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     emptyDiagramsViewShown = true;
     // Its start variants follow the suggestion, so look now (deferred: this
     // can be the first listing, still inside activation) and count what it shows.
+    // The view says "Looking at your folder…" meanwhile, so the look gets the
+    // longer on-screen time (#328), and stretches a look an unseen ask started.
     setTimeout(() => {
-      void startIntent.refresh().then((intent) => {
+      void startIntent.refresh({ onScreen: true }).then((intent) => {
         if (intent) recordStartSuggested(intent);
         onEmptyDiagramsViewShown();
       });
@@ -2101,6 +2162,8 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     void context.workspaceState.update(RELATIONSHIPS_GROUPING_KEY, grouping);
     void vscode.commands.executeCommand('setContext', 'erdStudio.relationshipsGrouping', grouping);
   };
+  // Diagram opens under way: a diagram row's double-click (its file as text) waits for its click's canvas.
+  const diagramOpens = new PendingOpens();
   const editorProvider = new SemanticEditorProvider(
     context,
     subjectAreaService,
@@ -2358,7 +2421,18 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     if (!target) { return; }
     await vscode.commands.executeCommand('erdStudio.openDomain', target);
   };
-  telemetry.activation('project_found', fs.existsSync(fullSemanticDirPath), subjectAreaService.listSubjectAreas(workspaceRoot, semanticDir).length);
+  const activatedWithSemanticDir = fs.existsSync(fullSemanticDirPath);
+  telemetry.activation('project_found', activatedWithSemanticDir, subjectAreaService.listSubjectAreas(workspaceRoot, semanticDir).length);
+  // #331: the Table Library's size, as a range, once per window (never on a
+  // refresh). Only where an ERD folder exists, so libraryTablesNone means an
+  // empty library rather than a folder with no ERD Studio in it.
+  if (activatedWithSemanticDir) {
+    try {
+      telemetry.libraryTables(distinctTableCount(tableLibraryService.listTableFiles()));
+    } catch (err) {
+      log.warn('[ERD Studio] Counting the Table Library for usage telemetry failed:', err);
+    }
+  }
   // Every window's outcome, not only the day's last (`activation`).
   telemetry.feature(hasDbt ? 'activatedDbt' : 'activatedLogical');
   // A presence flag, once a day: activation resolved a root without dbt_project.yml.
@@ -2383,6 +2457,7 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
   }
   recordDetectedAssistants();
   recordPhysicalTooling(context, { root: workspaceRoot, hasDbt });
+  recordModelRepo(context, fullSemanticDirPath);
 
   // Surface a broken layers.json once per distinct error. LayerService falls
   // back to default layers in memory but refuses to overwrite the file, so the
@@ -2496,10 +2571,29 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     await editorProvider.refreshAllOpenSubjectAreas();
   }));
 
+  // Usage telemetry (#329): where each outside change below came from (git,
+  // a save in this window, the disk, or no readable repository), as presence
+  // keys. One look at the repository's HEAD per burst, a few seconds after
+  // it; never throws into a refresh, and reads nothing while telemetry is off.
+  const outsideChanges = new OutsideChangeRecorder({
+    repoFrom: fullSemanticDirPath,
+    enabled: () => telemetry.enabled(),
+    record: (feature) => telemetry.featureQuiet(feature, true),
+    // A canvas's undo or redo brings back (or removes) files with no own write recorded.
+    restoredAt: () => editorProvider.lastUndoRedoAt(),
+  });
+  const noteOutsideChange = (kind: OutsideChangeKind, fsPath: string): void => {
+    // A file Convert Project to DBML deleted is back: Edit > Undo of Convert,
+    // which also deletes the .dbml files it wrote. None of it is counted.
+    if (convertedSourcesHere.has(path.resolve(fsPath))) outsideChanges.noteRestored();
+    outsideChanges.note(kind, fsPath);
+  };
+
   // A DBML relationships file changed externally: its Refs may belong to any
   // table (a Ref attaches wherever its owner is, from any file), so every open
   // canvas is redrawn (§5.4). Never a table event.
-  const relationshipsChangedSubscription = fileWatcherService.onRelationshipsChanged(guardRefresh('Table', async () => {
+  const relationshipsChangedSubscription = fileWatcherService.onRelationshipsChanged(guardRefresh('Table', async ({ uri }) => {
+    noteOutsideChange('change', uri.fsPath);
     draftGeneration.bump();
     tableLibraryService.invalidateRelationships();
     await editorProvider.refreshAllOpenSubjectAreas();
@@ -2555,7 +2649,15 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     // A domain file ERD Studio did not write appeared: an AI assistant, a hand
     // edit or a git pull. createDomain writes outside the own-write tracker,
     // so it marks its path in subjectAreasCreatedHere instead.
-    if (created && !subjectAreasCreatedHere.delete(uri.fsPath)) { telemetry.feature('domainCreatedExternal'); }
+    if (created) {
+      if (!subjectAreasCreatedHere.delete(uri.fsPath)) {
+        telemetry.feature('domainCreatedExternal');
+        noteOutsideChange('create', uri.fsPath);
+      }
+    } else if (classifyWatchedSemanticPath(fullSemanticDirPath, uri.fsPath) === 'domain') {
+      // An existing diagram file changed (a template or .sync-plan.json is not one).
+      noteOutsideChange('change', uri.fsPath);
+    }
     // A canvas showing "deleted or renamed" whose file is back redraws (#161).
     editorProvider.syncSubjectAreaFilePresence();
     // A canvas whose document is not following its file (left unsaved by a
@@ -2589,6 +2691,21 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     } catch (err) {
       log.warn('[ERD Studio] Could not check a saved file for relationships imports:', err);
     }
+    // #329: a file saved here that the watcher then reports is the editor's,
+    // not the disk's. ERD Studio's own saves are not.
+    if (document.uri.scheme === 'file' && !isErdStudioSaving(document.uri) && !ownWrites.isPending(document.uri.fsPath)) {
+      outsideChanges.noteHandledHere(document.uri.fsPath);
+    }
+  });
+  // #329: a file renamed or deleted in this window (the Explorer) is the editor's too.
+  const filesRenamedHereSubscription = vscode.workspace.onDidRenameFiles((event) => {
+    for (const { oldUri, newUri } of event.files) {
+      outsideChanges.noteHandledHere(oldUri.fsPath);
+      outsideChanges.noteHandledHere(newUri.fsPath);
+    }
+  });
+  const filesDeletedHereSubscription = vscode.workspace.onDidDeleteFiles((event) => {
+    for (const uri of event.files) outsideChanges.noteHandledHere(uri.fsPath);
   });
 
   // Rename Subject Area records its created and deleted files as own writes,
@@ -2743,6 +2860,7 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     // Project to DBML restores each .json as it deletes the .dbml) was not
     // removed: no selectors prompt for it.
     const removed = removedSubjectAreaPaths(uris.map((u) => u.fsPath), fs.existsSync);
+    for (const filePath of removed) noteOutsideChange('change', filePath);
     if (removed.length === 0) return;
     // selectors.yml is a dbt file: a plain folder has none to regenerate, and
     // the views above already show the diagram gone.
@@ -2790,6 +2908,8 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
   // reports 1,100 tables in one batch while it is still deleting files, and
   // per-table work listed the library again for every one of them.
   const logicalModelChangedSubscription = fileWatcherService.onTablesChanged(guardRefresh('Table', ({ tables: changed }) => {
+    // A created or deleted table file arrives here too: each is a change to the model.
+    for (const t of changed) noteOutsideChange('change', t.uri.fsPath);
     draftGeneration.bump();
     const names = changed.map((t) => t.modelName);
     // By name, and by each changed file's own path: a name two schema folders share is two files.
@@ -3417,6 +3537,9 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     foreignFormatSubscription,
     unreadFileSubscription,
     savedDocumentSubscription,
+    filesRenamedHereSubscription,
+    filesDeletedHereSubscription,
+    outsideChanges,
     { dispose: () => setRefreshFailureSink(undefined) },
     editorWroteSubscription,
     semanticDeletedSubscription,
@@ -3558,14 +3681,24 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
       // Table Library rows dropped on a diagram's row in the Diagrams view: the same write as Add to Diagram….
       // Where two schema folders share a name, the dragged rows' files say which tables.
       // The drag is used up here, so a later canvas drop never adds it again; it is the fallback when the drop names nothing.
-      treeProvider.setTablesDropHandler(async (filePath, tables, uris) => {
-        const remembered = editorProvider.takeRememberedLibraryDrag();
+      // The tables each drop found, for Try Again after its add failed (#335): the drag is used up by then.
+      // Keyed by the drop's own `tables` array, which Try Again hands back, so a retry from an older toast
+      // adds that drop's tables, never a later drop's. A retry never takes or times a drag again.
+      const treeDropsFound = new WeakMap<string[], { names: string[]; files?: string[] }>();
+      treeProvider.setTablesDropHandler(async (filePath, tables, uris, again) => {
+        const before = again ? treeDropsFound.get(tables) : undefined;
+        if (before) {
+          await addToDiagramDeps.addTables(filePath, before.names, before.files);
+          return true;
+        }
+        const remembered = again ? undefined : editorProvider.takeRememberedLibraryDrag();
         const found = tablesOfTreeDrop({ tables, uris }, tableLibraryService.listTableFiles(), {
           byFile: tableLibraryService.hasSharedNames(),
           ...(remembered ? { remembered } : {}),
         });
         if (!found) return false;
-        editorProvider.noteDropSeen('diagramsRow', filePath);
+        treeDropsFound.set(tables, { names: found.names, ...(found.files ? { files: found.files } : {}) });
+        if (!again) editorProvider.noteDropSeen('diagramsRow', filePath);
         await addToDiagramDeps.addTables(filePath, found.names, found.files);
         return true;
       });
@@ -4238,15 +4371,21 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
       // diagrams reuses one tab until an edit pins it. Without the option
       // `openWith` pins every tab. VS Code still pins it when the user has
       // `workbench.editor.enablePreview` off.
-      await vscode.commands.executeCommand(
+      // Tracked, so a diagram row's double-click (its file as text) waits for this open and lands on top of it.
+      await diagramOpens.track(Promise.resolve(vscode.commands.executeCommand(
         'vscode.openWith',
         fileUri,
         SUBJECT_AREA_EDITOR_VIEW_TYPE,
         { preview: true },
-      );
+      )));
       if (stage === 'physical') {
         editorProvider.switchStageForUri(fileUri, 'physical');
       }
+    }),
+    // A diagram row's double-click in the glass sidebar (`{ doubleClick: true }`): its file as text, once the click's own open has landed.
+    vscode.commands.registerCommand('erdStudio.openDiagramFile', async (node?: unknown, options?: unknown) => {
+      if (typeof options === 'object' && options !== null && (options as { doubleClick?: unknown }).doubleClick === true) await diagramOpens.settle();
+      await openDiagramFile(node);
     }),
     // Customise Fields…: open <semanticDir>/fields.yml, or an unsaved one
     // holding the starting set. Writes nothing (the user saves it).
@@ -5427,7 +5566,6 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
         canvasOpen: hasOpenSubjectAreaCanvas(),
         intent,
         exampleShownOnMachine: context.globalState.get<boolean>(EXAMPLE_DRAFT_SHOWN_KEY) === true,
-        lookUnfinished: startIntent.lookUnfinished(),
       });
       if (!kind || autoDraftAsked || draftPreview.isOpen()) return;
       // Another prompt had this window: the draft waits for a later one.
@@ -5484,6 +5622,23 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
   // unset, so they come in a folder that has something to work on.
   const quietActivation = !hasDbt && !fs.existsSync(fullSemanticDirPath);
   const existingDiagrams = subjectAreaService.listSubjectAreas(workspaceRoot, semanticDir);
+  // #332: the arrival. The first activation in this workspace, in a project
+  // that already has a model (diagrams or tables): it came with the folder,
+  // a teammate's clone most of the time. Decided once per workspace whether
+  // telemetry is on or not, so turning it on later never counts an old
+  // workspace; a workspace an earlier version ran in is never counted.
+  {
+    const alreadyDecided = context.workspaceState.get<boolean>(SHARED_MODEL_DECIDED_KEY) === true;
+    if (!alreadyDecided) {
+      try {
+        const hasModel = existingDiagrams.length > 0 || tableLibraryService.listTableFiles().length > 0;
+        // The example's own window (its hand-off is read again, and cleared, below).
+        const openedAsExample = takePendingExample(context.globalState.get(PENDING_EXAMPLE_OPEN_KEY), workspaceRoot, Date.now()) !== undefined;
+        if (isSharedModelArrival({ ranHereBefore, hasModel, alreadyDecided, openedAsExample })) telemetry.featureOnce('sharedModelFirstOpened');
+      } catch { /* telemetry must never break activation */ }
+      await context.workspaceState.update(SHARED_MODEL_DECIDED_KEY, true);
+    }
+  }
   /** A first run in a folder with no diagram: the window is left for the draft (Draft-first §3.4). */
   let firstRunLeftForDraft = false;
   {
@@ -5692,7 +5847,6 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
           void runStartSuggestion({
             intent: () => startIntent.refresh(),
             sqlTables: () => startIntent.sqlTableCount(),
-            lookUnfinished: () => startIntent.lookUnfinished(),
             dbtAbove: () => dbtProjectAboveOpenFolders(workspaceRoot, (vscode.workspace.workspaceFolders ?? []).map((f) => f.uri.fsPath)),
             hasDiagrams: () => subjectAreaService.listSubjectAreas(workspaceRoot, semanticDir).length > 0,
             settingOn: startSuggestionsSettingOn,

@@ -106,7 +106,7 @@ describe('opening a diagram is logged', () => {
     const redacted = redactPaths(lines.find((l) => l.startsWith(`[Canvas] Opened `))!);
     expect(redacted).toMatch(/^\[Canvas\] Opened \{project\}\/\.erd-studio\/\{layer\}\/diagrams\/\{diagram\}\.dbml: 6 tables posted/);
     expect(redacted).not.toMatch(/gold|sales/);
-    expect(lines.some((l) => new RegExp(`^\\[Canvas\\] Opened ${file.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}: 6 tables posted \\d+ ms after ready$`).test(l))).toBe(true);
+    expect(lines.some((l) => new RegExp(`^\\[Canvas\\] Opened ${file.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}: 6 tables posted \\d+ ms after ready; \\d+ table files? read from disk$`).test(l))).toBe(true);
   });
 
   it('a refresh logs its phases at debug only (not in the buffer Send Feedback offers)', async () => {

@@ -27,6 +27,8 @@ on:
       - '.github/**'
       - 'social-video/**'
       - '.claude/**'
+      # Checks the product manager routine's brief (.claude/routines); nothing in the VSIX.
+      - 'test/unit/productManagerRoutine.test.ts'
       # npm package release tooling (publish-packages.yml); nothing in the VSIX.
       - 'scripts/release-packages.mjs'
       - 'test/unit/releasePackages.test.ts'
@@ -104,6 +106,7 @@ jobs:
               - '!.github/**'
               - '!social-video/**'
               - '!.claude/**'
+              - '!test/unit/productManagerRoutine.test.ts'
               - '!scripts/release-packages.mjs'
               - '!test/unit/releasePackages.test.ts'
               - '!scripts/release.mjs'

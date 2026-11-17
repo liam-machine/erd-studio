@@ -30,9 +30,7 @@
  * found never leaves the machine: telemetry gets fixed keys only.
  *
  * Nothing concrete (a `blank` suggestion) gets no notification: the example
- * draft on the ERD Studio icon, once per machine, takes its place. A look
- * that ran out of time having found nothing is asked once more first (the
- * tracker's retry), so a large folder's scripts are still offered.
+ * draft on the ERD Studio icon, once per machine, takes its place.
  *
  * vscode-free: the look, the state, the notification and the commands are injected.
  */
@@ -266,12 +264,6 @@ export interface StartSuggestionDeps {
   intent(): Promise<StartIntent | undefined>;
   /** The CREATE TABLE count the look made, when exact. */
   sqlTables(): number | undefined;
-  /**
-   * The look ran out of time having found nothing (`StartIntentTracker.lookUnfinished`):
-   * a blank suggestion is not known yet, so {@link runStartSuggestion} asks once more
-   * (the tracker's retry, with more time) before giving up the window.
-   */
-  lookUnfinished?(): boolean;
   /** Whether the dbt project sits above every open folder (one of its subfolders, such as models/, was opened). */
   dbtAbove?(): boolean;
   /** Whether the folder has a diagram now (it may have one since activation). */
@@ -320,10 +312,6 @@ export async function runStartSuggestion(deps: StartSuggestionDeps): Promise<Sta
   let intent: StartIntent | undefined;
   try {
     intent = await deps.intent();
-    // The look ran out of time (a large folder, a slow drive, a busy start):
-    // ask again now, while this suggestion still holds the window, rather
-    // than leave the folder's start to a surface the user may never open.
-    if (!isConcreteSuggestion(intent) && deps.lookUnfinished?.() === true) intent = await deps.intent();
   } catch {
     return nothing;
   }

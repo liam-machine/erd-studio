@@ -2,7 +2,7 @@
   "name": "erd-studio",
   "displayName": "ERD Studio: Data Modeling & ER Diagrams in DBML",
   "description": "Draw ER diagrams and logical data models in VS Code. They live in Git as DBML, an open format your AI assistant reads and writes. Import SQL, Power BI, Fabric or DBML; compare with dbt.",
-  "version": "2.0.6",
+  "version": "2.0.8",
   "publisher": "liamwynne",
   "license": "SEE LICENSE IN LICENSE",
   "icon": "media/icon.png",
@@ -341,6 +341,12 @@
         "icon": "$(go-to-file)"
       },
       {
+        "command": "erdStudio.openDiagramFile",
+        "title": "Open Diagram File",
+        "category": "ERD Studio",
+        "icon": "$(go-to-file)"
+      },
+      {
         "command": "erdStudio.showOnAnotherDiagram",
         "title": "Show on Another Diagram…",
         "category": "ERD Studio"
@@ -603,7 +609,12 @@
       {
         "view": "erdStudio.domainTree",
         "contents": "Loading diagrams…",
-        "when": "erdStudio.hasProject && (erdStudio.diagramsLoading || (!erdStudio.hasDbtProject && erdStudio.storage != yaml && erdStudio.storage != mixed && !erdStudio.startIntent))"
+        "when": "erdStudio.hasProject && erdStudio.diagramsLoading"
+      },
+      {
+        "view": "erdStudio.domainTree",
+        "contents": "Looking at your folder…",
+        "when": "erdStudio.hasProject && !erdStudio.diagramsLoading && !erdStudio.hasDbtProject && erdStudio.storage != yaml && erdStudio.storage != mixed && !erdStudio.startIntent"
       },
       {
         "view": "erdStudio.domainTree",
@@ -1389,6 +1400,10 @@
           "when": "false"
         },
         {
+          "command": "erdStudio.openDiagramFile",
+          "when": "false"
+        },
+        {
           "command": "erdStudio.showOnAnotherDiagram",
           "when": "false"
         },
@@ -1715,7 +1730,7 @@
     "@dbml/core": "11.0.0",
     "@dbml/parse": "11.0.0",
     "@erd-studio/core": "0.5.1",
-    "@erd-studio/renderer": "0.5.2",
+    "@erd-studio/renderer": "0.5.3",
     "@xyflow/react": "^12.5.0",
     "elkjs": "^0.9.3",
     "react": "^18.3.0",

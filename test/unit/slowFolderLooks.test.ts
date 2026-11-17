@@ -219,15 +219,14 @@ describe('#295: the late start suggestion is counted', () => {
     return { t, published, feature };
   }
 
-  it('a retry after a timeout that turns blank into an import counts startLookLateSuggestion once', async () => {
+  it('a retry after a timeout that finds an import counts startLookLateSuggestion once (what the timeout would have cost; since #328 the same ask gets it)', async () => {
     vi.useFakeTimers();
     const { t, published, feature } = trackerWith(lookThatStalls(1, ['sqlDdl']));
     const first = t.refresh();
     await vi.advanceTimersByTimeAsync(START_LOOK_TIMEOUT_MS + 1);
-    expect(await first).toBe('blank');
+    expect(await first).toBe('importSqlDdl');
     expect(await t.refresh()).toBe('importSqlDdl');
-    expect(await t.refresh()).toBe('importSqlDdl');
-    expect(published).toEqual(['blank', 'importSqlDdl']);
+    expect(published).toEqual(['importSqlDdl']);
     expect(keys(feature)).toEqual(['startLookTimeout', 'startLookLateSuggestion']);
   });
 
@@ -243,7 +242,7 @@ describe('#295: the late start suggestion is counted', () => {
     const { t, published, feature } = trackerWith(lookThatStalls(1, []));
     const first = t.refresh();
     await vi.advanceTimersByTimeAsync(START_LOOK_TIMEOUT_MS + 1);
-    await first;
+    expect(await first).toBe('blank');
     expect(await t.refresh()).toBe('blank');
     expect(published).toEqual(['blank']);
     expect(keys(feature)).toEqual(['startLookTimeout']);
@@ -272,8 +271,8 @@ describe('#295: the late start suggestion is counted', () => {
     });
     const first = t.refresh();
     await vi.advanceTimersByTimeAsync(START_LOOK_TIMEOUT_MS + 1);
+    // The retry (in the same ask) answers in time and finds nothing: the first timeout cost nothing.
     expect(await first).toBe('blank');
-    // The retry answers in time and finds nothing: the first timeout cost nothing.
     expect(await t.refresh()).toBe('blank');
     // Later the user saves a .dbml file, and a refresh past the fresh window looks again.
     added = ['dbml'];
@@ -461,10 +460,12 @@ describe('#295: facts the rule keeps in mind', () => {
     expect(answered.candidates).toEqual([root, deep]);
   });
 
-  it('an ask that joins the first look when it times out gets blank too (the start prompt then shows nothing this window)', async () => {
+  it('an ask that joins the first look when it times out waits for the retry too: both get the import (#328: the start prompt used to show nothing this window)', async () => {
     vi.useFakeTimers();
-    const look = vi.fn((signal: AbortSignal) => new Promise<ReadonlySet<DetectedImportSource>>((_r, reject) =>
-      signal.addEventListener('abort', () => reject(new Error('aborted')))));
+    let calls = 0;
+    const look = vi.fn((signal: AbortSignal) => (++calls === 1
+      ? new Promise<ReadonlySet<DetectedImportSource>>((_r, reject) => signal.addEventListener('abort', () => reject(new Error('aborted'))))
+      : Promise.resolve(new Set<DetectedImportSource>(['sqlDdl']))));
     const t = new StartIntentTracker({
       context: () => ({ hasProject: true, hasDbt: false, storage: 'dbml', hasDiagrams: false }),
       look,
@@ -473,7 +474,7 @@ describe('#295: facts the rule keeps in mind', () => {
     const emptyView = t.refresh();
     const startPrompt = t.refresh();
     await vi.advanceTimersByTimeAsync(START_LOOK_TIMEOUT_MS + 1);
-    expect(await Promise.all([emptyView, startPrompt])).toEqual(['blank', 'blank']);
-    expect(look).toHaveBeenCalledTimes(1);
+    expect(await Promise.all([emptyView, startPrompt])).toEqual(['importSqlDdl', 'importSqlDdl']);
+    expect(look).toHaveBeenCalledTimes(2);
   });
 });

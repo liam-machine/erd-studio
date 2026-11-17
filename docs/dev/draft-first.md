@@ -66,7 +66,7 @@ Buttons (Title Case, one primary):
 |---|---|---|
 | A find (`sqlDdl`, `semanticModel`, `dbml`) | **Keep as Diagram** | **More ways to start ▾** (New Diagram… · Import… · Import Your Data Model… · Open an Example…), **Discard** |
 | `dbt` | **Keep as Diagram** | **More ways to start ▾** (New Diagram… · Import… · Open an Example…), **Discard** |
-| `example`, folder open | **New Diagram…** | **Import Your Data Model…**, `Keep This Example` (a quiet link-style button), **More ways to start ▾** (Import…), **Discard** |
+| `example`, folder open | **Import Your Data Model…** (#328: toward the user's own model; the detail line says so, `EXAMPLE_IMPORT_LEAD`) | **New Diagram…**, `Keep This Example` (a quiet link-style button), **More ways to start ▾** (Import…), **Discard** |
 | `example`, no folder | **Open Folder…** | **Discard** |
 | `exampleProject` | **Save This Example…** | **New Diagram…** and **Import Your Data Model…** (folder open) or **Open Folder…** (no folder), **Discard** |
 
@@ -116,13 +116,13 @@ The `sidebar` draft opens with `preserveFocus` (the Diagrams view keeps the focu
 An automatic draft is due when all hold: `erdStudio.startSuggestions` is on; the folder's start suggestions are not off (Don't Ask Again / Turn Off); the folder has no diagram **and no table**; no canvas is open; and either
 
 - the suggestion is a find (`drawFromDbt`, `importSemanticModel`, `importSqlDdl`, `importDbmlFile`) and this folder has not had an automatic draft (`draftShown`) nor answered the suggestion (`answered`) → **find**; or
-- the suggestion is `blank` and this machine has not had the automatic example (`erdStudio.exampleDraftShown`, globalState) → **example**; but not when that `blank` only means the look ran out of time having found nothing (`lookUnfinished`, `StartIntentTracker.lookUnfinished()`: a large folder or a slow drive). The folder may hold the user's own files, so the example's "Nothing here to draw from yet" would not be true: no draft, and the sidebar's starts (led by **Import Your Data Model…**) remain.
+- the suggestion is `blank` and this machine has not had the automatic example (`erdStudio.exampleDraftShown`, globalState) → **example**.
 
 `convert` is never drafted (Convert has its own review panel). The flags are written **before** the draft shows (a crash cannot make it repeat).
 
 ### 3.3 The start suggestion (the one popup)
 
-Still the window's activation prompt (`startSuggestion`, after `diagramsNudge`), once per folder (Simplify: it was three times), shown only after the bounded look (a look that runs out of time keeps what it found by then; one that found nothing is asked once more, with twice the time, before the suggestion gives up the window: `docs/dev/onboarding-and-cli.md` → The start screen). From #305 an install that upgraded (no fresh-install record in the globalState `erdStudio.startSuggestion.machine`, written once by `activate()`'s fresh-install branch, never from telemetry) is asked **once per machine** in all; a new install keeps once per folder. The palette's **Turn On Start Suggestions for This Folder** sets the folder's `on`, which lifts that limit there; Undo after an off never sets it (`docs/dev/onboarding-and-cli.md` → The start suggestion). New text and buttons:
+Still the window's activation prompt (`startSuggestion`, after `diagramsNudge`), once per folder (Simplify: it was three times), shown only after the bounded look. From #305 an install that upgraded (no fresh-install record in the globalState `erdStudio.startSuggestion.machine`, written once by `activate()`'s fresh-install branch, never from telemetry) is asked **once per machine** in all; a new install keeps once per folder. The palette's **Turn On Start Suggestions for This Folder** sets the folder's `on`, which lifts that limit there; Undo after an off never sets it (`docs/dev/onboarding-and-cli.md` → The start suggestion). New text and buttons:
 
 - `ERD Studio found CREATE TABLE scripts in this folder (24 tables). Show them as a diagram? Nothing is saved until you keep it.` (no count: `…in this folder. Show them as a diagram? …`)
 - `ERD Studio found a Power BI or Fabric semantic model in this folder. Show it as a diagram? Nothing is saved until you keep it.`
@@ -150,7 +150,7 @@ The **nothing-found notification** (`runNothingFoundPrompt`) is removed: a folde
 | Workspace | What the user meets | Keep writes |
 |---|---|---|
 | **No folder** | First run: the walkthrough (Open Folder, Open an Example…). The Diagrams view: **Open Folder**, `Open an example` link. Open an Example… → the coffee-shop example draft, primary **Open Folder…**; the switcher's projects offer **Save This Example…** | An example project, in a folder of its own (new window) |
-| **Empty folder** (plain, nothing found) | ERD Studio icon → the example draft once per machine (**New Diagram…**, **Import Your Data Model…**, `Keep This Example`). Later: the sidebar's **Import Your Data Model…** button, with **New Diagram…** as a link | `Keep This Example`: the coffee-shop diagram into this folder (`importDbml` source `example`); `.erd-studio/` and `layers.json` only then |
+| **Empty folder** (plain, nothing found) | ERD Studio icon → the example draft once per machine (**Import Your Data Model…**, **New Diagram…**, `Keep This Example`). Later: the sidebar's **Import Your Data Model…** button, with **New Diagram…** as a link | `Keep This Example`: the coffee-shop diagram into this folder (`importDbml` source `example`); `.erd-studio/` and `layers.json` only then |
 | **SQL scripts** | Activation: the popup (Show Me). Or the icon: the draft directly. The draft of every CREATE TABLE script (the quick path's files and dialect) | `importDbml` source `sql` (quick answers: layer, name) |
 | **Power BI / Fabric** | As SQL; several models: the first, with the `Model` switcher | `importDbml` source `semanticModel` |
 | **A DBML file** | As SQL (`findDefaultFile`) | `importDbml` source `file` |
@@ -282,7 +282,7 @@ Three packages, built in parallel, on **disjoint files**. Each codes against `sr
 - `draftHeadline(…)`, `draftDetail(…)` exported for tests.
 
 `draftTriggers.ts`:
-- `type AutoDraft = 'find' | 'example'`; `autoDraftDue(input: { settingOn: boolean; state: { off?: boolean; answered?: boolean; draftShown?: boolean }; hasDiagrams: boolean; hasTables: boolean; canvasOpen: boolean; intent: StartIntent | undefined; exampleShownOnMachine: boolean; lookUnfinished?: boolean }): AutoDraft | undefined` (§3.2).
+- `type AutoDraft = 'find' | 'example'`; `autoDraftDue(input: { settingOn: boolean; state: { off?: boolean; answered?: boolean; draftShown?: boolean }; hasDiagrams: boolean; hasTables: boolean; canvasOpen: boolean; intent: StartIntent | undefined; exampleShownOnMachine: boolean }): AutoDraft | undefined` (§3.2).
 - `draftSourceForIntent(intent: StartIntent): DraftSource | undefined` (`importSqlDdl` → `sqlDdl`, …, `drawFromDbt` → `dbt`).
 - `walkthroughAutoOpens(input: { hasFolder: boolean; owed: boolean }): boolean`.
 - `EXAMPLE_DRAFT_SHOWN_KEY = 'erdStudio.exampleDraftShown'`.

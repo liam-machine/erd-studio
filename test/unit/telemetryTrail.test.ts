@@ -303,6 +303,18 @@ describe('the service keeps the trail', () => {
     ]);
   });
 
+  it('#331: the project size ranges stay off the trail, and reach the body', async () => {
+    start();
+    telemetry.activation('project_found', true, 1);
+    at('10:00:02'); telemetry.libraryTables(250);
+    at('10:00:05'); telemetry.canvasOpened('logical', 'v5', 1100);
+    expect(await sentTrail()).toEqual([['windowOpened', 0, 1, 1], ['canvasOpened', 5, 1, 1]]);
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(init.body as string) as HeartbeatBody;
+    expect(body.features).toMatchObject({ libraryTables200to499: 1, diagramTables500Plus: 1 });
+    expect(body.modelCount).toBe('51+');
+  });
+
   it('a focus change shorter than five seconds is taken back; a longer one is kept as away and back', async () => {
     start();
     telemetry.activation('project_found', true, 1);

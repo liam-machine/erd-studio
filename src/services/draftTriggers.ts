@@ -76,12 +76,6 @@ export interface AutoDraftInput {
   intent: StartIntent | undefined;
   /** {@link EXAMPLE_DRAFT_SHOWN_KEY} is set. */
   exampleShownOnMachine: boolean;
-  /**
-   * The look at the folder ran out of time having found nothing
-   * (`StartIntentTracker.lookUnfinished`): a `blank` intent is not known to
-   * be blank. Absent: false.
-   */
-  lookUnfinished?: boolean;
 }
 
 /** The intents a draft can be built from (`convert` never is: Convert has its own review). */
@@ -93,10 +87,7 @@ const FIND_INTENTS: ReadonlySet<StartIntent> = new Set<StartIntent>(['drawFromDb
  * has no diagram and no table, no canvas is open, and either the folder's
  * find has not been drafted nor its suggestion answered (`find`), or the
  * folder suggests a blank start and this machine has not had the example
- * draft (`example`). Undefined otherwise — also for a `blank` that only
- * means the look ran out of time (`lookUnfinished`): the folder may hold the
- * user's own files, so the example ("Nothing here to draw from yet") is not
- * shown and the sidebar's starts, led by Import Your Data Model…, remain.
+ * draft (`example`). Undefined otherwise.
  */
 export function autoDraftDue(input: AutoDraftInput): AutoDraft | undefined {
   if (!input.settingOn) return undefined;
@@ -108,7 +99,7 @@ export function autoDraftDue(input: AutoDraftInput): AutoDraft | undefined {
     return input.state.draftShown === true || input.state.answered === true ? undefined : 'find';
   }
   if (intent === 'blank') {
-    return input.exampleShownOnMachine || input.lookUnfinished === true ? undefined : 'example';
+    return input.exampleShownOnMachine ? undefined : 'example';
   }
   return undefined;
 }

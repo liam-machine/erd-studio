@@ -20,7 +20,7 @@ import { YmlParserService } from '../../src/services/ymlParserService';
 import { TemplateService } from '../../src/services/templateService';
 import { SelectorsService } from '../../src/services/selectorsService';
 import { telemetry } from '../../src/services/telemetryService';
-import { log } from '../../src/services/logger';
+import { clearLogBuffer, log, recentLogLines } from '../../src/services/logger';
 import { READY_TIMEOUT_MS } from '../../src/services/readyWatch';
 import { dbtFixtureRoot, diagramPath, type DbtStorage } from './helpers/dbtFixtures';
 
@@ -291,5 +291,82 @@ describe('why a DBML diagram did not load (B14)', () => {
     vi.spyOn(telemetry, 'enabled').mockReturnValue(false);
     await open(file);
     expect(featureOnce.mock.calls.map(([k]) => k)).not.toContain('dbmlLayoutBadLine');
+  });
+});
+
+describe('how long a diagram took to open, and whether it read its tables from disk (#333)', () => {
+  // The ERD Studio log's lines, without the time and level.
+  const canvasLines = () => recentLogLines().map((l) => l.replace(/^\S+ \[\w+\] /, ''));
+  beforeEach(() => clearLogBuffer());
+
+  describe('a DBML project', () => {
+    useFixture('dbml');
+
+    it('the first open reads table files (cold); the same diagram opened again reads none (warm)', async () => {
+      const canvasLoad = vi.spyOn(telemetry, 'canvasLoad');
+      const { panel } = await open(diagramPath(root, 'dbml', 'silver', 'showcase'));
+      expect(canvasLoad).toHaveBeenCalledTimes(1);
+      const [ms, cold] = canvasLoad.mock.calls[0];
+      expect(Number.isFinite(ms) && ms >= 0).toBe(true);
+      expect(cold).toBe(true);
+      const opened = canvasLines().filter((l) => l.startsWith('[Canvas] Opened '));
+      expect(opened).toHaveLength(1);
+      expect(opened[0]).toMatch(/: \d+ tables posted \d+ ms after ready; [1-9]\d* table files? read from disk$/);
+      // canvasLoadOver20s is the top range now, never a separate once-a-day call.
+      expect(featureOnce.mock.calls.map(([k]) => k)).not.toContain('canvasLoadOver20s');
+
+      // A Retry, or the page loaded again: the same provider has every table read.
+      await panel._simulateMessage({ type: 'ready' });
+      expect(canvasLoad).toHaveBeenCalledTimes(2);
+      expect(canvasLoad.mock.calls[1][1]).toBe(false);
+      expect(canvasLines().filter((l) => l.startsWith('[Canvas] Opened ')).at(-1)).toMatch(/; 0 table files read from disk$/);
+    });
+
+    it('a diagram that did not open records no load time', async () => {
+      const canvasLoad = vi.spyOn(telemetry, 'canvasLoad');
+      const file = diagramPath(root, 'dbml', 'silver', 'showcase');
+      fs.writeFileSync(file, `${fs.readFileSync(file, 'utf-8')}\nTable broken {\n  id int [pk\n}\n`);
+      await open(file);
+      expect(canvasLoad).not.toHaveBeenCalled();
+    });
+
+    it('canvasPainted records the paint range and a log line; anything else records nothing and says nothing', async () => {
+      const canvasPaint = vi.spyOn(telemetry, 'canvasPaint');
+      const { panel } = await open(diagramPath(root, 'dbml', 'silver', 'showcase'));
+      await panel._simulateMessage({ type: 'canvasPainted', payload: { ms: 1200 } });
+      expect(canvasPaint.mock.calls).toEqual([[1200]]);
+      expect(canvasLines()).toContainEqual(expect.stringMatching(/\[Canvas\] Drew .*showcase\.dbml: first paint 1200 ms after the diagram arrived$/));
+
+      canvasPaint.mockClear();
+      for (const payload of [{ ms: '1200' }, { ms: -1 }, { ms: 600_001 }, undefined, { ms: Number.NaN }]) {
+        await panel._simulateMessage({ type: 'canvasPainted', payload });
+      }
+      expect(canvasPaint).not.toHaveBeenCalled();
+      expect(types(panel).filter((t) => t === 'error')).toHaveLength(0);
+      expect(errorCodes()).not.toContain('handlerFailed');
+    });
+
+    it('is allowed on the physical stage: timing only, never a dropped edit', async () => {
+      const canvasPaint = vi.spyOn(telemetry, 'canvasPaint');
+      const { panel } = await open(diagramPath(root, 'dbml', 'silver', 'showcase'));
+      await panel._simulateMessage({ type: 'switchStage', payload: { stage: 'physical' } });
+      error.mockClear();
+      const before = types(panel).filter((t) => t === 'error').length;
+      await panel._simulateMessage({ type: 'canvasPainted', payload: { ms: 300 } });
+      expect(errorCodes()).not.toContain('physicalEditDropped');
+      expect(types(panel).filter((t) => t === 'error')).toHaveLength(before);
+      expect(canvasPaint.mock.calls).toEqual([[300]]);
+    });
+  });
+
+  describe('a YAML project', () => {
+    useFixture('yaml');
+
+    it('the first open reads its model files too (cold), the second none', async () => {
+      const canvasLoad = vi.spyOn(telemetry, 'canvasLoad');
+      const { panel } = await open(diagramPath(root, 'yaml', 'silver', 'showcase'));
+      await panel._simulateMessage({ type: 'ready' });
+      expect(canvasLoad.mock.calls.map(([, cold]) => cold)).toEqual([true, false]);
+    });
   });
 });
