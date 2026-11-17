@@ -50,7 +50,7 @@ Help & Feedback, the walkthrough's `watch` / `watchLogical` steps and the comman
 
 `video/getting-started.vtt` (and `getting-started-logical.vtt`) is the same captions as WebVTT, kept as a source artefact for review and for uploading next to the video elsewhere. It is not shipped.
 
-Style reference: `docs/assets/erd-studio-linkedin.mp4` (thumbnail beside it). Colour tokens come from it and from `scripts/social-preview.html`.
+Style reference: `scripts/social-preview.html`. The colour tokens were first sampled from the September 2026 LinkedIn video, since retired from the repo (its end card used wording the project no longer uses).
 
 ## Prerequisites
 

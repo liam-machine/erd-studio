@@ -111,38 +111,77 @@ export function isSqlScriptTaken(filePath: string, text: string): boolean {
 
 /**
  * Folders a walk never enters: tools' and VCS's own, dependencies, a dbt
- * project's build output and Power BI's local cache. Any other hidden folder
- * is entered (a `.devcontainer/initdb/` of CREATE TABLE scripts counts).
+ * project's build output, Power BI's local cache, .NET build output
+ * (`bin`, `obj`: copies of the project's `.sql` at best), a Databricks
+ * bundle's cache, a conda environment and MLflow's run store. Any other
+ * hidden folder is entered (a `.devcontainer/initdb/` of CREATE TABLE
+ * scripts counts). Folders named `env`, `build`, `dist` or `out` are entered
+ * (a team may keep real DDL under `env/prod/`): a Python environment of any
+ * name is recognised by what it holds ({@link isEnvironmentFolder}).
  */
 export const IGNORED_IMPORT_FOLDERS: ReadonlySet<string> = new Set([
   'node_modules', 'bower_components', '.git', '.hg', '.svn', '.venv', 'venv', '__pycache__', 'target', 'dbt_packages',
   'dbt_modules', 'site-packages', '.pbi', '.tox', '.nox', '.cache', '.idea', '.vscode', '.vscode-test', '.terraform',
   '.mypy_cache', '.pytest_cache', '.ruff_cache', '.next', '.nuxt', '.yarn', '.pnpm-store', '.gradle', '.npm',
   '.direnv', '.eggs', '.ipynb_checkpoints', '.history', '.Trash',
+  'bin', 'obj', '.vs', '.databricks', '.conda', 'conda-meta', 'mlruns',
 ]);
+
+/**
+ * A Hive-style partition folder (`year=2024`, `dt=2024-01-01`): a data
+ * lake's partitioned files, never a model's, and often thousands of them.
+ */
+const PARTITION_FOLDER = /^[^=]+=[^=]*$/;
+
+/**
+ * Whether a folder's listing says it is a Python environment, whatever its
+ * name (`env/`, `py311/`, `.env/`): a virtualenv's `pyvenv.cfg` or a conda
+ * environment's `conda-meta/`. A walk does not go below one.
+ */
+export function isEnvironmentFolder(entries: DirEntries): boolean {
+  return entries.some(([name, isDirectory]) => (isDirectory ? name === 'conda-meta' : name === 'pyvenv.cfg'));
+}
 
 /** How deep a walk goes below the folder it starts in. */
 export const IMPORT_WALK_MAX_DEPTH = 16;
+
+/**
+ * How many folders a walk lists at once. A listing waits on the disk (a cold
+ * drive, a network or synced folder, WSL reading a Windows drive), so a few
+ * at a time cut a large folder's walk several times over; the files found,
+ * their order and the bounds are the same as one at a time.
+ */
+export const IMPORT_WALK_CONCURRENCY = 4;
 
 /** One directory's entries: a name and whether it is a folder. */
 export type DirEntries = ReadonlyArray<readonly [name: string, isDirectory: boolean]>;
 
 export interface WalkResult {
-  /** Matching files, as paths joined with `/` under `root`, sorted. */
+  /**
+   * Matching files, as paths joined with `/` under `root`, sorted.
+   */
   files: string[];
-  /** More than `limit` files matched: `files` holds the first `limit` found. */
+  /**
+   * More than `limit` files matched, or `maxFolders` folders were listed
+   * before the walk ended: `files` holds the shallowest found.
+   */
   truncated: boolean;
+  /** `cancelled` stopped the walk before every folder was listed (set only then). */
+  stopped?: true;
 }
 
 /**
  * Every file under `root` that `include` accepts, breadth first (so a bound
- * keeps the shallowest), skipping {@link IGNORED_IMPORT_FOLDERS} and any
- * folder `skipFolder` names, at most `limit` of them (`truncated` says there
- * were more) and at most `maxDepth` folders deep
- * ({@link IMPORT_WALK_MAX_DEPTH}). `readDir` lists one folder (a symbolic
- * link to a folder counts as a folder); a folder that cannot be listed is
- * skipped; `cancelled` stops the walk (what was found so far is returned).
- * Sorted with numbers in order (`2_x` before `10_x`).
+ * keeps the shallowest), skipping {@link IGNORED_IMPORT_FOLDERS}, partition
+ * folders (`year=2024`), Python environments of any name
+ * ({@link isEnvironmentFolder}) and any folder `skipFolder` names, at most
+ * `limit` of them (`truncated` says there were more), at most `maxDepth`
+ * folders deep ({@link IMPORT_WALK_MAX_DEPTH}) and, with `maxFolders`, at most
+ * that many folders listed (`truncated` again). `readDir` lists one folder (a
+ * symbolic link to a folder counts as a folder), up to
+ * {@link IMPORT_WALK_CONCURRENCY} at once; a folder that cannot be listed is
+ * skipped; `cancelled` stops the walk (what was found so far is returned,
+ * with `stopped`). Sorted with numbers in order (`2_x` before `10_x`).
  */
 export async function walkFiles(
   root: string,
@@ -151,29 +190,58 @@ export async function walkFiles(
     include: (name: string) => boolean;
     limit: number;
     maxDepth?: number;
+    maxFolders?: number;
     skipFolder?: (folderPath: string) => boolean;
     cancelled?: () => boolean;
   },
 ): Promise<WalkResult> {
   const maxDepth = options.maxDepth ?? IMPORT_WALK_MAX_DEPTH;
+  const maxFolders = options.maxFolders ?? Number.POSITIVE_INFINITY;
   const files: string[] = [];
   let truncated = false;
+  let listed = 0;
+  const done = (stopped: boolean): WalkResult => ({ files: files.sort(compareNames), truncated, ...(stopped ? { stopped: true as const } : {}) });
   const join = (a: string, b: string): string => (a.endsWith('/') || a.endsWith('\\') ? `${a}${b}` : `${a}/${b}`);
   let level = [root];
   for (let depth = 0; level.length > 0 && !truncated; depth++) {
     const next: string[] = [];
-    for (const folder of level) {
-      if (truncated || options.cancelled?.()) return { files: files.sort(compareNames), truncated };
-      let entries: DirEntries;
+    // A few listings of this level in flight at once, each taken in the
+    // level's order: the same files, order and bounds as one at a time.
+    const listings: Array<Promise<DirEntries | undefined>> = [];
+    let started = 0;
+    const list = (folder: string): Promise<DirEntries | undefined> => {
       try {
-        entries = await readDir(folder);
+        return readDir(folder).then((e) => e, () => undefined);
       } catch {
-        continue;
+        return Promise.resolve(undefined);
       }
+    };
+    const startListings = (from: number): void => {
+      while (started < level.length && started < from + IMPORT_WALK_CONCURRENCY && listed < maxFolders && !options.cancelled?.()) {
+        listings.push(list(level[started]));
+        started++;
+        listed++;
+      }
+    };
+    for (let i = 0; i < level.length; i++) {
+      if (options.cancelled?.()) return done(true);
+      startListings(i);
+      if (i >= started) {
+        if (options.cancelled?.()) return done(true);
+        // The folder cap: this folder and the rest of the walk are not listed.
+        truncated = true;
+        break;
+      }
+      // A listing that has come back is kept even if the walk is stopped
+      // meanwhile (a wrap-up keeps what it found; the next folder stops it).
+      const entries = await listings[i];
+      if (entries === undefined) continue;
+      if (depth > 0 && isEnvironmentFolder(entries)) continue;
+      const folder = level[i];
       const sorted = [...entries].sort((a, b) => compareNames(a[0], b[0]));
       for (const [name, isDirectory] of sorted) {
         if (isDirectory) {
-          if (depth >= maxDepth || IGNORED_IMPORT_FOLDERS.has(name)) continue;
+          if (depth >= maxDepth || IGNORED_IMPORT_FOLDERS.has(name) || PARTITION_FOLDER.test(name)) continue;
           const child = join(folder, name);
           if (options.skipFolder?.(child)) continue;
           next.push(child);
@@ -182,10 +250,11 @@ export async function walkFiles(
           files.push(join(folder, name));
         }
       }
+      if (truncated) break;
     }
     level = next;
   }
-  return { files: files.sort(compareNames), truncated };
+  return done(false);
 }
 
 /**
@@ -205,6 +274,13 @@ export function isOwnDbmlExport(text: string): boolean {
 
 /** How many file names one listing of the open folder holds at most (names only; nothing is read). */
 export const IMPORT_LIST_LIMIT = 5000;
+/**
+ * How many folders one listing of the open folder lists at most (the dbt
+ * search's own bound): past it the listing holds the shallowest files
+ * (`truncated`), so a parent folder of many repos, or a data folder of
+ * thousands of partitions, is never walked whole.
+ */
+export const IMPORT_LIST_MAX_FOLDERS = 5000;
 
 /**
  * A file every semantic model Import Semantic Model… can read holds
@@ -228,25 +304,33 @@ export interface ImportListing {
   semanticModel: string[];
   /** A `dbt_project.yml` is in the folder. */
   dbtProject: boolean;
-  /** More files than {@link IMPORT_LIST_LIMIT}: the listing holds the shallowest. */
+  /**
+   * More files than {@link IMPORT_LIST_LIMIT}, more folders than
+   * {@link IMPORT_LIST_MAX_FOLDERS}, or `cancelled` stopped it: the listing
+   * holds the shallowest.
+   */
   truncated: boolean;
+  /** `cancelled` stopped the listing before every folder was listed (set only then). */
+  stopped?: true;
 }
 
 /**
  * The one listing of the open folder that the start screen's look and the
  * quick imports share: `.sql` and `.dbml` files (any letter case), semantic
  * model files and `dbt_project.yml`, by {@link walkFiles}' rules, never
- * inside the ERD Studio folder (`semanticDir`, or the legacy `erd-studio/`).
+ * inside the ERD Studio folder (`semanticDir`, or the legacy `erd-studio/`),
+ * listing at most {@link IMPORT_LIST_MAX_FOLDERS} folders.
  */
 export async function listImportFiles(
   root: string,
   readDir: (folder: string) => Promise<DirEntries>,
-  options: { semanticDir: string; cancelled?: () => boolean; limit?: number },
+  options: { semanticDir: string; cancelled?: () => boolean; limit?: number; maxFolders?: number },
 ): Promise<ImportListing> {
   const own = new Set([options.semanticDir.replace(/[\\/]+$/, ''), 'erd-studio'].map((d) => normaliseSlashes(`${root}/${d}`)));
   const walk = await walkFiles(root, readDir, {
     include: (name) => /\.(sql|dbml)$/i.test(name) || isSemanticModelMarker(name) || name === 'dbt_project.yml',
     limit: options.limit ?? IMPORT_LIST_LIMIT,
+    maxFolders: options.maxFolders ?? IMPORT_LIST_MAX_FOLDERS,
     skipFolder: (folder) => own.has(normaliseSlashes(folder)),
     cancelled: options.cancelled,
   });
@@ -263,7 +347,8 @@ export async function listImportFiles(
     dbml: walk.files.filter((f) => /\.dbml$/i.test(f)),
     semanticModel: walk.files.filter((f) => isSemanticModelMarker(base(f)) && (base(f).toLowerCase() !== 'database.json' || folderModels.has(f))),
     dbtProject: walk.files.some((f) => base(f) === 'dbt_project.yml'),
-    truncated: walk.truncated,
+    truncated: walk.truncated || walk.stopped === true,
+    ...(walk.stopped ? { stopped: true as const } : {}),
   };
 }
 

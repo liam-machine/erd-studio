@@ -27,6 +27,7 @@ import {
   rankSqlFiles,
   sqlScriptTableCount,
   type DirEntries,
+  type ImportListing,
   type ImportModelSource,
 } from '../services/importSources';
 import { log } from '../services/logger';
@@ -147,6 +148,12 @@ export interface DetectImportIo {
   size?(filePath: string): Promise<number | undefined>;
   /** The look was cancelled: stop listing and opening files. Absent: never. */
   cancelled?(): boolean;
+  /**
+   * Time to wrap up: stop listing folders, but still read the bounded starts
+   * of the files listed so far, so a look running out of time keeps what it
+   * found (the start screen's look, `StartIntentTracker`). Absent: never.
+   */
+  stopListing?(): boolean;
 }
 
 export { readFileStart };
@@ -169,6 +176,12 @@ export interface ImportFindings {
   sqlTables?: number;
   /** The folder holds a `dbt_project.yml` (the host notes it when the window runs without dbt). */
   dbtProject?: boolean;
+  /**
+   * The listing was stopped (`stopListing`) before every folder was listed:
+   * `sources` are what the folders listed so far hold, and the rest of the
+   * folder is unknown (set only then).
+   */
+  partial?: true;
 }
 
 /** How many `.dbml` files the look opens to find one that is not ERD Studio's own export. */
@@ -186,7 +199,8 @@ const DETECT_DBML_FILES = 5;
  * import reads). A lookup that fails counts as nothing found. With
  * `countTables` (the start screen's look, which the start suggestion names a
  * count from) every one of those `.sql` files is read, not only up to the
- * first with a CREATE TABLE.
+ * first with a CREATE TABLE. When `io.stopListing` says to wrap up, the
+ * listing ends where it is and the files it holds are still read (`partial`).
  */
 export async function detectImportFindings(
   io: DetectImportIo,
@@ -194,7 +208,8 @@ export async function detectImportFindings(
   options: { countTables?: boolean } = {},
 ): Promise<ImportFindings> {
   const found = new Set<ImportModelSource>();
-  const listing = await listImportFiles(io.root, (f) => io.readDirectory(f), { semanticDir, cancelled: io.cancelled })
+  const stopListing = (): boolean => io.cancelled?.() === true || io.stopListing?.() === true;
+  const listing: ImportListing = await listImportFiles(io.root, (f) => io.readDirectory(f), { semanticDir, cancelled: stopListing })
     .catch(() => ({ sql: [], dbml: [], semanticModel: [], dbtProject: false, truncated: false }));
   // No `*.pbip`: a report-only (thin) Power BI Project has one and no model,
   // and every model Import Semantic Model… reads has one of these files.
@@ -225,6 +240,7 @@ export async function detectImportFindings(
     sources: found,
     ...(exact && found.has('sqlDdl') && tables > 0 ? { sqlTables: tables } : {}),
     ...(listing.dbtProject ? { dbtProject: true } : {}),
+    ...(listing.stopped ? { partial: true as const } : {}),
   };
 }
 
@@ -280,17 +296,19 @@ export function vscodeDetectImportIo(root: string, token?: vscode.CancellationTo
 /**
  * The start screen's look at the folder (`StartIntentTracker`): the same
  * detector as Import…'s picker, counting CREATE TABLEs for the start
- * suggestion, cancelled when `signal` aborts. Reads only; what it finds
- * never leaves the machine.
+ * suggestion, cancelled when `signal` aborts; when `wrapUp` aborts it stops
+ * listing and answers with what the folders listed so far hold (`partial`).
+ * Reads only; what it finds never leaves the machine.
  */
-export function vscodeStartLook(root: string, semanticDir: string): (signal: AbortSignal) => Promise<ImportFindings> {
-  return async (signal) => {
+export function vscodeStartLook(root: string, semanticDir: string): (signal: AbortSignal, wrapUp?: AbortSignal) => Promise<ImportFindings> {
+  return async (signal, wrapUp) => {
     const source = new vscode.CancellationTokenSource();
     const abort = (): void => source.cancel();
     signal.addEventListener('abort', abort);
     try {
       if (signal.aborted) return { sources: new Set() };
-      return await detectImportFindings(vscodeDetectImportIo(root, source.token), semanticDir, { countTables: true });
+      const io: DetectImportIo = { ...vscodeDetectImportIo(root, source.token), stopListing: () => wrapUp?.aborted === true };
+      return await detectImportFindings(io, semanticDir, { countTables: true });
     } catch (err) {
       log.warn('[ERD Studio] Start screen: could not look for import sources:', err);
       return { sources: new Set() };

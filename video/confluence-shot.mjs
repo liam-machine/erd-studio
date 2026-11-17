@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Renders player/assets/confluence-sales.png, the diagram on the default cut's Confluence page
-// (player/scenes/tour/confluence.js): the tour's own `shop-analytics` diagram (record/fixtures.erd.mjs, the
+// (player/scenes/tour/confluence.js): the tour's own `sales` diagram (record/fixtures.erd.mjs, the
 // .erd-studio a plain take wrote: the Snowflake import, the table added by hand and the one Claude
 // Code added) loaded by @erd-studio/core's loadDisplaySubjectArea with its DBML reader and drawn by
 // @erd-studio/renderer's ErdCanvas, which the ERD Studio for Confluence macro runs in viewer mode
@@ -26,7 +26,7 @@ export const SHOT = { file: join(HERE, 'player', 'assets', HERO ? 'confluence-he
 if (!Object.keys(DBT_ERD).length) throw new Error('record/fixtures.erd.mjs is empty: run `node record/fixtures.mjs --capture` after a plain take');
 /** The .erd-studio files drawn, and the diagram among them. */
 const ERD = HERO ? JSON.parse(readFileSync(join(HERE, 'record', 'hero-run.json'), 'utf8')).design.after : DBT_ERD;
-const DIAGRAM = HERO ? 'main/diagrams/orders.dbml' : 'main/diagrams/shop-analytics.dbml';
+const DIAGRAM = HERO ? 'main/diagrams/orders.dbml' : 'main/diagrams/sales.dbml';
 rmSync(OUT, { recursive: true, force: true });
 mkdirSync(OUT, { recursive: true });
 

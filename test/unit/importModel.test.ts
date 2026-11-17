@@ -32,7 +32,10 @@ import {
 } from '../../src/commands/importModel';
 import { NO_LEGACY_ALIAS, PRE_REGISTERED_COMMANDS } from '../../src/extension';
 import {
+  IMPORT_LIST_MAX_FOLDERS,
+  IMPORT_WALK_CONCURRENCY,
   MAX_SQL_FILE_BYTES,
+  compareNames,
   convertedFileName,
   sqlImportFileName,
   describeImportProblems,
@@ -425,5 +428,102 @@ describe('importSources helpers', () => {
       '1 relationship with an end that is missing, skipped or already joined.',
     ]);
     expect(semanticModelSkippedSummary({ measures: 0, autoDateTables: 0, calculationGroups: 0, relationships: 0 })).toEqual([]);
+  });
+});
+
+describe('the folder look on a large folder (the first-run look ran out of time, docs/dev/onboarding-and-cli.md)', () => {
+  /** A tree as folder → entries; a listing waits `delay(folder)` ms (a cold or remote drive), and how many run at once is recorded. */
+  function slowTree(tree: Record<string, Array<[string, boolean]>>, delay: (folder: string) => number = () => 1) {
+    const listed: string[] = [];
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const readDir = async (folder: string) => {
+      listed.push(folder);
+      inFlight++;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      const ms = delay(folder);
+      if (ms > 0) await new Promise((r) => setTimeout(r, ms));
+      else await Promise.resolve();
+      inFlight--;
+      const entries = tree[folder];
+      if (!entries) throw new Error('ENOENT');
+      return entries;
+    };
+    return { readDir, listed, maxInFlight: () => maxInFlight };
+  }
+
+  it('never goes below a Python environment of any name, a partition folder, .NET build output or a bundle cache; still finds the DDL beside them', async () => {
+    const t = slowTree({
+      '/w': [['env', true], ['py311', true], ['data', true], ['bin', true], ['obj', true], ['.databricks', true], ['warehouse', true], ['envs', true]],
+      '/w/env': [['pyvenv.cfg', false], ['Lib', true], ['x.sql', false]],
+      '/w/env/Lib': [['y.sql', false]],
+      '/w/py311': [['conda-meta', true], ['share', true]],
+      '/w/py311/share': [['z.sql', false]],
+      '/w/data': [['orders', true]],
+      '/w/data/orders': [['year=2024', true], ['dt=2024-01-01', true]],
+      '/w/data/orders/year=2024': [['p.sql', false]],
+      '/w/bin': [['Debug', true]],
+      '/w/obj': [['copy.sql', false]],
+      '/w/.databricks': [['bundle', true]],
+      '/w/warehouse': [['ddl', true]],
+      '/w/warehouse/ddl': [['tables.sql', false]],
+      // A folder merely named like an environment is entered: a team may keep DDL under env/prod/.
+      '/w/envs': [['prod', true]],
+      '/w/envs/prod': [['schema.sql', false]],
+    }, () => 0);
+    const walk = await walkFiles('/w', t.readDir, { include: (n) => n.endsWith('.sql'), limit: 100 });
+    expect(walk).toEqual({ files: ['/w/envs/prod/schema.sql', '/w/warehouse/ddl/tables.sql'], truncated: false });
+    for (const never of ['/w/env/Lib', '/w/py311/share', '/w/data/orders/year=2024', '/w/bin', '/w/obj', '/w/.databricks']) {
+      expect(t.listed, never).not.toContain(never);
+    }
+  });
+
+  it('lists a few folders at once, and finds the same files, in the same order and bounds, as one at a time', async () => {
+    // Later folders answer first: the files kept under a bound are still the shallowest, in reading order.
+    const tree: Record<string, Array<[string, boolean]>> = { '/w': [] };
+    for (let i = 0; i < 12; i++) {
+      tree['/w'].push([`f${i}`, true]);
+      tree[`/w/f${i}`] = [[`t${i}.sql`, false], ['deeper', true]];
+      tree[`/w/f${i}/deeper`] = [[`d${i}.sql`, false]];
+    }
+    const t = slowTree(tree, (folder) => (folder.match(/f(\d+)/) ? 12 - Number(folder.match(/f(\d+)/)![1]) : 1));
+    const all = await walkFiles('/w', t.readDir, { include: (n) => n.endsWith('.sql'), limit: 100 });
+    const every = Array.from({ length: 12 }, (_, i) => [`/w/f${i}/t${i}.sql`, `/w/f${i}/deeper/d${i}.sql`]).flat();
+    expect(all).toEqual({ files: every.sort(compareNames), truncated: false });
+    expect(t.maxInFlight()).toBeGreaterThan(1);
+    expect(t.maxInFlight()).toBeLessThanOrEqual(IMPORT_WALK_CONCURRENCY);
+    const bounded = await walkFiles('/w', slowTree(tree, (f) => (f.match(/f(\d+)/) ? 12 - Number(f.match(/f(\d+)/)![1]) : 1)).readDir, { include: (n) => n.endsWith('.sql'), limit: 3 });
+    expect(bounded).toEqual({ files: ['/w/f0/t0.sql', '/w/f1/t1.sql', '/w/f2/t2.sql'], truncated: true });
+  });
+
+  it('one listing of a huge folder lists at most IMPORT_LIST_MAX_FOLDERS folders, keeps the shallow DDL and says it is truncated', async () => {
+    const tree: Record<string, Array<[string, boolean]>> = { '/w': [['ddl', true], ['runs', true]], '/w/ddl': [['tables.sql', false]], '/w/runs': [] };
+    for (let i = 0; i < IMPORT_LIST_MAX_FOLDERS + 1000; i++) {
+      tree['/w/runs'].push([`run_${i}`, true]);
+      tree[`/w/runs/run_${i}`] = [['query.sql', false]];
+    }
+    const t = slowTree(tree, () => 0);
+    const listing = await listImportFiles('/w', t.readDir, { semanticDir: '.erd-studio' });
+    expect(t.listed.length).toBeLessThanOrEqual(IMPORT_LIST_MAX_FOLDERS);
+    expect(listing.truncated).toBe(true);
+    expect(listing.sql[0]).toBe('/w/ddl/tables.sql');
+  });
+
+  it('a look told to wrap up stops listing but still reads the scripts it listed: the SQL is found (partial, no table count)', async () => {
+    const files: Record<string, string> = { 'ddl/tables.sql': 'CREATE TABLE dim_customer (id int primary key);' };
+    for (let i = 0; i < 300; i++) files[`logs/run_${String(i).padStart(3, '0')}/notes/q.sql`] = 'select 1';
+    const io = memIo(files);
+    // Time is up once 20 folders have been listed.
+    const findings = await detectImportFindings({ ...io, stopListing: () => io.listed.length >= 20 }, '.erd-studio', { countTables: true });
+    expect(findings.sources).toEqual(new Set(['sqlDdl']));
+    expect(findings.partial).toBe(true);
+    expect(findings.sqlTables).toBeUndefined();
+    expect(io.listed.length).toBeLessThan(30);
+    expect(io.opened).toContain('/w/ddl/tables.sql');
+    // A look that is cancelled outright reads nothing more.
+    const cancelled = memIo(files);
+    expect((await detectImportFindings({ ...cancelled, cancelled: () => cancelled.listed.length >= 20 }, '.erd-studio', { countTables: true })).sources).toEqual(new Set());
+    // Not told to wrap up: not partial.
+    expect((await detectImportFindings(memIo(files), '.erd-studio', { countTables: true })).partial).toBeUndefined();
   });
 });

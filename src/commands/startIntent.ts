@@ -10,10 +10,15 @@
  * surface asks: the empty Diagrams view being drawn, the Welcome panel's
  * status, or the walkthrough being opened. Never on activation's own path
  * (a refresh is always deferred), never writing anything, and the look is
- * cancelled after {@link START_LOOK_TIMEOUT_MS}. What it found stays on this
- * machine: telemetry gets the suggestion's fixed key only. A look that runs
- * out of time is tried once more, on the next refresh
- * ({@link START_LOOK_ATTEMPTS}).
+ * cancelled after {@link START_LOOK_TIMEOUT_MS}. Before that it is asked to
+ * wrap up ({@link START_LOOK_WRAP_UP_SHARE}): it stops listing folders and
+ * answers with what the folders listed so far hold, so a large folder's
+ * shallow `ddl/` is still suggested. What it found stays on this machine:
+ * telemetry gets the suggestion's fixed key only. A look that runs out of
+ * time having found nothing is tried once more, on the next refresh
+ * ({@link START_LOOK_ATTEMPTS}); until one finishes, `blank` is a guess
+ * ({@link StartIntentTracker.lookUnfinished}), never "this folder holds
+ * nothing".
  *
  * The empty Diagrams view of a folder without dbt shows "Loading diagrams…"
  * until the first suggestion is published (so New Diagram never shows first
@@ -33,8 +38,14 @@ import {
   type StartIntent,
 } from '../types/startActions';
 
-/** How long the look may take before it is cancelled and the folder counts as holding nothing to import. */
+/** How long the look may take before it is cancelled (what it found by then is lost; see {@link START_LOOK_WRAP_UP_SHARE}). */
 export const START_LOOK_TIMEOUT_MS = 1500;
+/**
+ * The share of the look's time spent listing folders: then the look is asked
+ * to wrap up (its `wrapUp` signal aborts), stops listing, and reads the
+ * bounded starts of the files it listed in the rest of the time.
+ */
+export const START_LOOK_WRAP_UP_SHARE = 0.6;
 /** A finished look is reused for this long. */
 export const START_LOOK_FRESH_MS = 60_000;
 /**
@@ -49,11 +60,12 @@ export interface StartIntentDeps {
   /** Where the folder stands now (cheap: no file walk). */
   context(): Omit<StartContext, 'found'>;
   /**
-   * The bounded look at the folder; it stops when `signal` aborts. The
-   * sources found, or those with the CREATE TABLE count the start
-   * suggestion names (`sqlTables`, only when exact).
+   * The bounded look at the folder; it stops when `signal` aborts. When
+   * `wrapUp` aborts it stops listing and answers soon with what it found so
+   * far (`partial`). The sources found, or those with the CREATE TABLE count
+   * the start suggestion names (`sqlTables`, only when exact).
    */
-  look(signal: AbortSignal): Promise<ReadonlySet<DetectedImportSource> | StartLookFindings>;
+  look(signal: AbortSignal, wrapUp: AbortSignal): Promise<ReadonlySet<DetectedImportSource> | StartLookFindings>;
   /** Publish a changed suggestion (the context key). */
   publish(intent: StartIntent): void;
   /** The look saw a `dbt_project.yml` while the window runs without dbt (the host notes it; never a prompt). */
@@ -76,6 +88,8 @@ export interface StartLookFindings {
   sqlTables?: number;
   /** The folder holds a `dbt_project.yml`. */
   dbtProject?: boolean;
+  /** The look wrapped up before listing every folder: `sources` are some of what the folder holds. */
+  partial?: boolean;
 }
 
 export class StartIntentTracker {
@@ -85,6 +99,8 @@ export class StartIntentTracker {
   private lookedAt = Number.NEGATIVE_INFINITY;
   /** Looks that ran out of time so far. */
   private timeouts = 0;
+  /** The last look ran out of time having found nothing: the folder's files are unknown, not absent. */
+  private unfinished = false;
   private inFlight: Promise<void> | undefined;
   private controller: AbortController | undefined;
   private published: StartIntent | undefined;
@@ -110,6 +126,17 @@ export class StartIntentTracker {
   /** Where the folder stands now, with the last look's findings (none before the first look). */
   startContext(): StartContext {
     return { ...this.deps.context(), found: this.found };
+  }
+
+  /**
+   * The last look ran out of time having found nothing (a timeout, or a
+   * wrap-up with nothing listed yet): a `blank` suggestion now means "not
+   * known yet", not "nothing to import". The start suggestion asks again
+   * rather than giving up the window, and the automatic draft is not the
+   * example ("Nothing here to draw from yet" would not be true).
+   */
+  lookUnfinished(): boolean {
+    return this.unfinished;
   }
 
   /** How many CREATE TABLEs the last look counted, when it could tell exactly (stays on this machine). */
@@ -193,17 +220,19 @@ export class StartIntentTracker {
   private lookOnce(): Promise<void> {
     if (this.inFlight) return this.inFlight;
     const controller = new AbortController();
+    const wrapUp = new AbortController();
     this.controller = controller;
     // A retry after a timed-out look gets more time (the listing is warm now).
     const timeoutMs = (this.deps.timeoutMs ?? START_LOOK_TIMEOUT_MS) * (1 + this.timeouts);
     const run = async (): Promise<void> => {
       let timer: ReturnType<typeof setTimeout> | undefined;
+      const wrapUpTimer = setTimeout(() => wrapUp.abort(), Math.round(timeoutMs * START_LOOK_WRAP_UP_SHARE));
       const timedOut = new Promise<'timeout'>((resolve) => {
         timer = setTimeout(() => resolve('timeout'), timeoutMs);
       });
       try {
         const result = await Promise.race([
-          this.deps.look(controller.signal).catch(() => {
+          this.deps.look(controller.signal, wrapUp.signal).catch(() => {
             // Our own abort after a timeout is not a failure of the look.
             if (!controller.signal.aborted) this.count(() => this.deps.error?.('startLookFailed'));
             return new Set<DetectedImportSource>();
@@ -212,32 +241,47 @@ export class StartIntentTracker {
         ]);
         if (result === 'timeout') {
           controller.abort();
-          this.found = new Set();
-          this.sqlTables = undefined;
-          this.timeouts++;
-          this.count(() => this.deps.feature?.('startLookTimeout'));
-          // Stale (looked at again on the next refresh) until the attempts run out.
-          this.lookedAt = this.timeouts >= START_LOOK_ATTEMPTS ? Number.POSITIVE_INFINITY : Number.NEGATIVE_INFINITY;
-          if (this.lookedAt === Number.POSITIVE_INFINITY) this.count(() => this.deps.feature?.('startLookGaveUp'));
+          this.ranOutOfTime();
         } else {
           const findings: StartLookFindings = isFindings(result) ? result : { sources: result };
+          if (findings.dbtProject) this.noteDbtProject();
+          if (findings.partial && findings.sources.size === 0) {
+            // Wrapped up with nothing found yet: as good as a timeout (the rest of the folder is unknown).
+            this.ranOutOfTime();
+            return;
+          }
+          // It ran out of listing time, but what it found by then is the suggestion.
+          if (findings.partial) this.count(() => this.deps.feature?.('startLookTimeout'));
           this.found = findings.sources;
           this.sqlTables = findings.sqlTables;
+          this.unfinished = false;
           this.lookedAt = this.now();
           if (this.timeouts > 0 && !this.retrySettled) {
             this.retrySettled = true;
             this.retryJustSettled = true;
           }
-          if (findings.dbtProject) this.noteDbtProject();
         }
       } finally {
         if (timer) clearTimeout(timer);
+        clearTimeout(wrapUpTimer);
         this.inFlight = undefined;
         if (this.controller === controller) this.controller = undefined;
       }
     };
     this.inFlight = run();
     return this.inFlight;
+  }
+
+  /** A look that ran out of time with nothing found: blank for now, tried again on the next refresh until the attempts run out. */
+  private ranOutOfTime(): void {
+    this.found = new Set();
+    this.sqlTables = undefined;
+    this.unfinished = true;
+    this.timeouts++;
+    this.count(() => this.deps.feature?.('startLookTimeout'));
+    // Stale (looked at again on the next refresh) until the attempts run out.
+    this.lookedAt = this.timeouts >= START_LOOK_ATTEMPTS ? Number.POSITIVE_INFINITY : Number.NEGATIVE_INFINITY;
+    if (this.lookedAt === Number.POSITIVE_INFINITY) this.count(() => this.deps.feature?.('startLookGaveUp'));
   }
 }
 

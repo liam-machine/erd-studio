@@ -470,7 +470,9 @@ as the `onboarding-stories` artifact (videos, logs, screenshots, `summary.json`)
 - **The Command Center is an agents pill** in a profile with chat on (the
   realistic stories): `s.sel.commandCenter` takes whichever is visible, and
   its label opens the same Quick Open.
-- **A notification's source** is in its footer ("Source: ERD Studio"); a
+- **A notification's source** is in its footer: the extension's display
+  name ("Source: ERD Studio: Data Modeling & ER Diagrams in DBML"; "Source:
+  ERD Studio" from a VSIX built before the listing's rename); a
   progress notification has none, and `lib/noise.mjs` counts it as the
   extension's. A click's progress toast is part of the answer: expect it.
 - **Clicks into a webview get lost while filming.** A recorded run dropped

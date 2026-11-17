@@ -5427,6 +5427,7 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
         canvasOpen: hasOpenSubjectAreaCanvas(),
         intent,
         exampleShownOnMachine: context.globalState.get<boolean>(EXAMPLE_DRAFT_SHOWN_KEY) === true,
+        lookUnfinished: startIntent.lookUnfinished(),
       });
       if (!kind || autoDraftAsked || draftPreview.isOpen()) return;
       // Another prompt had this window: the draft waits for a later one.
@@ -5691,6 +5692,7 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
           void runStartSuggestion({
             intent: () => startIntent.refresh(),
             sqlTables: () => startIntent.sqlTableCount(),
+            lookUnfinished: () => startIntent.lookUnfinished(),
             dbtAbove: () => dbtProjectAboveOpenFolders(workspaceRoot, (vscode.workspace.workspaceFolders ?? []).map((f) => f.uri.fsPath)),
             hasDiagrams: () => subjectAreaService.listSubjectAreas(workspaceRoot, semanticDir).length > 0,
             settingOn: startSuggestionsSettingOn,

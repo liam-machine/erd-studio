@@ -41,6 +41,12 @@ describe('autoDraftDue', () => {
     expect(autoDraftDue(base({ intent: 'importSqlDdl', exampleShownOnMachine: true }))).toBe('find');
   });
 
+  it('a blank that only means the look ran out of time never draws the example (the folder may hold the user\'s files); a find still drafts', () => {
+    expect(autoDraftDue(base({ intent: 'blank', lookUnfinished: true }))).toBeUndefined();
+    expect(autoDraftDue(base({ intent: 'blank', lookUnfinished: false }))).toBe('example');
+    expect(autoDraftDue(base({ intent: 'importSqlDdl', lookUnfinished: true }))).toBe('find');
+  });
+
   it('a blank folder gets the example once per machine', () => {
     expect(autoDraftDue(base({ intent: 'blank' }))).toBe('example');
     expect(autoDraftDue(base({ intent: 'blank', exampleShownOnMachine: true }))).toBeUndefined();

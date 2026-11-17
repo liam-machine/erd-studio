@@ -74,10 +74,12 @@ describe('package.json storage wording (native DBML storage, 2.0)', () => {
   userText({ description: pkg.description, displayName: pkg.displayName }, 'package', texts);
   userText(pkg.contributes, 'contributes', texts);
 
-  it('leads the Marketplace with one idea: logical data modelling in Git, stored as DBML, an open format, with dbt last', () => {
+  it('leads the Marketplace with what you do (draw ER diagrams and data models), then Git, DBML, an open format, with dbt last', () => {
     expect(pkg.description).toBe(
-      'Logical data modeling in Git, stored as DBML, an open format. Draw ERDs in VS Code as files your AI assistant reads and writes. Import DBML, SQL or Power BI; compare with dbt.',
+      'Draw ER diagrams and logical data models in VS Code. They live in Git as DBML, an open format your AI assistant reads and writes. Import SQL, Power BI, Fabric or DBML; compare with dbt.',
     );
+    // A search result card shows about the first 45 characters: they say what you do, not how it is stored.
+    expect(pkg.description.slice(0, 45)).toMatch(/^Draw ER diagrams and logical data models/);
     // "Stored as DBML" is the product's one idea (every new project). That a YAML/JSON project from before
     // 2.0 keeps working, and keeps writing YAML and JSON, lives in the README and docs/faq.md
     // (pinned by readmeWording.test.ts), not in the listing.
@@ -85,7 +87,19 @@ describe('package.json storage wording (native DBML storage, 2.0)', () => {
     expect(pkg.description.indexOf('dbt')).toBeGreaterThan(pkg.description.indexOf('AI assistant'));
     expect(pkg.keywords).toContain('dbt');
     expect(pkg.keywords).toContain('dbml editor');
+    // The search terms the listing did not rank for: both spellings, "er diagram" and Power BI.
+    for (const term of ['er diagram', 'data modeling', 'data modelling', 'power bi']) expect(pkg.keywords).toContain(term);
     expect(pkg.keywords.length).toBeLessThanOrEqual(30);
+  });
+
+  it('puts the search words in the display name, after the product name (Marketplace rank follows the name)', () => {
+    // The product is still "ERD Studio" everywhere else: the activity bar, the palette category, the
+    // settings heading and the output channel name it explicitly. VS Code shows the display name in the
+    // Extensions view and as a notification's "Source:".
+    expect(pkg.displayName).toBe('ERD Studio: Data Modeling & ER Diagrams in DBML');
+    expect(pkg.displayName.startsWith('ERD Studio')).toBe(true);
+    expect(pkg.contributes.viewsContainers.activitybar[0].title).toBe('ERD Studio');
+    expect(pkg.contributes.configuration.title).toBe('ERD Studio');
   });
 
   it('never says "open standard", and never calls the storage YAML or JSON', () => {

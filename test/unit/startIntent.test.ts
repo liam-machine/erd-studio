@@ -6,10 +6,22 @@
  * look, that the context key is published only on a change, and that a
  * refresh asked for on activation's path is deferred.
  */
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import * as vscode from 'vscode';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { START_LOOK_ATTEMPTS, START_LOOK_FRESH_MS, START_LOOK_TIMEOUT_MS, StartIntentTracker, type StartIntentDeps } from '../../src/commands/startIntent';
-import { detectImportSources, type DetectImportIo } from '../../src/commands/importModel';
+import {
+  START_LOOK_ATTEMPTS,
+  START_LOOK_FRESH_MS,
+  START_LOOK_TIMEOUT_MS,
+  START_LOOK_WRAP_UP_SHARE,
+  StartIntentTracker,
+  type StartIntentDeps,
+  type StartLookFindings,
+} from '../../src/commands/startIntent';
+import { detectImportSources, vscodeStartLook, type DetectImportIo } from '../../src/commands/importModel';
 import type { DetectedImportSource, StartContext } from '../../src/types/startActions';
 
 afterEach(() => {
@@ -236,5 +248,104 @@ describe('the look is Import…\'s own detector, stopping when cancelled', () =>
     const io: DetectImportIo = { root: '/w', readDirectory, readStart: vi.fn(async () => ''), cancelled: () => true };
     expect(await detectImportSources(io, '.erd-studio')).toEqual(new Set());
     expect(readDirectory).not.toHaveBeenCalled();
+  });
+});
+
+describe('a look that runs out of time keeps what it found (the first-run look on a large folder)', () => {
+  const wrapUpAt = Math.ceil(START_LOOK_TIMEOUT_MS * START_LOOK_WRAP_UP_SHARE);
+
+  it('is asked to wrap up before its deadline: the SQL it found by then is the suggestion (counted as a timeout), and is kept for a minute', async () => {
+    vi.useFakeTimers();
+    const keys: string[] = [];
+    const look = vi.fn((_signal: AbortSignal, wrapUp: AbortSignal) => new Promise<StartLookFindings>((resolve) => {
+      wrapUp.addEventListener('abort', () => resolve({ sources: new Set(['sqlDdl']), partial: true }));
+    }));
+    const { t, published } = tracker({ look, feature: (k) => { keys.push(k); } });
+    const pending = t.refresh();
+    await vi.advanceTimersByTimeAsync(wrapUpAt);
+    expect(await pending).toBe('importSqlDdl');
+    expect(published).toEqual(['importSqlDdl']); // never blank first
+    expect(t.lookUnfinished()).toBe(false);
+    expect(t.sqlTableCount()).toBeUndefined();
+    // It still ran out of time: the key keeps its meaning.
+    expect(keys).toEqual(['startLookTimeout']);
+    expect(await t.refresh()).toBe('importSqlDdl');
+    expect(look).toHaveBeenCalledTimes(1);
+  });
+
+  it('a wrap-up with nothing found yet, or a look that never answers, leaves the folder unknown (blank for now); a retry that finishes clears it', async () => {
+    vi.useFakeTimers();
+    const keys: string[] = [];
+    let calls = 0;
+    const look = vi.fn((_signal: AbortSignal, wrapUp: AbortSignal) => {
+      calls++;
+      if (calls === 1) {
+        return new Promise<StartLookFindings>((resolve) => {
+          wrapUp.addEventListener('abort', () => resolve({ sources: new Set(), partial: true }));
+        });
+      }
+      return Promise.resolve<StartLookFindings>({ sources: new Set(['semanticModel']) });
+    });
+    const { t, published } = tracker({ look, feature: (k) => { keys.push(k); } });
+    const first = t.refresh();
+    await vi.advanceTimersByTimeAsync(wrapUpAt);
+    expect(await first).toBe('blank');
+    expect(t.lookUnfinished()).toBe(true);
+    expect(keys).toEqual(['startLookTimeout']); // once, not twice
+    expect(await t.refresh()).toBe('importSemanticModel');
+    expect(t.lookUnfinished()).toBe(false);
+    expect(published).toEqual(['blank', 'importSemanticModel']);
+    expect(keys).toEqual(['startLookTimeout', 'startLookLateSuggestion']);
+
+    const never = tracker({ look: vi.fn(() => new Promise<ReadonlySet<DetectedImportSource>>(() => {})) });
+    const pending = never.t.refresh();
+    await vi.advanceTimersByTimeAsync(START_LOOK_TIMEOUT_MS);
+    expect(await pending).toBe('blank');
+    expect(never.t.lookUnfinished()).toBe(true);
+    // A look that finished and found nothing: really blank.
+    const empty = tracker({ look: vi.fn(async () => new Set<DetectedImportSource>()) });
+    expect(await empty.t.refresh()).toBe('blank');
+    expect(empty.t.lookUnfinished()).toBe(false);
+  });
+
+  it('a large folder on a slow drive: the host\'s own look (vscodeStartLook) still suggests its shallow CREATE TABLE scripts within the time', async () => {
+    // 6,000 folders of run output beside one ddl/ folder; every listing waits on the disk.
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'erd-start-look-'));
+    try {
+      fs.mkdirSync(path.join(root, 'ddl'));
+      fs.writeFileSync(path.join(root, 'ddl', 'tables.sql'), 'CREATE TABLE dim_customer (id int primary key, name text);\n');
+      const dir = vscode.FileType.Directory;
+      const file = vscode.FileType.File;
+      const tree = new Map<string, Array<[string, number]>>();
+      tree.set(root, [['ddl', dir], ['output', dir]]);
+      tree.set(path.join(root, 'ddl'), [['tables.sql', file]]);
+      const runs: Array<[string, number]> = [];
+      for (let i = 0; i < 6000; i++) {
+        runs.push([`run_${i}`, dir]);
+        tree.set(path.join(root, 'output', `run_${i}`), [['logs', dir], ['query.sql', file]]);
+        tree.set(path.join(root, 'output', `run_${i}`, 'logs'), [['out.txt', file]]);
+      }
+      tree.set(path.join(root, 'output'), runs);
+      let listed = 0;
+      vi.spyOn(vscode.workspace.fs, 'readDirectory').mockImplementation(async (uri: { fsPath: string }) => {
+        listed++;
+        await new Promise((r) => setTimeout(r, 2));
+        return tree.get(uri.fsPath) ?? [];
+      });
+      const timeoutMs = 400;
+      const t = new StartIntentTracker({
+        context: () => ({ hasProject: true, hasDbt: false, storage: 'dbml', hasDiagrams: false }),
+        look: vscodeStartLook(root, '.erd-studio'),
+        publish: () => {},
+        timeoutMs,
+      });
+      // A look that missed its deadline would have answered blank.
+      expect(await t.refresh()).toBe('importSqlDdl');
+      expect(t.lookUnfinished()).toBe(false);
+      // It stopped listing long before the 12,000 folders were listed.
+      expect(listed).toBeLessThan(2000);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   });
 });

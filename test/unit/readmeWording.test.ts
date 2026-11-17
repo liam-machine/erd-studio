@@ -33,6 +33,24 @@ describe('the README', () => {
     expect(headings).toEqual(['What it is', 'The ways to start', "What's in your repo", 'Work with your AI assistant', 'Using dbt?', 'Learn more']);
   });
 
+  it('opens with the reader\'s problem, a real screenshot, dbt as an add-on, the maker and the licence (docs/dev/onboarding-and-cli.md → "User-facing wording")', () => {
+    const first = README.slice(0, README.indexOf('\n## What it is\n'));
+    expect(first).toContain('Free to use. Source available under the');
+    expect(first).toMatch(/\*\*A data model that lives apart from the code goes stale, and after three months nobody trusts it\.\*\*/);
+    expect(first).toContain('**dbt is an add-on.**');
+    expect(first).toContain('](docs/dbt.md)');
+    expect(first).toContain('Built by a data engineer');
+    expect(first).toContain('https://github.com/liam-machine)');
+    const shot = 'media/screenshot-canvas-light.png';
+    expect(first).toContain(`https://raw.githubusercontent.com/liam-machine/erd-studio/main/${shot}`);
+    expect(fs.existsSync(path.join(ROOT, shot))).toBe(true);
+    // README-only media stays out of the VSIX (the 60-file cap)
+    expect(read('.vscodeignore').split('\n')).toContain(shot);
+    // our own words say "data model", not "ERD"; a quoted review keeps its own words
+    const ownWords = prose(first).split('\n').filter((l) => !l.startsWith('>')).join('\n');
+    expect(ownWords.replace(/ERD Studio/g, '')).not.toMatch(/\bERDs?\b/);
+  });
+
   it('is about 700 words of prose', () => {
     const words = prose(README).match(/[A-Za-z0-9][\w'’.\-/…]*/g) ?? [];
     expect(words.length).toBeGreaterThanOrEqual(600);

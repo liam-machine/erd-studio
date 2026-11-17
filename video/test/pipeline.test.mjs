@@ -247,8 +247,10 @@ test('never "No AI needed": the default cut, the end card and the thumbnail say 
 });
 
 // dbt is an add-on: no dbt in the logical cut at all, and in the default cut only in its dbt beat.
-const NO_DBT = /\bdbt\b|Physical|manifest/i;
-const NO_DBT_ON_SCREEN = /\bdbt\b|Physical|manifest|\bDiff\b|sample project/i;
+// manifest as a word: Claude Code's spinner says "Manifesting…"
+const NO_DBT = /\bdbt\b|Physical|\bmanifest\b/i;
+// Diff is the dbt beat's label, so it is matched with its capital only: the Import Your Data Model tab says "review and diff in Git"
+const NO_DBT_ON_SCREEN = /\bdbt\b|Physical|\bmanifest\b|\b(?-i:Diff)\b|sample project/i;
 /** The default cut's dbt beat: its own take, in a dbt project, the one scene that may name dbt. */
 const isDbtBeat = (sc) => sc.id === 'dbt';
 /** The wall of sources names dbt among the tools a data model already lives in (its narration and its tiles). */
@@ -376,7 +378,9 @@ test('the end card is short: the name, one line, free to use in VS Code, the ext
   const mod = (await import('../player/scenes/tour/endCard.js')).default;
   const words = mod.render(5).replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim().split(' ');
   assert.ok(words.length <= 14, `${words.length} words on the end card: ${words.join(' ')}`);
-  assert.equal(editor.EXTENSION.name, pkg.displayName);
+  // the product's name, which the Marketplace display name starts with ("ERD Studio: Data Modeling & …")
+  assert.equal(editor.EXTENSION.name, 'ERD Studio');
+  assert.ok(pkg.displayName.startsWith(`${editor.EXTENSION.name}:`), pkg.displayName);
   assert.equal(editor.EXTENSION.publisher, pkg.publisher);
   // the search hint names the Marketplace id, publisher.name
   assert.equal(editor.EXTENSION.id, `${pkg.publisher}.${pkg.name}`);
@@ -471,13 +475,13 @@ test('a folder without dbt draws no stage colours (the renderer\'s neutral canva
   }
 });
 
-test('an import in a new folder without dbt asks only the name: one layer', () => {
+test('an import in a new folder without dbt asks no layer: there is one', () => {
   const src = read('src', 'commands', 'importDbml.ts');
   assert.ok(src.includes("prompt: `Name the diagram. It is saved in the ${layerLabel} layer.`,"));
   // one creatable layer: it is the default and nothing is asked (layerWording.ts)
   assert.ok(read('src', 'services', 'layerWording.ts').includes('if (creatableIds.length === 1) return creatableIds[0];'));
-  // the recording saw that prompt in the real product, from Import SQL DDL (record/takes.json)
-  assert.ok(takes.importSql.screenText.some((x) => x.startsWith(IMPORT_NAME_PROMPT)));
+  // the recording's import (Import your SQL scripts, which asks nothing) drafted into that one layer (record/takes.json)
+  assert.ok([...takes.importSql.screenText, ...takes.draft.screenText].some((x) => x.startsWith('Keep saves it as ') && x.includes(` in the ${NEW_LAYER.label} layer `)));
 });
 
 test('the README GIF uses the layer a new folder without dbt really gets (Main), as the recording shows', async () => {
@@ -485,10 +489,10 @@ test('the README GIF uses the layer a new folder without dbt really gets (Main),
   assert.equal(NEW_LAYER.count, 1);
   const { HERO_TREE } = await import('../player/hero.js');
   assert.ok(HERO_TREE.some(([d, k, l]) => d === 1 && k === 'folder' && l === NEW_LAYER.id));
-  // the recording's plain folder got the same one layer: the import's draft and name box say Main
+  // the recording's plain folder got the same one layer: the import's draft says Main
   const shown = Object.values(takes).flatMap((s) => s.take === 'plain' ? s.screenText : []);
   const { DIAGRAM } = await import('../record/scenes.mjs');
-  for (const s of [`Keep saves it as ${DIAGRAM} in the ${NEW_LAYER.label} layer (.erd-studio/${NEW_LAYER.id}/diagrams/${DIAGRAM}.dbml).`, IMPORT_NAME_PROMPT]) assert.ok(shown.some((x) => x.startsWith(s)), s);
+  for (const s of [`Keep saves it as ${DIAGRAM} in the ${NEW_LAYER.label} layer (.erd-studio/${NEW_LAYER.id}/diagrams/${DIAGRAM}.dbml).`]) assert.ok(shown.some((x) => x.startsWith(s)), s);
   // no Silver or Gold anywhere in the player's HTML scenes or the GIF
   for (const f of [...readdirSync(join(HERE, '..', 'player', 'scenes', 'tour')).map((x) => join('scenes', 'tour', x)), 'hero.js', 'editor.js']) {
     assert.doesNotMatch(readFileSync(join(HERE, '..', 'player', f), 'utf8'), /\b(Gold|Silver|GLD|SLV)\b|gold\//, f);
@@ -946,9 +950,10 @@ test('the recording shows dbt only in the dbt beat, and there shows what the lin
   for (const [, label, hint] of lib.STAGE_TABS) { assert.ok(dbt.has(label), label); assert.ok(dbt.has(`· ${hint}`), hint); }
   for (const w of ['Run dbt parse', 'Open Physical view', lib.COMPARE_WORDS.logical, lib.COMPARE_WORDS.stop, 'Only in Logical', 'Only in Physical']) assert.ok(dbt.has(w), w);
   assert.ok([...dbt].some((t) => t.startsWith('dbt parse finished.')), 'Run dbt parse ran dbt for real');
-  // "Import from dbt turns your models into a diagram": the Diagrams view's New… menu showed it, under the
-  // command's own title, and the line uses the start's one label (src/types/startActions.ts)
-  assert.ok(dbt.has(cmdTitle('erdStudio.drawFromDbt')), cmdTitle('erdStudio.drawFromDbt'));
+  // "Import from dbt turns your models into a diagram": Import Your Data Model's tab showed its button (the
+  // guide's own label, src/services/importGuide.ts), and the line uses the start's one label (src/types/startActions.ts)
+  assert.match(read('src', 'services', 'importGuide.ts'), /dbt: 'Import from dbt',/);
+  assert.ok(dbt.has('Import from dbt'), 'Import from dbt');
   assert.match(read('src', 'types', 'startActions.ts'), /drawFromDbt: 'Import from dbt',/);
   assert.ok(script.scenes.find(isDbtBeat).lines[0].caption.includes('Import from dbt'), 'the dbt beat names Import from dbt');
   assert.match(read('src', 'commands', 'runDbtParse.ts'), /RUN_DBT_PARSE_ACTION = 'Run dbt parse'/);
@@ -1008,15 +1013,21 @@ test('each recorded scene shows the product labels its narration names', async (
   const { PG_DUMP } = await import('../record/fixtures.mjs');
   const DIALECTS = Object.values(Object.fromEntries([...read('src', 'services', 'sqlDdlImport.ts').match(/SQL_DIALECT_LABELS[^{]+\{([^}]+)\}/)[1].matchAll(/(\w+): '([^']+)'/g)].map((m) => [m[1], m[2]])));
   assert.equal(DIALECTS.length, 9, 'nine dialects');
+  // "one of the nine it reads": the Found in this folder card's sentence names each (src/services/importGuide.ts FOUND_TEXT)
+  const guide = read('src', 'services', 'importGuide.ts');
+  const FOUND_SQL = guide.slice(guide.indexOf('const FOUND_TEXT')).match(/importSqlDdl: '([^']+)'/)[1];
+  assert.equal(FOUND_SQL.split(': ')[1].split(/, | or /).length, 9, FOUND_SQL);
+  const IMPORT_SQL_LABEL = guide.match(/importSqlDdl: '(Import your SQL scripts)'/)[1];
   const expect = {
     hook: ['dim_customer.dbml', 'fct_order.dbml', `${DIAGRAM}.dbml`, '6 tables'],
     export: ['sales.sql', 'pipelines', 'README.md'],
-    importSql: [cmd('erdStudio.importSqlDdl'), 'Import SQL DDL', 'Import', 'Detected from your SQL', ...DIALECTS],
+    importSql: [cmd('erdStudio.showImportGuide'), 'Found in this folder', FOUND_SQL, IMPORT_SQL_LABEL, 'Draft from 1 SQL file (PostgreSQL) · 4 tables, 3 relationships · not saved'],
     draft: ['Draft from 1 SQL file (PostgreSQL) · 4 tables, 3 relationships · not saved', tsConst('src/services/draftModel.ts', 'KEEP_AS_DIAGRAM')],
     files: ['.erd-studio', 'fct_order.dbml', 'pipelines', 'DBML Table'],
     scale: [BIG_DIAGRAM, '2000 tables', '2719 relationships'],
     byHand: ['Starter columns (optional)', HAND_TABLE],
-    aiSetup: [cmd('erdStudio.setupAiHelper'), ...editor.HELP_ROWS],
+    // the side panel's Help & Feedback, unfolded: its first rows (the rest sit below the panel's fold)
+    aiSetup: [cmd('erdStudio.setupAiHelper'), 'Help & Feedback', ...editor.HELP_ROWS.slice(0, editor.HELP_ROWS.indexOf(cmd('erdStudio.setupAiHelper')))],
     aiRun: ['dim_customer', 'customer_id', '6 tables'],
     dbt: [lib.COMPARE_WORDS.logical, 'Physical', 'numeric(18,2)', 'order_status'],
   };
@@ -1024,14 +1035,12 @@ test('each recorded scene shows the product labels its narration names', async (
   for (const [id, labels] of Object.entries(expect)) for (const l of labels) assert.ok(shown(id).has(l), `${id} never showed "${l}"`);
   // the export ran pg_dump in the terminal, for real; the dialect PostgreSQL was detected
   assert.ok(takes.export.terminalText.some((r) => r.includes(`$ ${PG_DUMP}`)), 'pg_dump in the terminal');
-  assert.ok([...shown('importSql')].some((t) => /^detected · /.test(t)), 'a dialect marked detected');
-  assert.ok([...shown('importSql')].some((t) => t.startsWith(IMPORT_NAME_PROMPT)));
+  assert.ok(DIALECTS.every((l) => FOUND_SQL.includes(l.split(' / ')[0].replace(/^(Google|Amazon) /, ''))), 'the card names every dialect the import reads');
   // Set Up My AI Helper's toast names the assistant it set up
   assert.ok([...shown('aiSetup')].some((t) => /^AI helper ready for Claude Code/.test(t)), 'Set Up My AI Helper\'s toast');
   // the narration's labels are the product's
   const said = script.scenes.flatMap((s) => s.lines.map((l) => l.caption)).join(' ');
-  for (const l of [cmd('erdStudio.setupAiHelper'), 'Import SQL DDL', 'New', 'Run dbt parse', 'Compare with dbt', 'Physical tab']) assert.ok(said.includes(l.replace(/…$/, '')), l);
-  assert.equal(cmd('erdStudio.importSqlDdl'), 'Import SQL DDL…');
+  for (const l of [cmd('erdStudio.setupAiHelper'), cmd('erdStudio.showImportGuide'), 'Import from dbt', 'Run dbt parse', 'Compare with dbt', 'Physical tab']) assert.ok(said.includes(l.replace(/…$/, '')), l);
 });
 
 test('the scale scene says what its take shows: 2,000 tables, 2,700 relationships, lines routed in the background, and no time for it', () => {
@@ -1325,8 +1334,9 @@ test('the design the take wrote is formatted as ERD Studio writes it, but for th
   const tsx = join(REPO, 'node_modules', '.bin', 'tsx');
   if (!existsSync(tsx)) return t.skip('run npm ci at the repo root to check the DBML formatting');
   const { DBT_ERD } = await import('../record/fixtures.mjs');
-  // ERD Studio formats every file it writes (Claude Code edited fct_order, the relationships and dim_customer; Layout rewrote the diagram after it)
-  const ours = ['main/tables/sales/dim_store.dbml', 'main/tables/sales/dim_product.dbml', 'main/tables/sales/dim_date.dbml', 'main/tables/sales/dim_promotion.dbml', 'main/diagrams/shop-analytics.dbml'];
+  // ERD Studio formats every file it writes (Claude Code edited fct_order, the relationships, dim_customer and the
+  // diagram, whose use line it added: Layout splices only erd_layout, and an edit never re-pads lines it did not write)
+  const ours = ['main/tables/sales/dim_store.dbml', 'main/tables/sales/dim_product.dbml', 'main/tables/sales/dim_date.dbml', 'main/tables/sales/dim_promotion.dbml'];
   const texts = ours.map((f) => DBT_ERD[f]);
   const { spawnSync } = await import('node:child_process');
   const code = `import { formatDbml } from ${JSON.stringify(join(REPO, 'packages', 'core', 'src', 'dbml', 'format.ts'))};
@@ -1383,7 +1393,9 @@ test('the AI change is held on a still of the take\'s last frame, showing the li
   assert.match(term, /Write\(\.erd-studio\/main\/tables\/sales\/dim_customer\.dbml\)/);
   // the relationships file's edit (the terminal is sampled every 0.6 s, so its Update header or its added Ref row)
   assert.ok(/Update\(\.erd-studio\/main\/relationships\/main\.dbml\)/.test(term) || term.split('\n').some((r) => /^\d+ \+Ref: sales\.fct_order\.customer_id >\? /.test(r)), 'Claude Code edited the relationships file');
-  for (const l of CHANGE.table.lines.slice(1, -1)) assert.ok(term.includes(l.trim()), l);
+  // every line of the new file the terminal's preview showed (Claude Code folds a long one: "… +N lines")
+  const folded = +(/… \+(\d+) lines/.exec(term)?.[1] ?? 0);
+  for (const l of CHANGE.table.lines.slice(1, CHANGE.table.lines.length - Math.max(1, folded))) assert.ok(term.includes(l.trim()), l);
   // the marks sit inside the window
   const { w, h } = script.recording.inset;
   assert.ok(NEW_TABLE.x + NEW_TABLE.w < w && NEW_TABLE.y + NEW_TABLE.h < h);
@@ -1413,7 +1425,7 @@ test('one pull request: the .dbml change and the SQL that builds the table, in t
   const { CODE_ALSO, FILES, ADDED } = await import('../player/scenes/tour/pullRequest.js');
   assert.match(readFileSync(join(HERE, '..', 'record', 'fixtures.mjs'), 'utf8'), new RegExp(`'${CODE_ALSO.path}'`));
   assert.equal(FILES, 6);
-  assert.equal(ADDED, 21);
+  assert.equal(ADDED, 24);
   // no repo address, no user: the GitHub mark only
   const src = readFileSync(join(SCENES, 'tour', 'pullRequest.js'), 'utf8').replace(/^\s*\/\/.*$/gm, '');
   assert.doesNotMatch(src, /github\.com|@[a-z]/i);
