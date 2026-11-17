@@ -40,7 +40,7 @@
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/liam-machine/erd-studio/main/media/screenshot-canvas-light.png" width="800" alt="A screenshot of the ERD Studio canvas in VS Code's light theme: a retail sales star schema of five tables, each with its grain, keys and column types. The pointer rests on sales.fct_retail_sales, and its four relationships to dim_date, dim_store, dim_product and dim_promotion light up in amber with arrows. The toolbar, the table count and the minimap float over the canvas as rounded, see-through panels. On the left, the ERD Studio side panel searches and lists the diagrams, the Table Library by layer and schema, the relationships, and Help &amp; Feedback." /><br /><br />
-  <sub>VS Code's light theme: hover a table and its relationships light up.</sub>
+  <sub>Light theme: hover a table and its relationships light up.</sub>
 </p>
 
 - **Relate by dragging.** Drag a column onto another table's column: it is one `Ref` line in a file.
@@ -55,13 +55,9 @@
 2. Open any folder and click **ERD Studio** in the Activity Bar.
 3. Click **Import Your Data Model…**: it looks at the folder, on your machine only, and puts the import that fits first. Or click **New Diagram…** for an empty canvas.
 
-| Your folder holds | The import |
-|---|---|
-| A Power BI or Fabric semantic model | **Import your Power BI semantic model** |
-| `CREATE TABLE` scripts | **Import your SQL scripts** (PostgreSQL, MySQL, SQL Server, Snowflake, Databricks, Oracle, BigQuery, Redshift or SQLite), with their keys and comments |
-| A `.dbml` file from dbdiagram.io or any DBML tool | **Import your DBML file** |
+**Import from:** Databricks · Snowflake · Power BI · Microsoft Fabric · SQL Server and Azure SQL · PostgreSQL · MySQL and MariaDB · Oracle · BigQuery · Redshift · SQLite · DuckDB · dbdiagram.io and other DBML tools · modelling tools that export SQL or DBML.
 
-Every import opens as a draft; nothing is written until you press **Keep as Diagram**. [The guide](docs/import-existing-models.md) has the export steps for Databricks, Snowflake, Fabric and SQL Server, and ends with **Open an Example…**, a finished coffee-shop model.
+Each arrives as a file you export, never a live connection: **Import your Power BI semantic model**, **Import your SQL scripts** or **Import your DBML file**. [The guide](docs/import-existing-models.md) has the export step for each. Every import opens as a draft; nothing is written until you press **Keep as Diagram**. With nothing to import, **Open an Example…** is a finished coffee-shop model.
 
 <table align="center"><tr>
 <td width="300"><a href="https://cdn.jsdelivr.net/gh/liam-machine/erd-studio@main/docs/assets/getting-started.mp4"><img src="https://raw.githubusercontent.com/liam-machine/erd-studio/main/docs/assets/getting-started-play.jpg" width="300" alt="Play Watch the Tour (2:48): ERD Studio recorded in VS Code's light theme. It shows the tools it imports from, imports a PostgreSQL schema exported with one pg_dump command, shows its DBML files next to the code and a 2,000-table diagram, edits it by hand and with an AI assistant, reviews the DBML and SQL in one pull request, compares the design with what the code builds, and shows ERD Studio for Confluence drawing it from GitHub." /></a></td>
@@ -78,7 +74,7 @@ Commit the `.erd-studio/` folder: that's your data model.
 ├── layers.json                   ← your layers, in order
 └── gold/                         ← a layer (silver, gold, …)
     ├── tables/
-    │   └── gold/                 ← a schema
+    │   └── sales/                ← a schema
     │       ├── dim_customer.dbml ← one file per table, shared by every diagram
     │       └── fct_order.dbml
     ├── relationships/
@@ -88,8 +84,8 @@ Commit the `.erd-studio/` folder: that's your data model.
 ```
 
 ```dbml
-// .erd-studio/gold/tables/gold/fct_order.dbml
-Table gold.fct_order [
+// .erd-studio/gold/tables/sales/fct_order.dbml
+Table sales.fct_order [
   role: 'transaction-fact',
   grain: 'One row per order'
 ] {
