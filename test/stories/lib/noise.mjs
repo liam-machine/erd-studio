@@ -17,17 +17,8 @@
 //            causes it (Show Me → its draft tab), or a quick pick that opened
 //            within QUICK_INPUT_GRACE_MS of the story's own input (the palette)
 
-import { readFileSync } from 'node:fs';
-
 const POLL_MS = 250;
 const QUICK_INPUT_GRACE_MS = 3000;
-
-/**
- * A notification's "Source:" is the extension's display name (package.json `displayName`,
- * "ERD Studio: Data Modeling & ER Diagrams in DBML"), not the product name; a VSIX built
- * before the listing's rename says "ERD Studio".
- */
-const ERD_SOURCES = new Set(['ERD Studio', JSON.parse(readFileSync(new URL('../../../package.json', import.meta.url), 'utf8')).displayName]);
 
 /** Tabs ERD Studio opens: its webviews and its diagrams. */
 const ERD_TAB = /^(Draft|Example): |^ERD Studio Tour$|^Import Your Data Model$|^Convert to DBML$|\.dbml$/;
@@ -103,7 +94,7 @@ export class Noise {
     }
     const was = new Set(prev.toasts.map((x) => x.text));
     // ERD Studio's own: its source says so; a progress toast (window.withProgress) carries no source, and is an extension's.
-    for (const toast of snap.toasts) if (!was.has(toast.text)) this.add('notification', toast.text, ERD_SOURCES.has(toast.source) || !toast.source && toast.progress ? 'erd' : 'vscode', toast.source || (toast.progress ? 'a progress notification' : undefined));
+    for (const toast of snap.toasts) if (!was.has(toast.text)) this.add('notification', toast.text, toast.source === 'ERD Studio' || !toast.source && toast.progress ? 'erd' : 'vscode', toast.source || (toast.progress ? 'a progress notification' : undefined));
     const tabsWere = new Set(prev.tabs);
     for (const tab of snap.tabs) if (!tabsWere.has(tab)) this.add('tab', tab, ERD_TAB.test(tab) ? 'erd' : 'vscode');
     if (snap.walkthrough && snap.walkthrough !== prev.walkthrough) this.add('walkthrough', snap.walkthrough, /ERD Studio/.test(snap.walkthrough) ? 'erd' : 'vscode');
