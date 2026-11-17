@@ -1,0 +1,28 @@
+<!doctype html>
+<!-- The README's strip of import sources (media/import-sources.png). Each mark is the file in
+     player/assets/logos/ (LOGOS.md), unaltered, above its product's name; DuckDB and DBML have no vetted
+     mark, so they are words. SQL Server's tile also stands for Azure SQL (the README's alt text says so). Render at 2x, transparent, from this folder:
+     chrome --headless=new --force-device-scale-factor=2 --default-background-color=00000000 \
+       --window-size=800,196 --screenshot=../media/import-sources.png import-sources.html -->
+<meta charset="utf-8">
+<style>
+  html, body { margin: 0; background: transparent; }
+  body { width: 800px; font-family: -apple-system, "Helvetica Neue", Arial, sans-serif; }
+  .wall { display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; padding: 2px; }
+  .tile { height: 90px; box-sizing: border-box; background: #fff; border: 1px solid #d0d7de; border-radius: 10px;
+          display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; }
+  .tile img { width: 34px; height: 34px; object-fit: contain; }
+  .tile .word { height: 34px; display: flex; align-items: center; font: 700 16px -apple-system, "Helvetica Neue", Arial, sans-serif; color: #1f2328; }
+  .tile span { font-size: 11.5px; font-weight: 600; color: #1f2328; text-align: center; line-height: 1.15; }
+</style>
+<div class="wall" id="wall"></div>
+<script>
+  const sources = [
+    ['databricks', 'Databricks'], ['snowflake', 'Snowflake'], ['power-bi', 'Power BI'], ['fabric', 'Microsoft Fabric'],
+    ['postgresql', 'PostgreSQL'], ['sql-server', 'SQL Server'], ['mysql', 'MySQL'],
+    ['oracle', 'Oracle'], ['bigquery', 'BigQuery'], ['redshift', 'Redshift'], ['mariadb', 'MariaDB'],
+    ['sqlite', 'SQLite'], [null, 'catalog CSV', 'DuckDB'], [null, 'any DBML tool', 'DBML'],
+  ];
+  document.getElementById('wall').innerHTML = sources.map(([logo, name, word]) =>
+    `<div class="tile">${logo ? `<img src="player/assets/logos/${logo}.svg" alt="">` : `<div class="word">${word}</div>`}<span>${name}</span></div>`).join('');
+</script>

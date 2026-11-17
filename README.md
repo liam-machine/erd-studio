@@ -55,9 +55,11 @@
 2. Open any folder and click **ERD Studio** in the Activity Bar.
 3. Click **Import Your Data Model…**: it looks at the folder, on your machine only, and puts the import that fits first. Or click **New Diagram…** for an empty canvas.
 
-**Import from:** Databricks · Snowflake · Power BI · Microsoft Fabric · SQL Server and Azure SQL · PostgreSQL · MySQL and MariaDB · Oracle · BigQuery · Redshift · SQLite · DuckDB · dbdiagram.io and other DBML tools · modelling tools that export SQL or DBML.
+<p align="center">
+  <img src="https://raw.githubusercontent.com/liam-machine/erd-studio/main/media/import-sources.png" width="800" alt="The sources ERD Studio imports from, each with its logo: Databricks, Snowflake, Power BI, Microsoft Fabric, PostgreSQL, SQL Server and Azure SQL, MySQL, Oracle, BigQuery, Redshift, MariaDB, SQLite, DuckDB (from a catalog CSV) and DBML from dbdiagram.io or any DBML tool." />
+</p>
 
-Each arrives as a file you export, never a live connection: **Import your Power BI semantic model**, **Import your SQL scripts** or **Import your DBML file**. [The guide](docs/import-existing-models.md) has the export step for each. Every import opens as a draft; nothing is written until you press **Keep as Diagram**. With nothing to import, **Open an Example…** is a finished coffee-shop model.
+Each of these, and any modelling tool that exports SQL or DBML, arrives as a file you export, never a live connection: **Import your Power BI semantic model**, **Import your SQL scripts** or **Import your DBML file**. [The guide](docs/import-existing-models.md) has the export step for each. Every import opens as a draft; nothing is written until you press **Keep as Diagram**. With nothing to import, **Open an Example…** is a finished coffee-shop model.
 
 <table align="center"><tr>
 <td width="300"><a href="https://cdn.jsdelivr.net/gh/liam-machine/erd-studio@main/docs/assets/getting-started.mp4"><img src="https://raw.githubusercontent.com/liam-machine/erd-studio/main/docs/assets/getting-started-play.jpg" width="300" alt="Play Watch the Tour (2:48): ERD Studio recorded in VS Code's light theme. It shows the tools it imports from, imports a PostgreSQL schema exported with one pg_dump command, shows its DBML files next to the code and a 2,000-table diagram, edits it by hand and with an AI assistant, reviews the DBML and SQL in one pull request, compares the design with what the code builds, and shows ERD Studio for Confluence drawing it from GitHub." /></a></td>

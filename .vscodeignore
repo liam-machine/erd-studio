@@ -65,6 +65,7 @@ data engineer plugin/**
 media/demo.gif
 media/readme-workflow.png
 media/screenshot-canvas-light.png
+media/import-sources.png
 
 # Dev/local files
 # The import corpus cache (scripts/corpus/fetch.mjs), gitignored but not read by vsce.

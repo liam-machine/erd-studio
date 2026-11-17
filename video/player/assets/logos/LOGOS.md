@@ -1,6 +1,6 @@
 # Third-party logos
 
-Used only in the getting-started tour: the wall of sources the import reads (`scenes/sources/wall.js`,
+Used in the README's strip of import sources (`media/import-sources.png`, drawn by `video/import-sources.html`: the twelve product marks, each above its name) and in the getting-started tour: the wall of sources the import reads (`scenes/sources/wall.js`,
 both cuts; the logical cut's without dbt), the export scene's Snowflake query card
 (`scenes/rec/window.js`, `props.query`) and the Confluence scene (`scenes/tour/confluence.js`). Copied unchanged from `social-video/player/assets/logos/`
 (video/ never loads anything from social-video/ at run time); the sources, terms and how each file
