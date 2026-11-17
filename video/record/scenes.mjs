@@ -18,26 +18,32 @@ import { PG_DUMP, plainFolder } from './fixtures.mjs';
 
 const ERD_ICON = wb('.activitybar [aria-label^="ERD Studio"]');
 const EXPLORER_ICON = wb('.activitybar [aria-label^="Explorer"]');
-const sideRow = (text, extra = '') => wb(`.part.sidebar .monaco-list-row${extra}`, { text });
+/** A row of ERD Studio's side panel (a webview: its diagrams, tables and Help & Feedback rows carry their name as aria-label). */
+const sideRow = (label) => wv(`.gs-row[aria-label="${label}"]`);
+/** A section header of the side panel (Diagrams, Table Library, Relationships, Help & Feedback). */
+const sideSection = (re) => wv('button.gs-section__toggle', { re });
 const explorerRow = (text) => wb('.explorer-folders-view .monaco-list-row', { text });
-const pickRow = (re) => wb('.quick-input-widget .monaco-list-row', { re });
 const button = (text) => wv('button', { text });
-const ADD = wv('button', { re: '^\\+ Add' });
-const LAYOUT = wv('button', { re: 'Layout$' });
+/** The canvas toolbar's controls (icons, named by their aria-label). */
+const ADD = wv('button[aria-label="Add table or relationship"]');
+const LAYOUT = wv('button[aria-label="Auto-layout nodes"]');
+const FIT = wv('button[aria-label="Fit view to show all nodes"]');
 const STARTER = wv('select.new-model-dialog__select');
 const TERMINAL = wb('.part.panel .xterm');
 /** Where the drawn pointer waits off camera: past the window's right edge (composite clips it there). */
 const OFF_WINDOW = { x: 1480, y: 300 };
 /** An empty spot of the editor's tab bar, where the real mouse rests when it must not hover anything on the canvas. */
 const TAB_BAR = { x: 1100, y: 48 };
-/** The Diagrams view's New… menu (its title bar's +) and its Import from dbt… item. */
-const NEW_MENU = wb('.part.sidebar .pane-header .action-label[aria-label^="New…"]');
-const menuItem = (re) => wb('.monaco-menu .action-label', { re });
+/** Import Your Data Model…: the empty side panel's button, and the row Help & Feedback leads with once there is a diagram. */
+const IMPORT_START = wv('button', { re: '^Import Your Data Model' });
+const IMPORT_ROW = sideRow('Import Your Data Model…');
+/** The Import Your Data Model tab's title (a webview panel), closed off camera once the import is kept. */
+const GUIDE_TAB_TITLE = 'Import Your Data Model';
 
 /** The schema the shop's tables are in (the PostgreSQL database's `sales`, record/fixtures.mjs): the import keeps it, so each table's file is under tables/<schema>/. */
 export const SCHEMA = 'sales';
-/** The diagram the import makes, named from the folder it imported (the name box's default). */
-export const DIAGRAM = 'shop-analytics';
+/** The diagram the import makes, named after the one file it read (sales.sql: the draft's "Keep saves it as sales"). */
+export const DIAGRAM = 'sales';
 
 /** The scale take's diagram (record/bigProject.mjs): 2,000 tables, about 2,700 relationships. */
 export const BIG_DIAGRAM = 'enterprise_warehouse';
@@ -184,10 +190,13 @@ async function watchRouting(d, t0, { max = 40000, every = 150 } = {}) {
 
 /** The diagram's canvas tab in front, the whole diagram in view and clear of the minimap, nothing selected. */
 async function canvasInView(d, { click = { x: 0, y: 0 } } = {}) {
+  // the Import Your Data Model tab, left open behind the kept diagram, closed off camera
+  await d.ev(`[...document.querySelectorAll('.tabs-container .tab')].find((t) => t.innerText.trim().startsWith(${JSON.stringify(GUIDE_TAB_TITLE)}))?.querySelector('.tab-actions .action-label')?.click()`);
+  await sleep(200);
   await d.click(wb(`.tabs-container .tab[data-resource-name="${DIAGRAM}.dbml"]`), { ms: 1 });
-  await d.waitFor(button('Fit'));
+  await d.waitFor(FIT);
   await sleep(500);
-  await d.click(button('Fit'), { ms: 1 });
+  await d.click(FIT, { ms: 1 });
   await sleep(700);
   await clearOfMinimap(d);
   await sleep(200);
@@ -256,9 +265,12 @@ export const TAKES = {
       // a first-open toast ("This project has 1 ERD Studio diagram", which can take a few seconds) is not part of the tour
       const notNow = wb('.notifications-toasts .monaco-button', { text: 'Not now' });
       await d.waitFor(notNow, 8000).then(() => d.click(notNow, { ms: 1 })).catch(() => {});
-      // the side bar stays open (its New… menu is where Import from dbt is); the scene hides it before
-      // Run dbt parse, so the comparison's marks and panel get the window's width
-      await d.click(button('Fit'), { ms: 1 });
+      // the side bar stays open, Help & Feedback unfolded (its first row, Import Your Data Model…, is
+      // where Import from dbt is); the scene hides it before Run dbt parse, so the comparison's marks
+      // and panel get the window's width
+      await d.click(sideSection('^Help'), { ms: 1 });
+      await sleep(600);
+      await d.click(FIT, { ms: 1 });
       await sleep(800);
       await clearOfMinimap(d);
       await sleep(200);
@@ -299,50 +311,42 @@ export const SCENES = {
       await d.moveTo({ x: 700, y: 420 }, { ms: 1100, hover: false });
     },
   },
-  // "Then click New, Import SQL DDL, and import the folder. It works out the dialect: PostgreSQL, one
-  // of the nine it reads." The Diagrams view's New… menu, Import SQL DDL…, the file dialog opened on
-  // the project folder (sales.sql in it) and its Import (every .sql file in the folder), the dialect
-  // pick (all nine, PostgreSQL first, marked as detected), then the name box (the folder's name).
+  // "Then click Import Your Data Model, and import the SQL scripts it found. It works out the dialect:
+  // PostgreSQL, one of the nine it reads." The empty side panel's Import Your Data Model…, its tab's
+  // "Found in this folder" card (which names the nine dialects it reads), Import your SQL scripts,
+  // then the draft, its title naming the dialect it detected: Draft from 1 SQL file (PostgreSQL).
   importSql: {
     async run(d, { at, beats, shot }) {
       await at(0.05);
       await d.click(ERD_ICON, { ms: 350 });
-      await d.waitFor(NEW_MENU);
-      await at(beats.import.t + 0.35);   // "click New" (each click lands at the end of its glide)
-      await d.click(NEW_MENU, { ms: 450, synthetic: true });
-      const item = menuItem('^Import SQL DDL');
-      await d.waitFor(item, 5000);
-      await at(beats.import.t + 1.1);    // "Import SQL DDL"
-      await d.click(item, { ms: 400 });
+      await d.waitFor(IMPORT_START);
+      await at(beats.import.t + 0.9);    // "click Import Your Data Model" (each click lands at the end of its glide)
+      await d.click(IMPORT_START, { ms: 500 });
+      const found = wv('button', { text: 'Import your SQL scripts' });
+      await d.waitFor(found, 10000);
       await d.parkMouse({ x: 1300, y: 560 });
-      // the file dialog opens on the project folder: Import takes the folder, every .sql file in it
-      const importFolder = wb('.quick-input-widget .monaco-button', { text: 'Import' });
-      await d.waitFor(importFolder, 10000);
-      await d.waitFor(pickRow('^.?sales\\.sql$'), 10000);
-      await at(beats.import.t + 2.55);   // "import the folder"
-      await d.click(importFolder, { ms: 500 });
+      await shot('guide');
+      await at(beats.import.t + 2.6);    // "import the SQL scripts it found"
+      await d.click(found, { ms: 500 });
       await d.parkMouse({ x: 1300, y: 560 });
-      const pg = pickRow('PostgreSQL');
-      await d.waitFor(pg, 20000);
-      // the drawn pointer runs down the nine dialects (the real mouse stays put: no tooltip)
-      await at(beats.dialect.t + 0.3);
-      const last = await d.locate(pickRow('^SQLite'), { dx: 0.25 }).catch(() => null);
-      if (last) await d.moveTo({ x: last.x, y: last.y }, { ms: 900, hover: false });
-      await shot('dialects');
-      await at(beats.dialect.t + 1.5);   // "PostgreSQL" (the click lands at the end of its glide)
-      await d.click(pg, { ms: 600, dx: 0.25 });
-      await d.waitFor(wb('.quick-input-message', { re: '^Name the diagram' }), 20000);
+      const title = wv('*', { re: '^Draft from 1 SQL file', last: true });
+      await d.waitFor(wv('button', { text: 'Keep as Diagram' }), 20000);
+      await shot('draft');
+      // the drawn pointer runs along the draft's title as "PostgreSQL" plays (the real mouse stays put: no tooltip)
+      await at(beats.dialect.t + 1.2);
+      await d.moveTo(title, { ms: 700, dx: 0.08, dy: 0.7, hover: false });
+      await d.moveTo(title, { ms: 900, dx: 0.42, dy: 0.7, hover: false });
     },
   },
   // "You get a draft of every table and relationship. Keep it, and it's your diagram."
   draft: {
     async run(d, { at, beats }) {
-      await at(beats.draft.t);
-      await d.enter();   // the name box: the folder's name
-      await d.waitFor(button('Keep as Diagram'), 20000);
+      // the draft is open (importSql): the pointer over its tables, then Keep as Diagram
+      await at(beats.draft.t + 0.6);
+      await d.moveTo({ x: 900, y: 380 }, { ms: 900, hover: false });
       await at(beats.keep.t + 0.3);
       await d.click(button('Keep as Diagram'), { ms: 600 });
-      await d.waitFor(button('Fit'), 20000);
+      await d.waitFor(FIT, 20000);
     },
   },
   // "Each table is now a DBML file, an open format, next to the code that builds it. Change it, and
@@ -381,7 +385,7 @@ export const SCENES = {
       await d.click(sideRow(BIG_DIAGRAM), { ms: 500 });
       // timed from the click: the first tables, and the routed lines replacing the first, straight ones
       const routing = watchRouting(d, t0);
-      await d.waitFor(button('Fit'), 20000);
+      await d.waitFor(FIT, 20000);
       await sleep(400);
       // the side bar closes (its view's icon), so the canvas gets the window's width; the lines settle on the opened group
       await d.click(ERD_ICON, { ms: 450 });
@@ -394,7 +398,7 @@ export const SCENES = {
       // the whole diagram, 2,000 tables, once the settled lines have been seen for a moment (no
       // fixed beat: how long routing takes depends on the machine)
       await sleep(300);
-      await d.click(button('Fit'), { ms: 550 });
+      await d.click(FIT, { ms: 550 });
       await d.parkMouse(TAB_BAR);   // the real mouse off the canvas: no table or column tooltip
       await shot('fitted');
       // zoom into one area about the table the pointer will hover, a few wheel steps (each takes a
@@ -431,7 +435,7 @@ export const SCENES = {
       await at(beats.hand.t + 5.0);   // "…and lay it out"
       await d.click(LAYOUT, { ms: 500 });
       await sleep(800);
-      await d.click(button('Fit'), { ms: 400 });
+      await d.click(FIT, { ms: 400 });
       await sleep(250);
       await clearOfMinimap(d);
     },
@@ -441,7 +445,7 @@ export const SCENES = {
   aiSetup: {
     async run(d, { at, beats }) {
       await at(beats.or.t + 0.4);
-      await d.click(wb('.part.sidebar .pane-header', { re: '^Help' }), { ms: 700 });
+      await d.click(sideSection('^Help'), { ms: 700 });
       await at(beats.or.t + 1.9);   // "Click Set Up My AI Helper"
       await d.click(sideRow('Set Up My AI Helper'), { ms: 550 });
       const toast = wb('.notifications-toasts .notification-list-item-message', { re: '^AI helper ready' });
@@ -473,7 +477,7 @@ export const SCENES = {
       await sleep(1500);
       await clearTerminal(d);
       await sleep(600);
-      await d.click(button('Fit'), { ms: 1 });
+      await d.click(FIT, { ms: 1 });
       await sleep(600);
       await d.click({ x: 120, y: 520 }, { ms: 1 });   // an empty spot on the canvas: nothing selected
       await sleep(300);
@@ -501,7 +505,7 @@ export const SCENES = {
       await at(beats.live.t + 0.9);
       await d.click(LAYOUT, { ms: 550 });
       await sleep(700);
-      await d.click(button('Fit'), { ms: 400 });
+      await d.click(FIT, { ms: 400 });
       await sleep(200);
       await clearOfMinimap(d);   // the new table in the open, not under the minimap
       await at(beats.live.t + 3.0);   // the new table, on the tidied canvas (held to the scene's end)
@@ -547,19 +551,22 @@ export const SCENES = {
   // Open Physical view held while its line plays, back to Logical and Compare with dbt.
   dbt: {
     async run(d, { at, beats, ff }) {
-      await at(beats.draw.t + 0.9);
-      await d.click(NEW_MENU, { ms: 600, synthetic: true });
-      const draw = menuItem('^Import from dbt');
-      await d.waitFor(draw, 5000);
+      await at(beats.draw.t + 0.2);
+      await d.click(IMPORT_ROW, { ms: 600 });
+      // the tab leads with the dbt card, open: its Import from dbt button
+      const draw = wv('button', { text: 'Import from dbt' });
+      await d.waitFor(draw, 8000);
+      await d.parkMouse({ x: 1300, y: 560 });
       await at(beats.draw.t + 1.9);   // "Import from dbt"
-      await d.moveTo(draw, { ms: 550, dx: 0.6 });   // past the label's end: the pointer does not cover it
-      await at(beats.draw.end + 0.1);
-      await d.escape();
-      await sleep(150);
+      await d.moveTo(draw, { ms: 550, dx: 1.08, dy: 0.5, hover: false });   // just past the button's end: the pointer does not cover its label
+      await at(beats.draw.end - 0.4);
+      // back to the diagram's tab (not run: this project's diagram exists already)
+      await d.click(wb(`.tabs-container .tab[data-resource-name="${DIAGRAM}.dbml"]`), { ms: 450 });
+      await sleep(200);
       await at(beats.parse.t + 0.1);
       await d.click(ERD_ICON, { ms: 550 });   // the active view's icon: the side bar closes, the canvas takes the width
       await sleep(250);
-      await d.click(button('Fit'), { ms: 400 });   // the diagram across that width
+      await d.click(FIT, { ms: 400 });   // the diagram across that width
       await sleep(200);
       await clearOfMinimap(d);
       await at(beats.parse.t + 2.2);   // "click Run dbt parse"

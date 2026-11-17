@@ -74,7 +74,7 @@ for (const [name, take] of Object.entries(TAKES)) {
         if (ff === 'running') throw new Error(`${id}: at(${s}) during the fast-forward`);
         const target = clock(s);
         const wait = (t0 + target) * 1000 - Date.now();
-        if (wait > 0) await sleep(wait); else late = Math.max(late, -wait / 1000);
+        if (wait > 0) await sleep(wait); else { late = Math.max(late, -wait / 1000); if (process.env.REC_DEBUG && -wait > 300) console.log(`  ${id}: at(${s.toFixed(2)}) ${(-wait / 1000).toFixed(2)}s late`); }
       };
       const fastForward = {
         start() {
@@ -112,12 +112,16 @@ for (const [name, take] of Object.entries(TAKES)) {
       await spec.run(d, { at, notBefore, beats: scene.beats, dur: scene.dur, scene, ff: fastForward, note, shot });
       if (ff === 'running') throw new Error(`${id}: ff.start() without ff.end()`);
       const busyTake = now();
+      // how late the clicks ran: the closing waits below time no click (the text sampler's last pass can
+      // run a little past the scene's end on a heavy page, which only delays the next scene's start)
+      const clicksLate = late;
       // the clicks' end, in the video's time
       const busyUntil = !ff ? busyTake : busyTake >= ff.b ? ff.o + (busyTake - ff.b) : ff.o;
       await at(scene.dur - 0.15);
       sampling = false;
       await sampler;
       await at(scene.dur);
+      late = clicksLate;
       const over = Math.max(0, busyUntil - scene.dur);
       const speed = ff ? (ff.b - ff.a) / (ff.o - ff.a) : 1;
       console.log(`${id.padEnd(11)} ${scene.dur.toFixed(2)}s  actions done at ${busyUntil.toFixed(2)}s${ff ? `  (sped up ${speed.toFixed(1)}x from ${ff.a}s)` : ''}${late ? `  (a click ran ${late.toFixed(2)}s late)` : ''}${over ? '  OVER' : ''}${Object.keys(notes).length ? `  ${JSON.stringify(notes)}` : ''}`);

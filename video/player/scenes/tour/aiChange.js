@@ -22,10 +22,13 @@ export const CHANGE = {
   table: {
     path: '.erd-studio/main/tables/sales/dim_customer.dbml',
     lines: [
-      "Table sales.dim_customer [role: 'domain-dim', grain: 'One row per customer'] {",
-      '  customer_id   integer                    [pk]',
+      'Table sales.dim_customer [',
+      "  role: 'domain-dim',",
+      "  grain: 'One row per customer'",
+      '] {',
+      '  customer_id   integer                  [pk]',
       '  customer_name "character varying(100)"',
-      '  email         "character varying(120)"',
+      '  email         "character varying(100)"',
       '  city          "character varying(60)"',
       '  region        "character varying(30)"',
       '}',
@@ -37,15 +40,15 @@ export const CHANGE = {
     line: 'Ref: sales.fct_order.customer_id >? sales.dim_customer.customer_id',
   },
   /** The two smaller edits that go with them: the key column on the fact table, the table on the diagram. */
-  also: [['fct_order.dbml', '+ customer_id'], ['shop-analytics.dbml', '+ dim_customer']],
+  also: [['fct_order.dbml', '+ customer_id'], ['sales.dbml', '+ dim_customer']],
 };
 
 /** On the still (inset px): the new table's card, the relationship's line from fct_order to it, and fct_order's new key column's row. */
-export const NEW_TABLE = { x: 790, y: 334, w: 190, h: 122 };
-export const LINK = [[409, 378], [788, 378]];
-export const FK_ROW = { x: 280, y: 365, w: 124, h: 14 };
+export const NEW_TABLE = { x: 442, y: 498, w: 203, h: 139 };
+export const LINK = [[359, 470], [359, 567], [436, 567]];
+export const FK_ROW = { x: 296, y: 373, w: 114, h: 14 };
 /** The punch-in: about this point (inset px), to this scale, the point ending at the inset's centre-left. */
-const ZOOM = { focus: [600, 380], scale: 1.5, to: [820, 372] };
+const ZOOM = { focus: [470, 480], scale: 1.5, to: [820, 360] };
 
 // The pointer composite drew on the footage's last frame, so the still shows it too, then moves it
 // off the window's right edge (absent in the pipeline test, which renders without a server).
@@ -108,7 +111,7 @@ export default {
     // the card: what it wrote (over the terminal), leaving as the canvas punches in
     const cardOp = Math.min(easeOut(seg(t, scene.beats.files.t - 0.05, scene.beats.files.t + 0.35)), fadeOut(t, canvasAt, 0.35));
     if (cardOp > 0) {
-      const CX = 996, CY = 30, CW = 714;   // over the terminal, clear of the new table (x ≤ 980); wide enough for the table's first line at 14 px
+      const CX = 996, CY = 30, CW = 714;   // over the terminal, clear of the new table (x ≤ 650); wide enough for the table's first line at 14 px
       const row = (sign, text, lit, extra = '') => `<div style="display:flex;height:25px;align-items:center;white-space:pre;background:${lit ? `rgba(171,242,188,${lit.toFixed(3)})` : ADD.bg};${extra}">
           <span style="width:30px;flex:none;align-self:stretch;display:flex;align-items:center;justify-content:center;background:${ADD.gutter};color:${ADD.sign}">${sign}</span><span style="padding-left:10px">${esc(text)}</span></div>`;
       const head = (path, badge, lit) => `<div style="display:flex;align-items:center;gap:10px;height:40px;padding:0 14px;background:#f6f8fa;border-bottom:1px solid #d0d7de;font-size:17px;color:#1f2328;white-space:nowrap">

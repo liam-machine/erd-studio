@@ -8,6 +8,18 @@ The `Unreleased` heading below is renamed to the released version by the deploy 
 Releases are patch bumps by default. To ship a minor or major version, write it into the
 heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that.
 
+## Unreleased
+
+### Changed
+
+- **The README is rebuilt around the logical model and its DBML.** It opens with a real recording of the canvas, then the problem it solves (a data model kept apart from the code goes stale) and two Marketplace reviews. It then says why ERD Studio (a diagram of your DBML, a logical model, in your repo, made for your AI), what the canvas does, with a real screenshot, and how to start in three steps. **Share it** is new: **Export Diagram…**, and ERD Studio for Confluence, a separate paid app. **Using dbt?** comes after all of that, and nothing above it mentions dbt. The licence line reads "Free to use. Source available under the PolyForm Shield licence." **Using ERD Studio with dbt** (`docs/dbt.md`) gives the tour's real length (2:48) and no longer links the older "How ERD Studio works" video, which showed a label since renamed.
+- **The README's opening recording is new.** It is a real screen recording: a table's relationships lighting up, an AI assistant adding a table that then appears on the diagram, and a relationship drawn by dragging, which is one `Ref` line in a file. A strip of logos in **Get started** shows every source you can import from.
+- **Watch the Tour is re-recorded in ERD Studio's current look.** The tour (2:48) now shows the glass side panel and canvas and the current way in: **Import Your Data Model…**, then the import the folder suggests, then the draft. Three lines of its narration changed to match, and it no longer says how long anything takes.
+
+### Removed
+
+- Retired, unreferenced media in the repository's `docs/assets/`: the old README workflow picture and the September LinkedIn video and its thumbnail. Nothing in the extension used them.
+
 ## 2.0.8 — 2026-11-16
 
 ### Added

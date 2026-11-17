@@ -123,7 +123,7 @@ scenes:
     lines:
       - id: s_import
         beat: import
-        caption: Then click New, Import SQL DDL, and import the folder.
+        caption: Then click Import Your Data Model, and import the SQL scripts it found.
       - id: s_dialect
         beat: dialect
         pause: 0.149   # as x_sf: the scene keeps the length its take was filmed for
@@ -177,7 +177,7 @@ scenes:
         caption: "Big models stay readable: this one has 2,000 tables and 2,700 relationships."
       - id: z_route
         beat: route
-        caption: Every line finds its way around the tables in the background, in seconds.
+        caption: Every line finds its way around the tables, routed in the background.
       - id: z_hover
         beat: hover
         caption: "Zoom in, and hover a table: arrows flow along its relationships."
@@ -236,7 +236,7 @@ scenes:
         caption: It loads the ERD Studio skill by itself, and a pre-tool hook makes sure it has, before any edit,
       - id: r_live
         beat: live
-        caption: so what it writes is a diagram you can see, right away.
+        caption: so what it writes is a diagram you can see on the canvas.
 
   - id: aiShow
     module: tour/aiChange
