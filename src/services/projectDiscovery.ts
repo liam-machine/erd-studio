@@ -71,10 +71,15 @@ function isDirectory(dir: string): boolean {
  * activation event). Without `hostCandidates`, a project deeper than the
  * walk goes is not found here; the host says so in its log
  * (`noteUnusedDbtProject` in `extension.ts`).
+ *
+ * `below`: the projects below the workspace folders, already found. The
+ * extension passes its shared look's (`folderLook.ts`, #347: git's index and
+ * one asynchronous walk as deep as this one), so it never makes the
+ * synchronous walk here; the CLI and the tests leave it out.
  */
 export function findDbtProjectCandidates(
   folderPaths: readonly string[],
-  options: { hostCandidates?: readonly string[]; semanticDir?: string } = {},
+  options: { hostCandidates?: readonly string[]; semanticDir?: string; below?: readonly string[] } = {},
 ): string[] {
   const found: string[] = [];
   const seen = new Set<string>();
@@ -91,8 +96,11 @@ export function findDbtProjectCandidates(
   for (const folder of folderPaths) {
     if (!hasDbtProjectFile(folder)) add(findDbtProjectAbove(folder, options.semanticDir ?? '.erd-studio'));
   }
-  const walked = findDbtProjectsBelow(folderPaths);
-  const below = options.hostCandidates ? sortDbtCandidates([...walked, ...options.hostCandidates], folderPaths) : walked;
+  const walked = options.below ?? findDbtProjectsBelow(folderPaths);
+  // What a look found comes in no order: sorted as the walk goes, like the host's.
+  const below = options.hostCandidates || options.below
+    ? sortDbtCandidates([...walked, ...(options.hostCandidates ?? [])], folderPaths)
+    : walked;
   below.forEach(add);
   return found;
 }
@@ -177,8 +185,9 @@ export interface DbtProjectResolution {
 }
 
 /**
- * Resolve the project ERD Studio opens. Walks the workspace once; the result
- * also feeds the picker and the `hasMultipleDbtProjects` context key.
+ * Resolve the project ERD Studio opens. Walks the workspace once (not at
+ * all with `below`, the projects a look already found); the result also
+ * feeds the picker and the `hasMultipleDbtProjects` context key.
  *
  * `projectPath` may be absolute or relative to any workspace folder (the
  * first folder that resolves wins), and need not be a dbt project (#111). `picked` is honoured only while it is
@@ -188,10 +197,10 @@ export interface DbtProjectResolution {
  */
 export function resolveDbtProject(
   folderPaths: readonly string[],
-  opts: { projectPath?: string; picked?: string; semanticDir?: string; hostCandidates?: readonly string[] } = {},
+  opts: { projectPath?: string; picked?: string; semanticDir?: string; hostCandidates?: readonly string[]; below?: readonly string[] } = {},
 ): DbtProjectResolution {
   const semanticDir = opts.semanticDir ?? '.erd-studio';
-  const candidates = findDbtProjectCandidates(folderPaths, { hostCandidates: opts.hostCandidates, semanticDir });
+  const candidates = findDbtProjectCandidates(folderPaths, { hostCandidates: opts.hostCandidates, semanticDir, below: opts.below });
   const autoRoot = autoDetectProject(candidates, semanticDir);
 
   const configured = (opts.projectPath ?? '').trim();

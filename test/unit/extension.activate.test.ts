@@ -47,6 +47,9 @@ import { parseSubjectAreaDbml } from '@erd-studio/core/dbml';
 import { answerDraft, closeDraft, flush, nextDraft } from './helpers/draftDriver';
 import { DraftPreviewPanel } from '../../src/providers/DraftPreviewPanel';
 import { StartIntentTracker } from '../../src/commands/startIntent';
+import { execFileSync } from 'child_process';
+import * as dbtProjectSearch from '../../src/services/dbtProjectSearch';
+import { resolveDbtProject } from '../../src/services/projectDiscovery';
 import { DRAFT_SCOPE_EMPTY_NOTICE } from '../../src/services/draftModel';
 import { SHOW_RELATIONSHIPS_BUTTON } from '../../src/commands/goToTable';
 import { START_SUGGESTION_ALREADY_KEPT_MESSAGE } from '../../src/services/startSuggestion';
@@ -2356,6 +2359,93 @@ describe('dbt discovery at activation (never missed silently)', () => {
     await activate(context);
     expect(hasDbtKey(exec)).toBe(true);
     expect(lastFoundProjectLine()).toBe(`ERD Studio: Found dbt project at ${deep}`);
+  });
+
+  it('never makes the synchronous folder walk (#347): the projects below the folder come from the shared look', async () => {
+    const project = dbtAt('repo/analytics');
+    openWorkspace(root);
+    const walk = vi.spyOn(dbtProjectSearch, 'findDbtProjectsBelow');
+    // The spy does see the walk when something makes it (the CLI's way in, without a look's answer).
+    resolveDbtProject([root], {});
+    expect(walk).toHaveBeenCalledTimes(1);
+    walk.mockClear();
+    const exec = vi.spyOn(vscode.commands, 'executeCommand');
+    await activate(context);
+    expect(walk).not.toHaveBeenCalled();
+    expect(hasDbtKey(exec)).toBe(true);
+    expect(lastFoundProjectLine()).toBe(`ERD Studio: Found dbt project at ${project}`);
+    // Select dbt Project… lists them the same way.
+    vi.spyOn(vscode.window, 'showQuickPick').mockResolvedValue(undefined as never);
+    await vscode.commands.executeCommand('erdStudio.selectDbtProject');
+    expect(walk).not.toHaveBeenCalled();
+  });
+
+  const hasGit = ((): boolean => {
+    try {
+      execFileSync('git', ['--version'], { stdio: 'ignore' });
+      return true;
+    } catch {
+      return false;
+    }
+  })();
+
+  it.skipIf(!hasGit)('in a git repository the tracked projects come from git\'s index (#347): a project deeper than the walk goes is found although the host\'s search never answers', async () => {
+    const deep = dbtAt('a/b/c/d/e/f/g/transform');
+    const git = (...args: string[]): void => {
+      execFileSync('git', ['-c', 'user.email=t@example.com', '-c', 'user.name=t', ...args], { cwd: root, stdio: 'ignore' });
+    };
+    git('init', '-q');
+    git('add', 'a');
+    openWorkspace(root);
+    vi.useRealTimers();
+    // A cold search: it never answers, so before #347 only the six-deep walk decided and this project was missed.
+    const findFiles = vi.spyOn(vscode.workspace, 'findFiles').mockImplementation(((include: unknown) =>
+      (include === '**/dbt_project.yml' ? new Promise(() => {}) : Promise.resolve([]))) as never);
+    const quiet = vi.spyOn(telemetry, 'featureQuiet');
+    const exec = vi.spyOn(vscode.commands, 'executeCommand');
+    await activate(context);
+    expect(hasDbtKey(exec)).toBe(true);
+    expect(lastFoundProjectLine()).toBe(`ERD Studio: Found dbt project at ${deep}`);
+    // The host's search is still asked (it alone finds a project git does not track and the walk does not reach).
+    expect(findFiles.mock.calls.filter((c) => c[0] === '**/dbt_project.yml')).toHaveLength(1);
+    // Counted off the onboarding trail: it describes what activation found.
+    expect(quiet.mock.calls.map((c) => c[0])).toContain('dbtSearchFromIndex');
+  });
+
+  it.skipIf(!hasGit)('in a git repository a project git does not track is still found: by the walk, and deeper than it by the host\'s search', async () => {
+    const untrackedDeep = dbtAt('a/b/c/d/e/f/g/transform');
+    fs.writeFileSync(path.join(root, 'README.md'), '# repo\n');
+    execFileSync('git', ['init', '-q'], { cwd: root, stdio: 'ignore' });
+    execFileSync('git', ['add', 'README.md'], { cwd: root, stdio: 'ignore' });
+    openWorkspace(root);
+    vi.spyOn(vscode.workspace, 'findFiles').mockImplementation((async (include: unknown) =>
+      (include === '**/dbt_project.yml' ? [vscode.Uri.file(path.join(untrackedDeep, 'dbt_project.yml'))] : [])) as never);
+    const exec = vi.spyOn(vscode.commands, 'executeCommand');
+    await activate(context);
+    expect(hasDbtKey(exec)).toBe(true);
+    expect(lastFoundProjectLine()).toBe(`ERD Studio: Found dbt project at ${untrackedDeep}`);
+  });
+
+  it('outside a git repository the host\'s search is still asked (bounded), beside the look', async () => {
+    dbtAt('analytics');
+    openWorkspace(root);
+    const findFiles = vi.spyOn(vscode.workspace, 'findFiles');
+    const quiet = vi.spyOn(telemetry, 'featureQuiet');
+    await activate(context);
+    expect(findFiles.mock.calls.filter((c) => c[0] === '**/dbt_project.yml')).toHaveLength(1);
+    expect(quiet.mock.calls.map((c) => c[0])).not.toContain('dbtSearchFromIndex');
+  });
+
+  it('dbt_project.yml in another letter case is still seen below the folder, as the walk that asked for it by name saw it', async () => {
+    const dir = path.join(root, 'p');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'DBT_PROJECT.YML'), "name: 'x'\n");
+    // Only where the disk ignores case (macOS, Windows) is that file dbt's.
+    const caseBlind = fs.existsSync(path.join(dir, 'dbt_project.yml'));
+    openWorkspace(root);
+    const exec = vi.spyOn(vscode.commands, 'executeCommand');
+    await activate(context);
+    expect(hasDbtKey(exec)).toBe(caseBlind);
   });
 
   it('a dbt project the window does not use (erdStudio.projectPath names a plain folder) gets one log line and the dbtProjectUnused flag, no prompt', async () => {

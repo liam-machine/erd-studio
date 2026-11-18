@@ -1043,7 +1043,7 @@ a message or a count of tables. A sum over `features` excludes
 **B4 — activation timing, the host dbt search, and why activation failed (by phase).**
 
 - `activationOver10s` — activation took more than 10 s up to the project summary (once a day).
-- `dbtSearchTimedOut` — the host search for a dbt_project.yml timed out. Since `dbtSearchSkipped` ("Keys added after 2.0.0"), a window whose dbt project already holds ERD data does not wait for the search and never records this key, so its share falls without any search getting faster: read it beside `dbtSearchSkipped`, and judge speed by `activationOver10s`.
+- `dbtSearchTimedOut` — the host search for a dbt_project.yml timed out. Since `dbtSearchSkipped` ("Keys added after 2.0.0"), a window whose dbt project already holds ERD data does not wait for the search and never records this key, so its share falls without any search getting faster. Since the release after 2.0.9 (#347) the search still runs in every window that waits for it, for at most 1 s, but beside the shared look instead of before it, so the key's share is expected to stay about where it was while a timed-out search costs less: where git's index could be used (`dbtSearchFromIndex`, "Keys added after 2.0.0") the look already has every tracked dbt project at any depth. Read it beside `dbtSearchSkipped` and `dbtSearchFromIndex`, and judge speed by `activationOver10s`.
 - `activationFailed` (error) — activation threw (the total; one phase code beside it).
 - `activationFailedDiscovery` (error) — activation threw while finding the project.
 - `activationFailedServices` (error) — activation threw while creating the services.
@@ -1156,8 +1156,8 @@ The clause is matched on the device against fixed keywords: the line the parser 
 - `draftDropNoDialect` — a quiet draft was dropped: no SQL dialect could be chosen.
 - `draftDropNeedsChoice` — a quiet draft was dropped: several dialects or models need a choice.
 - `draftDropTimeLimit` — a quiet draft was dropped: the SQL import's time limit was reached before it read a table (appended after the import outcome keys).
-- `startLookTimeout` — the start screen look at the folder timed out. From the release after 2.0.7 (#328) the first look has 3 s instead of 1.5 s when the empty Diagrams view asks for it, and a timed-out look is retried in the same ask: read rates before and after that release apart.
-- `startLookGaveUp` — the start screen gave up looking at the folder: a second look this session ran out of time. From #328 that is almost always one ask's look and its retry (4.5 s unseen or 6 s on screen); it can also be a later look, more than a minute after a retry that answered, which then gets no retry of its own.
+- `startLookTimeout` — the start screen look at the folder timed out. From the release after 2.0.7 (#328) the first look has 3 s instead of 1.5 s when the empty Diagrams view asks for it, and a timed-out look is retried in the same ask: read rates before and after that release apart. Since the release after 2.0.9 (#347) nothing is cancelled or retried: the key means the session's first look had no answer by its first mark (the same 1.5 s, or 3 s on screen), the ask then waits 3 s more and the look runs on. A look that has found something by the mark is not late, and inside a git repository the index answers in milliseconds, so the rate falls there with no disk getting faster: read the release after 2.0.9 apart again, with `startLookFolders*` ("Keys added after 2.0.0") beside it for how far the walk had got.
+- `startLookGaveUp` — the start screen gave up looking at the folder: a second look this session ran out of time. From #328 that is almost always one ask's look and its retry (4.5 s unseen or 6 s on screen); it can also be a later look, more than a minute after a retry that answered, which then gets no retry of its own. Up to 2.0.9 the folder then counted as holding nothing for the rest of the session. Since the release after 2.0.9 (#347) the key means only that the asks stopped waiting without an answer, after the same 4.5 s or 6 s: they are answered with what is known (a blank diagram), the look runs on, and an import it finds later is suggested then (`startLookFoundAfterDeadline`, "Keys added after 2.0.0"). So it no longer means a lost suggestion: without `startLookFoundAfterDeadline` beside it, it is mostly a large folder with nothing to import. Counted for the session's first look only: a later look (more than a minute after one that finished) is waited for only to its first mark, the last answer standing meanwhile, and records neither key.
 - `startLookFailed` (error) — the start screen look at the folder threw (not our own abort).
 - `startContextFailed` (error) — refreshing the start screen context threw.
 
@@ -1467,7 +1467,8 @@ Appended to `FEATURES` after the 2.0.0 list above (in
 `src/services/telemetryPayload.ts` and `src/index.js`, in the same order), on
 the same terms: fixed keys, never a name, a path, a message or a count of
 tables (a size is one of a few fixed ranges: a failed layout's, below, and the
-project's, #331, near the end; a time is a fixed range too, #333, at the end). Deploy the
+project's, #331, near the end; a time is a fixed range too, #333, and so is how
+far a folder walk had got, #347, at the end). Deploy the
 Worker before the extension release that records them, or their counts are
 dropped. The failed-layout codes, the dbt search failure reasons and the canvas
 handler failure steps in this section are appended to `ERROR_CODES` in the
@@ -1581,7 +1582,11 @@ npx wrangler d1 execute erd-studio-telemetry --remote --command \
 **Why the host's dbt project search failed** (#304; added after 2.0.4). Every
 window, activation asks VS Code's own search (`workspace.findFiles`) for a
 `dbt_project.yml` at any depth, and gives it 1 s before the bounded folder walk
-alone decides (`findHostDbtProjects` in `src/extension.ts`). A search that
+alone decides (`findHostDbtProjects` in `src/extension.ts`; since the release after 2.0.9, #347,
+beside the shared look instead of before it, still for at most 1 s and also
+where git's index could be used, `dbtSearchFromIndex` at the end of this
+section, so these counts are not expected to fall, and the walk is the shared
+look's). A search that
 failed (not one that timed out, `dbtSearchTimedOut`) was counted only as
 `dbtSearchFailed`. It now also says which step failed, decided on the device
 from where the failure was caught, never from the error's text. Exactly one
@@ -1631,7 +1636,8 @@ for the search (`dbtSearchSkipped`, #295) and the search it left running fails
 (with `dbtSearchFailedWalkFound` beside it, since that window's project came
 from the walk); once more when activation's
 search timed out and the late retry (a window that opened without dbt lets the
-search finish, for up to 60 s, to point out a deeper project) then failed — a
+search finish, for up to 60 s, to point out a deeper project; in the release after 2.0.9 as before,
+also where git's index could be used, `dbtSearchFromIndex`) then failed — a
 window whose activation search already failed retries but never counts twice
 (versions up to 2.0.4 counted it twice: such a window without dbt recorded
 `dbtSearchFailed` at activation and again when the late retry failed, so
@@ -1660,21 +1666,21 @@ no key. The search's own stretch is the time spent *waiting* on it; with its
 1 s cap, a long one means the shared extension host thread was busy (another
 extension's start, or our own synchronous work), so its timer ran late too.
 
-- `activationSlowDbtSearch` — the longest stretch of a start over 10 s was the wait on the host's search for a dbt_project.yml: the extension host thread was busy.
+- `activationSlowDbtSearch` — the longest stretch of a start over 10 s was the wait on the host's search for a dbt_project.yml: the extension host thread was busy. Since the release after 2.0.9 (#347) the search runs beside the shared look instead of before it (also where git's index could be used, `dbtSearchFromIndex`), and this stretch is only the wait it added once the look had answered: none with `dbtSearchSkipped`, and otherwise at most the rest of its 1 s unless the thread was busy.
 - `activationSlowDiscovery` — the longest stretch was the rest of finding the project, without the folder walk (`activationSlowWalk`) and without the wait on the search: the globalState writes before the search and, after an update with a diagram open, the save-and-reload prompt (it waits for the user, so a slow answer counts here).
 - `activationSlowServices` — the longest stretch was creating the services, up to the project read (reading a large ERD folder).
 
 What the start screen's first timeout cost, and the search activation no
 longer waits for:
 
-- `startLookLateSuggestion` — the start screen's look at the folder ran out of time, and the retry (the next look that answered, with twice the time) found something to import: what the timeout cost, or would have cost. Up to 2.0.7 the blank-diagram suggestion was shown first and the retry ran at the next refresh, so a file saved between the timeout and the retry could still count (rare). From the release after 2.0.7 (#328) the retry runs straight away in the same ask and blank is never shown in between, so the key counts installs the retry saved rather than ones that saw blank first: read it by version. Decided on that one look only: a later look that finds a file added after it does not count. Read beside `startLookTimeout` (the installs whose first look ran out of time) and `startLookGaveUp`.
-- `dbtSearchSkipped` — activation did not wait for the host's search for a dbt_project.yml: no `erdStudio.projectPath`, no picked project, and the first dbt workspace folder already holds ERD data, so nothing the search could find changes the project that opens (`hostSearchCannotChangeRoot`). The search still runs, off activation's path, to count the workspace's dbt projects for **Select dbt Project**; if it fails, `dbtSearchFailed` and its reason are still recorded (with `dbtSearchFailedWalkFound`), but a timeout is not.
-- `activationSlowWalk` — the longest stretch of a start over 10 s was the synchronous walk of the workspace folders that finds the dbt project (up to 5,000 folders; `resolveWorkspaceProject`, timed on its own). `activationSlowDiscovery` is then the rest of Discovery, without the walk.
+- `startLookLateSuggestion` — the start screen's look at the folder ran out of time, and the retry (the next look that answered, with twice the time) found something to import: what the timeout cost, or would have cost. Up to 2.0.7 the blank-diagram suggestion was shown first and the retry ran at the next refresh, so a file saved between the timeout and the retry could still count (rare). From the release after 2.0.7 (#328) the retry runs straight away in the same ask and blank is never shown in between, so the key counts installs the retry saved rather than ones that saw blank first: read it by version. Decided on that one look only: a later look that finds a file added after it does not count. Read beside `startLookTimeout` (the installs whose first look ran out of time) and `startLookGaveUp`. Since the release after 2.0.9 (#347) there is no retry, because the look is never cancelled: the key counts the session's first look finding something to import after its first mark (`startLookTimeout`), whether an ask was still waiting or the asks had stopped (`startLookFoundAfterDeadline` is then counted beside it). It is what a look cancelled at the first mark would have cost, so it still reads as before by version.
+- `dbtSearchSkipped` — activation did not wait for the host's search for a dbt_project.yml: no `erdStudio.projectPath`, no picked project, and the first dbt workspace folder already holds ERD data, so nothing the search could find changes the project that opens (`hostSearchCannotChangeRoot`). The search still runs, off activation's path, to count the workspace's dbt projects for **Select dbt Project**; if it fails, `dbtSearchFailed` and its reason are still recorded (with `dbtSearchFailedWalkFound`), but a timeout is not. Since the release after 2.0.9 (#347) such a window waits for nothing below the open folders at all: the shared look for the dbt projects below them (git's index and the walk) is not awaited either and starts 1.5 s after activation (`LATE_DBT_LOOK_DELAY_MS`), beside the host's search, only to reveal **Select dbt Project**. Git's index is not asked at activation there, so the window never records `dbtSearchFromIndex`.
+- `activationSlowWalk` — the longest stretch of a start over 10 s was the synchronous walk of the workspace folders that finds the dbt project (up to 5,000 folders; `resolveWorkspaceProject`, timed on its own). `activationSlowDiscovery` is then the rest of Discovery, without the walk. Since the release after 2.0.9 (#347) activation makes no synchronous walk: the stretch is the wait on the shared look for the dbt projects below the open folders (`src/services/folderLook.ts`: git's index, then one asynchronous walk six folders deep, two listings at a time, the same 5,000 folders at most), during which the extension host is free for other extensions. A `dbtSearchSkipped` window does not wait for it, so it has no such stretch.
 
 ```bash
 # What held starts over 10 s, per OS (installs, last 28 days)
 npx wrangler d1 execute erd-studio-telemetry --remote --command \
-  "SELECT h.os, j.key, COUNT(DISTINCT h.install_id) AS installs FROM heartbeats h, json_each(h.features) j WHERE h.day >= date('now','-28 days') AND h.day < date('now') AND COALESCE(h.dev, 0) = 0 AND (j.key LIKE 'activationSlow%' OR j.key IN ('activationOver10s', 'dbtSearchTimedOut', 'dbtSearchSkipped')) GROUP BY h.os, j.key ORDER BY h.os, installs DESC"
+  "SELECT h.os, j.key, COUNT(DISTINCT h.install_id) AS installs FROM heartbeats h, json_each(h.features) j WHERE h.day >= date('now','-28 days') AND h.day < date('now') AND COALESCE(h.dev, 0) = 0 AND (j.key LIKE 'activationSlow%' OR j.key IN ('activationOver10s', 'dbtSearchTimedOut', 'dbtSearchSkipped', 'dbtSearchFromIndex')) GROUP BY h.os, j.key ORDER BY h.os, installs DESC"
 ```
 
 **The start suggestion's repeat cost** (#305). The start suggestion is asked
@@ -1889,6 +1895,44 @@ the size guard (`trimHeartbeat`) never drops them.
 # How long the slowest open took, per OS and diagram size, over the last 28 days (install-days with each range; for a load range, how many were cold)
 npx wrangler d1 execute erd-studio-telemetry --remote --command \
   "SELECT h.os, h.model_count, j.key, COUNT(*) AS install_days, COUNT(DISTINCT h.install_id) AS installs, SUM(j.key LIKE 'canvasLoad%' AND json_extract(h.features,'$.canvasLoadCold') IS NOT NULL) AS cold_loads FROM heartbeats h, json_each(h.features) j WHERE COALESCE(h.dev, 0) = 0 AND h.day >= date('now','-28 days') AND (j.key LIKE 'canvasLoad%' OR j.key LIKE 'canvasPaint%') AND j.key <> 'canvasLoadCold' GROUP BY 1, 2, 3 ORDER BY 1, 2, 3"
+```
+
+**The one look at the open folder** (added after 2.0.9, #347). Up to 2.0.9 a
+folder was gone over up to three times as it opened (activation's synchronous
+walk for dbt projects, the start screen's look, Import…'s), and the start
+screen's look was cancelled at a deadline: on Windows about a third of installs
+on 2.0.8 and 2.0.9 recorded `startLookGaveUp`, after which the folder counted
+as holding nothing for the session. Since the release after 2.0.9 one shared look
+(`src/services/folderLook.ts`) answers all of them: inside a git repository it
+first reads git's index (`gitIndex.ts`: the repository's own file, one read
+however many folders there are; git is never run), then makes one bounded,
+asynchronous walk (`folderScan.ts`: at most 20,000 folders and 60 s, two
+listings at a time; the dbt project search waits for the first 5,000 at most). A deadline only bounds how long a surface waits: the look runs on, and
+what it finds later is suggested then. These keys say whether the index could
+be used, how far the walk had got when a look ran late, and what stopping at
+the deadline would have cost. Nothing leaves but which key applies: never a
+count of folders or files, a name or a path.
+
+- `startLookFromIndex` — the start screen's look could use git's index for the open folder (index versions 2 to 4, a split index, a worktree's or submodule's `.git` file): the tracked files were known from one file. Recorded only when the start screen looks at all (a new or DBML project without dbt and without a diagram, `startNeedsLook`), once a day, off the onboarding trail.
+- `startLookIndexFallback` — the folder is in a git repository whose index could not be used (no index file yet because nothing has been added, or one that cannot be read; an opened sub-folder under which the index names no import file and no tracked folder; over 32 MiB; a version other than 2 to 4; damaged; a split index without its shared index; or not read within 3 s), so the walk alone answered. Once a day, off the trail. `startLookFromIndex` and `startLookIndexFallback` together are the looked-at folders that are git repositories; a look with neither was in no repository, or under a `.git` file that could not be followed.
+- `startLookFoldersUnder200` — beside `startLookTimeout`: the walk had listed fewer than 200 folders when the session's first look passed its first mark without an answer. The count includes what activation's dbt project search had already listed (six folders deep or 5,000 folders, before the look's clock starts). So this key says the folder's top six levels hold under 200 folders and the look was still late: the listings themselves were slow (a slow or network disk, a busy extension host). Once a day, off the trail.
+- `startLookFolders200to2000` — it had listed 200 to 2,000 folders (200 is here, 2,000 too).
+- `startLookFoldersOver2000` — it had listed more than 2,000 (the walk stops at 20,000). This key says the folder is large, not that its listings were fast.
+- `startLookFoundAfterDeadline` — the session's first look found something to import only after the asks had stopped waiting (`startLookGaveUp`), and the suggestion was published then (the `erdStudio.startIntent` context key, so the empty Diagrams view and the walkthrough change to the import). Up to 2.0.9 that install saw no suggestion all session: this is what #347 saved. Always counted beside `startLookLateSuggestion`; once a day, on the onboarding trail like it.
+- `dbtSearchFromIndex` — at activation git's index could be used for every open folder (it listed their tracked files, so every tracked `dbt_project.yml` was known at any depth from one file read per folder). It does not mean the host's search (`workspace.findFiles`) was skipped: that search still runs beside the look, waiting at most 1 s, because only it finds a project that git does not track and the walk does not reach. Counted once per such activation (like `dbtSearchSkipped`, never once a day), off the trail. Such a window can still record `dbtSearchTimedOut` and `dbtSearchFailed*`. A window that waits for nothing (`dbtSearchSkipped`) never records it.
+
+How to read them, per `os`:
+
+- **Whether #347 worked.** `startLookGaveUp` on Windows should fall from about 33% of installs (2.0.8 and 2.0.9) to under 10% on the release after 2.0.9 and later, while `activationOver10s` does not rise. `dbtSearchTimedOut` is expected to stay about where it was while costing less: the search still runs, but beside the look instead of before it, and where git's index could be used the look already has the tracked dbt projects. Compare by `ext_version`: `startLookTimeout`, `startLookGaveUp` and `startLookLateSuggestion` changed meaning in the release after 2.0.9 (their own lines say how).
+- **What is left of `startLookGaveUp`** is a look with nothing to answer from by the deadline: no usable index (`startLookIndexFallback`, or neither index key), or an index with no import file in it while the walk was still going. With `startLookFoundAfterDeadline` the user got the import late; without it, the folder most likely holds nothing to import and a blank diagram was the right answer.
+- **Slow disk or large folder.** Among installs with `startLookTimeout`, mostly `startLookFoldersOver2000` means large folders (the bound is doing its job); mostly `startLookFoldersUnder200` means small folders whose listings were slow, which no bound on folders helps.
+- A day with two windows can carry two `startLookFolders*` ranges, and both index keys (two folders): count installs per key, never assume they exclude each other.
+- An oversized body's trim (`trimHeartbeat`) takes these first, as the newest keys: they are not on its keep list. Such a day is rare in a folder that has no diagram yet, which is where the look runs.
+
+```bash
+# The folder look per OS and version: index used or not, late looks and how far the walk had got, give-ups and what they would have cost (installs, last 28 days)
+npx wrangler d1 execute erd-studio-telemetry --remote --command \
+  "SELECT h.os, h.ext_version, j.key, COUNT(DISTINCT h.install_id) AS installs FROM heartbeats h, json_each(h.features) j WHERE h.day >= date('now','-28 days') AND h.day < date('now') AND COALESCE(h.dev, 0) = 0 AND (j.key LIKE 'startLook%' OR j.key IN ('dbtSearchFromIndex', 'dbtSearchSkipped', 'dbtSearchTimedOut', 'activationOver10s')) GROUP BY 1, 2, 3 ORDER BY 1, 2, installs DESC"
 ```
 
 ## The local archive

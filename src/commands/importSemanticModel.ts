@@ -49,6 +49,7 @@ import {
   walkFiles,
   type DirEntries,
 } from '../services/importSources';
+import { nodeReadDirEntries } from '../services/folderScan';
 import { log } from '../services/logger';
 import { ledgerLogLines, type LedgerEntry } from '../services/importLedger';
 import { SHOW_IMPORT_REPORT_COMMAND, SHOW_IMPORT_REPORT_LABEL, problemLedger } from '../services/importReport';
@@ -528,9 +529,8 @@ export function vscodeImportSemanticModelUi(): ImportSemanticModelUi {
       });
       return picked?.[0]?.fsPath;
     },
-    readDirectory: async (folder) =>
-      (await vscode.workspace.fs.readDirectory(vscode.Uri.file(folder)))
-        .map(([name, type]) => [name, (type & vscode.FileType.Directory) !== 0] as const),
+    // Listed with Node: a `workspace.fs` listing waits on a round trip to VS Code's window for every folder (#347).
+    readDirectory: (folder) => nodeReadDirEntries(folder),
     // UTF-8, or UTF-16 by its BOM (older Visual Studio tooling saves model.bim so).
     readFile: async (filePath) => decodeSemanticModelFile(await vscode.workspace.fs.readFile(vscode.Uri.file(filePath))),
     pickModel: async (items, options) => vscode.window.showQuickPick([...items], options),

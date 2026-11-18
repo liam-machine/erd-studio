@@ -22,6 +22,7 @@ import {
   hookSkippedFeatures,
   isTelemetryErrorCode,
   loggedErrorCodes,
+  startLookFoldersFeature,
   welcomeFailureCode,
   writeFailureFeature,
 } from '../../src/services/runtimeTelemetry';
@@ -71,6 +72,17 @@ describe('B4: activation', () => {
     expect(heartbeatDue(recordError(day, 'activationFailed'), '2026-11-02')).toBe(true);
     // Another error alone does not make an activation-less day due.
     expect(heartbeatDue(recordError(day, 'saveFailed'), '2026-11-02')).toBe(false);
+  });
+});
+
+describe('#347: how far the walk had got when the first look ran late', () => {
+  it('is one of three fixed ranges of folders listed, never a count', () => {
+    expect([0, 1, 199].map(startLookFoldersFeature)).toEqual(Array(3).fill('startLookFoldersUnder200'));
+    expect([200, 201, 2000].map(startLookFoldersFeature)).toEqual(Array(3).fill('startLookFolders200to2000'));
+    expect([2001, 20_000].map(startLookFoldersFeature)).toEqual(Array(2).fill('startLookFoldersOver2000'));
+    for (const key of ['startLookFoldersUnder200', 'startLookFolders200to2000', 'startLookFoldersOver2000']) {
+      expect(FEATURES as readonly string[]).toContain(key);
+    }
   });
 });
 

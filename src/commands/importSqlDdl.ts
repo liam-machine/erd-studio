@@ -77,7 +77,9 @@ import {
   sqlScriptTableCount,
   walkFiles,
   type DirEntries,
+  type ImportListing,
 } from '../services/importSources';
+import { nodeReadDirEntries } from '../services/folderScan';
 import { getErdStudioSetting } from '../services/configService';
 import { log } from '../services/logger';
 import { createLedger, ledgerLogLines, type LedgerEntry } from '../services/importLedger';
@@ -216,7 +218,7 @@ export const OTHER_SQL_FILES_ITEM = '$(folder-opened) Other files or a folder…
 export interface ImportSqlDdlUi {
   /** `.sql` files or a folder; undefined when cancelled. */
   pickSources(defaultFolder: string | undefined): Promise<SqlSources | undefined>;
-  /** One folder's entries (`workspace.fs.readDirectory`). */
+  /** One folder's entries: a name and whether it is a folder. */
   readDirectory(folder: string): Promise<DirEntries>;
   /** A file's text (`workspace.fs`), decoded by its byte order mark (UTF-16 from SQL Server Management Studio). Throws when it cannot be read. */
   readFile(filePath: string): Promise<string>;
@@ -260,6 +262,12 @@ export interface ImportSqlDdlDeps extends Omit<ImportDbmlDeps, 'ui' | 'source' |
   /** The extension's folder: the SQL importer is `<extensionPath>/dist/sqlImport.js`. */
   extensionPath: string;
   sqlUi?: ImportSqlDdlUi;
+  /**
+   * The open folder's import files, from the window's shared look
+   * (`src/services/folderLook.ts`): the quick path takes its scripts from it.
+   * Absent: the folder is listed afresh (`listImportFiles`).
+   */
+  listImportFiles?: () => Promise<ImportListing>;
   /** The Import DBML half (layer, name, dry run, open). */
   ui?: ImportDbmlUi;
   /** Loads the SQL importer (tests pass the engine module itself): the conversion then runs in-process. Default: in a worker (`workerSqlConverter`). */
@@ -1122,14 +1130,24 @@ async function importCatalogExport(deps: ImportSqlDdlDeps, read: SqlResume, pres
  * {@link MAX_SQL_FILES} files are opened, names that usually hold table
  * definitions first (`rankSqlFiles`, the look's order); a file larger than
  * the import reads is left out. `truncated`: not every `.sql` file in the
- * folder was looked at, so "every one" cannot be promised.
+ * folder was looked at, so "every one" cannot be promised. `listing`: the
+ * folder's files, already listed (the window's shared look).
  */
 export async function findSqlDdlScripts(
   root: string,
   semanticDir: string,
   ui: Pick<ImportSqlDdlUi, 'readDirectory' | 'readFile' | 'readFileStart' | 'fileSize'>,
+  listing?: () => Promise<ImportListing>,
 ): Promise<{ files: string[]; truncated: boolean }> {
-  const listing = await listImportFiles(root, (f) => ui.readDirectory(f), { semanticDir });
+  const listed = await (listing ? listing() : listImportFiles(root, (f) => ui.readDirectory(f), { semanticDir }));
+  return sqlDdlScriptsOf(root, listed, ui);
+}
+
+async function sqlDdlScriptsOf(
+  root: string,
+  listing: ImportListing,
+  ui: Pick<ImportSqlDdlUi, 'readFile' | 'readFileStart' | 'fileSize'>,
+): Promise<{ files: string[]; truncated: boolean }> {
   const ranked = rankSqlFiles(listing.sql, root);
   const opened = ranked.slice(0, MAX_SQL_FILES);
   const files: string[] = [];
@@ -1158,7 +1176,8 @@ export async function quickImportSqlDdl(deps: ImportSqlDdlDeps): Promise<ImportD
   const ui = sqlUiOf(deps);
   const quiet = deps.draft?.quiet === true;
   const { ours, gatherMessage, stoppedBeforeATable } = sqlRun(ui, quiet, deps.draft);
-  const found = await findSqlDdlScripts(deps.workspaceRoot, deps.semanticDir, ui).catch(() => ({ files: [] as string[], truncated: false }));
+  const found = await findSqlDdlScripts(deps.workspaceRoot, deps.semanticDir, ui, deps.listImportFiles)
+    .catch(() => ({ files: [] as string[], truncated: false }));
   if (found.truncated && found.files.length > 0) {
     log.info(`[ERD Studio] ${TITLE}: the folder holds more .sql files than are looked at; importing the ${found.files.length} CREATE TABLE scripts found first.`);
   }
@@ -1439,9 +1458,8 @@ export function vscodeImportSqlDdlUi(): ImportSqlDdlUi {
       }
       return { files: picked.map((u) => u.fsPath) };
     },
-    readDirectory: async (folder) =>
-      (await vscode.workspace.fs.readDirectory(vscode.Uri.file(folder)))
-        .map(([name, type]) => [name, (type & vscode.FileType.Directory) !== 0] as const),
+    // Listed with Node: a `workspace.fs` listing waits on a round trip to VS Code's window for every folder (#347).
+    readDirectory: (folder) => nodeReadDirEntries(folder),
     readFile: async (filePath) => decodeText(await vscode.workspace.fs.readFile(vscode.Uri.file(filePath))),
     pickDialect: async (items, options) => {
       const picked = await vscode.window.showQuickPick(dialectPickRows(items), options);

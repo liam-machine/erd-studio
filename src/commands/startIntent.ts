@@ -4,25 +4,33 @@
  * published as the `erdStudio.startIntent` context key, which the walkthrough
  * and the empty Diagrams view gate their start variants on.
  *
- * The folder's files are looked at (Import…'s own bounded detector,
- * `detectImportSources`) only when they can decide the suggestion — a new
- * DBML project without dbt and without a diagram — and only when a start
- * surface asks: the empty Diagrams view being drawn, the Welcome panel's
- * status, the walkthrough being opened, or the start suggestion. Never on
- * activation's own path (a refresh is always deferred), never writing
- * anything, and each look is cancelled after {@link START_LOOK_TIMEOUT_MS}
- * ({@link START_LOOK_ON_SCREEN_MS} while a surface shows the wait). What it
- * found stays on this machine: telemetry gets the suggestion's fixed key only.
+ * The folder's files are looked at (the shared look, `src/services/folderLook.ts`:
+ * git's index first, then one bounded walk) only when they can decide the
+ * suggestion — a new DBML project without dbt and without a diagram — and
+ * only when a start surface asks: the empty Diagrams view being drawn, the
+ * Welcome panel's status, the walkthrough being opened, or the start
+ * suggestion. Never on activation's own path (a refresh is always deferred),
+ * never writing anything. What it found stays on this machine: telemetry gets
+ * the suggestion's fixed key only.
  *
- * A look that runs out of time is tried once more straight away, within the
- * same ask ({@link START_LOOK_ATTEMPTS}), so the ask that timed out still gets
- * the folder's suggestion; only when every attempt ran out of time does the
- * folder count as holding nothing to import, for the rest of the session
- * (#328: a timed-out first look used to publish `blank`, and the start
- * suggestion then showed nothing).
+ * **Running out of time is not an answer** (#347). A deadline only decides
+ * how long an ask waits: {@link START_LOOK_TIMEOUT_MS} to the first mark
+ * ({@link START_LOOK_ON_SCREEN_MS} while a surface shows the wait), then
+ * {@link START_LOOK_PATIENCE_MS} more, as the two attempts of 2.0.8 had
+ * (#328). The look itself is never cancelled and never started again from
+ * the top: it runs on, and whatever it finds later is published then, so
+ * "still looking" never turns into "nothing here" for the rest of the
+ * session. An ask is answered as soon as the look has found something (the
+ * index answers in milliseconds), a moment later when the whole look is
+ * nearly done ({@link START_LOOK_SETTLE_MS}), so the suggestion rarely changes
+ * under the user.
+ *
+ * Once a look has finished, a later one (the last is older than
+ * {@link START_LOOK_FRESH_MS}) is waited for only to the first mark: the last
+ * answer stands until the new one lands.
  *
  * The empty Diagrams view of a folder without dbt shows "Looking at your
- * folder…" until the first suggestion is published (so New Diagram never
+ * folder…" until the first suggestion is published (so New Diagram rarely
  * shows first and then turns into an import), so a refresh always publishes
  * one: `blank` when the folder's state cannot be read.
  *
@@ -39,31 +47,39 @@ import {
   type StartIntent,
 } from '../types/startActions';
 
-/** How long a first look nobody is shown waiting on may take before it is cancelled (and tried again). */
+/**
+ * How long an ask nobody is shown waiting on waits for the look before the
+ * look counts as late (`startLookTimeout`). The ask keeps waiting
+ * ({@link START_LOOK_PATIENCE_MS}); the look is never cancelled.
+ */
 export const START_LOOK_TIMEOUT_MS = 1500;
 /**
- * How long a look may take while a surface shows the wait (the empty Diagrams
- * view says "Looking at your folder…"), and how long every retry may take:
- * the folder's listing is warm in the file system's cache by then. A surface
- * that starts showing the wait while a shorter look runs stretches that look
- * to this, counted from its start.
+ * That first mark while a surface shows the wait (the empty Diagrams view
+ * says "Looking at your folder…"). A surface that starts showing the wait
+ * while a shorter wait runs stretches it to this, counted from the look's
+ * start.
  */
 export const START_LOOK_ON_SCREEN_MS = 2 * START_LOOK_TIMEOUT_MS;
+/**
+ * How much longer an ask waits after the first mark before it answers with
+ * what is known (`startLookGaveUp`: the ask got no answer; the look runs on).
+ * The worst wait is 1.5 s + 3 s for an unseen ask, 3 s + 3 s for one on
+ * screen: what 2.0.8's two attempts took.
+ */
+export const START_LOOK_PATIENCE_MS = START_LOOK_ON_SCREEN_MS;
+/**
+ * After the look's first find, how long an ask still waits for the whole
+ * look: in most folders it finishes within this, so the suggestion is the
+ * final one (with its table count) and never changes under the user.
+ */
+export const START_LOOK_SETTLE_MS = 400;
 /** A finished look is reused for this long. */
 export const START_LOOK_FRESH_MS = 60_000;
-/**
- * Looks that may run out of time in a session: the first is tried once more
- * straight away, in the same ask, with {@link START_LOOK_ON_SCREEN_MS}; after
- * that the folder counts as holding nothing to import for the rest of the
- * session. The worst wait is 1.5 s + 3 s for an unseen ask, 3 s + 3 s for one
- * on screen.
- */
-export const START_LOOK_ATTEMPTS = 2;
 
 export interface StartRefreshOptions {
   /**
    * The asking surface shows that it waits ("Looking at your folder…" in the
-   * empty Diagrams view): the look gets {@link START_LOOK_ON_SCREEN_MS}.
+   * empty Diagrams view): the first mark is {@link START_LOOK_ON_SCREEN_MS}.
    */
   onScreen?: boolean;
 }
@@ -72,22 +88,35 @@ export interface StartIntentDeps {
   /** Where the folder stands now (cheap: no file walk). */
   context(): Omit<StartContext, 'found'>;
   /**
-   * The bounded look at the folder; it stops when `signal` aborts. The
-   * sources found, or those with the CREATE TABLE count the start
-   * suggestion names (`sqlTables`, only when exact).
+   * The look at the folder: the sources found, or those with the CREATE TABLE
+   * count the start suggestion names (`sqlTables`, only when exact). It may
+   * say what it has found so far through `early` (any number of times, before
+   * it resolves): an ask is answered from the first find. `signal` aborts
+   * only when the tracker is disposed; a look is never cancelled for being
+   * slow.
    */
-  look(signal: AbortSignal): Promise<ReadonlySet<DetectedImportSource> | StartLookFindings>;
-  /** Publish a changed suggestion (the context key). Never while a look and its retry run. */
+  look(
+    signal: AbortSignal,
+    early?: (findings: StartLookFindings) => void,
+  ): Promise<ReadonlySet<DetectedImportSource> | StartLookFindings>;
+  /** Publish a changed suggestion (the context key). */
   publish(intent: StartIntent): void;
   /** The look saw a `dbt_project.yml` while the window runs without dbt (the host notes it; never a prompt). */
   onDbtProjectSeen?(): void;
+  /** The session's first look passed its first mark without an answer (the host counts how far the walk had got). */
+  onLate?(): void;
+  /** {@link START_LOOK_TIMEOUT_MS} (tests). */
   timeoutMs?: number;
+  /** {@link START_LOOK_SETTLE_MS} (tests). */
+  settleMs?: number;
   now?(): number;
   /**
-   * Counts a fixed key (`startLookTimeout`, `startLookGaveUp`,
-   * `startLookLateSuggestion`: the look that answered after a timeout found
-   * an import, so the timeout would have cost the suggestion; the host counts
-   * each once a day).
+   * Counts a fixed key, each for the session's first look only:
+   * `startLookTimeout` (no answer by the first mark), `startLookGaveUp` (the
+   * asks stopped waiting without one), `startLookLateSuggestion` (an import
+   * was found after the first mark, so a look cancelled there would have cost
+   * the suggestion) and `startLookFoundAfterDeadline` (it was found after the
+   * asks had stopped waiting). The host counts each once a day.
    */
   feature?(key: TelemetryFeature): void;
   /** Counts a fixed error code (`startLookFailed`, `startContextFailed`). */
@@ -102,27 +131,44 @@ export interface StartLookFindings {
   dbtProject?: boolean;
 }
 
+/** One look in flight, and the wait the asks share on it. */
+interface LookRun {
+  controller: AbortController;
+  /** No look had finished when this one started: its marks are counted, and a surface showing the wait stretches it. */
+  first: boolean;
+  /** A surface shows the wait. */
+  onScreen: boolean;
+  /** It has found something (its early answer is in). */
+  found: boolean;
+  /** The first mark passed without an answer. */
+  late: boolean;
+  /** The asks stopped waiting without an answer. */
+  gaveUp: boolean;
+  /** The asks no longer wait on it (answered, or out of time): what it finds from here is published as it lands. */
+  waitOver: boolean;
+  wait: Promise<void>;
+  endWait(): void;
+  timer: ReturnType<typeof setTimeout> | undefined;
+  settle: ReturnType<typeof setTimeout> | undefined;
+}
+
 export class StartIntentTracker {
   private found: ReadonlySet<DetectedImportSource> | undefined;
   private sqlTables: number | undefined;
-  /** When `found` was looked up; Infinity once {@link START_LOOK_ATTEMPTS} looks ran out of time. */
+  /** When the last finished look answered. */
   private lookedAt = Number.NEGATIVE_INFINITY;
-  /** Looks that ran out of time so far. */
-  private timeouts = 0;
-  private inFlight: Promise<void> | undefined;
-  /** A surface asked for the look in flight and shows the wait: its short first attempt is stretched. */
-  private inFlightOnScreen = false;
-  private controller: AbortController | undefined;
+  /** A look has finished this session (whatever it found). */
+  private answered = false;
+  private run: LookRun | undefined;
   private published: StartIntent | undefined;
   private scheduled: ReturnType<typeof setTimeout> | undefined;
   private disposed = false;
   /**
-   * The first look that answered after a timeout has run (whatever it found):
-   * `startLookLateSuggestion` is decided on that look only, once a session.
+   * The session's first look answered after its first mark (`late`) or after
+   * the asks had stopped waiting (`afterDeadline`): the next publish decides
+   * `startLookLateSuggestion` / `startLookFoundAfterDeadline`.
    */
-  private retrySettled = false;
-  /** That look just answered: the refresh that resumes after it decides the key. */
-  private retryJustSettled = false;
+  private lateAnswer: 'late' | 'afterDeadline' | undefined;
 
   constructor(private readonly deps: StartIntentDeps) {}
 
@@ -165,23 +211,13 @@ export class StartIntentTracker {
       return undefined;
     }
     if (startNeedsLook(ctx) && !this.isFresh()) {
-      await this.lookOnce(options.onScreen === true);
+      await this.waitForLook(options.onScreen === true);
+      // The folder may have changed while the ask waited (a diagram made): publish for how it stands now.
+      try {
+        ctx = this.deps.context();
+      } catch { /* as it stood when the ask began */ }
     }
-    const intent = startIntentFor({ ...ctx, found: this.found });
-    // What the first timeout would have cost: the retry (the first look that
-    // answered after it) found an import, which a timed-out look used to hide
-    // behind blank. A later look finding a file added since is not counted,
-    // nor one that changes a suggestion other than blank.
-    const afterRetry = this.retryJustSettled;
-    this.retryJustSettled = false;
-    if (intent && intent !== this.published && !this.disposed) {
-      if (afterRetry && (this.published === undefined || this.published === 'blank') && isDirectImport(intent)) {
-        this.count(() => this.deps.feature?.('startLookLateSuggestion'));
-      }
-      this.published = intent;
-      this.deps.publish(intent);
-    }
-    return intent;
+    return this.publishFrom(ctx);
   }
 
   /** A refresh on a later tick (coalesced): for callers on activation's path, such as the tree's first listing. */
@@ -197,7 +233,10 @@ export class StartIntentTracker {
     this.disposed = true;
     if (this.scheduled) clearTimeout(this.scheduled);
     this.scheduled = undefined;
-    this.controller?.abort();
+    const run = this.run;
+    this.run = undefined;
+    run?.controller.abort();
+    run?.endWait();
   }
 
   /** A dbt_project.yml the look saw, in a window without dbt: the host's to note (once). */
@@ -212,93 +251,170 @@ export class StartIntentTracker {
   }
 
   private isFresh(): boolean {
-    if (this.lookedAt === Number.POSITIVE_INFINITY) return true;
-    return this.found !== undefined && this.now() - this.lookedAt < START_LOOK_FRESH_MS;
+    return this.answered && this.now() - this.lookedAt < START_LOOK_FRESH_MS;
   }
 
   /**
-   * One look at a time, retried in the same ask after a timeout; concurrent
-   * callers share it. An on-screen caller joining a look in flight stretches
-   * its short first attempt to {@link START_LOOK_ON_SCREEN_MS}.
+   * The suggestion for `ctx` with what the look has found, published when it
+   * changed. A look that answered late decides its two keys here: only an
+   * import replacing nothing (or a blank diagram) is what the deadline would
+   * have cost.
    */
-  private lookOnce(onScreen: boolean): Promise<void> {
-    if (this.inFlight) {
-      if (onScreen) this.inFlightOnScreen = true;
-      return this.inFlight;
-    }
-    this.inFlightOnScreen = onScreen;
-    const run = async (): Promise<void> => {
-      try {
-        while (!this.disposed && this.timeouts < START_LOOK_ATTEMPTS) {
-          if (await this.lookAttempt()) return;
-        }
-      } finally {
-        this.inFlight = undefined;
-        this.inFlightOnScreen = false;
+  private publishFrom(ctx: Omit<StartContext, 'found'>): StartIntent | undefined {
+    const intent = startIntentFor({ ...ctx, found: this.found });
+    const late = this.lateAnswer;
+    this.lateAnswer = undefined;
+    if (intent && intent !== this.published && !this.disposed) {
+      if (late && (this.published === undefined || this.published === 'blank') && isDirectImport(intent)) {
+        this.count(() => this.deps.feature?.('startLookLateSuggestion'));
+        if (late === 'afterDeadline') this.count(() => this.deps.feature?.('startLookFoundAfterDeadline'));
       }
-    };
-    this.inFlight = run();
-    return this.inFlight;
+      this.published = intent;
+      this.deps.publish(intent);
+    }
+    return intent;
   }
 
-  /** One bounded look. True when it answered; false when it ran out of time (counted, and the folder given up on after the last attempt). */
-  private async lookAttempt(): Promise<boolean> {
+  /**
+   * Wait on the look in flight (starting one when none is): until it has
+   * answered, or its time for the asks is up. Concurrent asks share the wait;
+   * an on-screen ask joining stretches a short first mark. Once the wait on a
+   * look is over, later asks do not wait on that look again: what it finds is
+   * published as it lands.
+   */
+  private waitForLook(onScreen: boolean): Promise<void> {
+    let run = this.run;
+    if (!run) run = this.startLook(onScreen);
+    else if (onScreen) run.onScreen = true;
+    return run.waitOver ? Promise.resolve() : run.wait;
+  }
+
+  private startLook(onScreen: boolean): LookRun {
     const controller = new AbortController();
-    this.controller = controller;
+    let release!: () => void;
+    const run: LookRun = {
+      controller,
+      first: !this.answered,
+      onScreen,
+      found: false,
+      late: false,
+      gaveUp: false,
+      waitOver: false,
+      wait: new Promise<void>((resolve) => { release = resolve; }),
+      endWait: () => {
+        if (run.waitOver) return;
+        run.waitOver = true;
+        if (run.timer) clearTimeout(run.timer);
+        if (run.settle) clearTimeout(run.settle);
+        run.timer = undefined;
+        run.settle = undefined;
+        release();
+      },
+      timer: undefined,
+      settle: undefined,
+    };
+    this.run = run;
     const short = this.deps.timeoutMs ?? START_LOOK_TIMEOUT_MS;
     const long = 2 * short;
-    // A retry gets the long time (the listing is warm now), and so does a look a surface shows waiting on.
-    const budget = this.timeouts > 0 || this.inFlightOnScreen ? long : short;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const timedOut = new Promise<'timeout'>((resolve) => {
-      let stretched = false;
-      const expire = (): void => {
-        // A surface started showing the wait meanwhile: the rest of the long time, from the look's start.
-        if (budget < long && !stretched && this.inFlightOnScreen) {
-          stretched = true;
-          timer = setTimeout(expire, long - budget);
-          return;
-        }
-        resolve('timeout');
-      };
-      timer = setTimeout(expire, budget);
+    // A timer that fires after the extension host was busy runs before the
+    // answers the disk gave meanwhile are handled: give those one turn of the
+    // event loop (a timer of its own runs after them) before the look counts
+    // as late.
+    const afterTurn = (then: () => void): void => {
+      run.timer = setTimeout(() => { if (!run.waitOver && !this.disposed) then(); }, 0);
+    };
+    const patienceOver = (): void => afterTurn(() => {
+      // It has found something meanwhile: that is the answer, and nobody gave up.
+      if (run.found) { run.endWait(); return; }
+      run.gaveUp = true;
+      this.count(() => this.deps.feature?.('startLookGaveUp'));
+      run.endWait();
     });
-    try {
-      const result = await Promise.race([
-        this.deps.look(controller.signal).catch(() => {
-          // Our own abort after a timeout is not a failure of the look.
-          if (!controller.signal.aborted) this.count(() => this.deps.error?.('startLookFailed'));
-          return new Set<DetectedImportSource>();
-        }),
-        timedOut,
-      ]);
-      if (result === 'timeout') {
-        controller.abort();
-        this.timeouts++;
+    // Only the session's first look stretches for a surface that shows the wait.
+    let stretched = !run.first || onScreen;
+    const firstMark = (): void => {
+      // A surface started showing the wait meanwhile: the rest of the on-screen time, from the look's start.
+      if (!stretched && run.onScreen) {
+        stretched = true;
+        run.timer = setTimeout(firstMark, long - short);
+        return;
+      }
+      afterTurn(() => {
+        // It has found something: that is the answer (the rest lands late).
+        if (run.found) { run.endWait(); return; }
+        run.late = true;
+        // A later look: the last answer stands until this one lands.
+        if (!run.first) { run.endWait(); return; }
         this.count(() => this.deps.feature?.('startLookTimeout'));
-        if (this.timeouts >= START_LOOK_ATTEMPTS) {
-          // Out of attempts: the folder counts as holding nothing to import, and is not looked at again this session.
-          this.found = new Set();
-          this.sqlTables = undefined;
-          this.lookedAt = Number.POSITIVE_INFINITY;
-          this.count(() => this.deps.feature?.('startLookGaveUp'));
-        }
-        return false;
-      }
-      const findings: StartLookFindings = isFindings(result) ? result : { sources: result };
-      this.found = findings.sources;
-      this.sqlTables = findings.sqlTables;
-      this.lookedAt = this.now();
-      if (this.timeouts > 0 && !this.retrySettled) {
-        this.retrySettled = true;
-        this.retryJustSettled = true;
-      }
-      if (findings.dbtProject) this.noteDbtProject();
-      return true;
-    } finally {
-      if (timer) clearTimeout(timer);
-      if (this.controller === controller) this.controller = undefined;
+        this.count(() => this.deps.onLate?.());
+        run.timer = setTimeout(patienceOver, long);
+      });
+    };
+    run.timer = setTimeout(firstMark, run.first && onScreen ? long : short);
+
+    let pending: Promise<ReadonlySet<DetectedImportSource> | StartLookFindings>;
+    try {
+      pending = Promise.resolve(this.deps.look(controller.signal, (early) => this.absorb(run, early, false)));
+    } catch (err) {
+      pending = Promise.reject(err instanceof Error ? err : new Error(String(err)));
     }
+    void pending.then(
+      (answer) => this.absorb(run, answer, true),
+      () => {
+        // Our own abort (dispose) is not a failure of the look.
+        if (!controller.signal.aborted) this.count(() => this.deps.error?.('startLookFailed'));
+        // What it had found before it failed still stands.
+        this.absorb(run, run.found && this.found ? this.found : new Set<DetectedImportSource>(), true);
+      },
+    );
+    return run;
+  }
+
+  /**
+   * What a look found: so far (`final` false) or in all. The asks waiting on
+   * it are released (a first find waits {@link START_LOOK_SETTLE_MS} for the
+   * rest); with nobody waiting any more, a changed suggestion is published
+   * here.
+   */
+  private absorb(run: LookRun, answer: ReadonlySet<DetectedImportSource> | StartLookFindings, final: boolean): void {
+    if (this.disposed || this.run !== run) return;
+    const findings: StartLookFindings = isFindings(answer) ? answer : { sources: answer };
+    if (findings.dbtProject) this.noteDbtProject();
+    if (!final) {
+      // What a look has found so far counts only before any look has finished
+      // (a later look's first finds would hide what the last one found), and
+      // only when it holds something.
+      if (!run.first || findings.sources.size === 0) return;
+      run.found = true;
+    }
+    this.found = findings.sources;
+    this.sqlTables = findings.sqlTables;
+    if (final) {
+      this.lookedAt = this.now();
+      this.answered = true;
+      this.run = undefined;
+    }
+    if (run.first && run.late) this.lateAnswer = run.gaveUp ? 'afterDeadline' : 'late';
+    if (run.waitOver) {
+      this.publishLate();
+      return;
+    }
+    if (final) {
+      run.endWait();
+    } else if (!run.settle) {
+      run.settle = setTimeout(() => run.endWait(), this.deps.settleMs ?? START_LOOK_SETTLE_MS);
+    }
+  }
+
+  /** The look answered with nobody waiting: publish the suggestion if it changed. */
+  private publishLate(): void {
+    let ctx: Omit<StartContext, 'found'>;
+    try {
+      ctx = this.deps.context();
+    } catch {
+      return; // the next refresh counts and publishes
+    }
+    this.publishFrom(ctx);
   }
 }
 

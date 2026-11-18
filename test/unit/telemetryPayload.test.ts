@@ -682,7 +682,7 @@ describe('allowlists agree with the Worker', () => {
     // It closes the 2.0.0 list: what follows was appended later (the Fabric card's keys, then the
     // major update notice's, the layout fallbacks', then the start suggestion's repeat and the canvas's Convert button, #305,
     // ... then where outside changes came from, #329, then whether models are shared, #332, then how long
-    // a diagram took to open, #333), never put before it.
+    // a diagram took to open, #333, then the one look at the open folder, #347), never put before it.
     expect(FEATURES.slice(FEATURES.indexOf('draftDropTimeLimit') + 1)).toEqual([
       'importGuideActionFabricCatalog', 'importGuideCopiedFabricCatalog',
       'importFabricOutcomeClean', 'importFabricOutcomeRepaired', 'importFabricOutcomePartial',
@@ -705,6 +705,9 @@ describe('allowlists agree with the Worker', () => {
       'sharedModelFirstOpened', 'modelInGit', 'modelNotInGit', 'modelRepoHasRemote',
       'canvasLoadUnder1s', 'canvasLoad1to5s', 'canvasLoad5to20s', 'canvasLoadCold',
       'canvasPaintUnder1s', 'canvasPaint1to5s', 'canvasPaintOver5s',
+      'startLookFromIndex', 'startLookIndexFallback',
+      'startLookFoldersUnder200', 'startLookFolders200to2000', 'startLookFoldersOver2000',
+      'startLookFoundAfterDeadline', 'dbtSearchFromIndex',
     ]);
     // #262's per-step load codes follow the logged-error ones and close the 2.0.0 error list;
     // what a failed layout was like (after 2.0.4) is appended after them.
@@ -724,6 +727,7 @@ describe('allowlists agree with the Worker', () => {
     // size is model_count, plus (#331) one fixed range past its 51+; the Table Library's
     // size is one fixed range at activation. Those two families are the only size keys;
     // the other exception is a layout that failed (four fixed ranges, as error codes).
+    // #347's startLookFolders* are ranges of folders a walk had listed by a deadline (how far it got), not sizes of the user's model.
     expect(FEATURES.filter((f) => /^draftTables/.test(f))).toEqual([]);
     expect(FEATURES.filter((f) => /Tables\d|Rels\d|TablesUnder|RelsUnder|TablesNone|TablesPlus|\d+Plus$/.test(f))).toEqual([
       'libraryTablesNone', 'libraryTables1to10', 'libraryTables11to50', 'libraryTables51to199', 'libraryTables200to499', 'libraryTables500Plus',
@@ -775,6 +779,9 @@ describe('allowlists agree with the Worker', () => {
       'sharedModelFirstOpened', 'modelInGit', 'modelNotInGit', 'modelRepoHasRemote',
       'canvasLoadUnder1s', 'canvasLoad1to5s', 'canvasLoad5to20s', 'canvasLoadCold',
       'canvasPaintUnder1s', 'canvasPaint1to5s', 'canvasPaintOver5s',
+      'startLookFromIndex', 'startLookIndexFallback',
+      'startLookFoldersUnder200', 'startLookFolders200to2000', 'startLookFoldersOver2000',
+      'startLookFoundAfterDeadline', 'dbtSearchFromIndex',
     ]);
     for (const key of added) expect(section, key).toMatch(new RegExp(`^- \`${key}\` `, 'm'));
     // The error codes appended after the 2.0.0 list (a failed layout's class, size, duration and fallbacks;

@@ -14,11 +14,18 @@
  * {@link DETECT_TIMEOUT_MS}. The source runs as a command, so the
  * walkthrough's `onCommand:` completion events see it.
  *
+ * The folder is gone over by the window's one shared look
+ * (`src/services/folderLook.ts`, #347: git's index first, then one bounded
+ * walk), which the start screen, the picker and the quick imports all read;
+ * a caller that cannot wait for the whole of it takes what it has so far.
+ *
  * Not pre-registered: an empty window gets the usual open-a-folder stub.
  */
 
 import * as vscode from 'vscode';
 
+import type { FolderLookRun, FolderLooks } from '../services/folderLook';
+import { nodeReadDirEntries } from '../services/folderScan';
 import {
   MAX_SQL_FILE_BYTES,
   isOwnDbmlExport,
@@ -27,6 +34,7 @@ import {
   rankSqlFiles,
   sqlScriptTableCount,
   type DirEntries,
+  type ImportListing,
   type ImportModelSource,
 } from '../services/importSources';
 import { log } from '../services/logger';
@@ -42,6 +50,20 @@ export const IMPORT_MODEL_COMMAND = 'erdStudio.importModel';
 
 /** How long the picker waits for the look at the folder before showing the fixed order. */
 export const DETECT_TIMEOUT_MS = 800;
+/**
+ * How long the picker and Import DBML…'s default file wait for the whole of
+ * the shared look before going by what it has found so far (the reads that
+ * follow fit in the rest of {@link DETECT_TIMEOUT_MS}).
+ */
+export const DETECT_LISTING_MS = 500;
+/** A look this recent is good enough for a quick import (it takes the files the folder holds now). */
+export const QUICK_IMPORT_LOOK_AGE_MS = 5000;
+/** While the start screen's look walks, what it has found so far is read at most this often at first… */
+const EARLY_LOOK_EVERY_MS = 250;
+/** …and, after passes that found nothing, no more often than this. */
+const EARLY_LOOK_SLOWEST_MS = 4000;
+/** How many files' starts one look keeps (it reads the same few again as the listing grows). */
+const EARLY_LOOK_STARTS_KEPT = 64;
 /** At most this many `.sql` files are opened to look for a CREATE TABLE. */
 export const DETECT_SQL_FILES = 20;
 /** Only the start of each is read. */
@@ -139,8 +161,13 @@ async function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Pro
 export interface DetectImportIo {
   /** The open folder the look lists. */
   root: string;
-  /** One folder's entries (`workspace.fs.readDirectory`): a name and whether it is a folder. */
+  /** One folder's entries: a name and whether it is a folder. */
   readDirectory(folder: string): Promise<DirEntries>;
+  /**
+   * The folder's import files, already listed (the window's shared look).
+   * Absent: they are listed here, with `readDirectory` (`listImportFiles`).
+   */
+  listing?(): Promise<ImportListing>;
   /** The start of a file's text (decoded by its byte order mark). */
   readStart(filePath: string, chars: number): Promise<string>;
   /** A file's size in bytes; absent or undefined: unknown. */
@@ -194,7 +221,7 @@ export async function detectImportFindings(
   options: { countTables?: boolean } = {},
 ): Promise<ImportFindings> {
   const found = new Set<ImportModelSource>();
-  const listing = await listImportFiles(io.root, (f) => io.readDirectory(f), { semanticDir, cancelled: io.cancelled })
+  const listing = await importListingOf(io, semanticDir)
     .catch(() => ({ sql: [], dbml: [], semanticModel: [], dbtProject: false, truncated: false }));
   // No `*.pbip`: a report-only (thin) Power BI Project has one and no model,
   // and every model Import Semantic Model… reads has one of these files.
@@ -235,8 +262,7 @@ export async function detectImportFindings(
  * path drafts this one, and its Open dialog starts on it.
  */
 export async function findImportDbmlFile(io: DetectImportIo, semanticDir: string): Promise<string | undefined> {
-  const listing = await listImportFiles(io.root, (f) => io.readDirectory(f), { semanticDir, cancelled: io.cancelled })
-    .catch(() => undefined);
+  const listing = await importListingOf(io, semanticDir).catch(() => undefined);
   for (const file of listing?.dbml.slice(0, DETECT_DBML_FILES) ?? []) {
     if (io.cancelled?.()) return undefined;
     const head = await io.readStart(file, 512).catch(() => undefined);
@@ -245,11 +271,26 @@ export async function findImportDbmlFile(io: DetectImportIo, semanticDir: string
   return undefined;
 }
 
-/** {@link findImportDbmlFile} on the open folder, or undefined after `timeoutMs`. */
-export async function vscodeFindImportDbmlFile(root: string, semanticDir: string, timeoutMs = DETECT_TIMEOUT_MS): Promise<string | undefined> {
+/** The folder's import files for a look: the ones already listed for it (`io.listing`), else listed here. */
+function importListingOf(io: DetectImportIo, semanticDir: string): Promise<ImportListing> {
+  return io.listing ? io.listing() : listImportFiles(io.root, (f) => io.readDirectory(f), { semanticDir, cancelled: io.cancelled });
+}
+
+/**
+ * {@link findImportDbmlFile} on the open folder, or undefined after
+ * `timeoutMs`. With the window's `looks`, from the shared look (what it has
+ * found by {@link DETECT_LISTING_MS} when it is still walking).
+ */
+export async function vscodeFindImportDbmlFile(
+  root: string,
+  semanticDir: string,
+  timeoutMs = DETECT_TIMEOUT_MS,
+  looks?: FolderLooks,
+): Promise<string | undefined> {
   const source = new vscode.CancellationTokenSource();
   try {
-    return await withTimeout(findImportDbmlFile(vscodeDetectImportIo(root, source.token), semanticDir), timeoutMs, undefined);
+    const io = vscodeDetectImportIo(root, source.token, looks ? soonListing(looks.run(root)) : undefined);
+    return await withTimeout(findImportDbmlFile(io, semanticDir), timeoutMs, undefined);
   } catch (err) {
     log.warn('[ERD Studio] Import: could not look for a DBML file to suggest:', err);
     return undefined;
@@ -264,47 +305,166 @@ export async function detectImportSources(io: DetectImportIo, semanticDir: strin
   return (await detectImportFindings(io, semanticDir)).sources;
 }
 
-/** The real lookups, under `root`; `token` stops the listing and the reads. */
-export function vscodeDetectImportIo(root: string, token?: vscode.CancellationToken): DetectImportIo {
+/**
+ * The real lookups, under `root`; `token` stops the listing and the reads.
+ * Folders are listed with Node, not `vscode.workspace.fs` (which waits on a
+ * round trip to VS Code's window for every listing, #347). `listing`: the
+ * folder's import files, already listed by the window's shared look.
+ */
+export function vscodeDetectImportIo(root: string, token?: vscode.CancellationToken, listing?: () => Promise<ImportListing>): DetectImportIo {
   return {
     root,
-    readDirectory: async (folder) =>
-      (await vscode.workspace.fs.readDirectory(vscode.Uri.file(folder)))
-        .map(([name, type]) => [name, (type & vscode.FileType.Directory) !== 0] as const),
+    readDirectory: (folder) => nodeReadDirEntries(folder),
     readStart: (filePath, chars) => readTextStart(filePath, chars),
     size: (filePath) => fileSize(filePath),
     cancelled: () => token?.isCancellationRequested === true,
+    ...(listing ? { listing } : {}),
   };
 }
 
 /**
- * The start screen's look at the folder (`StartIntentTracker`): the same
- * detector as Import…'s picker, counting CREATE TABLEs for the start
- * suggestion, cancelled when `signal` aborts. Reads only; what it finds
- * never leaves the machine.
+ * A shared look's listing for a caller with little time: the whole of it
+ * when the walk is over within {@link DETECT_LISTING_MS}, else what it has
+ * found so far (with the index's files for the folders it has not reached).
  */
-export function vscodeStartLook(root: string, semanticDir: string): (signal: AbortSignal) => Promise<ImportFindings> {
-  return async (signal) => {
-    const source = new vscode.CancellationTokenSource();
-    const abort = (): void => source.cancel();
-    signal.addEventListener('abort', abort);
+function soonListing(run: FolderLookRun, waitMs = DETECT_LISTING_MS): () => Promise<ImportListing> {
+  return async () => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
     try {
-      if (signal.aborted) return { sources: new Set() };
-      return await detectImportFindings(vscodeDetectImportIo(root, source.token), semanticDir, { countTables: true });
-    } catch (err) {
-      log.warn('[ERD Studio] Start screen: could not look for import sources:', err);
-      return { sources: new Set() };
+      return await Promise.race([
+        run.listing(),
+        new Promise<ImportListing>((resolve) => { timer = setTimeout(() => resolve(run.listingSoFar()), waitMs); }),
+      ]);
     } finally {
-      signal.removeEventListener('abort', abort);
-      source.dispose();
+      if (timer) clearTimeout(timer);
     }
   };
 }
 
-/** The real Import… deps for a folder. */
-export function vscodeImportModelDeps(root: string, semanticDir: string): ImportModelDeps {
+/** What the start screen's look counts (fixed keys, never what it found). */
+export interface StartLookHooks {
+  feature?(key: TelemetryFeature): void;
+}
+
+/**
+ * The start screen's look at the folder (`StartIntentTracker`), on the
+ * window's shared look: the same detector as Import…'s picker, counting
+ * CREATE TABLEs for the start suggestion. It answers `early` as soon as it
+ * has found something: from git's index (tracked files, one file read) or as
+ * the walk goes; then in full once the walk is over. `signal` stops its file
+ * reads (the tracker is disposed); the shared look itself runs on for its
+ * other callers. Reads only; what it finds never leaves the machine.
+ */
+export function folderStartLook(
+  looks: FolderLooks,
+  root: string,
+  semanticDir: string,
+  hooks: StartLookHooks = {},
+): (signal: AbortSignal, early?: (findings: ImportFindings) => void) => Promise<ImportFindings> {
+  return async (signal, early) => {
+    if (signal.aborted) return { sources: new Set() };
+    try {
+      const run = looks.run(root);
+      // One read of a file's start per look, however often the listing is gone over (the newest kept).
+      const starts = new Map<string, Promise<string>>();
+      const io = (listing: ImportListing): DetectImportIo => ({
+        root,
+        readDirectory: (folder) => nodeReadDirEntries(folder),
+        readStart: (filePath, chars) => {
+          const key = `${chars}\u0000${filePath}`;
+          let start = starts.get(key);
+          if (!start) {
+            start = readTextStart(filePath, chars);
+            starts.set(key, start);
+            // A read that failed is tried again by the next pass.
+            start.catch(() => { starts.delete(key); });
+            if (starts.size > EARLY_LOOK_STARTS_KEPT) starts.delete(starts.keys().next().value as string);
+          }
+          return start;
+        },
+        size: (filePath) => fileSize(filePath),
+        cancelled: () => signal.aborted,
+        listing: async () => listing,
+      });
+
+      // What has been found so far is read a pass at a time, until a pass finds
+      // something (the ask is answered from that) or the walk is over. A pass
+      // runs only when the listing holds a file the last pass did not see, and
+      // each fruitless pass waits twice as long for the next: a folder of
+      // thousands of scripts without a CREATE TABLE costs a handful of passes.
+      let over = false;
+      let reading = false;
+      let seen = 0;
+      let every = EARLY_LOOK_EVERY_MS;
+      let lastPass = Number.NEGATIVE_INFINITY;
+      let waiting: ReturnType<typeof setTimeout> | undefined;
+      const stopped = (): boolean => over || signal.aborted || !early;
+      const pass = async (): Promise<void> => {
+        if (stopped() || reading) return;
+        const listing = run.listingSoFar();
+        const size = listing.sql.length + listing.dbml.length + listing.semanticModel.length + (listing.dbtProject ? 1 : 0);
+        if (size === seen) return;
+        seen = size;
+        reading = true;
+        lastPass = Date.now();
+        try {
+          const findings = await detectImportFindings(io(listing), semanticDir);
+          if (stopped()) return;
+          if (findings.sources.size > 0) over = true;
+          else every = Math.min(2 * every, EARLY_LOOK_SLOWEST_MS);
+          if (findings.sources.size > 0 || findings.dbtProject) {
+            early?.({ sources: findings.sources, ...(findings.dbtProject ? { dbtProject: true } : {}) });
+          }
+        } catch (err) {
+          log.warn('[ERD Studio] Start screen: could not read what the folder look has found so far:', err);
+        } finally {
+          reading = false;
+          // More may have been found while this pass read.
+          soFarChanged();
+        }
+      };
+      function soFarChanged(): void {
+        if (stopped() || reading || waiting) return;
+        const wait = every - (Date.now() - lastPass);
+        if (wait <= 0) {
+          void pass();
+          return;
+        }
+        waiting = setTimeout(() => { waiting = undefined; void pass(); }, wait);
+      }
+
+      // The walk starts now (it never waits on the index read for long); what it finds is read as it goes.
+      const stop = run.onProgress(soFarChanged);
+      const whole = run.listing();
+      let listing: ImportListing;
+      try {
+        const stage = await run.index;
+        if (stage.usable) hooks.feature?.('startLookFromIndex');
+        else if (stage.repository) hooks.feature?.('startLookIndexFallback');
+        // Git's index has answered for the tracked files (and the dbt search may have walked already): read those now.
+        soFarChanged();
+        listing = await whole;
+      } finally {
+        // The whole answer follows: no more passes over what was found so far.
+        over = true;
+        stop();
+        if (waiting) clearTimeout(waiting);
+      }
+      return await detectImportFindings(io(listing), semanticDir, { countTables: true });
+    } catch (err) {
+      log.warn('[ERD Studio] Start screen: could not look for import sources:', err);
+      return { sources: new Set() };
+    }
+  };
+}
+
+/** The real Import… deps for a folder (with the window's `looks`, from the shared look). */
+export function vscodeImportModelDeps(root: string, semanticDir: string, looks?: FolderLooks): ImportModelDeps {
   return {
-    detect: () => detectImportSources(vscodeDetectImportIo(root), semanticDir).catch((err: unknown) => {
+    detect: () => detectImportSources(
+      vscodeDetectImportIo(root, undefined, looks ? soonListing(looks.run(root)) : undefined),
+      semanticDir,
+    ).catch((err: unknown) => {
       log.warn('[ERD Studio] Import: could not look for import sources:', err);
       return new Set<ImportModelSource>();
     }),

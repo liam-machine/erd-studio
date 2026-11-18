@@ -747,8 +747,8 @@ export const FEATURES = [
   // Also added after 2.0.4 (#295). An activation that read its project after more
   // than 10 s (beside activationOver10s): which stretch held the longest
   // share, the wait on the host's dbt search, the rest of Discovery, or
-  // Services. A retry of the start look after a timeout turned the blank
-  // suggestion into an import. The host's dbt search was not waited for: the
+  // Services. A start look that answered after its first mark turned the
+  // blank suggestion into an import (up to 2.0.9: its retry did). The host's dbt search was not waited for: the
   // first dbt workspace folder already holds ERD data, so it cannot change
   // the project that opens.
   'activationSlowDbtSearch',
@@ -756,8 +756,8 @@ export const FEATURES = [
   'activationSlowServices',
   'startLookLateSuggestion',
   'dbtSearchSkipped',
-  // Also #295: the synchronous folder walk that finds the project held the
-  // longest share of a slow activation (activationSlowDiscovery is then the
+  // Also #295: the look for the dbt projects below the open folders (up to
+  // 2.0.9 a synchronous walk) held the longest share of a slow activation (activationSlowDiscovery is then the
   // rest of Discovery, without the walk).
   'activationSlowWalk',
   // #305: the start suggestion showed on a machine where it had already been
@@ -839,6 +839,24 @@ export const FEATURES = [
   'canvasPaintUnder1s',
   'canvasPaint1to5s',
   'canvasPaintOver5s',
+  // #347: the one shared look at the folder (git's index first, then one
+  // bounded walk). Whether the start screen's look could use git's index
+  // (FromIndex) or found a repository whose index it could not use
+  // (IndexFallback); how far the walk had got when the session's first look
+  // passed its first mark, as a fixed range of folders listed (never a
+  // count); that an import was found only after the asks had stopped waiting
+  // (FoundAfterDeadline: what a cancelled look would have lost); and that
+  // git's index named the tracked dbt projects at activation (counted per
+  // activation; the host's search still runs beside the look). The others are presence
+  // flags; all are off the onboarding trail except FoundAfterDeadline
+  // (recorded with startLookLateSuggestion).
+  'startLookFromIndex',
+  'startLookIndexFallback',
+  'startLookFoldersUnder200',
+  'startLookFolders200to2000',
+  'startLookFoldersOver2000',
+  'startLookFoundAfterDeadline',
+  'dbtSearchFromIndex',
 ] as const;
 export type TelemetryFeature = (typeof FEATURES)[number];
 

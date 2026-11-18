@@ -197,13 +197,17 @@ describe('classifyOutsideChange: the rule', () => {
     });
   });
 
-  it('the seven keys are appended to FEATURES after #331\'s, and only #332\'s and #333\'s follow them', () => {
+  it('the seven keys are appended to FEATURES after #331\'s, and only #332\'s, #333\'s and #347\'s follow them', () => {
     expect(FEATURES.slice(FEATURES.indexOf('diagramTables500Plus') + 1)).toEqual([
       'domainCreatedExternalGit', 'domainCreatedExternalLocal', 'domainCreatedExternalNoGit',
       'modelChangedExternalGit', 'modelChangedExternalNoGit', 'modelChangedExternalEditor', 'modelChangedExternalDisk',
       'sharedModelFirstOpened', 'modelInGit', 'modelNotInGit', 'modelRepoHasRemote',
       'canvasLoadUnder1s', 'canvasLoad1to5s', 'canvasLoad5to20s', 'canvasLoadCold',
       'canvasPaintUnder1s', 'canvasPaint1to5s', 'canvasPaintOver5s',
+      // #347: the one shared look at the folder.
+      'startLookFromIndex', 'startLookIndexFallback',
+      'startLookFoldersUnder200', 'startLookFolders200to2000', 'startLookFoldersOver2000',
+      'startLookFoundAfterDeadline', 'dbtSearchFromIndex',
     ]);
     // The total stays where it was, and is still a 1.x key.
     expect(FEATURES.indexOf('domainCreatedExternal')).toBeLessThan(FEATURES.indexOf('heartbeatProvisional'));
