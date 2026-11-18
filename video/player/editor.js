@@ -66,6 +66,7 @@ export function fileTree(rows, { top = 58, rowH = 40, width = 560, indent = 26, 
 
 // ---------- the extension listing (package.json) ----------
 export const EXTENSION = {
+  /** The product's name; the Marketplace display name starts with it ("ERD Studio: Data Modeling & ER Diagrams in DBML"). */
   name: 'ERD Studio',
   publisher: 'liamwynne',
   /** The Marketplace id (publisher.name): a search for the name alone also lists an unrelated extension. */

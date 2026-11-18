@@ -1,4 +1,4 @@
-/* Getting-started video — style tokens (spec D.4, sampled from docs/assets/erd-studio-linkedin.mp4).
+/* Getting-started video — style tokens (spec D.4, sampled from the retired September 2026 LinkedIn video; see video/README.md).
    No transitions and no @keyframes anywhere: every frame is a pure function of t (see main.js). */
 
 @font-face { font-family: 'Inter'; font-weight: 400; font-display: block; src: url(fonts/inter-latin-400-normal.woff2) format('woff2'); }

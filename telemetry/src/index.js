@@ -934,6 +934,18 @@ const FEATURES = [
   'canvasPaintUnder1s',
   'canvasPaint1to5s',
   'canvasPaintOver5s',
+  // Added after 2.0.9 (#347): the one shared look at the folder. Whether the start
+  // screen's look could use git's index or met a repository whose index it could not
+  // use; how far the walk had got when the first look ran late, as a fixed range of
+  // folders listed, never a count; an import found only after the asks had stopped
+  // waiting; and git's index naming the tracked dbt projects at activation.
+  'startLookFromIndex',
+  'startLookIndexFallback',
+  'startLookFoldersUnder200',
+  'startLookFolders200to2000',
+  'startLookFoldersOver2000',
+  'startLookFoundAfterDeadline',
+  'dbtSearchFromIndex',
 ];
 
 /** The only keys `errors` may carry; anything else is dropped. */

@@ -10,6 +10,29 @@ heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that
 
 ## Unreleased
 
+### Changed
+
+- **Opening a folder is lighter on VS Code.** ERD Studio now goes over the folder once instead of three times, two folders at a time and at most 20,000 of them, and no longer holds up other extensions while it looks for dbt projects. VS Code's own file search for dbt projects now runs alongside ERD Studio's look instead of before it. (#347)
+- **Usage telemetry, if you have it on, now also says how the look at your folder went.** The anonymous daily report records whether ERD Studio could use git's list of files (`startLookFromIndex`, or `startLookIndexFallback` when the folder is in a repository whose list it could not use), how far it had got through the folder when the look was slow, as one range of folders (`startLookFoldersUnder200`, `startLookFolders200to2000`, `startLookFoldersOver2000`), whether a suggestion came only after ERD Studio had stopped waiting for it (`startLookFoundAfterDeadline`), and whether git's list named the dbt projects it tracks (`dbtSearchFromIndex`). Only these fixed keys are sent, never a count of folders or files, a file or folder name, or a path. (#347)
+
+### Fixed
+
+- **In a large folder, ERD Studio's look for where to start no longer gives up.** When you open a folder, ERD Studio looks for CREATE TABLE scripts, DBML files or a Power BI semantic model to suggest where to start. In a large folder that look could still run out of time, and ERD Studio then treated the folder as holding nothing for as long as the window stayed open: on Windows, the look gave up this way on about 1 in 3 installs of 2.0.8 and 2.0.9. Now, in a folder that is in a Git repository, ERD Studio first reads git's own list of the files it tracks, which is one file however many folders there are (git itself is never run), so the suggestion comes almost at once. It carries on going through the folder in the background, and scripts it finds later are suggested as soon as they are found. (#347)
+
+## 2.0.9 — 2026-11-17
+
+### Changed
+
+- **The README is rebuilt around the logical model and its DBML.** It opens with a real recording of the canvas, then the problem it solves (a data model kept apart from the code goes stale) and two Marketplace reviews. It then says why ERD Studio (a diagram of your DBML, a logical model, in your repo, made for your AI), what the canvas does, with a real screenshot, and how to start in three steps. **Share it** is new: **Export Diagram…**, and ERD Studio for Confluence, a separate paid app. **Using dbt?** comes after all of that, and nothing above it mentions dbt. The licence line reads "Free to use. Source available under the PolyForm Shield licence." **Using ERD Studio with dbt** (`docs/dbt.md`) gives the tour's real length (2:48) and no longer links the older "How ERD Studio works" video, which showed a label since renamed.
+- **The README's opening recording is new.** It is a real screen recording: a table's relationships lighting up, an AI assistant adding a table that then appears on the diagram, and a relationship drawn by dragging, which is one `Ref` line in a file. A strip of logos in **Get started** shows every source you can import from.
+- **Watch the Tour is re-recorded in ERD Studio's current look.** The tour (2:48) now shows the glass side panel and canvas and the current way in: **Import Your Data Model…**, then the import the folder suggests, then the draft. Three lines of its narration changed to match, and it no longer says how long anything takes.
+
+### Removed
+
+- Retired, unreferenced media in the repository's `docs/assets/`: the old README workflow picture and the September LinkedIn video and its thumbnail. Nothing in the extension used them.
+
+## 2.0.8 — 2026-11-16
+
 ### Added
 
 - **Double-click a diagram in the glass side panel to open its file.** A click still opens the diagram; a double-click opens the diagram's file as text (its DBML, or its JSON in a project from before 2.0), as a double-click on a table already opens the table's file. The standard side panel is unchanged: a diagram's row opens the diagram there on a click or a double-click.

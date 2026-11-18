@@ -123,8 +123,9 @@ function holdsSemanticDir(dir: string, semanticDir: string): boolean {
  * (any dbt project beats a plain folder, as in the extension's search).
  * With no such folder at or above it — or only one above it — a dbt
  * project up to six levels below the current directory comes next
- * (`findDbtProjectsBelow`, the extension's own walk: hidden folders other
- * than tools' own, symbolic links followed), then that
+ * (`findDbtProjectsBelow`, the walk the extension's own look follows the
+ * rules of: hidden folders other than tools' own, symbolic links followed),
+ * then that
  * design folder above. Null when there is none.
  */
 export function resolveProjectRoot(

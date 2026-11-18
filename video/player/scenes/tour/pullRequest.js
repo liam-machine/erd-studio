@@ -20,7 +20,7 @@ export const DESIGN = [
   { path: CHANGE.table.path, badge: 'new file', lines: CHANGE.table.lines },
   { path: CHANGE.ref.path, badge: '+2', lines: [CHANGE.ref.use, CHANGE.ref.line] },
   { path: '.erd-studio/main/tables/sales/fct_order.dbml', badge: '+1', lines: null },
-  { path: '.erd-studio/main/diagrams/shop-analytics.dbml', badge: '+2', lines: null },
+  { path: '.erd-studio/main/diagrams/sales.dbml', badge: '+2', lines: null },
 ];
 /** The code side: the SQL that builds the new table, beside the code the project already has. */
 export const CODE = {
