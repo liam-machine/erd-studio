@@ -8,6 +8,17 @@ The `Unreleased` heading below is renamed to the released version by the deploy 
 Releases are patch bumps by default. To ship a minor or major version, write it into the
 heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that.
 
+## Unreleased
+
+### Changed
+
+- **Opening a folder is lighter on VS Code.** ERD Studio now goes over the folder once instead of three times, two folders at a time and at most 20,000 of them, and no longer holds up other extensions while it looks for dbt projects. VS Code's own file search for dbt projects now runs alongside ERD Studio's look instead of before it. (#347)
+- **Usage telemetry, if you have it on, now also says how the look at your folder went.** The anonymous daily report records whether ERD Studio could use git's list of files (`startLookFromIndex`, or `startLookIndexFallback` when the folder is in a repository whose list it could not use), how far it had got through the folder when the look was slow, as one range of folders (`startLookFoldersUnder200`, `startLookFolders200to2000`, `startLookFoldersOver2000`), whether a suggestion came only after ERD Studio had stopped waiting for it (`startLookFoundAfterDeadline`), and whether git's list named the dbt projects it tracks (`dbtSearchFromIndex`). Only these fixed keys are sent, never a count of folders or files, a file or folder name, or a path. (#347)
+
+### Fixed
+
+- **In a large folder, ERD Studio's look for where to start no longer gives up.** When you open a folder, ERD Studio looks for CREATE TABLE scripts, DBML files or a Power BI semantic model to suggest where to start. In a large folder that look could still run out of time, and ERD Studio then treated the folder as holding nothing for as long as the window stayed open: on Windows, the look gave up this way on about 1 in 3 installs of 2.0.8 and 2.0.9. Now, in a folder that is in a Git repository, ERD Studio first reads git's own list of the files it tracks, which is one file however many folders there are (git itself is never run), so the suggestion comes almost at once. It carries on going through the folder in the background, and scripts it finds later are suggested as soon as they are found. (#347)
+
 ## 2.0.9 — 2026-11-17
 
 ### Changed

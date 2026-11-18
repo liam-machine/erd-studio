@@ -3,11 +3,17 @@
  * activation, the start screen's look) and what a slow folder costs.
  *
  * A slow activation names the stretch that held it (the wait on the host's
- * dbt search, the folder walk, the rest of Discovery, or Services: the only
- * stretches before the measurement), the retry after a timeout that turns the
- * blank start suggestion into an import is counted (that retry only), and activation does not wait for the host's search when
- * nothing it could find can change the project that opens. The last block
- * pins facts the rule has to keep in mind.
+ * dbt search, the look for the dbt projects below the open folders, the rest
+ * of Discovery, or Services: the only stretches before the measurement), a
+ * look that answers after its first mark and turns the blank start suggestion
+ * into an import is counted (the session's first look only), and activation
+ * does not wait for the host's search when nothing it could find can change
+ * the project that opens. The last block pins facts the rule has to keep in
+ * mind.
+ *
+ * Since #347 the look is never cancelled or started again: it runs on past
+ * its marks, so "the retry" of these tests' first version is the same look
+ * answering late.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as fs from 'fs';
@@ -22,6 +28,7 @@ import { FEATURES } from '../../src/services/telemetryPayload';
 import { ACTIVATION_SLOW, SLOW_ACTIVATION_MS, slowActivationFeature } from '../../src/services/runtimeTelemetry';
 import { hostSearchCannotChangeRoot, resolveDbtProject, withHostCandidates } from '../../src/services/projectDiscovery';
 import { StartIntentTracker, START_LOOK_FRESH_MS, START_LOOK_TIMEOUT_MS } from '../../src/commands/startIntent';
+import { FolderLooks } from '../../src/services/folderLook';
 import { isDirectImport, START_ACTIONS, START_INTENTS, type DetectedImportSource } from '../../src/types/startActions';
 
 const REPO_ROOT = path.resolve(__dirname, '../..');
@@ -126,30 +133,33 @@ describe('#295: which stretch held a slow activation', () => {
     expect(slowActivationFeature({ dbtSearch: 0, walk: 0, discovery: 5500, services: 5500 }, 11_000)).toBe('activationSlowDiscovery');
   });
 
-  it('11 s waiting on the host search records activationOver10s and activationSlowDbtSearch', async () => {
-    // A root dbt project without ERD data: activation waits for the search.
+  it('11 s waiting on the host search, after the look has answered, records activationOver10s and activationSlowDbtSearch', async () => {
+    // A root dbt project without ERD data, outside a git repository: activation waits for the search.
     dbtAt('.');
     openRoot();
     const clock = skewableClock();
-    vi.spyOn(vscode.workspace, 'findFiles').mockImplementation((async () => { clock.jump(11_000); return []; }) as never);
+    // The search answers once the look (a folder of one file) is long done.
+    vi.spyOn(vscode.workspace, 'findFiles').mockImplementation((() =>
+      new Promise((resolve) => setTimeout(() => { clock.jump(11_000); resolve([]); }, 100))) as never);
     const once = vi.spyOn(telemetry, 'featureOnce');
     await activate(context);
     expect(keys(once)).toContain('activationOver10s');
     expect(keys(once).filter((k) => k.startsWith('activationSlow'))).toEqual(['activationSlowDbtSearch']);
   });
 
-  it('11 s in the walk that finds the project records activationSlowWalk, not activationSlowDiscovery', async () => {
-    // A root dbt project without ERD data: activation waits for the search, then walks.
+  it('11 s in the look that finds the projects below records activationSlowWalk, not activationSlowDiscovery', async () => {
+    // A root dbt project without ERD data: activation waits for the shared look (git's index and one walk).
     dbtAt('.');
     openRoot();
     const clock = skewableClock();
-    let searched = false;
+    const look = FolderLooks.prototype.dbtProjectsBelow;
     let jumped = false;
-    // The walk reads the picked project (resolveWorkspaceProject); the clock jumps there, after the search.
-    context = makeContext(root, undefined, (key) => {
-      if (key === SELECTED_PROJECT_KEY && searched && !jumped) { jumped = true; clock.jump(11_000); }
+    vi.spyOn(FolderLooks.prototype, 'dbtProjectsBelow').mockImplementation(async function (this: FolderLooks, folders: readonly string[]) {
+      const found = await look.call(this, folders);
+      if (!jumped) { jumped = true; clock.jump(11_000); }
+      return found;
     });
-    vi.spyOn(vscode.workspace, 'findFiles').mockImplementation((async () => { searched = true; return []; }) as never);
+    vi.spyOn(vscode.workspace, 'findFiles').mockResolvedValue([] as never);
     const once = vi.spyOn(telemetry, 'featureOnce');
     await activate(context);
     expect(jumped).toBe(true);
@@ -195,19 +205,14 @@ describe('#295: which stretch held a slow activation', () => {
 });
 
 describe('#295: the late start suggestion is counted', () => {
-  /** A look that never answers the first `stalls` times (cancelled by the timeout), then finds `found`. */
-  function lookThatStalls(stalls: number, found: DetectedImportSource[]) {
-    let calls = 0;
-    return vi.fn((signal: AbortSignal) => {
-      calls++;
-      if (calls <= stalls) {
-        return new Promise<ReadonlySet<DetectedImportSource>>((_r, reject) => signal.addEventListener('abort', () => reject(new Error('aborted'))));
-      }
-      return Promise.resolve(new Set<DetectedImportSource>(found));
-    });
+  /** A look that answers `found` after `ms` (never, with Infinity). */
+  function lookAfter(ms: number, found: DetectedImportSource[]) {
+    return vi.fn(() => new Promise<ReadonlySet<DetectedImportSource>>((resolve) => {
+      if (Number.isFinite(ms)) setTimeout(() => resolve(new Set(found)), ms);
+    }));
   }
 
-  function trackerWith(look: ReturnType<typeof lookThatStalls>) {
+  function trackerWith(look: ReturnType<typeof lookAfter>) {
     const published: string[] = [];
     const feature = vi.fn();
     const t = new StartIntentTracker({
@@ -219,11 +224,11 @@ describe('#295: the late start suggestion is counted', () => {
     return { t, published, feature };
   }
 
-  it('a retry after a timeout that finds an import counts startLookLateSuggestion once (what the timeout would have cost; since #328 the same ask gets it)', async () => {
+  it('a look that answers after its first mark with an import counts startLookLateSuggestion once (what a look cancelled there would have cost; the same ask gets it)', async () => {
     vi.useFakeTimers();
-    const { t, published, feature } = trackerWith(lookThatStalls(1, ['sqlDdl']));
+    const { t, published, feature } = trackerWith(lookAfter(START_LOOK_TIMEOUT_MS + 500, ['sqlDdl']));
     const first = t.refresh();
-    await vi.advanceTimersByTimeAsync(START_LOOK_TIMEOUT_MS + 1);
+    await vi.advanceTimersByTimeAsync(START_LOOK_TIMEOUT_MS + 500);
     expect(await first).toBe('importSqlDdl');
     expect(await t.refresh()).toBe('importSqlDdl');
     expect(published).toEqual(['importSqlDdl']);
@@ -231,32 +236,32 @@ describe('#295: the late start suggestion is counted', () => {
   });
 
   it('not when the first look answers in time', async () => {
-    const { t, published, feature } = trackerWith(lookThatStalls(0, ['sqlDdl']));
+    const { t, published, feature } = trackerWith(lookAfter(0, ['sqlDdl']));
     expect(await t.refresh()).toBe('importSqlDdl');
     expect(published).toEqual(['importSqlDdl']);
     expect(keys(feature)).toEqual([]);
   });
 
-  it('not when the retry finds nothing to import either', async () => {
+  it('not when the late look finds nothing to import either', async () => {
     vi.useFakeTimers();
-    const { t, published, feature } = trackerWith(lookThatStalls(1, []));
+    const { t, published, feature } = trackerWith(lookAfter(START_LOOK_TIMEOUT_MS + 500, []));
     const first = t.refresh();
-    await vi.advanceTimersByTimeAsync(START_LOOK_TIMEOUT_MS + 1);
+    await vi.advanceTimersByTimeAsync(START_LOOK_TIMEOUT_MS + 500);
     expect(await first).toBe('blank');
     expect(await t.refresh()).toBe('blank');
     expect(published).toEqual(['blank']);
     expect(keys(feature)).toEqual(['startLookTimeout']);
   });
 
-  it('not when the retry finds nothing and a later look finds a file added since', async () => {
+  it('not when the late look finds nothing and a later look finds a file added since', async () => {
     vi.useFakeTimers();
     let clock = 0;
     let added: DetectedImportSource[] = [];
     let calls = 0;
-    const look = vi.fn((signal: AbortSignal) => {
+    const look = vi.fn(() => {
       calls++;
       if (calls === 1) {
-        return new Promise<ReadonlySet<DetectedImportSource>>((_r, reject) => signal.addEventListener('abort', () => reject(new Error('aborted'))));
+        return new Promise<ReadonlySet<DetectedImportSource>>((resolve) => setTimeout(() => resolve(new Set()), START_LOOK_TIMEOUT_MS + 500));
       }
       return Promise.resolve(new Set<DetectedImportSource>(added));
     });
@@ -270,15 +275,15 @@ describe('#295: the late start suggestion is counted', () => {
       now: () => clock,
     });
     const first = t.refresh();
-    await vi.advanceTimersByTimeAsync(START_LOOK_TIMEOUT_MS + 1);
-    // The retry (in the same ask) answers in time and finds nothing: the first timeout cost nothing.
+    await vi.advanceTimersByTimeAsync(START_LOOK_TIMEOUT_MS + 500);
+    // The look answers late and finds nothing: the first mark cost nothing.
     expect(await first).toBe('blank');
     expect(await t.refresh()).toBe('blank');
     // Later the user saves a .dbml file, and a refresh past the fresh window looks again.
     added = ['dbml'];
     clock += START_LOOK_FRESH_MS + 1;
     expect(await t.refresh()).toBe('importDbmlFile');
-    expect(look).toHaveBeenCalledTimes(3);
+    expect(look).toHaveBeenCalledTimes(2);
     expect(published).toEqual(['blank', 'importDbmlFile']);
     expect(keys(feature)).toEqual(['startLookTimeout']);
   });
@@ -460,21 +465,21 @@ describe('#295: facts the rule keeps in mind', () => {
     expect(answered.candidates).toEqual([root, deep]);
   });
 
-  it('an ask that joins the first look when it times out waits for the retry too: both get the import (#328: the start prompt used to show nothing this window)', async () => {
+  it('an ask that joins a look past its first mark waits on with the first: both get the import (#328: the start prompt used to show nothing this window)', async () => {
     vi.useFakeTimers();
-    let calls = 0;
-    const look = vi.fn((signal: AbortSignal) => (++calls === 1
-      ? new Promise<ReadonlySet<DetectedImportSource>>((_r, reject) => signal.addEventListener('abort', () => reject(new Error('aborted'))))
-      : Promise.resolve(new Set<DetectedImportSource>(['sqlDdl']))));
+    const look = vi.fn(() => new Promise<ReadonlySet<DetectedImportSource>>((resolve) => {
+      setTimeout(() => resolve(new Set<DetectedImportSource>(['sqlDdl'])), START_LOOK_TIMEOUT_MS + 800);
+    }));
     const t = new StartIntentTracker({
       context: () => ({ hasProject: true, hasDbt: false, storage: 'dbml', hasDiagrams: false }),
       look,
       publish: () => {},
     });
     const emptyView = t.refresh();
-    const startPrompt = t.refresh();
     await vi.advanceTimersByTimeAsync(START_LOOK_TIMEOUT_MS + 1);
+    const startPrompt = t.refresh();
+    await vi.advanceTimersByTimeAsync(800);
     expect(await Promise.all([emptyView, startPrompt])).toEqual(['importSqlDdl', 'importSqlDdl']);
-    expect(look).toHaveBeenCalledTimes(2);
+    expect(look).toHaveBeenCalledTimes(1); // one look, never started again
   });
 });

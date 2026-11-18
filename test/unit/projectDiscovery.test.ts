@@ -94,6 +94,46 @@ describe('resolveDbtProject', () => {
   });
 });
 
+describe('resolveDbtProject with the projects a look already found (#347: `below`)', () => {
+  it('takes them in the walk\'s order whatever order they came in, drops one that holds no dbt_project.yml, and matches the walk', () => {
+    const deep = dbt('z/one/two');
+    const hidden = dbt('.staging');
+    const shallow = dbt('b');
+    const first = dbt('a', true);
+    const gone = path.join(root, 'gone');
+    const walked = resolveDbtProject([root], {});
+    const looked = resolveDbtProject([root], { below: [deep, gone, hidden, first, shallow, shallow] });
+    expect(looked.candidates).toEqual([first, shallow, hidden, deep]);
+    expect(looked.candidates).toEqual(sortDbtCandidates(walked.candidates, [root]));
+    expect(looked.root).toBe(walked.root);
+    expect(looked.root).toBe(first);
+    expect(looked.hasDbt).toBe(true);
+  });
+
+  it('makes no walk of its own: with nothing found below, a project the walk would find is not a candidate', () => {
+    dbt('nested');
+    expect(resolveDbtProject([root], {}).candidates).toHaveLength(1);
+    const looked = resolveDbtProject([root], { below: [] });
+    expect(looked.candidates).toEqual([]);
+    expect(looked.hasDbt).toBe(false);
+    expect(looked.root).toBe(root);
+  });
+
+  it('the open folders themselves and a project above them never depend on it', () => {
+    const project = dbt('repo/analytics');
+    const models = path.join(project, 'models');
+    fs.mkdirSync(models);
+    expect(resolveDbtProject([project], { below: [] }).root).toBe(project);
+    expect(resolveDbtProject([models], { below: [] }).root).toBe(project);
+  });
+
+  it('merges the host search\'s projects with them, each once', () => {
+    const near = dbt('near');
+    const far = dbt('a/b/c/d/e/f/g/far');
+    expect(resolveDbtProject([root], { below: [near], hostCandidates: [far, near] }).candidates).toEqual([near, far]);
+  });
+});
+
 describe('resolveDbtProject — logical-only roots', () => {
   function folder(rel: string, withErd: false | '.erd-studio' | 'erd-studio' = false): string {
     const dir = path.join(root, rel);

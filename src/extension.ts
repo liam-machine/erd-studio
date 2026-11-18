@@ -102,6 +102,7 @@ import {
   harnessFailureKeys,
   loggedErrorCodes,
   slowActivationFeature,
+  startLookFoldersFeature,
   type ActivationPhase,
   type DbtSearchResult,
   type RefreshKind,
@@ -206,7 +207,15 @@ import { assistantInfo } from './types/aiAssistants';
 import { DRAW_FROM_DBT_COMMAND, drawFromDbt, type DbtDraftOptions, type DrawFromDbtDeps } from './commands/drawFromDbt';
 import { IMPORT_DBML_COMMAND, importDbml, quickImportDbml, type ImportDbmlDeps, type ImportDraftOptions } from './commands/importDbml';
 import { OPEN_EXAMPLE_DIAGRAM_COMMAND } from './commands/openExampleDiagram';
-import { IMPORT_MODEL_COMMAND, runImportModel, vscodeFindImportDbmlFile, vscodeImportModelDeps, vscodeStartLook } from './commands/importModel';
+import {
+  IMPORT_MODEL_COMMAND,
+  QUICK_IMPORT_LOOK_AGE_MS,
+  folderStartLook,
+  runImportModel,
+  vscodeFindImportDbmlFile,
+  vscodeImportModelDeps,
+} from './commands/importModel';
+import { FolderLooks } from './services/folderLook';
 import { IMPORT_SQL_DDL_COMMAND, importSqlDdl, quickImportSqlDdl, sqlImportTimeLimitMs, type ImportSqlDdlDeps } from './commands/importSqlDdl';
 import { sqlDialectOfImportArg } from './services/sqlDdlImport';
 import { importGuideSourceOfImportArg } from './services/importOutcomeTelemetry';
@@ -431,11 +440,42 @@ function workspaceFolderPaths(): string[] {
  * Resolve the project for this window: `erdStudio.projectPath`, then the
  * picked project, then dbt auto-detection, then (logical-only) the first
  * folder holding ERD data, then the first folder. See `resolveDbtProject`.
+ * `below`: the dbt projects below the open folders, from the window's shared
+ * look ({@link dbtProjectsBelowFolders}); always given, so the extension
+ * never makes `resolveDbtProject`'s own synchronous walk (#347).
  * `hostCandidates`: the host's own search for dbt_project.yml
- * ({@link findHostDbtProjects}), merged with the bounded walk.
+ * ({@link findHostDbtProjects}), merged with them.
  */
-function resolveWorkspaceProject(context: vscode.ExtensionContext, hostCandidates?: readonly string[]): DbtProjectResolution {
-  return resolveDbtProject(workspaceFolderPaths(), { ...workspaceProjectChoice(context), hostCandidates });
+function resolveWorkspaceProject(
+  context: vscode.ExtensionContext,
+  found: { below: readonly string[]; hostCandidates?: readonly string[] },
+): DbtProjectResolution {
+  return resolveDbtProject(workspaceFolderPaths(), { ...workspaceProjectChoice(context), hostCandidates: found.hostCandidates, below: found.below });
+}
+
+/**
+ * The window's shared looks at its folders (`src/services/folderLook.ts`,
+ * #347): git's index first, then one bounded walk, read by activation's dbt
+ * project search, the start screen, Import… and the quick imports. Set by
+ * `activate`, cleared when the extension is disposed.
+ */
+let folderLooks: FolderLooks | undefined;
+
+/**
+ * The dbt projects below the open folders, from the window's shared look:
+ * the tracked ones git's index lists and the ones the walk meets, as deep as
+ * the dbt project walk has always gone. Asynchronous: the extension host is
+ * never held. Empty before activation and when the look fails.
+ */
+async function dbtProjectsBelowFolders(): Promise<string[]> {
+  const looks = folderLooks;
+  if (!looks) return [];
+  try {
+    return await looks.dbtProjectsBelow(workspaceFolderPaths());
+  } catch (err) {
+    log.warn('[ERD Studio] Looking for dbt projects below the open folders failed:', err);
+    return [];
+  }
 }
 
 /** The user's own say in the project: `erdStudio.projectPath`, the picked project, and where ERD data lives. */
@@ -447,8 +487,18 @@ function workspaceProjectChoice(context: vscode.ExtensionContext): { projectPath
   };
 }
 
-/** How long activation waits for the host's dbt_project.yml search before the walk alone decides. */
+/**
+ * How long activation waits for the host's dbt_project.yml search before the
+ * look alone decides. The search runs beside the look (#347), so this is the
+ * most it can add, not a wait before the look starts.
+ */
 export const ACTIVATION_DBT_SEARCH_MS = 1000;
+/**
+ * When the host's search cannot change the project that opens, the look for
+ * the projects below it (which only reveals Select dbt Project) starts this
+ * long after activation, out of its way.
+ */
+export const LATE_DBT_LOOK_DELAY_MS = 1500;
 /** At most this many dbt projects are listed by the host's search. */
 const HOST_DBT_SEARCH_MAX = 50;
 
@@ -546,9 +596,9 @@ async function selectDbtProject(
   target?: string,
 ): Promise<void> {
   // The host's whole search, so a project deeper than the walk is listed too.
-  const search = await findHostDbtProjects(5000);
+  const [search, below] = await Promise.all([findHostDbtProjects(5000), dbtProjectsBelowFolders()]);
   if (search.outcome === 'error') for (const code of dbtSearchFailureCodes(search.reason)) telemetry.error(code);
-  const resolution = resolveWorkspaceProject(context, search.paths);
+  const resolution = resolveWorkspaceProject(context, { below, hostCandidates: search.paths });
   if (resolution.candidates.length === 0) {
     // A window always has a root here (the command is registered only then),
     // so no candidates means a plain folder: there is no dbt project to pick.
@@ -1695,39 +1745,74 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
   // The glass sidebar (prototype): its WebviewView and Toggle Glass Sidebar work in an empty window too.
   const glassSidebar = registerGlassSidebar(context);
 
-  // The host's own search for dbt_project.yml (every depth), bounded so it
-  // never holds activation up; the walk alone decides when it is late. Not
-  // waited for at all when nothing it finds can change the project that
-  // opens (#295: the first dbt workspace folder already holds ERD data): it
-  // then runs on, off activation's path, only to count the workspace's dbt
-  // projects for the Select dbt Project button (below, with the project row).
+  // The dbt projects below the open folders (#347). One shared look answers,
+  // and the start screen and Import… read the same one later: git's index
+  // (every tracked dbt_project.yml, at any depth, from one file) and one
+  // asynchronous walk as deep as the dbt project walk has always gone. The
+  // extension host is never held by a synchronous walk, and no listing is
+  // made twice.
+  //
+  // The host's own search (workspace.findFiles) is still waited for, bounded,
+  // but beside the look instead of before it: only it finds a project that
+  // git does not track and the walk does not reach. Nothing
+  // is waited for at all when nothing found below can change the project
+  // that opens (#295: the first dbt workspace folder already holds ERD data):
+  // the look and the host's search then run on, off activation's path, only
+  // to count the workspace's dbt projects for the Select dbt Project button
+  // (below, with the project row).
+  const looks = new FolderLooks({ semanticDir: getErdStudioSetting('semanticDir', '.erd-studio') });
+  folderLooks = looks;
+  context.subscriptions.push({ dispose: () => {
+    looks.dispose();
+    if (folderLooks === looks) folderLooks = undefined;
+  } });
   const dbtSearchStart = Date.now();
   // Undefined when activation did not wait for the search (dbtSearchSkipped).
   let hostDbtSearch: DbtSearchResult | undefined;
   let lateHostDbtSearch: Promise<string[] | undefined> | undefined;
+  /** The look for the projects below, when activation did not wait for it. */
+  let lateDbtLook: Promise<string[]> | undefined;
+  let dbtProjectsBelow: string[] = [];
+  // Activation's stretches, for a slow one (slowActivationFeature, below).
+  let dbtSearchMs = 0;
+  let walkMs = 0;
   if (hostSearchCannotChangeRoot(workspaceFolderPaths(), workspaceProjectChoice(context))) {
     // What activation found, not something the user did: off the onboarding trail.
     telemetry.featureQuiet('dbtSearchSkipped');
     lateHostDbtSearch = findHostDbtProjects(60_000).then((late) => {
       if (late.outcome === 'error') {
         for (const code of dbtSearchFailureCodes(late.reason)) telemetry.error(code);
-        // No projectPath, no pick, and the walk found the dbt project that
-        // opens (hostSearchCannotChangeRoot), so this failure lost nothing.
+        // No projectPath, no pick, and the folder itself is the dbt project
+        // that opens (hostSearchCannotChangeRoot), so this failure lost nothing.
         telemetry.feature('dbtSearchFailedWalkFound');
       }
       return late.paths;
     });
+    lateDbtLook = new Promise<string[]>((resolve) => {
+      const timer = setTimeout(() => { void dbtProjectsBelowFolders().then(resolve); }, LATE_DBT_LOOK_DELAY_MS);
+      context.subscriptions.push({ dispose: () => { clearTimeout(timer); resolve([]); } });
+    });
   } else {
-    hostDbtSearch = await findHostDbtProjects(ACTIVATION_DBT_SEARCH_MS);
-    if (hostDbtSearch.outcome === 'timeout') telemetry.feature('dbtSearchTimedOut');
-    else if (hostDbtSearch.outcome === 'error') for (const code of dbtSearchFailureCodes(hostDbtSearch.reason)) telemetry.error(code);
+    const folders = workspaceFolderPaths();
+    const below = looks.dbtProjectsBelow(folders).catch((err: unknown) => {
+      log.warn('[ERD Studio] Looking for dbt projects below the open folders failed:', err);
+      return [] as string[];
+    });
+    // The host's search still runs, beside the look: only it finds a project
+    // that is neither tracked by git nor within the walk's reach.
+    const hostSearch = findHostDbtProjects(ACTIVATION_DBT_SEARCH_MS);
+    // Milliseconds as a rule: one file read per folder (none outside a repository), 3 s at the very most.
+    if (await looks.indexed(folders)) telemetry.featureQuiet('dbtSearchFromIndex');
+    dbtProjectsBelow = await below;
+    walkMs = elapsedMs(dbtSearchStart);
+    hostDbtSearch = await hostSearch;
+    // Only the wait the host's search added once the look had answered.
+    dbtSearchMs = elapsedMs(dbtSearchStart) - walkMs;
+    if (hostDbtSearch?.outcome === 'timeout') telemetry.feature('dbtSearchTimedOut');
+    else if (hostDbtSearch?.outcome === 'error') for (const code of dbtSearchFailureCodes(hostDbtSearch.reason)) telemetry.error(code);
   }
   const hostDbtProjects = hostDbtSearch?.paths;
-  // Activation's stretches, for a slow one (slowActivationFeature, below).
-  const dbtSearchMs = elapsedMs(dbtSearchStart);
-  const walkStart = Date.now();
-  const projectResolution = resolveWorkspaceProject(context, hostDbtProjects);
-  const walkMs = elapsedMs(walkStart);
+  const projectResolution = resolveWorkspaceProject(context, { below: dbtProjectsBelow, hostCandidates: hostDbtProjects });
   // The search failed and the walk alone still found a dbt project (#304):
   // a failure without this is one that may have cost the user their project.
   // `autoRoot` is what the walk resolves (a projectPath setting or a pick does
@@ -1898,9 +1983,15 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
       storage: projectStorageOf(tableLibraryService),
       hasDiagrams: subjectAreaService.listSubjectAreas(workspaceRoot, semanticDir).length > 0,
     }),
-    look: vscodeStartLook(workspaceRoot, semanticDir),
+    // What the look met on the way (git's index used or not), not something the user did: once a day, off the onboarding trail.
+    look: folderStartLook(looks, workspaceRoot, semanticDir, { feature: (key) => telemetry.featureQuiet(key, true) }),
     publish: (intent) => { void vscode.commands.executeCommand('setContext', START_INTENT_CONTEXT_KEY, intent); },
     onDbtProjectSeen: () => noteUnusedDbtProject(workspaceRoot, undefined, 'look'),
+    // How far the walk had got when the first look ran late (a fixed range, never a count).
+    onLate: () => {
+      const folders = looks.peek(workspaceRoot)?.stats().folders;
+      if (folders !== undefined) telemetry.featureQuiet(startLookFoldersFeature(folders), true);
+    },
     feature: (key) => telemetry.featureOnce(key),
     error: (code) => telemetry.error(code),
   });
@@ -3348,7 +3439,7 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     onWritten: refreshAfterImport,
     // "This folder has a DBML file": the one the look counted (never ERD Studio's own export);
     // the quick path drafts it and the Open dialog starts on it, chosen.
-    findDefaultFile: () => vscodeFindImportDbmlFile(workspaceRoot, semanticDir),
+    findDefaultFile: () => vscodeFindImportDbmlFile(workspaceRoot, semanticDir, undefined, looks),
     ...(draft ? { draft } : {}),
   });
   const sqlDeps = (draft?: ImportDraftOptions): ImportSqlDdlDeps => ({
@@ -3361,6 +3452,8 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     validateDomainName: validateNewSlug,
     onWritten: refreshAfterImport,
     timeLimitMs: sqlImportTimeLimitMs(),
+    // The scripts the folder holds now, from the shared look (a new one unless the last is seconds old).
+    listImportFiles: () => looks.run(workspaceRoot, QUICK_IMPORT_LOOK_AGE_MS).listing(),
     ...(draft ? { draft } : {}),
   });
   const semanticModelDeps = (draft?: ImportDraftOptions): ImportSemanticModelDeps => ({
@@ -3569,25 +3662,34 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
           : undefined);
       };
       showProjectName();
-      // The host's search that activation did not wait for (#295): a dbt project
-      // only it found (deeper than the walk goes) reveals the button and the
-      // row, as it would have had activation waited. The open project stays.
+      // The look and the host's search that activation did not wait for
+      // (#295, #347): a dbt project either finds below the open one reveals
+      // the button and the row, as it would have had activation waited. The
+      // open project stays.
       let lateSearchSettled = false;
-      void lateHostDbtSearch?.then((paths) => {
+      const revealMoreProjects = (paths: readonly string[] | undefined): void => {
         if (lateSearchSettled || !paths || !hasDbt || hasMultipleProjects) return;
         if (withHostCandidates(projectResolution.candidates, paths).length <= 1) return;
         hasMultipleProjects = true;
         void vscode.commands.executeCommand('setContext', 'erdStudio.hasMultipleDbtProjects', true);
         showProjectName();
-      });
+      };
+      void lateHostDbtSearch?.then(revealMoreProjects);
+      void lateDbtLook?.then(revealMoreProjects);
+      /** Each change of folders counts afresh; an older count that lands later is dropped. */
+      let folderCount = 0;
       const foldersChanged = vscode.workspace.onDidChangeWorkspaceFolders(() => {
-        // The late search answered for the old folders: these are counted afresh.
+        // The late searches answered for the old folders: these are counted afresh.
         lateSearchSettled = true;
-        hasMultipleProjects = hasDbt && resolveWorkspaceProject(context).candidates.length > 1;
-        void vscode.commands.executeCommand('setContext', 'erdStudio.hasMultipleDbtProjects', hasMultipleProjects);
-        showProjectName();
+        const count = ++folderCount;
+        void dbtProjectsBelowFolders().then((below) => {
+          if (count !== folderCount) return;
+          hasMultipleProjects = hasDbt && resolveWorkspaceProject(context, { below }).candidates.length > 1;
+          void vscode.commands.executeCommand('setContext', 'erdStudio.hasMultipleDbtProjects', hasMultipleProjects);
+          showProjectName();
+        });
       });
-      return vscode.Disposable.from(domainTreeView!, domainTreeData!, foldersChanged, { dispose: () => { lateSearchSettled = true; } });
+      return vscode.Disposable.from(domainTreeView!, domainTreeData!, foldersChanged, { dispose: () => { lateSearchSettled = true; folderCount++; } });
     })(),
     vscode.window.registerCustomEditorProvider(SUBJECT_AREA_EDITOR_VIEW_TYPE, editorProvider, {
       // Keep the webview (React tree, ELK worker, in-progress discrepancy /
@@ -4462,7 +4564,7 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     }),
     // Import… (the start screen's Import): DBML, SQL DDL or a Power BI /
     // Fabric semantic model, the source the folder seems to hold first.
-    vscode.commands.registerCommand(IMPORT_MODEL_COMMAND, () => runImportModel(vscodeImportModelDeps(workspaceRoot, semanticDir))),
+    vscode.commands.registerCommand(IMPORT_MODEL_COMMAND, () => runImportModel(vscodeImportModelDeps(workspaceRoot, semanticDir, looks))),
     // CREATE TABLE scripts and semantic models are converted to DBML, then go
     // through Import DBML's own flow (layer, name, the draft, Keep).
     // A start (the start screen's primary import, the start suggestion) passes

@@ -1,16 +1,44 @@
 /**
  * StartIntentTracker (src/commands/startIntent.ts): the host's suggestion for
  * the open folder — when it looks at the folder (only when the files can
- * decide, never twice within a minute, once more straight away after running
- * out of time, then not again), that a look is bounded and cancelled, that concurrent asks share one
- * look, that the context key is published only on a change, and that a
- * refresh asked for on activation's path is deferred.
+ * decide, never twice within a minute), that running out of time is never an
+ * answer (#347: the look is neither cancelled nor started again; the ask is
+ * answered with what is known and what the look finds later is published
+ * then), that an ask is answered from the look's first find, that concurrent
+ * asks share one look, that the context key is published only on a change,
+ * and that a refresh asked for on activation's path is deferred.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { START_LOOK_ATTEMPTS, START_LOOK_FRESH_MS, START_LOOK_TIMEOUT_MS, StartIntentTracker, type StartIntentDeps } from '../../src/commands/startIntent';
+import {
+  START_LOOK_FRESH_MS,
+  START_LOOK_PATIENCE_MS,
+  START_LOOK_SETTLE_MS,
+  START_LOOK_TIMEOUT_MS,
+  StartIntentTracker,
+  type StartIntentDeps,
+  type StartLookFindings,
+} from '../../src/commands/startIntent';
 import { detectImportSources, type DetectImportIo } from '../../src/commands/importModel';
 import type { DetectedImportSource, StartContext } from '../../src/types/startActions';
+
+/** A look the test answers by hand: `early` for what it has found so far, `answer` for the whole of it. */
+function heldLook() {
+  const signals: AbortSignal[] = [];
+  const earlies: Array<(findings: StartLookFindings) => void> = [];
+  const answers: Array<(found: ReadonlySet<DetectedImportSource> | StartLookFindings) => void> = [];
+  const look = vi.fn((signal: AbortSignal, early?: (findings: StartLookFindings) => void) => {
+    signals.push(signal);
+    earlies.push(early ?? (() => {}));
+    return new Promise<ReadonlySet<DetectedImportSource> | StartLookFindings>((resolve) => { answers.push(resolve); });
+  });
+  return {
+    look,
+    signals,
+    early: (sources: DetectedImportSource[], n = earlies.length - 1) => earlies[n]({ sources: new Set(sources) }),
+    answer: (found: DetectedImportSource[] | StartLookFindings, n = answers.length - 1) => answers[n](Array.isArray(found) ? new Set(found) : found),
+  };
+}
 
 afterEach(() => {
   vi.useRealTimers();
@@ -82,37 +110,124 @@ describe('StartIntentTracker', () => {
     expect(published).toEqual(['importSemanticModel']);
   });
 
-  it('cancels a look that runs out of time and tries once more in the same ask (with twice the time); only then suggests a blank diagram, and never looks again this session', async () => {
+  it('a look that runs out of time is neither cancelled nor started again: the ask gets a blank diagram after 1.5 s + 3 s, and what the look finds later is published then', async () => {
     vi.useFakeTimers();
-    const signals: AbortSignal[] = [];
-    const look = vi.fn((s: AbortSignal) => { signals.push(s); return new Promise<ReadonlySet<DetectedImportSource>>(() => {}); });
-    const { t, published, advance } = tracker({ look });
+    const held = heldLook();
+    const { t, published } = tracker({ look: held.look });
     const pending = t.refresh();
-    await vi.advanceTimersByTimeAsync(START_LOOK_TIMEOUT_MS);
-    expect(signals[0]?.aborted).toBe(true);
-    expect(published).toEqual([]); // the retry runs: nothing published yet (#328)
-    // The retry: twice the time.
-    await vi.advanceTimersByTimeAsync(START_LOOK_TIMEOUT_MS);
-    expect(signals[1]?.aborted).toBe(false);
-    await vi.advanceTimersByTimeAsync(START_LOOK_TIMEOUT_MS);
+    await vi.advanceTimersByTimeAsync(START_LOOK_TIMEOUT_MS + 1);
+    expect(published).toEqual([]); // still waited for: nothing published at the first mark (#328)
+    await vi.advanceTimersByTimeAsync(START_LOOK_PATIENCE_MS + 1);
     expect(await pending).toBe('blank');
-    expect(signals[1]?.aborted).toBe(true);
     expect(published).toEqual(['blank']);
-    expect(look).toHaveBeenCalledTimes(START_LOOK_ATTEMPTS);
-    advance(10 * START_LOOK_FRESH_MS);
-    await t.refresh();
-    expect(look).toHaveBeenCalledTimes(START_LOOK_ATTEMPTS);
+    expect(held.signals[0]?.aborted).toBe(false); // never cancelled for being slow
+    // While that look runs on, a later ask neither waits again nor starts another.
+    expect(await t.refresh()).toBe('blank');
+    expect(held.look).toHaveBeenCalledTimes(1);
+    held.answer(['sqlDdl']);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(published).toEqual(['blank', 'importSqlDdl']); // published as it lands, with nobody asking
+    expect(t.known()).toBe('importSqlDdl');
+    expect(held.look).toHaveBeenCalledTimes(1);
   });
 
-  it('a retried look that answers counts, for the ask that timed out', async () => {
+  it('an ask is answered from the look\'s first find, a moment later (the settle time), without waiting for the whole look', async () => {
     vi.useFakeTimers();
-    let calls = 0;
-    const look = vi.fn(() => (++calls === 1 ? new Promise<ReadonlySet<DetectedImportSource>>(() => {}) : Promise.resolve(new Set<DetectedImportSource>(['sqlDdl']))));
-    const { t, published } = tracker({ look });
-    const first = t.refresh();
-    await vi.advanceTimersByTimeAsync(START_LOOK_TIMEOUT_MS);
-    expect(await first).toBe('importSqlDdl');
+    const held = heldLook();
+    const { t, published } = tracker({ look: held.look });
+    const pending = t.refresh();
+    held.early(['sqlDdl']); // git's index: milliseconds in
+    await vi.advanceTimersByTimeAsync(START_LOOK_SETTLE_MS - 1);
+    expect(published).toEqual([]);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(await pending).toBe('importSqlDdl');
     expect(published).toEqual(['importSqlDdl']);
+    expect(t.sqlTableCount()).toBeUndefined(); // the count is exact only once the whole folder was looked at
+    // The whole look: its count, and a stronger find, are published as they land.
+    held.answer({ sources: new Set<DetectedImportSource>(['sqlDdl', 'semanticModel']), sqlTables: 4 });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(published).toEqual(['importSqlDdl', 'importSemanticModel']);
+    expect(t.sqlTableCount()).toBe(4);
+  });
+
+  it('a look that finishes within the settle time is the answer: one publish, with its table count', async () => {
+    vi.useFakeTimers();
+    const held = heldLook();
+    const { t, published } = tracker({ look: held.look });
+    const pending = t.refresh();
+    held.early(['dbml']);
+    await vi.advanceTimersByTimeAsync(START_LOOK_SETTLE_MS / 2);
+    held.answer({ sources: new Set<DetectedImportSource>(['dbml', 'sqlDdl']), sqlTables: 7 });
+    expect(await pending).toBe('importSqlDdl');
+    expect(published).toEqual(['importSqlDdl']); // never importDbmlFile first
+    expect(t.sqlTableCount()).toBe(7);
+  });
+
+  it('a first find that says nothing does not answer the ask', async () => {
+    vi.useFakeTimers();
+    const held = heldLook();
+    const { t, published } = tracker({ look: held.look });
+    const pending = t.refresh();
+    held.early([]);
+    await vi.advanceTimersByTimeAsync(START_LOOK_SETTLE_MS + 1);
+    expect(published).toEqual([]);
+    held.answer(['dbml']);
+    expect(await pending).toBe('importDbmlFile');
+  });
+
+  it('a diagram made while an ask waits: the ask publishes for the folder as it stands when the look answers', async () => {
+    vi.useFakeTimers();
+    const held = heldLook();
+    const state = { hasProject: true, hasDbt: false, storage: 'dbml' as const, hasDiagrams: false };
+    const published: string[] = [];
+    // A new object each time, as the extension builds it.
+    const t = new StartIntentTracker({ context: () => ({ ...state }), look: held.look, publish: (i) => published.push(i) });
+    const ask = t.refresh();
+    await vi.advanceTimersByTimeAsync(500);
+    state.hasDiagrams = true;
+    expect(await t.refresh()).toBe('blank');
+    held.answer(['sqlDdl']);
+    expect(await ask).toBe('blank');
+    expect(published).toEqual(['blank']);
+  });
+
+  it('a look that fails after its first find keeps the find', async () => {
+    vi.useFakeTimers();
+    const earlies: Array<(f: StartLookFindings) => void> = [];
+    let fail!: (err: Error) => void;
+    const look = vi.fn((_s: AbortSignal, early?: (f: StartLookFindings) => void) => {
+      earlies.push(early ?? (() => {}));
+      return new Promise<ReadonlySet<DetectedImportSource>>((_r, reject) => { fail = reject; });
+    });
+    const { t, published } = tracker({ look });
+    const ask = t.refresh();
+    earlies[0]({ sources: new Set<DetectedImportSource>(['sqlDdl']) });
+    await vi.advanceTimersByTimeAsync(START_LOOK_SETTLE_MS);
+    expect(await ask).toBe('importSqlDdl');
+    fail(new Error('disk'));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(published).toEqual(['importSqlDdl']);
+    expect(t.known()).toBe('importSqlDdl');
+  });
+
+  it('once a look has finished, a later one is waited for only to the first mark: the last answer stands until the new one lands', async () => {
+    vi.useFakeTimers();
+    const held = heldLook();
+    const { t, published, advance } = tracker({ look: held.look });
+    const first = t.refresh();
+    held.answer(['sqlDdl']);
+    expect(await first).toBe('importSqlDdl');
+    advance(START_LOOK_FRESH_MS + 1);
+    const second = t.refresh();
+    expect(held.look).toHaveBeenCalledTimes(2);
+    held.early(['dbml']); // what a later look has found so far never hides what the last one found
+    await vi.advanceTimersByTimeAsync(START_LOOK_SETTLE_MS + 1);
+    expect(published).toEqual(['importSqlDdl']);
+    await vi.advanceTimersByTimeAsync(START_LOOK_TIMEOUT_MS);
+    expect(await second).toBe('importSqlDdl');
+    held.answer(['semanticModel']);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(published).toEqual(['importSqlDdl', 'importSemanticModel']);
   });
 
   it('tells the host when the look saw a dbt_project.yml in a window without dbt (never in one with dbt)', async () => {
@@ -166,37 +281,132 @@ describe('StartIntentTracker telemetry (2.0 B9): fixed keys only, never what the
     return { keys, feature: (k: string) => { keys.push(k); }, error: (c: string) => { keys.push(`!${c}`); } };
   };
 
-  it('each timeout counts startLookTimeout; running out of attempts counts startLookGaveUp once', async () => {
+  it('no answer by the first mark counts startLookTimeout (and tells the host how far the walk got); the asks giving up counts startLookGaveUp; each once', async () => {
     vi.useFakeTimers();
     const r = recorders();
-    const look = vi.fn(() => new Promise<ReadonlySet<DetectedImportSource>>(() => {}));
-    const { t, advance } = tracker({ look, feature: r.feature, error: r.error });
+    const onLate = vi.fn();
+    const held = heldLook();
+    const { t } = tracker({ look: held.look, feature: r.feature, error: r.error, onLate });
     const first = t.refresh();
-    await vi.advanceTimersByTimeAsync(START_LOOK_TIMEOUT_MS);
+    await vi.advanceTimersByTimeAsync(START_LOOK_TIMEOUT_MS + 1);
     expect(r.keys).toEqual(['startLookTimeout']);
-    await vi.advanceTimersByTimeAsync(2 * START_LOOK_TIMEOUT_MS);
+    expect(onLate).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(START_LOOK_PATIENCE_MS + 1);
     await first;
-    expect(r.keys).toEqual(['startLookTimeout', 'startLookTimeout', 'startLookGaveUp']);
-    advance(10 * START_LOOK_FRESH_MS);
+    expect(r.keys).toEqual(['startLookTimeout', 'startLookGaveUp']);
     await t.refresh();
-    expect(r.keys).toHaveLength(3);
+    await vi.advanceTimersByTimeAsync(10 * START_LOOK_PATIENCE_MS);
+    expect(r.keys).toHaveLength(2);
+    expect(onLate).toHaveBeenCalledTimes(1);
   });
 
-  it('a rejection after our own abort (the timeout) records nothing', async () => {
+  it('an import found between the marks counts startLookLateSuggestion; found after the asks gave up, startLookFoundAfterDeadline too', async () => {
     vi.useFakeTimers();
+    const between = recorders();
+    const a = heldLook();
+    const one = tracker({ look: a.look, feature: between.feature });
+    const ask = one.t.refresh();
+    await vi.advanceTimersByTimeAsync(START_LOOK_TIMEOUT_MS + 1);
+    a.answer(['sqlDdl']);
+    expect(await ask).toBe('importSqlDdl');
+    expect(between.keys).toEqual(['startLookTimeout', 'startLookLateSuggestion']);
+    expect(one.published).toEqual(['importSqlDdl']); // blank was never shown
+
+    const after = recorders();
+    const b = heldLook();
+    const two = tracker({ look: b.look, feature: after.feature });
+    const late = two.t.refresh();
+    await vi.advanceTimersByTimeAsync(START_LOOK_TIMEOUT_MS + START_LOOK_PATIENCE_MS + 2);
+    expect(await late).toBe('blank');
+    b.answer(['dbml']);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(after.keys).toEqual(['startLookTimeout', 'startLookGaveUp', 'startLookLateSuggestion', 'startLookFoundAfterDeadline']);
+    expect(two.published).toEqual(['blank', 'importDbmlFile']);
+  });
+
+  it('a late look that finds nothing to import counts neither late key', async () => {
+    vi.useFakeTimers();
+    const r = recorders();
+    const held = heldLook();
+    const { t, published } = tracker({ look: held.look, feature: r.feature });
+    const ask = t.refresh();
+    await vi.advanceTimersByTimeAsync(START_LOOK_TIMEOUT_MS + START_LOOK_PATIENCE_MS + 2);
+    await ask;
+    held.answer([]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(r.keys).toEqual(['startLookTimeout', 'startLookGaveUp']);
+    expect(published).toEqual(['blank']);
+  });
+
+  it('a find in the last moments before the asks would give up is the answer: nobody gave up', async () => {
+    vi.useFakeTimers();
+    const r = recorders();
+    const held = heldLook();
+    const { t } = tracker({ look: held.look, feature: r.feature });
+    const ask = t.refresh();
+    await vi.advanceTimersByTimeAsync(START_LOOK_TIMEOUT_MS + 1);
+    await vi.advanceTimersByTimeAsync(START_LOOK_PATIENCE_MS - 100);
+    held.early(['sqlDdl']);
+    await vi.advanceTimersByTimeAsync(150);
+    expect(await ask).toBe('importSqlDdl');
+    expect(r.keys).toEqual(['startLookTimeout', 'startLookLateSuggestion']);
+  });
+
+  it('a look that has found something by the first mark is not late', async () => {
+    vi.useFakeTimers();
+    const r = recorders();
+    const held = heldLook();
+    // A settle time longer than the first mark: the mark comes first and takes the find as the answer.
+    const { t } = tracker({ look: held.look, feature: r.feature, settleMs: 10 * START_LOOK_TIMEOUT_MS });
+    const ask = t.refresh();
+    held.early(['sqlDdl']);
+    await vi.advanceTimersByTimeAsync(START_LOOK_TIMEOUT_MS + 1);
+    expect(await ask).toBe('importSqlDdl');
+    expect(r.keys).toEqual([]);
+  });
+
+  it('an answer the disk gave while the extension host was busy past the mark is handled before the look counts as late', async () => {
+    vi.useFakeTimers();
+    const r = recorders();
+    // The answer lands in the same turn the first mark's timer fires in (the timer runs first).
+    const look = vi.fn(() => new Promise<ReadonlySet<DetectedImportSource>>((resolve) => {
+      setTimeout(() => resolve(new Set<DetectedImportSource>(['sqlDdl'])), START_LOOK_TIMEOUT_MS);
+    }));
+    const { t } = tracker({ look, feature: r.feature });
+    const ask = t.refresh();
+    await vi.advanceTimersByTimeAsync(START_LOOK_TIMEOUT_MS + 1);
+    expect(await ask).toBe('importSqlDdl');
+    expect(r.keys).toEqual([]);
+  });
+
+  it('a later look running late counts nothing (the keys are about the session\'s first look)', async () => {
+    vi.useFakeTimers();
+    const r = recorders();
+    const held = heldLook();
+    const { t, advance } = tracker({ look: held.look, feature: r.feature });
+    const first = t.refresh();
+    held.answer([]);
+    await first;
+    advance(START_LOOK_FRESH_MS + 1);
+    const second = t.refresh();
+    await vi.advanceTimersByTimeAsync(START_LOOK_TIMEOUT_MS + 1);
+    expect(await second).toBe('blank');
+    held.answer(['sqlDdl']); // a file added since
+    await vi.advanceTimersByTimeAsync(0);
+    expect(r.keys).toEqual([]);
+  });
+
+  it('a rejection after our own abort (dispose) records nothing', async () => {
     const r = recorders();
     const look = vi.fn((signal: AbortSignal) => new Promise<ReadonlySet<DetectedImportSource>>((_, reject) => {
       signal.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
     }));
     const { t } = tracker({ look, feature: r.feature, error: r.error });
     const pending = t.refresh();
-    await vi.advanceTimersByTimeAsync(START_LOOK_TIMEOUT_MS);
-    await vi.advanceTimersByTimeAsync(0);
-    expect(r.keys).toEqual(['startLookTimeout']);
-    await vi.advanceTimersByTimeAsync(2 * START_LOOK_TIMEOUT_MS);
-    expect(await pending).toBe('blank');
-    await vi.advanceTimersByTimeAsync(0);
-    expect(r.keys).toEqual(['startLookTimeout', 'startLookTimeout', 'startLookGaveUp']);
+    t.dispose();
+    await pending;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(r.keys).toEqual([]);
   });
 
   it('a real rejection records the error startLookFailed', async () => {

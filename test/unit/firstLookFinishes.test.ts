@@ -3,14 +3,17 @@
  *
  * On 2.0.0–2.0.5, 8 of 21 first runs had the start screen's look time out,
  * and 6 of those saw nothing from ERD Studio at all: a look that ran out of
- * time published `blank`, the start suggestion shows nothing for `blank`, and
- * the retry (with twice the time) ran only on a *later* refresh — never for
- * the ask that timed out. The rules pinned here:
+ * time published `blank`, and the start suggestion shows nothing for `blank`.
+ * 2.0.8 tried the look once more in the same ask; on Windows that retry ran
+ * out of time too on 1 install in 3, and the folder then counted as holding
+ * nothing for the session (#347). Since then the look is never cancelled or
+ * started again: it runs on, and the rules pinned here are
  *
- * - one ask is answered by the look *and* its retry: `blank` is published only
- *   once both ran out of time, never in between;
+ * - one ask waits as long as 2.0.8's two attempts did (1.5 s to the first
+ *   mark, then 3 s more): `blank` is published only once that whole wait is
+ *   over, never at the first mark;
  * - a surface that shows the wait (the empty Diagrams view, "Looking at your
- *   folder…") gives the first look {@link START_LOOK_ON_SCREEN_MS}, and does
+ *   folder…") gives the first mark {@link START_LOOK_ON_SCREEN_MS}, and does
  *   so too when it joins a look an unseen ask started;
  * - the empty Diagrams view says "Looking at your folder…" exactly while the
  *   suggestion is unpublished, and "Loading diagrams…" only while the tree
@@ -20,31 +23,24 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 
-import * as startIntentModule from '../../src/commands/startIntent';
-import { START_LOOK_ATTEMPTS, START_LOOK_TIMEOUT_MS, StartIntentTracker, type StartIntentDeps } from '../../src/commands/startIntent';
+import { START_LOOK_ON_SCREEN_MS, START_LOOK_PATIENCE_MS, START_LOOK_TIMEOUT_MS, StartIntentTracker, type StartIntentDeps } from '../../src/commands/startIntent';
 import { evaluateWhen } from '../../src/providers/glassSidebar/whenClause';
 import { runStartSuggestion, type StartSuggestionDeps } from '../../src/services/startSuggestion';
 import type { DetectedImportSource } from '../../src/types/startActions';
-
-/** The on-screen budget (absent before #328: twice the unseen one is what it must be). */
-const START_LOOK_ON_SCREEN_MS = (startIntentModule as { START_LOOK_ON_SCREEN_MS?: number }).START_LOOK_ON_SCREEN_MS ?? 2 * START_LOOK_TIMEOUT_MS;
 
 afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
-/** A look that hangs (until aborted) the first `stalls` times, then answers `found` after `answerAfterMs`. */
-function slowLook(stalls: number, found: DetectedImportSource[], answerAfterMs = 0) {
-  let calls = 0;
+/** A look that answers `found` after `answerAfterMs` (never, with Infinity). */
+function slowLook(found: DetectedImportSource[], answerAfterMs = 0) {
   const signals: AbortSignal[] = [];
   const look = vi.fn((signal: AbortSignal) => {
-    calls++;
     signals.push(signal);
-    if (calls <= stalls) {
-      return new Promise<ReadonlySet<DetectedImportSource>>((_r, reject) => signal.addEventListener('abort', () => reject(new Error('aborted'))));
-    }
-    return new Promise<ReadonlySet<DetectedImportSource>>((resolve) => setTimeout(() => resolve(new Set(found)), answerAfterMs));
+    return new Promise<ReadonlySet<DetectedImportSource>>((resolve) => {
+      if (Number.isFinite(answerAfterMs)) setTimeout(() => resolve(new Set(found)), answerAfterMs);
+    });
   });
   return { look, signals };
 }
@@ -63,48 +59,53 @@ function trackerWith(look: StartIntentDeps['look']) {
 }
 
 /** Ask the tracker, as the empty Diagrams view does (it shows that it waits). */
-const onScreen = (t: StartIntentTracker) => (t.refresh as (o?: { onScreen?: boolean }) => ReturnType<StartIntentTracker['refresh']>)({ onScreen: true });
+const onScreen = (t: StartIntentTracker) => t.refresh({ onScreen: true });
 
-describe('#328: one ask is answered by the look and its retry', () => {
-  it('a first look that stalls, then a retry that finds CREATE TABLE scripts: the same ask gets the import, and blank is never published', async () => {
+describe('#328: one ask waits for a look that runs past its first mark', () => {
+  it('a look that finds CREATE TABLE scripts half a second after the first mark: the same ask gets the import, and blank is never published', async () => {
     vi.useFakeTimers();
-    const { look, signals } = slowLook(1, ['sqlDdl'], 500);
+    const { look, signals } = slowLook(['sqlDdl'], START_LOOK_TIMEOUT_MS + 500);
     const { t, published, keys } = trackerWith(look);
     const ask = t.refresh();
     await vi.advanceTimersByTimeAsync(START_LOOK_TIMEOUT_MS + 1);
     expect(published).toEqual([]); // still looking: nothing published in between
-    expect(signals[0]?.aborted).toBe(true);
+    expect(signals[0]?.aborted).toBe(false); // and never cancelled (#347)
     await vi.advanceTimersByTimeAsync(500);
     expect(await ask).toBe('importSqlDdl');
     expect(published).toEqual(['importSqlDdl']);
-    expect(look).toHaveBeenCalledTimes(2);
-    // What the first timeout would have cost (no new key: the one #295 added).
+    expect(look).toHaveBeenCalledTimes(1);
+    // What a look cancelled at the first mark would have cost (the key #295 added).
     expect(keys).toEqual(['startLookTimeout', 'startLookLateSuggestion']);
   });
 
-  it('blank only once every attempt ran out of time, each cancelled; then never looked at again this session', async () => {
+  it('blank only once the ask\'s whole wait is over; the look is not cancelled, and what it finds after that is published then', async () => {
     vi.useFakeTimers();
-    const { look, signals } = slowLook(Infinity, []);
+    const { look, signals } = slowLook(['sqlDdl'], 20_000);
     const { t, published, keys } = trackerWith(look);
     const ask = t.refresh();
     await vi.advanceTimersByTimeAsync(START_LOOK_TIMEOUT_MS + 1);
     expect(published).toEqual([]);
-    // The retry has the on-screen time, never more (the worst unseen wait is 1.5 s + 3 s).
-    await vi.advanceTimersByTimeAsync(START_LOOK_ON_SCREEN_MS - 2);
+    // The rest of the wait is the on-screen time, never more (the worst unseen wait is 1.5 s + 3 s).
+    await vi.advanceTimersByTimeAsync(START_LOOK_PATIENCE_MS - 2);
     expect(published).toEqual([]);
-    await vi.advanceTimersByTimeAsync(2);
+    await vi.advanceTimersByTimeAsync(4);
     expect(await ask).toBe('blank');
     expect(published).toEqual(['blank']);
-    expect(signals.map((s) => s.aborted)).toEqual([true, true]);
-    expect(look).toHaveBeenCalledTimes(START_LOOK_ATTEMPTS);
-    expect(keys).toEqual(['startLookTimeout', 'startLookTimeout', 'startLookGaveUp']);
+    expect(signals.map((s) => s.aborted)).toEqual([false]);
+    expect(keys).toEqual(['startLookTimeout', 'startLookGaveUp']);
+    // A later ask neither waits again nor starts another look.
     expect(await t.refresh()).toBe('blank');
-    expect(look).toHaveBeenCalledTimes(START_LOOK_ATTEMPTS);
+    expect(look).toHaveBeenCalledTimes(1);
+    // #347: running out of time was not an answer. The folder's scripts are suggested when the look gets to them.
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(published).toEqual(['blank', 'importSqlDdl']);
+    expect(keys).toEqual(['startLookTimeout', 'startLookGaveUp', 'startLookLateSuggestion', 'startLookFoundAfterDeadline']);
+    expect(look).toHaveBeenCalledTimes(1);
   });
 
-  it('the start suggestion, asked once off screen in a slow folder, now shows the import instead of nothing', async () => {
+  it('the start suggestion, asked once off screen in a slow folder, shows the import instead of nothing', async () => {
     vi.useFakeTimers();
-    const { look } = slowLook(1, ['sqlDdl']);
+    const { look } = slowLook(['sqlDdl'], START_LOOK_TIMEOUT_MS + 200);
     const { t } = trackerWith(look);
     const show = vi.fn(async () => undefined);
     let state: ReturnType<StartSuggestionDeps['state']> = { shown: 0 };
@@ -127,7 +128,7 @@ describe('#328: one ask is answered by the look and its retry', () => {
       setOffContext: () => {},
     };
     const outcome = runStartSuggestion(deps);
-    await vi.advanceTimersByTimeAsync(START_LOOK_TIMEOUT_MS + 1);
+    await vi.advanceTimersByTimeAsync(START_LOOK_TIMEOUT_MS + 201);
     await vi.runOnlyPendingTimersAsync();
     expect((await outcome).shown).toBe(true);
     expect(show).toHaveBeenCalledTimes(1);
@@ -135,9 +136,9 @@ describe('#328: one ask is answered by the look and its retry', () => {
 });
 
 describe('#328: a surface that shows the wait gives the first look longer', () => {
-  it('asked on screen, a look that answers at 2 s is not cancelled and counts no timeout', async () => {
+  it('asked on screen, a look that answers at 2 s counts no timeout', async () => {
     vi.useFakeTimers();
-    const { look } = slowLook(0, ['sqlDdl'], 2000);
+    const { look } = slowLook(['sqlDdl'], 2000);
     const { t, published, keys } = trackerWith(look);
     const ask = onScreen(t);
     await vi.advanceTimersByTimeAsync(2000);
@@ -147,21 +148,21 @@ describe('#328: a surface that shows the wait gives the first look longer', () =
     expect(keys).toEqual([]);
   });
 
-  it('asked off screen, that same look is cancelled at 1.5 s (the unseen budget is unchanged)', async () => {
+  it('asked off screen, that same look passes its first mark at 1.5 s (the unseen mark is unchanged) and still answers the ask', async () => {
     vi.useFakeTimers();
-    const { look, signals } = slowLook(0, ['sqlDdl'], 2000);
+    const { look, signals } = slowLook(['sqlDdl'], 2000);
     const { t, keys } = trackerWith(look);
     const ask = t.refresh();
     await vi.advanceTimersByTimeAsync(START_LOOK_TIMEOUT_MS + 1);
-    expect(signals[0]?.aborted).toBe(true);
     expect(keys[0]).toBe('startLookTimeout');
-    await vi.advanceTimersByTimeAsync(10_000);
-    await ask;
+    expect(signals[0]?.aborted).toBe(false);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(await ask).toBe('importSqlDdl');
   });
 
   it('the empty Diagrams view joining a look an unseen ask started gives it the longer time (counted from its start)', async () => {
     vi.useFakeTimers();
-    const { look, signals } = slowLook(0, ['sqlDdl'], 2500);
+    const { look, signals } = slowLook(['sqlDdl'], 2500);
     const { t, published, keys } = trackerWith(look);
     const startPrompt = t.refresh();
     await vi.advanceTimersByTimeAsync(1000);
@@ -174,19 +175,20 @@ describe('#328: a surface that shows the wait gives the first look longer', () =
     expect(keys).toEqual([]);
   });
 
-  it('joining does not stretch the look past the on-screen time', async () => {
+  it('joining does not stretch the first mark past the on-screen time', async () => {
     vi.useFakeTimers();
-    const { look, signals } = slowLook(0, ['sqlDdl'], 60_000);
-    const { t } = trackerWith(look);
+    const { look } = slowLook(['sqlDdl'], 60_000);
+    const { t, keys } = trackerWith(look);
     const startPrompt = t.refresh();
     await vi.advanceTimersByTimeAsync(1000);
     void onScreen(t);
     await vi.advanceTimersByTimeAsync(START_LOOK_ON_SCREEN_MS - 1000 - 1);
-    expect(signals[0]?.aborted).toBe(false);
-    await vi.advanceTimersByTimeAsync(2);
-    expect(signals[0]?.aborted).toBe(true);
-    await vi.advanceTimersByTimeAsync(START_LOOK_ON_SCREEN_MS);
+    expect(keys).toEqual([]);
+    await vi.advanceTimersByTimeAsync(3);
+    expect(keys).toEqual(['startLookTimeout']);
+    await vi.advanceTimersByTimeAsync(START_LOOK_PATIENCE_MS + 2);
     expect(await startPrompt).toBe('blank');
+    expect(keys).toEqual(['startLookTimeout', 'startLookGaveUp']);
   });
 });
 

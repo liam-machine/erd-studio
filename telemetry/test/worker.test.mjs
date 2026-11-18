@@ -622,11 +622,43 @@ describe('validation — acceptance and normalisation', () => {
     );
     assert.deepEqual(JSON.parse(params[17]), features);
     assert.deepEqual(
-      WORKER_FEATURES.slice(WORKER_FEATURES.indexOf('modelRepoHasRemote') + 1),
+      WORKER_FEATURES.slice(WORKER_FEATURES.indexOf('modelRepoHasRemote') + 1, WORKER_FEATURES.indexOf('canvasPaintOver5s') + 1),
       ['canvasLoadUnder1s', 'canvasLoad1to5s', 'canvasLoad5to20s', 'canvasLoadCold', 'canvasPaintUnder1s', 'canvasPaint1to5s', 'canvasPaintOver5s'],
     );
     // canvasLoadOver20s, the top range, is still the 2.0.0 key.
     assert.ok(WORKER_FEATURES.indexOf('canvasLoadOver20s') < WORKER_FEATURES.indexOf('draftDropTimeLimit'));
+    assert.equal(params[18], '{}');
+  });
+
+  it('keeps what the one look at the folder met (#347), after how long a diagram took to open, and drops a count of folders, a look-alike or an error-side copy', async () => {
+    const features = {
+      startLookFromIndex: 1,
+      startLookIndexFallback: 1,
+      startLookFoldersUnder200: 1,
+      startLookFolders200to2000: 1,
+      startLookFoldersOver2000: 1,
+      startLookFoundAfterDeadline: 1,
+      dbtSearchFromIndex: 3,
+    };
+    const params = await storedParams(
+      heartbeat({
+        features: { ...features, startLookFolders: 1234, startLookFoldersOver5000: 1, startLookFolders200to2000s: 1, startLookNoIndex: 1, dbtSearchFromGit: 1 },
+        errors: { startLookIndexFallback: 1, dbtSearchFromIndex: 1 },
+      }),
+    );
+    assert.deepEqual(JSON.parse(params[17]), features);
+    // Everything after #333's keys: the newest keys close the list.
+    assert.deepEqual(
+      WORKER_FEATURES.slice(WORKER_FEATURES.indexOf('canvasPaintOver5s') + 1),
+      [
+        'startLookFromIndex', 'startLookIndexFallback',
+        'startLookFoldersUnder200', 'startLookFolders200to2000', 'startLookFoldersOver2000',
+        'startLookFoundAfterDeadline', 'dbtSearchFromIndex',
+      ],
+    );
+    // The keys whose meaning shifted with #347 keep their places from 2.0.0 and after 2.0.4.
+    assert.ok(WORKER_FEATURES.indexOf('startLookGaveUp') < WORKER_FEATURES.indexOf('draftDropTimeLimit'));
+    assert.ok(WORKER_FEATURES.indexOf('startLookLateSuggestion') < WORKER_FEATURES.indexOf('canvasLoadUnder1s'));
     assert.equal(params[18], '{}');
   });
 

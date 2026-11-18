@@ -50,11 +50,12 @@ export const SLOW_ACTIVATION_MS = 10_000;
 /**
  * The stretches of activation before the project is read (the
  * `activationOver10s` measurement), in milliseconds: `dbtSearch`, the wait
- * on the host's dbt_project.yml search (bounded by
- * `ACTIVATION_DBT_SEARCH_MS`, so a long one means the shared extension host
- * thread was busy, not that the search was slow); `walk`, the synchronous
- * folder walk that finds the project (`resolveWorkspaceProject`, timed on
- * its own); `discovery`, the rest of the Discovery phase (the globalState
+ * on the host's dbt_project.yml search once the look had answered (bounded
+ * by `ACTIVATION_DBT_SEARCH_MS`, so a long one means the shared extension
+ * host thread was busy, not that the search was slow; none where git's index
+ * answered); `walk`, the wait on the shared look that finds the dbt projects
+ * below the open folders (`folderLook.ts`: git's index and one asynchronous
+ * walk; up to 2.0.9 a synchronous walk); `discovery`, the rest of the Discovery phase (the globalState
  * writes before the search and, after an update, the save-and-reload
  * prompt, which waits for the user); `services`, from the Services phase to
  * the project read. The later phases (Watchers, Views, Commands, Prompts)
@@ -87,6 +88,18 @@ export function slowActivationFeature(spans: ActivationSpans, totalMs: number): 
     if (spans[span] > spans[longest]) longest = span;
   }
   return ACTIVATION_SLOW[longest];
+}
+
+/**
+ * How far the start screen's walk had got when its first look ran late
+ * (#347), as a fixed range. The count includes what activation's dbt
+ * project search had already listed: `Over2000` says the folder is large;
+ * `Under200` says a small folder's listings were slow (a slow disk, or a
+ * busy extension host). Never a count.
+ */
+export function startLookFoldersFeature(folders: number): TelemetryFeature {
+  if (folders < 200) return 'startLookFoldersUnder200';
+  return folders <= 2000 ? 'startLookFolders200to2000' : 'startLookFoldersOver2000';
 }
 
 /**

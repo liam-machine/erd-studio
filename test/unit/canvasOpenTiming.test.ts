@@ -101,12 +101,16 @@ describe('the ranges (#333)', () => {
     }
   });
 
-  it('the families are listed in FEATURES, fastest first, and the new keys are appended after #332\'s', () => {
+  it('the families are listed in FEATURES, fastest first, and the new keys are appended after #332\'s (only #347\'s follow them)', () => {
     expect([...CANVAS_LOAD_FEATURES]).toEqual(['canvasLoadUnder1s', 'canvasLoad1to5s', 'canvasLoad5to20s', 'canvasLoadOver20s']);
     expect([...CANVAS_PAINT_FEATURES]).toEqual(['canvasPaintUnder1s', 'canvasPaint1to5s', 'canvasPaintOver5s']);
     expect(FEATURES.slice(FEATURES.indexOf('modelRepoHasRemote') + 1)).toEqual([
       'canvasLoadUnder1s', 'canvasLoad1to5s', 'canvasLoad5to20s', 'canvasLoadCold',
       'canvasPaintUnder1s', 'canvasPaint1to5s', 'canvasPaintOver5s',
+      // #347: the one shared look at the folder.
+      'startLookFromIndex', 'startLookIndexFallback',
+      'startLookFoldersUnder200', 'startLookFolders200to2000', 'startLookFoldersOver2000',
+      'startLookFoundAfterDeadline', 'dbtSearchFromIndex',
     ]);
     // canvasLoadOver20s stays where 2.0.0 put it.
     expect(FEATURES.indexOf('canvasLoadOver20s')).toBeLessThan(FEATURES.indexOf('draftDropTimeLimit'));
