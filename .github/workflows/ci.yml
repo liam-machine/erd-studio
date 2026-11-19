@@ -83,6 +83,8 @@ jobs:
   # path, so every file runs in exactly one shard. No build needed:
   # test/globalSetup.ts builds dist/manifestWorker.js itself, and the tests that
   # need a package's dist/ build their own into a scratch folder.
+  # ERD_TEST_SET=main leaves out the wall-clock-budget files listed in
+  # test/timingTests.ts; the test-timing job below runs those.
   test:
     name: test (${{ matrix.shard }}/4)
     runs-on: ubuntu-latest
@@ -112,6 +114,8 @@ jobs:
           restore-keys: vitest-results-${{ matrix.shard }}-
 
       - run: npm run test -- --shard=${{ matrix.shard }}/4
+        env:
+          ERD_TEST_SET: main
 
       # Failed runs record durations too; only a cancelled run has none worth keeping.
       - name: Save vitest timings
@@ -120,6 +124,34 @@ jobs:
         with:
           path: node_modules/.vite/vitest/results.json
           key: vitest-results-${{ matrix.shard }}-${{ github.run_id }}
+
+  # The test files that assert how long CPU work takes (test/timingTests.ts).
+  # Beside other test files on the same cores they were slow and failed
+  # without a regression, so here each runs alone: one file at a time
+  # (ERD_TEST_SET=timing turns file parallelism off), on its own runner. Run
+  # one after another they take longer than a shard, so they are split two
+  # ways the same way as the shards (a hash of each file's path).
+  test-timing:
+    name: test-timing (${{ matrix.shard }}/2)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci --no-audit --no-fund
+
+      - run: npm run test -- --shard=${{ matrix.shard }}/2
+        env:
+          ERD_TEST_SET: timing
 
   # Preview of what publish-packages.yml will release to npm once this reaches
   # main, in the run summary. Informational only: it needs the npm registry,
