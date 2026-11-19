@@ -20,45 +20,64 @@ on:
     # release (nothing under .github/ ships in the VSIX).
     # Every marketplace release triggers a save-all + window reload for users
     # with a canvas open, so avoid publishing when nothing shipped changes.
-    # telemetry/** is deliberately NOT here: a telemetry-only merge must start
-    # this workflow so the Worker deploys. The `changes` job below repeats this
-    # list (plus telemetry/**) as the "not the extension" filter;
-    # test/unit/deployWorkflow.test.ts fails when the two drift.
-    paths-ignore:
-      - '**/*.md'
-      - 'docs/**'
-      - 'test/fixtures/**'
-      - 'test/stories/**'
-      - '.planning/**'
-      - '.github/**'
-      - 'social-video/**'
-      - '.claude/**'
+    # `paths`, not `paths-ignore`, so a file can be excluded and then brought
+    # back: patterns are read in order and the last one a file matches decides
+    # (a `!` pattern excludes, a plain one includes). So: everything, minus the
+    # `!` list (what never ships), plus the re-includes at the end (what ships
+    # although it sits under an excluded path).
+    # telemetry/** is deliberately NOT excluded: a telemetry-only merge must
+    # start this workflow so the Worker deploys. The `changes` job below repeats
+    # the `!` list (plus telemetry/**) as its `extension` filter and the
+    # re-includes as its `examples` filter; test/unit/deployWorkflow.test.ts
+    # fails when they drift, and checks both decide the same for sample paths.
+    paths:
+      - '**'
+      - '!**/*.md'
+      - '!docs/**'
+      - '!test/fixtures/**'
+      - '!test/stories/**'
+      - '!.planning/**'
+      - '!.github/**'
+      - '!social-video/**'
+      - '!.claude/**'
       # Checks the product manager routine's brief (.claude/routines); nothing in the VSIX.
-      - 'test/unit/productManagerRoutine.test.ts'
+      - '!test/unit/productManagerRoutine.test.ts'
       # npm package release tooling (publish-packages.yml); nothing in the VSIX.
-      - 'scripts/release-packages.mjs'
-      - 'test/unit/releasePackages.test.ts'
+      - '!scripts/release-packages.mjs'
+      - '!test/unit/releasePackages.test.ts'
       # Extension release tooling (this workflow and prerelease.yml run it from
       # the checkout); nothing in the VSIX.
-      - 'scripts/release.mjs'
-      - 'test/unit/release.test.ts'
+      - '!scripts/release.mjs'
+      - '!test/unit/release.test.ts'
       # Checks this workflow's own lists; nothing in the VSIX.
-      - 'test/unit/deployWorkflow.test.ts'
+      - '!test/unit/deployWorkflow.test.ts'
       # Checks prerelease.yml; nothing in the VSIX.
-      - 'test/unit/prereleaseWorkflow.test.ts'
+      - '!test/unit/prereleaseWorkflow.test.ts'
       # The import corpus (import-corpus.yml, run by hand): its fetch, counter
       # and scorer; nothing in the VSIX.
-      - 'scripts/corpus/**'
-      - 'test/unit/importCorpus.score.test.ts'
+      - '!scripts/corpus/**'
+      - '!test/unit/importCorpus.score.test.ts'
       # Database truth for the real-world samples (readback.py and the engines'
       # read-backs, differences.json): data, like test/fixtures; nothing in the VSIX.
-      - 'test/real-world-truth/**'
+      - '!test/real-world-truth/**'
       # A sibling project, never in the VSIX. A change to the src/services it
       # imports still triggers a release through src/.
-      - 'mcp-server/**'
+      - '!mcp-server/**'
       # The feedback-analysis proxy (Cloudflare Worker), deployed by hand from
       # proxy/README.md; never in the VSIX.
-      - 'proxy/**'
+      - '!proxy/**'
+      # Re-included, last so they win over the `!` patterns above: files under
+      # an excluded path that esbuild.js inlines into dist/extension.js, so a
+      # change to one ships.
+      # The example projects (Open an Example Project…): every file of every
+      # docs/examples/<id>/ folder, README.md and .erd-studio/README.md
+      # included (scripts/exampleBundle.cjs). docs/examples/README.md, the
+      # index, is not read and still releases nothing. A new example releases
+      # with no edit here; a new folder elsewhere under docs/ does not.
+      - 'docs/examples/*/**/*'
+      # The setup-skill markdown (the '.md' text loader; src/services/harnessAssets.ts).
+      # src/harness/CLAUDE.md, the contributor notes beside them, is not read.
+      - 'src/harness/*/**/*.md'
 
 concurrency:
   group: deploy-main
@@ -88,7 +107,7 @@ jobs:
       contents: read
       pull-requests: read # paths-filter lists the PR's files through the API
     outputs:
-      extension: ${{ steps.filter.outputs.extension }}
+      extension: ${{ steps.filter.outputs.extension == 'true' || steps.inlined.outputs.extension == 'true' }}
       worker: ${{ steps.worker.outputs.changed }}
       sha: ${{ steps.worker.outputs.sha }}
     steps:
@@ -98,8 +117,11 @@ jobs:
           fetch-depth: 0 # the tag and its history
           filter: blob:none
 
-      # A file counts for the extension unless it matches a pattern below:
-      # `every` makes each pattern, negations included, have to match.
+      # The trigger's `paths` as two steps, since in paths-filter an exclusion
+      # is final (a later pattern cannot bring a file back). The extension
+      # ships when either matches a changed file (the `extension` output above).
+      # 1. A file outside every `!` pattern: `every` makes each pattern,
+      #    negations included, have to match.
       - uses: dorny/paths-filter@v4
         id: filter
         with:
@@ -128,6 +150,17 @@ jobs:
               - '!mcp-server/**'
               - '!proxy/**'
               - '!telemetry/**'
+
+      # 2. A file the trigger re-includes (its plain patterns after the `!`
+      #    list): `some`, the default, so matching any one of them is enough.
+      - uses: dorny/paths-filter@v4
+        id: inlined
+        with:
+          predicate-quantifier: some
+          filters: |
+            extension:
+              - 'docs/examples/*/**/*'
+              - 'src/harness/*/**/*.md'
 
       - name: Has the telemetry Worker changed since its last deploy?
         id: worker
