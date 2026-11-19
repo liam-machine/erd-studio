@@ -8,7 +8,9 @@ block in context. Everything in SKILL.md still applies, except where this file c
 GitHub can't start a routine on a new issue: routine GitHub triggers cover pull requests
 and releases only. The bridge is `.github/workflows/issue-to-routine.yml`:
 1. A maintainer adds the label **`issue-to-pr`** to an issue, or a maintainer opens one
-   with it.
+   with it. Other labels added at the same time are fine: each label starts its own run,
+   and the label name is part of the concurrency group, so their runs cannot cancel the
+   `issue-to-pr` one.
 2. The workflow POSTs to the routine's API trigger.
 3. The payload `text` holds the issue number and the URL.
 

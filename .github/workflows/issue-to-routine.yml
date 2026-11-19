@@ -19,8 +19,15 @@ on:
 
 permissions: {}
 
+# One run per label added, so adding several labels at once queues several runs.
+# A group keeps one run in progress and only the newest pending one, cancelling
+# the pending run it replaces, so with the issue number alone a later unrelated
+# label's run (which then skips) could cancel the pending `issue-to-pr` run and
+# the routine never fired. The label name keeps every other label out of the
+# `issue-to-pr` run's group, while two `issue-to-pr` events for one issue (the
+# label removed and added again) still never fire the routine at the same time.
 concurrency:
-  group: issue-to-routine-${{ github.event.issue.number }}
+  group: issue-to-routine-${{ github.event.issue.number }}-${{ github.event.label.name }}
   cancel-in-progress: false
 
 jobs:

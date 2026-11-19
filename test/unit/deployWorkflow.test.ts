@@ -281,3 +281,23 @@ describe('deploy.yml', () => {
     }
   });
 });
+
+// Kept here, beside deploy.yml's checks, because this file never starts a release.
+describe('issue-to-routine.yml', () => {
+  const routine = parse(readFileSync(resolve(ROOT, '.github/workflows/issue-to-routine.yml'), 'utf8')) as {
+    on: { issues: { types: string[] } };
+    concurrency: { group: string; 'cancel-in-progress': boolean };
+    jobs: Record<string, Job>;
+  };
+
+  it('another label added at the same time can never cancel the issue-to-pr run', () => {
+    // One run per label added; a group keeps only its newest pending run, so the
+    // label name must be in the group or an unrelated label's run displaces it.
+    expect(routine.on.issues.types).toEqual(['labeled']);
+    expect(routine.jobs.fire.if).toContain("github.event.label.name == 'issue-to-pr'");
+    expect(routine.concurrency.group).toContain('${{ github.event.issue.number }}');
+    expect(routine.concurrency.group).toContain('${{ github.event.label.name }}');
+    // Two issue-to-pr events for one issue still never fire at the same time.
+    expect(routine.concurrency['cancel-in-progress']).toBe(false);
+  });
+});
