@@ -84,6 +84,7 @@ npm run build:packages # publishable dist/ of both packages
 ```
 
 - Single test: `npx vitest run test/unit/domainService.test.ts`
+- **A test that asserts how long CPU work takes** (a ms budget, a frame budget, `timeRatio`, an event-loop stall) goes in `TIMING_TEST_FILES` (`test/timingTests.ts`): CI runs those files one at a time in `test-timing` (`ERD_TEST_SET=timing`) and keeps them out of the four shards (`ERD_TEST_SET=main`). A plain `npm run test` still runs everything.
 - CLI against a fixture (after a build): `node dist/cli.js doctor --project test/fixtures/dbt-project --no-dbt` (also `diff --all`, `inventory --summary`, `export`, `--json`)
 - Dev host: `npm run build && code --extensionDevelopmentPath=/Users/liamwynne/GIT/LIAM/erd-studio /Users/liamwynne/GIT/LIAM/erd-studio/test/fixtures/dbt-project` — open the **showcase** domain for the richest data. (F5 also works; it runs the `npm: watch` task.)
 - Tests alias `vscode` to the stateful mock `test/__mocks__/vscode.ts`. Fixture dbt projects live in `test/fixtures/` (`dbt-project` is the main one; `dbt-project-dbml` is the same project after Convert, regenerated with `npm run regen:dbt-dbml-fixture`; `logical-only` and `dbml-native` have no dbt).
