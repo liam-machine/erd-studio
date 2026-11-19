@@ -1,11 +1,17 @@
 name: Deploy to VS Code Marketplace and Open VSX
 
-# One workflow per merge to main, three jobs in order:
-#   changes          → what this merge releases (the two flags below)
+# One workflow per merge to main:
+#   changes          → what this merge releases (the two flags below), and the
+#                      commit every later job checks out (`sha`, main's tip)
 #   telemetry-worker → D1 migrations, then the telemetry Worker (telemetry/)
-#   deploy           → the extension, only after the Worker succeeded or had
-#                      nothing to deploy; a failed Worker blocks the release,
-#                      because an older Worker drops keys a new extension sends.
+#   build, verify    → in parallel with the Worker: type check + build, and the
+#                      full test suite in four shards, of that commit
+#   deploy           → the extension, only after build and every verify shard
+#                      passed and the Worker succeeded or had nothing to deploy;
+#                      a failed Worker blocks the release, because an older
+#                      Worker drops keys a new extension sends.
+# There is no branch protection on main, so build + verify are the real gate
+# before anything is published.
 on:
   pull_request:
     types: [closed]
@@ -72,9 +78,12 @@ jobs:
   #               before it releases the extension, instead of the change being
   #               lost. A manual deploy does not move the tag, so the next run
   #               redeploys the same code, which is harmless.
+  # Its `sha` output (main's tip when this job ran) is the one commit every
+  # later job checks out, so the Worker, the checks and the release agree.
   changes:
     if: github.event.pull_request.merged == true
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     permissions:
       contents: read
       pull-requests: read # paths-filter lists the PR's files through the API
@@ -83,7 +92,7 @@ jobs:
       worker: ${{ steps.worker.outputs.changed }}
       sha: ${{ steps.worker.outputs.sha }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: main
           fetch-depth: 0 # the tag and its history
@@ -145,6 +154,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.worker == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     # deploy-main already serialises whole runs; this also keeps any future
     # caller of this job from overlapping a deploy.
     concurrency:
@@ -172,13 +182,17 @@ jobs:
           done
           exit "$missing"
 
-      - uses: actions/checkout@v4
+      # Only telemetry/ (cone mode keeps the root files too): the Worker's tests,
+      # check, migrations and deploy read nothing else.
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.changes.outputs.sha }}
+          sparse-checkout: telemetry
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
-          node-version: 20
+          node-version: 24
+          package-manager-cache: false
 
       - name: Test
         working-directory: telemetry
@@ -220,30 +234,25 @@ jobs:
             exit 1
           fi
 
-  deploy:
-    needs: [changes, telemetry-worker]
-    # After the Worker, or when it had nothing to deploy (skipped) — never after
-    # it failed or was cancelled. `!cancelled()` is what lets a job run when one
-    # of its needs was skipped.
-    if: >-
-      !cancelled()
-      && needs.changes.result == 'success'
-      && needs.changes.outputs.extension == 'true'
-      && (needs.telemetry-worker.result == 'success' || needs.telemetry-worker.result == 'skipped')
+  # The checks deploy used to run itself, now beside the Worker instead of after
+  # it, on the commit deploy releases. Both run exactly when a release would
+  # (the extension changed), so a merge that releases nothing spends nothing.
+  build:
+    needs: changes
+    if: needs.changes.outputs.extension == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
-      contents: write
-      pull-requests: read
-
+      contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
-          ref: main
-          fetch-depth: 0
+          ref: ${{ needs.changes.outputs.sha }}
+          persist-credentials: false
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
 
       - run: npm ci
@@ -251,11 +260,102 @@ jobs:
       - name: Type check
         run: npm run compile
 
+      # The dev build, before the version bump is pushed; `vsce package` makes
+      # the production build in deploy.
       - name: Build
         run: npm run build
 
+  # `npm run test` split four ways: vitest's --shard partitions the same file
+  # list `npm run test` runs, so the shards together run every file once.
+  # test/globalSetup.ts builds what the tests need; no build step here.
+  verify:
+    needs: changes
+    if: needs.changes.outputs.extension == 'true'
+    name: verify (${{ matrix.shard }}/${{ strategy.job-total }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false # report every failing shard, not just the first
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.changes.outputs.sha }}
+          persist-credentials: false
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
       - name: Run tests
-        run: npm run test
+        run: npm run test -- --shard=${{ matrix.shard }}/${{ strategy.job-total }}
+
+  deploy:
+    needs: [changes, telemetry-worker, build, verify]
+    # After the Worker, or when it had nothing to deploy (skipped) — never after
+    # it failed or was cancelled — and only after build and every verify shard
+    # passed (a matrix job's result is success only when every shard is).
+    # `!cancelled()` is what lets a job run when one of its needs was skipped;
+    # a cancelled run skips this job.
+    if: >-
+      !cancelled()
+      && needs.changes.result == 'success'
+      && needs.changes.outputs.extension == 'true'
+      && needs.build.result == 'success'
+      && needs.verify.result == 'success'
+      && (needs.telemetry-worker.result == 'success' || needs.telemetry-worker.result == 'skipped')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      pull-requests: read
+    env:
+      # The commit build and verify tested.
+      SHA: ${{ needs.changes.outputs.sha }}
+
+    steps:
+      # The tested commit, not whatever main is now; fetch-depth 0 for main's
+      # tip (the rerun check below) and the bump's rebase. Blobless is enough:
+      # nothing here reads an old file's contents (rebase fetches what it needs).
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.changes.outputs.sha }}
+          fetch-depth: 0
+          filter: blob:none
+
+      # A rerun after the bump was pushed must retry that exact release. A blind
+      # patch bump would skip a version every time Marketplace timed out after
+      # this workflow had already advanced main. When main's tip is this merge's
+      # own bump commit, on top of the tested commit (a "Re-run failed jobs"
+      # reuses `changes`, so $SHA is the merge) or being it (a "Re-run all
+      # jobs"), release that commit: it differs from the tested one only in the
+      # version and the changelog.
+      - name: Is this a rerun of a release that already pushed its bump?
+        env:
+          MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+        run: |
+          git fetch --quiet origin +refs/heads/main:refs/remotes/origin/main
+          TIP=$(git rev-parse origin/main)
+          if [[ "$(git log -1 --format=%s "$TIP")" == "chore: bump version to v"*" [deploy]" \
+                && "$(git rev-parse "${TIP}^")" == "$MERGE_SHA" \
+                && ( "$SHA" == "$TIP" || "$SHA" == "$MERGE_SHA" ) ]]; then
+            git checkout --quiet --detach "$TIP"
+            echo "RECOVER_EXISTING_RELEASE=true" >> "$GITHUB_ENV"
+            echo "Recovering the interrupted release in ${TIP}"
+          fi
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
 
       - name: Check Claude approval
         id: claude_check
@@ -286,15 +386,9 @@ jobs:
       # --skip-duplicate would quietly skip a pin that collides with a pre-release).
       - name: Determine next version
         run: |
-          # A rerun after the bump was pushed must retry that exact release. A
-          # blind patch bump would skip a version every time Marketplace timed
-          # out after this workflow had already advanced main.
-          HEAD_SUBJECT=$(git log -1 --format=%s)
-          HEAD_PARENT=$(git rev-parse HEAD^)
-          MERGE_SHA="${{ github.event.pull_request.merge_commit_sha }}"
-          if [[ "$HEAD_SUBJECT" == "chore: bump version to v"*" [deploy]" && "$HEAD_PARENT" == "$MERGE_SHA" ]]; then
+          # The rerun check above found this release's bump already on main.
+          if [ "${RECOVER_EXISTING_RELEASE:-}" = "true" ]; then
             NEW_VERSION=$(node -p "require('./package.json').version")
-            echo "RECOVER_EXISTING_RELEASE=true" >> "$GITHUB_ENV"
             echo "Recovering interrupted release v${NEW_VERSION}"
             echo "NEW_VERSION=${NEW_VERSION}" >> "$GITHUB_ENV"
             exit 0
@@ -324,9 +418,38 @@ jobs:
 
       # Commit and push the bump BEFORE publishing so a failed publish never
       # leaves main behind the marketplace.
+      #
+      # The bump sits on the tested commit, so a push that goes through releases
+      # exactly what build and verify checked. A rejected push means main moved
+      # on (usually publish-packages.yml's `[packages]` bump racing this one);
+      # the rebase then brings those commits into the release, so it carries on
+      # only when they are release bookkeeping — a `[packages]` or `[deploy]`
+      # bump touching nothing but versions and the changelog. Anything else was
+      # never tested: stop before pushing, so nothing is released, and
+      # "Re-run all jobs" tests and releases main's new tip.
       - name: Commit version bump
         if: env.RECOVER_EXISTING_RELEASE != 'true'
         run: |
+          only_bookkeeping_since_tested() {
+            local ok=0 commit subject
+            while read -r commit subject; do
+              case "$subject" in
+                "chore: release "*" [packages]" | "chore: bump version to v"*" [deploy]") ;;
+                *)
+                  echo "::error::${commit} (${subject}) landed on main after the tested commit ${SHA}"
+                  ok=1
+                  continue
+                  ;;
+              esac
+              if git diff-tree --no-commit-id --name-only --no-renames -r "$commit" \
+                | grep -Ev '^(package\.json|package-lock\.json|CHANGELOG\.md|packages/[^/]+/package\.json)$'; then
+                echo "::error::${commit} (${subject}) changes more than versions (files above)"
+                ok=1
+              fi
+            done < <(git log --format='%H %s' "${SHA}..origin/main")
+            return "$ok"
+          }
+
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add package.json package-lock.json CHANGELOG.md
@@ -337,6 +460,10 @@ jobs:
             fi
             echo "Push failed (attempt ${attempt}); rebasing onto origin/main and retrying"
             git pull --rebase origin main
+            if ! only_bookkeeping_since_tested; then
+              echo "::error::main has untested commits since ${SHA}; nothing was pushed or published. Re-run all jobs to test and release main's new tip."
+              exit 1
+            fi
           done
           echo "::error::Could not push version bump after 3 attempts"
           exit 1
