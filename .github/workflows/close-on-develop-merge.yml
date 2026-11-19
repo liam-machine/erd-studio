@@ -20,6 +20,7 @@ jobs:
   close:
     if: github.event.pull_request.merged == true
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Close the issues the PR closes
         env:
