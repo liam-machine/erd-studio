@@ -43,18 +43,26 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    # The full test suite runs on this one runner; the limit only stops a hung run.
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: main
           fetch-depth: 0 # release tags drive change detection
+          # Blobless: the plan compares trees (`git diff --quiet <tag> HEAD`),
+          # and committing, tagging and pushing need only HEAD's files.
+          filter: blob:none
 
       # Trusted publishing needs Node >= 22.14 and npm >= 11.5.1. No npm cache:
-      # a release build installs exactly what the lockfile says.
-      - uses: actions/setup-node@v4
+      # a release build installs exactly what the lockfile says (setup-node
+      # would otherwise turn one on if package.json ever names npm as its
+      # packageManager).
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
+          package-manager-cache: false
 
       - name: Install npm with trusted publishing support
         run: npm install -g npm@11.6.2
