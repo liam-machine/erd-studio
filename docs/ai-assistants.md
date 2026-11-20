@@ -4,7 +4,7 @@ ERD Studio's data model is plain files in DBML, an open format, so any AI coding
 
 ## Set Up My AI Helper
 
-In the ERD Studio sidebar, open **Help & Feedback** and click **Set Up My AI Helper**. It is also on the ERD Studio Tour tab, and in the Command Palette as **ERD Studio: Set Up My AI Helper**. It installs instructions for the AI assistants it finds on your computer (Claude Code, GitHub Copilot, Codex, Gemini CLI, Cursor) that teach them ERD Studio's files.
+In the ERD Studio sidebar, open **Help & Feedback** and click **Set Up My AI Helper**. It is also on the ERD Studio Tour tab, and in the Command Palette as **ERD Studio: Set Up My AI Helper**. It asks which AI assistant you use (Claude Code, GitHub Copilot, Codex, Gemini CLI or Cursor; the ones it finds on your computer come first) and installs instructions for that one that teach it ERD Studio's files. Run it again to pick another: what is already installed stays.
 
 Then ask for what you want, for example:
 
@@ -85,7 +85,7 @@ ERD Studio's format rules only help if your assistant reads them before it write
 
 A few things to know:
 
-- **Which assistants get it:** Set Up My AI Helper adds the hook for the assistants it finds on your computer. When it finds none, it adds Claude Code's, GitHub Copilot's and Codex's (their files stay out of git), not Gemini CLI's. Updating ERD Studio's files later keeps the hooks you have current and adds no new ones.
+- **Which assistant gets it:** Set Up My AI Helper adds the hook for the assistant you pick in its list, and no other. Updating ERD Studio's files later keeps the hooks you have current and adds no new ones.
 - **Codex asks first.** Codex runs a new project hook only after you trust it: when it starts, it says a hook needs review, and you approve it in `/hooks`.
 - **Gemini CLI** shows a one-time notice the first time it runs a new project hook, and ignores project settings in a folder you haven't trusted. Google moved free-tier and Google One users from Gemini CLI to Antigravity CLI in June 2026; the Gemini CLI hook is for anyone still using Gemini CLI.
 - **Copilot in VS Code** reads `.github/copilot/settings.local.json` in Copilot sessions. A chat that uses VS Code's own local agent instead may not run the hook.

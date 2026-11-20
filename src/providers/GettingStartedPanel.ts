@@ -605,8 +605,17 @@ export interface SetupAiHelperDeps {
   };
   launcher: { install(opts: CliLauncherOptions): Promise<CliLauncherInstallResult> };
   launcherOptions: CliLauncherOptions;
-  /** Detected assistants: which skill folders to install (`recommendedSkillTargets`) and whom the message names. */
+  /**
+   * Which skill folders to install (`recommendedSkillTargets`) and whom the
+   * message names, when nobody is asked: without `chooseAssistant`.
+   */
   assistants: readonly AiAssistantId[];
+  /**
+   * Asks which one assistant to install for, before anything is written. With
+   * it, only that assistant's files are installed and `assistants` is not
+   * read; `undefined` (the list was closed) cancels the setup.
+   */
+  chooseAssistant?(): Promise<AiAssistantId | undefined>;
   /** The root has no dbt_project.yml: the success message says the guided setup designs the model with the user. */
   logicalOnly?: boolean;
   /** The Replace / Keep mine modal; undefined when dismissed. */
@@ -647,14 +656,23 @@ export function displayLauncherPath(absolute: string, homeDir: string): string {
 
 /**
  * The `setupAiHelper` flow (spec C.4), shared by the command and the panel:
- * install the Claude harness target (asking before replacing a hand-written
- * SKILL.md), then the helper launcher in `~/.erd-studio-cli`. A launcher
- * failure is reported but never undoes the skill install. Never throws.
+ * ask which assistant (`chooseAssistant`), install that one's skill folder
+ * (asking before replacing a hand-written SKILL.md), then the helper launcher
+ * in `~/.erd-studio-cli`. A launcher failure is reported but never undoes the
+ * skill install. Never throws.
  */
 export async function runSetupAiHelper(deps: SetupAiHelperDeps): Promise<SetupOutcome> {
   const filesWritten: string[] = [];
-  const assistants = deps.assistants;
+  let assistants = deps.assistants;
   try {
+    if (deps.chooseAssistant) {
+      const chosen = await deps.chooseAssistant();
+      if (chosen === undefined) {
+        telemetry.feature('setupHelperCancelled');
+        return { ok: false, filesWritten: [], message: SETUP_CANCELLED_MESSAGE };
+      }
+      assistants = [chosen];
+    }
     let result = deps.harness.installRecommended(deps.root, { replaceUnmanaged: false, assistants });
     if (result.status === 'needs-confirmation') {
       telemetry.feature('setupHelperConflict');

@@ -142,6 +142,31 @@ export function recommendedSkillTargets(assistants: readonly AiAssistantId[]): S
   return targets;
 }
 
+/** One row of the list Set Up My AI Helper asks from. */
+export interface AssistantChoice {
+  id: AiAssistantId;
+  name: string;
+  /** Found on this machine (`detectAssistants()`). */
+  detected: boolean;
+  /** The assistant the helper was last set up for in this folder. */
+  last: boolean;
+}
+
+/**
+ * The single-choice list Set Up My AI Helper shows on every run: all five
+ * assistants, so one that VS Code cannot see can still be picked. The first
+ * row is the one Enter takes: the assistant last set up in this folder, else
+ * the first detected one, else Claude Code. Then the other detected ones, then
+ * the rest, each group in `AI_ASSISTANTS` order.
+ */
+export function assistantChoices(detected: readonly AiAssistantId[], last?: AiAssistantId): AssistantChoice[] {
+  const rank = (a: AiAssistantInfo): number => (a.id === last ? 0 : detected.includes(a.id) ? 1 : 2);
+  return AI_ASSISTANTS
+    .map((a, index) => ({ a, index }))
+    .sort((x, y) => rank(x.a) - rank(y.a) || x.index - y.index)
+    .map(({ a }) => ({ id: a.id, name: a.name, detected: detected.includes(a.id), last: a.id === last }));
+}
+
 /** "Claude Code", "Claude Code and Codex", "Claude Code, Codex and Cursor". */
 export function joinNames(names: readonly string[]): string {
   if (names.length <= 1) { return names[0] ?? ''; }

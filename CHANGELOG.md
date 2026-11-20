@@ -8,6 +8,12 @@ The `Unreleased` heading below is renamed to the released version by the deploy 
 Releases are patch bumps by default. To ship a minor or major version, write it into the
 heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that.
 
+## Unreleased
+
+### Changed
+
+- **Set Up My AI Helper** now asks which AI assistant you use (Claude Code, GitHub Copilot, Codex, Gemini CLI or Cursor) and installs its helper files for that one only. Before, it installed for every assistant it found on your computer, and for all of them when it found none. The assistants it finds come first in the list, and the next run leads with the one you picked last, so Enter keeps it. Nothing already installed is removed. **Install AI Helper Files…** still lets you tick several.
+
 ## 2.0.10 — 2026-11-18
 
 ### Changed

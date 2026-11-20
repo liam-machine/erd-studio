@@ -186,6 +186,12 @@ export interface GettingStartedStatus {
   claude: ClaudeAvailability;
   /** Detected AI assistants, in `AI_ASSISTANTS` order (`detectAssistants()`). Empty when none was found. */
   assistants: AiAssistantId[];
+  /**
+   * The one assistant picked in Set Up My AI Helper's list, in this folder.
+   * Optional: absent until it has asked here (and for an install from before
+   * it asked), when the helper is judged and shown for `assistants`.
+   */
+  helperAssistant?: AiAssistantId;
   domainCount: number;
   /**
    * The dbt project folder — where Claude Code must run for the skill to be
@@ -343,7 +349,8 @@ export function formatProjectSummary(s: Omit<ProjectSummary, 'line'>): string {
 
 /**
  * The step card's one-word state, judged over the skill folders setup would
- * write for these assistants (`recommendedSkillTargets`). An unmanaged
+ * write for these assistants (`recommendedSkillTargets`): the one picked in
+ * Set Up My AI Helper, or the detected ones where it has not asked yet. An unmanaged
  * (hand-written) skill wins so the user learns before clicking that setup
  * will ask; `ready` needs every one of those skills current AND the helper
  * tool installed for this extension version. A newly detected assistant
@@ -1312,18 +1319,20 @@ const SCRIPT = `
     var found = s.assistants.length > 0 ? 'found' : 'none';
     var assistant = setState('assistant', found);
     if (assistant) { assistant.setAttribute('data-done', found === 'found' ? 'true' : 'false'); }
+    // The chips are what was found on this machine; the start rows are whom the
+    // helper is for: the assistant picked in Set Up My AI Helper, once it has asked here.
+    var helperFor = s.helperAssistant ? [s.helperAssistant] : s.assistants;
     var perAssistant = document.querySelectorAll('[data-assistant-row]');
     for (var a = 0; a < perAssistant.length; a++) {
-      perAssistant[a].hidden = s.assistants.indexOf(perAssistant[a].getAttribute('data-assistant-row')) < 0;
+      var shownIds = perAssistant[a].classList.contains('gs-chip') ? s.assistants : helperFor;
+      perAssistant[a].hidden = shownIds.indexOf(perAssistant[a].getAttribute('data-assistant-row')) < 0;
     }
     var helper = setState('helper', s.helper);
     if (helper) { helper.setAttribute('data-done', s.helper === 'ready' ? 'true' : 'false'); }
-    text('.gs-helper-for', s.assistants.length > 0 ? names(s.assistants) : 'every supported assistant');
-    var later = $('.gs-helper-later');
-    if (later) { later.hidden = s.assistants.length > 0; }
+    text('.gs-helper-for', s.helperAssistant ? names([s.helperAssistant]) : 'the AI assistant you pick');
     // An assistant but no guide installed yet: hide the launch rows, or "Open
     // Claude Code" would start /erd-studio-setup in a project without the skill.
-    setState('start', found === 'none' ? 'none' : s.helper === 'missing' ? 'notready' : 'some');
+    setState('start', helperFor.length === 0 ? 'none' : s.helper === 'missing' ? 'notready' : 'some');
     // The guided setup has a dbt route and a no-dbt one: it shows in both.
     // Draft-first: no start, Convert or "Open your diagrams" card here (the draft,
     // the sidebar and the Convert offer are the starts); the tour, the AI helper and Show Me Around.
@@ -1558,7 +1567,7 @@ export function buildGettingStartedHtml(input: GettingStartedHtmlInput): string 
         <span class="gs-step__num">2</span>
         <div class="gs-step__body">
           <h3 class="gs-step__title">Set up my AI helper</h3>
-          <p class="gs-step__text" data-when="missing ready update unmanaged" hidden><span ${only('unknown', 'nofolder', 'dbt')}>Adds the <code>/erd-studio-setup</code> guide and ERD Studio's file-format rules for </span><span ${only('logical')}>Adds ERD Studio's file-format rules for </span><strong class="gs-helper-for"></strong><span class="gs-helper-later" hidden> (so it's ready whichever you install)</span><span ${only('unknown', 'nofolder', 'dbt')}>, plus a small checking tool your assistant uses behind the scenes.</span><span ${only('logical')}>, so what your assistant writes opens on the canvas. It also adds the <code>/erd-studio-setup</code> guide and a small checking tool your assistant uses behind the scenes.</span></p>
+          <p class="gs-step__text" data-when="missing ready update unmanaged" hidden><span ${only('unknown', 'nofolder', 'dbt')}>Adds the <code>/erd-studio-setup</code> guide and ERD Studio's file-format rules for </span><span ${only('logical')}>Adds ERD Studio's file-format rules for </span><strong class="gs-helper-for"></strong><span ${only('unknown', 'nofolder', 'dbt')}>, plus a small checking tool your assistant uses behind the scenes.</span><span ${only('logical')}>, so what your assistant writes opens on the canvas. It also adds the <code>/erd-studio-setup</code> guide and a small checking tool your assistant uses behind the scenes.</span></p>
           <div class="gs-step__actions" data-when="missing ready update unmanaged" hidden>
             <button class="gs-btn gs-btn--primary gp-button gp-button--primary" type="button" data-action="setupAiHelper"><span class="gs-setup-label">Set up my AI helper</span></button>
           </div>

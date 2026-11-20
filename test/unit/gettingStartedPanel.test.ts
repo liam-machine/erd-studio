@@ -90,6 +90,7 @@ import {
 import { START_FEATURES, START_INTENT_FEATURES } from '../../src/commands/start';
 import { HARNESS_VERSION, HarnessService, extractHarnessVersion } from '../../src/services/harnessService';
 import type { RecommendedInstallResult } from '../../src/types/harness';
+import { assistantChoices } from '../../src/types/aiAssistants';
 import { telemetry } from '../../src/services/telemetryService';
 
 const REPO_ROOT = path.resolve(__dirname, '../..');
@@ -293,7 +294,8 @@ describe('panel script', () => {
       expect(visible('[data-step="assistant"] .gs-get .gs-link')).toEqual(['GitHub Copilot', 'Codex', 'Gemini CLI', 'Cursor']);
       expect(visible('.gs-chip')).toEqual([]);
       expect(visible('.gs-launch__row')).toEqual([]);
-      expect(visible('[data-step="helper"] .gs-step__text').join()).toContain('every supported assistant (so it\'s ready whichever you install)');
+      // Set Up My AI Helper asks which assistant: until it has, the card names nobody.
+      expect(visible('[data-step="helper"] .gs-step__text').join()).toContain('file-format rules for the AI assistant you pick, plus');
       expect(visible('[data-step="start"] .gs-step__hint').join()).toContain('see exactly what to type');
       // The skill detects the modelling style and confirms it (SKILL.md Stage 3b) — it never asks cold.
       expect(visible('[data-step="start"] .gs-step__text').join()).toContain('works out how your project is modelled and checks with you');
@@ -309,11 +311,27 @@ describe('panel script', () => {
       } });
       expect(visible('.gs-chip')).toEqual(['Claude Code', 'GitHub Copilot']);
       expect(visible('[data-step="assistant"] .gs-get')).toEqual([]);
-      expect(doc.querySelector('.gs-helper-for')?.textContent).toBe('Claude Code and GitHub Copilot');
-      expect((doc.querySelector('.gs-helper-later') as HTMLElement).hidden).toBe(true);
+      // An install from before setup asked: the start rows are still the detected assistants'.
+      expect(doc.querySelector('.gs-helper-for')?.textContent).toBe('the AI assistant you pick');
+      expect(doc.querySelector('.gs-helper-later')).toBeNull();
       expect(visible('[data-step="helper"] .gs-step__status')).toEqual(['Installed']);
       expect(visible('.gs-launch__name')).toEqual(['Claude Code', 'GitHub Copilot']);
       expect(visible('.gs-launch__prompt')).toEqual(['/erd-studio-setup', '/erd-studio-setup']);
+
+      // Picked in Set Up My AI Helper: the card and the start row are that one assistant's,
+      // also when it was not found on this machine; the chips stay what was found.
+      send({ type: 'status', payload: {
+        ...STATUS, claude: 'cli', assistants: ['claude', 'copilot'], helperAssistant: 'codex', helper: 'ready', domainCount: 3,
+        project: { name: 'dbt', relativePath: 'analytics/dbt' },
+      } });
+      expect(visible('.gs-chip')).toEqual(['Claude Code', 'GitHub Copilot']);
+      expect(doc.querySelector('.gs-helper-for')?.textContent).toBe('Codex');
+      expect(visible('.gs-launch__name')).toEqual(['Codex']);
+      expect(visible('.gs-launch__prompt')).toEqual(['$erd-studio-setup']);
+      send({ type: 'status', payload: {
+        ...STATUS, claude: 'cli', assistants: ['claude', 'copilot'], helper: 'ready', domainCount: 3,
+        project: { name: 'dbt', relativePath: 'analytics/dbt' },
+      } });
       expect(visible('[data-step="start"] .gs-btn').join()).toContain('Open Claude Code');
       expect(visible('[data-step="start"] .gs-btn').join()).toContain('Open Copilot Chat');
       expect(visible('[data-step="start"] .gs-btn').join()).toContain('Copy start command'); // Claude, nested
@@ -1079,6 +1097,29 @@ describe('locateClaudeCli (PATH scan, never spawns)', () => {
   });
 });
 
+describe('assistantChoices (the list Set Up My AI Helper asks from)', () => {
+  const ids = (detected: Parameters<typeof assistantChoices>[0], last?: Parameters<typeof assistantChoices>[1]) =>
+    assistantChoices(detected, last).map((c) => c.id);
+
+  it('always lists all five, so an assistant VS Code cannot see can still be picked', () => {
+    expect(ids([])).toEqual(['claude', 'copilot', 'codex', 'gemini', 'cursor']);
+    expect(assistantChoices([]).every((c) => !c.detected && !c.last)).toBe(true);
+  });
+
+  it('leads with the detected ones, then the rest, each in display order', () => {
+    expect(ids(['gemini', 'copilot'])).toEqual(['copilot', 'gemini', 'claude', 'codex', 'cursor']);
+    expect(assistantChoices(['gemini', 'copilot']).filter((c) => c.detected).map((c) => c.name)).toEqual(['GitHub Copilot', 'Gemini CLI']);
+  });
+
+  it('the assistant set up here last comes first, detected or not: Enter keeps it', () => {
+    expect(ids(['claude', 'copilot'], 'codex')).toEqual(['codex', 'claude', 'copilot', 'gemini', 'cursor']);
+    expect(ids(['claude', 'copilot'], 'copilot')).toEqual(['copilot', 'claude', 'codex', 'gemini', 'cursor']);
+    const [first, second] = assistantChoices(['claude', 'copilot'], 'codex');
+    expect(first).toEqual({ id: 'codex', name: 'Codex', detected: false, last: true });
+    expect(second).toEqual({ id: 'claude', name: 'Claude Code', detected: true, last: false });
+  });
+});
+
 describe('AI assistant detection (host inputs, never spawns)', () => {
   const files = (set: string[]) => (p: string) => set.includes(p);
 
@@ -1143,6 +1184,7 @@ function setupDeps(overrides: Partial<SetupAiHelperDeps> & {
     launcher: { install: launcherInstall },
     launcherOptions: { homeDir: '/h', extensionVersion: '1.0.11', execPath: '/x/Code', cliSourcePath: '/ext/dist/cli.js' },
     assistants: overrides.assistants ?? ['claude'],
+    ...(overrides.chooseAssistant ? { chooseAssistant: overrides.chooseAssistant } : {}),
     confirmReplace: overrides.confirmReplace ?? vi.fn(async () => 'replace' as const),
   };
   return { deps, installRecommended, launcherInstall };
@@ -1242,6 +1284,57 @@ describe('runSetupAiHelper', () => {
     expect(outcome.filesWritten).toContain('.agents/skills/erd-studio-setup/SKILL.md');
     expect(fs.existsSync(path.join(tmp, '.claude'))).toBe(false);
     expect(harness.harnessStatus(tmp).agents).toEqual({ schemaSkill: 'current', setupSkill: 'current' });
+  });
+
+  it('asks which assistant first and installs for that one only, whatever was detected', async () => {
+    const chooseAssistant = vi.fn(async () => 'codex' as const);
+    const confirmReplace = vi.fn(async () => 'keep' as const);
+    const { deps, installRecommended } = setupDeps({
+      assistants: ['claude', 'copilot'],
+      chooseAssistant,
+      confirmReplace,
+      results: [
+        { status: 'needs-confirmation', unmanaged: ['.agents/skills/erd-studio/SKILL.md'], filesWritten: [], targets: ['agents'] },
+        { status: 'installed', unmanaged: [], filesWritten: ['.agents/skills/erd-studio-setup/SKILL.md'], targets: ['agents'] },
+      ],
+    });
+    const outcome = await runSetupAiHelper(deps);
+    expect(chooseAssistant).toHaveBeenCalledTimes(1);
+    expect(installRecommended.mock.calls.map((c) => c[1])).toEqual([
+      { replaceUnmanaged: false, assistants: ['codex'] },
+      { replaceUnmanaged: false, keepUnmanaged: true, assistants: ['codex'] },
+    ]);
+    // The Replace / Keep mine modal names the picked assistant's folder only.
+    expect(confirmReplace).toHaveBeenCalledWith(['.agents/skills/erd-studio/SKILL.md'], ['agents']);
+    expect(outcome.ok).toBe(true);
+    expect(outcome.message).toBe("AI helper ready for Codex: run $erd-studio-setup there (restart it if it's already open).");
+  });
+
+  it('the picked assistant decides the folder on disk: one skill folder, never both', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'erd-setup-pick-'));
+    try {
+      for (const [picked, folder, other] of [['claude', '.claude', '.agents'], ['cursor', '.agents', '.claude']] as const) {
+        const root = path.join(tmp, picked);
+        fs.mkdirSync(root);
+        const { deps } = setupDeps({ assistants: [], chooseAssistant: async () => picked });
+        const outcome = await runSetupAiHelper({ ...deps, root, harness: new HarnessService('.erd-studio') });
+        expect(outcome.ok, picked).toBe(true);
+        expect(fs.existsSync(path.join(root, folder, 'skills', 'erd-studio-setup', 'SKILL.md')), picked).toBe(true);
+        expect(fs.existsSync(path.join(root, other)), picked).toBe(false);
+      }
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('closing the list cancels: nothing is installed, not even the checking tool', async () => {
+    const feature = vi.spyOn(telemetry, 'feature');
+    const { deps, installRecommended, launcherInstall } = setupDeps({ chooseAssistant: async () => undefined });
+    expect(await runSetupAiHelper(deps)).toEqual({ ok: false, filesWritten: [], message: SETUP_CANCELLED_MESSAGE });
+    expect(installRecommended).not.toHaveBeenCalled();
+    expect(launcherInstall).not.toHaveBeenCalled();
+    expect(feature).toHaveBeenCalledWith('setupHelperCancelled');
+    feature.mockRestore();
   });
 
   it('needs-confirmation dismissed → nothing is written and the launcher is not touched', async () => {

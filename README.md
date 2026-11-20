@@ -105,7 +105,7 @@ Have a YAML/JSON project from before 2.0? It keeps working. [Common questions](d
 
 ## Work with your AI assistant
 
-In the ERD Studio sidebar, under **Help & Feedback**, click **Set Up My AI Helper**. It teaches the assistants on your computer ERD Studio's files. Then ask:
+In the ERD Studio sidebar, under **Help & Feedback**, click **Set Up My AI Helper**. It asks which assistant you use and teaches it ERD Studio's files. Then ask:
 
 > Propose a star schema for orders in ERD Studio, with grain, keys and design rationale. Let me review the diagram before we write any SQL.
 

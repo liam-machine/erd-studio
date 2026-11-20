@@ -203,7 +203,7 @@ import {
 import { listDraftModels } from './services/dbtDraft';
 import { readManifestMtime } from './services/manifestStaleness';
 import { UPGRADE_NOTICE_MESSAGE, deriveAiHelperState, promptFor, SETUP_PROMPT, type GettingStartedStatus } from './types/gettingStarted';
-import { assistantInfo } from './types/aiAssistants';
+import { assistantChoices, assistantInfo, isAiAssistantId, type AiAssistantId } from './types/aiAssistants';
 import { DRAW_FROM_DBT_COMMAND, drawFromDbt, type DbtDraftOptions, type DrawFromDbtDeps } from './commands/drawFromDbt';
 import { IMPORT_DBML_COMMAND, importDbml, quickImportDbml, type ImportDbmlDeps, type ImportDraftOptions } from './commands/importDbml';
 import { OPEN_EXAMPLE_DIAGRAM_COMMAND } from './commands/openExampleDiagram';
@@ -308,6 +308,13 @@ const LAST_ACTIVATED_VERSION_KEY = 'lastActivatedVersion';
  * for a workspace with no harness files, so it is not shown on every activation.
  */
 const HARNESS_INSTALL_PROMPTED_KEY = 'erdStudio.harnessInstallPrompted';
+/**
+ * The one AI assistant Set Up My AI Helper was last run for in this folder
+ * (workspace state: machine-local, nothing goes into the repo). It leads the
+ * list the next run shows, and the Welcome panel's helper state and prompt
+ * follow it rather than whatever is detected.
+ */
+const AI_HELPER_ASSISTANT_KEY = 'erdStudio.aiHelper.assistant';
 
 /**
  * How long after activation the background read of the table library starts
@@ -5446,6 +5453,20 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
   const projectWorkspaceFolder =
     vscode.workspace.getWorkspaceFolder(vscode.Uri.file(workspaceRoot))?.uri.fsPath ?? firstWorkspaceFolder;
   const setupHarness = new HarnessService(semanticDir);
+  /** The assistant Set Up My AI Helper was last run for in this folder, if it has asked here. */
+  const lastHelperAssistant = (): AiAssistantId | undefined => {
+    const stored = context.workspaceState.get<string>(AI_HELPER_ASSISTANT_KEY);
+    return isAiAssistantId(stored) ? stored : undefined;
+  };
+  /**
+   * Whom the helper is for: the assistant picked in Set Up My AI Helper, or,
+   * in a folder where it has not asked yet (an install from before it asked),
+   * every assistant detected, as that install was made.
+   */
+  const helperAssistants = (): AiAssistantId[] => {
+    const last = lastHelperAssistant();
+    return last ? [last] : detectAiAssistants();
+  };
 
   const getGettingStartedStatus = async (): Promise<GettingStartedStatus> => {
     const status = setupHarness.harnessStatus(workspaceRoot);
@@ -5455,6 +5476,7 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     };
     const cli = cliLauncher.status(launcherOptions);
     const assistants = detectAiAssistants();
+    const helperAssistant = lastHelperAssistant();
     const relative = projectWorkspaceFolder ? path.relative(projectWorkspaceFolder, workspaceRoot) : '';
     return {
       hasProject: true,
@@ -5463,9 +5485,10 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
       storage: projectStorageOf(tableLibraryService),
       harness,
       cli,
-      helper: deriveAiHelperState(harness, cli, assistants),
+      helper: deriveAiHelperState(harness, cli, helperAssistants()),
       claude: detectClaude().availability,
       assistants,
+      ...(helperAssistant ? { helperAssistant } : {}),
       domainCount: subjectAreaService.listSubjectAreas(workspaceRoot, semanticDir).length,
       project: {
         name: path.basename(workspaceRoot),
@@ -5479,12 +5502,29 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     promptFor(assistant, workspaceRoot, firstWorkspaceFolder, process.platform);
 
   const runSetup = async () => {
+    let chosen: AiAssistantId | undefined;
     const outcome = await runSetupAiHelper({
       root: workspaceRoot,
       harness: setupHarness,
       launcher: cliLauncher,
       launcherOptions,
-      assistants: detectAiAssistants(),
+      assistants: helperAssistants(),
+      // Asked on every run: only the picked assistant's files are installed.
+      // The first row is the last choice here (else the first one found), so Enter keeps it.
+      chooseAssistant: async () => {
+        const items = assistantChoices(detectAiAssistants(), lastHelperAssistant()).map((c) => ({
+          label: c.name,
+          description: c.last ? 'set up here last time' : c.detected ? 'found on this computer' : undefined,
+          id: c.id,
+        }));
+        const picked = await vscode.window.showQuickPick(items, {
+          title: 'Set Up My AI Helper',
+          placeHolder: 'Which AI assistant do you use in this project? ERD Studio installs its helper for that one only.',
+          ignoreFocusOut: true,
+        });
+        chosen = picked?.id;
+        return chosen;
+      },
       logicalOnly: !hasDbt,
       confirmReplace: async (unmanaged, targets) => {
         const REPLACE = 'Replace';
@@ -5504,6 +5544,7 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
         return choice === REPLACE ? 'replace' : choice === KEEP ? 'keep' : undefined;
       },
     });
+    if (outcome.ok && chosen) { await context.workspaceState.update(AI_HELPER_ASSISTANT_KEY, chosen); }
     if (outcome.filesWritten.length > 0) { refreshContextKeys(); }
     return outcome;
   };
@@ -5547,9 +5588,9 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
         }
         return;
       }
-      // Offer an Open button for each assistant the editor can open, and one
-      // Copy for the first detected assistant (Claude Code when none is).
-      const assistants = detectAiAssistants();
+      // Offer an Open button when the editor can open the assistant just set
+      // up, and one Copy for it.
+      const assistants = helperAssistants();
       const OPEN_CLAUDE = 'Open Claude Code';
       const OPEN_COPILOT = 'Open Copilot Chat';
       const COPY = 'Copy prompt';

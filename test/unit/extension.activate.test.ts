@@ -973,15 +973,46 @@ describe('activate() in a folder without dbt_project.yml (logical-only)', () => 
     fs.writeFileSync(path.join(extensionRoot, 'dist', 'cli.js'), '// stub\n');
     (context as { extensionUri: unknown }).extensionUri = vscode.Uri.file(extensionRoot);
     await activate(context);
+    // It asks which assistant, every run: all five, one choice, nothing ticked for the user.
+    type Row = { label: string; description?: string; id: string };
+    const lists: Row[][] = [];
+    let pick: string | undefined;
+    const quickPick = vi.spyOn(vscode.window, 'showQuickPick').mockImplementation((async (items: Row[], options: { canPickMany?: boolean }) => {
+      expect(options.canPickMany).not.toBe(true);
+      lists.push(items);
+      return items.find((i) => i.id === pick);
+    }) as never);
+    const ready = () => info.mock.calls.filter((c) => String(c[0]).startsWith('AI helper ready'));
+    const error = vi.spyOn(vscode.window, 'showErrorMessage');
+
+    // Closing the list: nothing is written and nothing is said.
     await vscode.commands.executeCommand('erdStudio.setupAiHelper');
-    const calls = info.mock.calls.filter((c) => String(c[0]).startsWith('AI helper ready'));
+    expect(lists[0].map((i) => i.label)).toEqual(['Claude Code', 'GitHub Copilot', 'Codex', 'Gemini CLI', 'Cursor']);
+    expect(listTree(ws)).toEqual([]);
+    expect(ready()).toHaveLength(0);
+    expect(error).not.toHaveBeenCalled();
+
+    // Codex picked (none is detected here): its folder only, never Claude Code's too.
+    pick = 'codex';
+    await vscode.commands.executeCommand('erdStudio.setupAiHelper');
+    const calls = ready();
     expect(calls).toHaveLength(1);
     // The guided setup has a no-dbt route now, so the toast points at it, with the Copy button.
-    expect(String(calls[0][0])).toContain('to design your data model with you');
+    expect(String(calls[0][0])).toContain('AI helper ready for Codex: run $erd-studio-setup there to design your data model with you');
     expect(String(calls[0][0])).toContain('Guide not showing? Start your assistant from plain.');
-    expect(calls[0]).toContain('Copy prompt');
-    expect(fs.existsSync(path.join(ws, '.claude', 'skills', 'erd-studio-setup', 'SKILL.md'))).toBe(true);
+    expect(calls[0]).toEqual([expect.any(String), 'Copy prompt']);
+    expect(fs.existsSync(path.join(ws, '.agents', 'skills', 'erd-studio-setup', 'SKILL.md'))).toBe(true);
+    expect(fs.existsSync(path.join(ws, '.claude'))).toBe(false);
     expect(warn).not.toHaveBeenCalled();
+
+    // The next run leads with it, so Enter keeps it; picking another installs that one as well.
+    pick = 'claude';
+    await vscode.commands.executeCommand('erdStudio.setupAiHelper');
+    expect(lists[2][0]).toMatchObject({ label: 'Codex', description: 'set up here last time' });
+    expect(fs.existsSync(path.join(ws, '.claude', 'skills', 'erd-studio-setup', 'SKILL.md'))).toBe(true);
+    await vscode.commands.executeCommand('erdStudio.setupAiHelper');
+    expect(lists[3][0]).toMatchObject({ label: 'Claude Code', description: 'set up here last time' });
+    quickPick.mockRestore();
   });
 
   it('Open an Example… (and the hidden Open Example Diagram): the coffee-shop draft, nothing asked; Keep This Example writes it into the plain folder', async () => {
@@ -3238,8 +3269,14 @@ describe('existing-diagrams notice', () => {
     tearDownActivation();
     info.mockClear();
     const exec = vi.spyOn(vscode.commands, 'executeCommand');
-    info.mockImplementation((async (message: string) =>
-      (message.startsWith('Let your AI assistant') ? 'Set Up My AI Helper' : undefined)) as never);
+    // The offer itself is a notification: no list is open when it shows. The
+    // list comes only once the user has clicked Set Up My AI Helper.
+    let picksWhenOffered = -1;
+    info.mockImplementation((async (message: string) => {
+      if (!message.startsWith('Let your AI assistant')) { return undefined; }
+      picksWhenOffered = pick.mock.calls.length;
+      return 'Set Up My AI Helper';
+    }) as never);
     await activate(context);
     expect(nudgeCalls(info)).toEqual([]);
     expect(offers()).toEqual([[
@@ -3247,8 +3284,12 @@ describe('existing-diagrams notice', () => {
       'Set Up My AI Helper', 'Not now',
     ]]);
     expect(workspaceState.get('erdStudio.harnessInstallPrompted')).toBe(true);
-    expect(pick).not.toHaveBeenCalled();
+    expect(picksWhenOffered).toBe(0);
     await vi.waitFor(() => expect(exec).toHaveBeenCalledWith('erdStudio.setupAiHelper'));
+    // Clicking it asks which one assistant: a single choice, never a tick list.
+    await vi.waitFor(() => expect(pick).toHaveBeenCalledTimes(1));
+    expect((pick.mock.calls[0][1] as { title?: string; canPickMany?: boolean })).toMatchObject({ title: 'Set Up My AI Helper' });
+    expect((pick.mock.calls[0][1] as { canPickMany?: boolean }).canPickMany).not.toBe(true);
     exec.mockRestore();
   });
 
