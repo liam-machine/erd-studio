@@ -1489,6 +1489,32 @@ export class TableLibraryService {
   }
 
   /**
+   * What the library holds on disk now, as one string: every table file and
+   * relationships file it lists and `layers.json`, each with its path and
+   * signature (modified time and size). The listing is the index's, which
+   * checks itself against its directories on every lookup, so a file written
+   * by an AI assistant, `git` or another window is in the answer whether or
+   * not a file watcher reported it. Two equal answers: nothing the library
+   * lists was added, removed, renamed or rewritten in between.
+   *
+   * For the draft's staleness (Draft-first §5.1): one `stat` per file, twice
+   * per draft (as it is planned and at Keep). Reads only; never throws.
+   */
+  diskSignature(): string {
+    const sig = (p: string): string => `${p}\t${fileSignature(p) ?? '-'}`;
+    try {
+      const index = this.index.get();
+      return [
+        sig(path.join(this.semanticRoot, LAYERS_CONFIG_FILE)),
+        ...index.entries.map((e) => sig(e.filePath)),
+        ...index.relationshipsFiles.map(sig),
+      ].join('\n');
+    } catch {
+      return '';
+    }
+  }
+
+  /**
    * The reader's problems for `name`'s `.dbml` table file (through the cache,
    * so the answer is the file as it is on disk now), with the file: what
    * `doctor` reports for it and what the canvas's "not shown" notes are

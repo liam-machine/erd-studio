@@ -1912,6 +1912,9 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
   // edit in this window while a draft is open). A Keep after a bump plans the
   // draft again, so it never writes a library snapshot older than the file.
   const draftGeneration = new DraftGeneration();
+  // Asked as a draft is planned and again at Keep: the watchers' count, moved on first
+  // by what the library holds on disk now (a write no watcher reported still plans again).
+  const draftGenerationNow = (): number => draftGeneration.at(tableLibraryService.diskSignature());
   const draftSemanticRoot = path.normalize(path.join(workspaceRoot, semanticDir)) + path.sep;
   context.subscriptions.push(ownWrites.onRecorded((filePath) => {
     if (path.normalize(filePath).startsWith(draftSemanticRoot)) draftGeneration.bump();
@@ -3414,14 +3417,14 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     preview: draftPreview,
     trigger,
     ...(quiet ? { quiet, quietDrop } : {}),
-    generation: () => draftGeneration.value,
+    generation: draftGenerationNow,
     logicalOnly: !hasDbt,
   });
   const dbtDraftFor = (trigger: DraftTrigger, quiet = false): DbtDraftOptions => ({
     preview: draftPreview,
     trigger,
     ...(quiet ? { quiet, quietDrop } : {}),
-    generation: () => draftGeneration.value,
+    generation: draftGenerationNow,
   });
   // Every import through Import DBML's flow (a DBML file, SQL scripts or a catalog export, a semantic model):
   // once Keep has written the diagram, its canvas offers the relationships it can suggest (it writes none).

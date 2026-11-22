@@ -457,6 +457,35 @@ describe('the index sees changes made outside ERD Studio, with no invalidate cal
     expect(relOf(lib.findTableFile('dim_day')!)).toBe('silver/tables/calendar/dim_day.dbml');
   });
 
+  it('diskSignature: one string for what the library lists on disk, changed by a file added (with its new folders), rewritten or removed, and by layers.json; equal while nothing changed', () => {
+    // The draft's staleness (Draft-first §5.1) compares two of these: no watcher event is needed.
+    const lib = service();
+    const empty = lib.diskSignature();
+    expect(lib.diskSignature()).toBe(empty);
+
+    // A project that had no layer folder yet: the whole tree and the file at once.
+    const table = write('main/tables/sales/dim_customer.dbml', dbmlTable('dim_customer', undefined, 'sales'));
+    const added = lib.diskSignature();
+    expect(added).not.toBe(empty);
+    expect(lib.diskSignature()).toBe(added);
+
+    // The file rewritten in place (another size): its directory's listing is unchanged, the signature is not.
+    fs.writeFileSync(table, dbmlTable('dim_customer', '  id INT [pk]\n  loyalty_tier VARCHAR', 'sales'));
+    const rewritten = lib.diskSignature();
+    expect(rewritten).not.toBe(added);
+
+    write('main/relationships/main.dbml', HEADER);
+    const withRefs = lib.diskSignature();
+    expect(withRefs).not.toBe(rewritten);
+
+    write('layers.json', '{ "schemaVersion": 1, "layers": [{ "id": "main", "label": "Main", "creatable": true, "order": 0 }] }\n');
+    const withLayers = lib.diskSignature();
+    expect(withLayers).not.toBe(withRefs);
+
+    fs.rmSync(table);
+    expect(lib.diskSignature()).not.toBe(withLayers);
+  });
+
   it('a library folder created after the first lookup, and one deleted', () => {
     const lib = service();
     expect(lib.dirExists()).toBe(false);

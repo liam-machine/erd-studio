@@ -8,6 +8,12 @@ The `Unreleased` heading below is renamed to the released version by the deploy 
 Releases are patch bumps by default. To ship a minor or major version, write it into the
 heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that.
 
+## Unreleased
+
+### Fixed
+
+- **Keep as Diagram no longer gets stuck when a table was added to your project while the draft was open.** An AI assistant, a `git pull` or another window can write into `.erd-studio/` while you look at a draft, and **Keep as Diagram** then draws the draft again with "Your ERD Studio files changed, so the draft was redrawn. Check it and keep it again." On Linux that did not happen when the table arrived together with new folders (the first table of a project, a layer or a schema): VS Code did not report the new file, so Keep answered "… already exists in layer …; choose another name. Nothing was changed." each time you pressed it. Keep now also checks the files themselves, so the draft is redrawn whether or not the change was reported. Nothing was overwritten before, and nothing is now.
+
 ## 2.0.10 — 2026-11-18
 
 ### Changed

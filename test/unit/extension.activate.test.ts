@@ -4975,6 +4975,42 @@ describe('draft-first (docs/dev/draft-first.md)', () => {
     expect(fs.existsSync(path.join(ws, '.erd-studio', 'main', 'diagrams', 'shop.dbml'))).toBe(false);
   });
 
+  it('staleness needs no watcher event: a table written outside with its new folders (Linux reports no file event for it) → planned again at Keep, redrawn with the notice, nothing overwritten', async () => {
+    // What onboarding story 24 does in a real VS Code: the folder has no .erd-studio/ yet, and an assistant
+    // writes .erd-studio/main/tables/sales/customers.dbml, folders and file at once. inotify reports the new
+    // folders in part and the file not at all, so no watcher fires here: the library on disk is the only witness.
+    const ws = folderWith({ 'design/shop.dbml': 'Table sales.customers {\n  id int [pk]\n  name varchar\n}\n\nTable sales.orders {\n  id int [pk]\n  customer_id int [ref: > sales.customers.id]\n}\n' });
+    context = makeContext(root, { workspaceState: new Map<string, unknown>([['erdStudio.harnessInstallPrompted', true], SUGGESTION_USED]) });
+    const errors = vi.spyOn(vscode.window, 'showErrorMessage');
+    await activate(context);
+    await settle();
+    await openDiagramsView();
+    const first = await nextDraft();
+    expect(first.summary.newTables).toBe(2);
+    expect(fs.existsSync(path.join(ws, '.erd-studio'))).toBe(false);
+    // The same table (its schema folder and name), with a column the file's has not. No watcher is told.
+    const table = path.join(ws, '.erd-studio', 'main', 'tables', 'sales', 'customers.dbml');
+    fs.mkdirSync(path.dirname(table), { recursive: true });
+    const tableText = 'Table sales.customers {\n  id int [pk]\n  name varchar\n  loyalty_tier varchar\n}\n';
+    fs.writeFileSync(table, tableText);
+
+    answerDraft({ type: 'keep' });
+    const redrawn = await nextDraft(first);
+    expect(redrawn.banner.notice).toBe('Your ERD Studio files changed, so the draft was redrawn. Check it and keep it again.');
+    // Not "sales.customers already exists in layer main …; choose another name": the plan is made again instead.
+    expect(errors.mock.calls.map((c) => c[0])).toEqual([]);
+    expect(redrawn.banner.detail).toContain('1 table has the name of one in your project but other columns, so it is kept as its own.');
+    expect(keys()).toContain('draftRefreshed');
+    expect(fs.readFileSync(table, 'utf-8')).toBe(tableText);
+    expect(fs.existsSync(path.join(ws, '.erd-studio', 'main', 'diagrams', 'shop.dbml'))).toBe(false);
+
+    // Keep again: nothing changed since this plan, so it saves, beside the assistant's table.
+    answerDraft({ type: 'keep' });
+    await vi.waitFor(() => expect(fs.existsSync(path.join(ws, '.erd-studio', 'main', 'diagrams', 'shop.dbml'))).toBe(true));
+    expect(fs.readFileSync(table, 'utf-8')).toBe(tableText);
+    expect(fs.existsSync(path.join(ws, '.erd-studio', 'main', 'tables', 'sales', 'orders.dbml'))).toBe(true);
+  });
+
   it('dbt: the icon opens the top-ranked models folder\'s draft; the Folder switcher redraws it on another folder', async () => {
     fs.cpSync(FIXTURE_ROOT, root, { recursive: true });
     fs.rmSync(path.join(root, '.erd-studio'), { recursive: true, force: true });

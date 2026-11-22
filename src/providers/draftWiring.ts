@@ -268,12 +268,37 @@ export function draftPreviewEvents(
   };
 }
 
-/** How many times the project's files changed outside ERD Studio this session (the watchers bump it). */
+/**
+ * How many times the project's files changed this session, for a draft's
+ * staleness (Draft-first §5.1): a Keep whose number differs from its plan's
+ * plans again. Two sources move it:
+ *
+ * - `bump()`: the semantic-dir watchers (changes that are not ERD Studio's
+ *   own) and ERD Studio's own writes as each lands;
+ * - `at(disk)`: what the library holds on disk now, read by the caller as
+ *   it asks (`TableLibraryService.diskSignature()`). File watchers alone do
+ *   not see every outside write: on Linux a folder made together with its
+ *   parent folders (an assistant's or a `git pull`'s first table of a new
+ *   layer or schema, or of a project that had no `.erd-studio/` yet) can be
+ *   missed, with every file later written into it. The disk does not miss it.
+ */
 export class DraftGeneration {
   private count = 0;
+  /** What the disk held the last time {@link at} was asked (undefined before the first ask). */
+  private disk: string | undefined;
 
   bump(): void {
     this.count += 1;
+  }
+
+  /**
+   * The count now, given what the library holds on disk now: a difference
+   * from the last ask is a change of its own, whether or not a watcher saw it.
+   */
+  at(disk: string): number {
+    if (this.disk !== undefined && this.disk !== disk) this.count += 1;
+    this.disk = disk;
+    return this.count;
   }
 
   get value(): number {

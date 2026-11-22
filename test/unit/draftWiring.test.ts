@@ -301,4 +301,22 @@ describe('DraftGeneration', () => {
     g.bump();
     expect(g.value).toBe(2);
   });
+
+  it('at(disk): what the library holds on disk moves the count on, whether or not a watcher did', () => {
+    const g = new DraftGeneration();
+    // The first ask has nothing to compare with: it is the plan's number.
+    const planned = g.at('layers.json\t-');
+    expect(planned).toBe(0);
+    // Asked again with the disk as it was: the same number (Keep writes what was shown).
+    expect(g.at('layers.json\t-')).toBe(planned);
+    // A file no watcher reported: another number, so Keep plans again …
+    const changed = g.at('layers.json\t-\nmain/tables/sales/dim_customer.dbml\t1:55');
+    expect(changed).not.toBe(planned);
+    // … and the plan made then is the one a second Keep finds unchanged.
+    expect(g.at('layers.json\t-\nmain/tables/sales/dim_customer.dbml\t1:55')).toBe(changed);
+    // A watcher's bump and a disk change are each a change of their own.
+    g.bump();
+    expect(g.value).toBe(changed + 1);
+    expect(g.at('layers.json\t-\nmain/tables/sales/dim_customer.dbml\t1:55')).toBe(changed + 1);
+  });
 });
