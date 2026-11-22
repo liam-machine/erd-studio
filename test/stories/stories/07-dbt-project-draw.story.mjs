@@ -1,10 +1,9 @@
 // A dbt project (dbt_project.yml, models/ with schema yml, target/manifest.json
 // and catalog.json) that has never had ERD Studio: no .erd-studio/ folder.
-// What every new dbt user now sees first: the start suggestion, "ERD Studio
-// found a dbt project in this folder. Show its models as a diagram? Nothing
-// is saved until you keep it." (Show Me / Don't Ask Again for This Folder),
-// while the empty Diagrams view leads with "Import from dbt" (its one button).
-// Show Me is Draft-first: no picker, no name box, a read-only draft of the
+// What every new dbt user now sees first: a draft of their models, drawn on
+// the first run without a question (in place of the start suggestion's
+// notification), while the empty Diagrams view says the folder is a dbt
+// project. Draft-first: no picker, no name box, a read-only draft of the
 // top-ranked models folder (gold) with a Folder switcher over the others.
 // Switching to silver redraws it ("Draft: silver"), still nothing on disk.
 // Keep as Diagram runs Import from dbt's writer: the drawn tables become DBML
@@ -33,24 +32,19 @@ export default story({
       await s.eventually(async () => (await s.ui.windowTitle()).includes('analytics'), { message: 'the analytics folder did not open' });
     });
 
-    const FOUND = 'ERD Studio found a dbt project in this folder';
-    await s.step('ERD Studio offers to show its models as a diagram', async () => {
-      const toast = await s.ui.waitForNotification(FOUND, { timeout: 30000 });
-      s.assert.equal(toast.message, `${FOUND}. Show its models as a diagram? Nothing is saved until you keep it.`);
-      s.assert.deepEqual(toast.buttons, ['Show Me', "Don't Ask Again for This Folder"], 'the suggestion\'s buttons');
+    await s.step('The sidebar says my folder is a dbt project', async () => {
       // The sidebar: the empty Diagrams view says it is a dbt project, and its one button is Import Your Data Model… (the guide leads with Import from dbt).
       await s.ui.openSidebar('ERD Studio');
       await s.expectVisible(s.sel.welcomeLink('Import Your Data Model…'), { what: 'the Import Your Data Model… button in the empty Diagrams view' });
       s.assert.deepEqual(await s.wb.ev(s.sel.welcomeButtons), ['Import Your Data Model…'], 'Import Your Data Model… should be the one button in the empty Diagrams view (the guide leads with the dbt card)');
       s.expect((await s.ui.sidebarText()).includes('This folder is a dbt project.'), 'the empty Diagrams view should say the folder is a dbt project');
-      await s.wb.highlight(s.sel.notification(FOUND));
+      await s.wb.highlight(s.sel.sidebar);
       await s.pause(1800);
       await s.wb.unhighlight();
     }, { at: 'left' });
 
     let draft;
-    await s.step('I click "Show Me": a draft of my top models folder, and a switcher for the others', async () => {
-      await s.ui.notificationButton(FOUND, 'Show Me');
+    await s.step('ERD Studio opens a draft of my top models folder, with a switcher for the others', async () => {
       draft = await waitForDraft(s, 'Draft: gold');
       s.assert.equal(await draft.page.ev(DRAFT.scopeLabel), 'Folder');
       for (const folder of ['gold', 'silver']) s.expect(draft.scopes.some((o) => o.startsWith(folder)), `the switcher should offer models/${folder}: ${draft.scopes.join(' | ')}`);
@@ -60,7 +54,7 @@ export default story({
       await draft.page.highlight(DRAFT.banner);
       await s.pause(2000);
       await s.wb.unhighlight();
-    }, { say: 'I click Show Me. A draft of my gold models opens, with a switcher for my other model folders.', at: 'left' });
+    }, { say: 'ERD Studio opens a draft of my gold models, with a switcher for my other model folders. I did not have to ask.', at: 'left' });
 
     await s.step('I switch it to my silver models', async () => {
       await chooseScope(s, draft.page, 'silver');

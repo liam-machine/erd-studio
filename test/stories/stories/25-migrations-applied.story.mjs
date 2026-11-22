@@ -3,8 +3,8 @@
 // test/fixtures/sql-ddl/flyway). V1 creates customer, product and orders;
 // V2 renames customer.email to email_address, adds customer.loyalty_tier and
 // orders.product_id, and a foreign key from that added column to product.
-// The start suggestion finds the scripts (V2 has no CREATE TABLE but changes
-// the tables V1 creates, so it is taken too), and Show Me draws the schema as
+// ERD Studio finds the scripts (V2 has no CREATE TABLE but changes the
+// tables V1 creates, so it is taken too), and its first run draws the schema as
 // it is after every migration, in file order: email_address (no email),
 // loyalty_tier, product_id, and both relationships (the inline one from V1,
 // and the one to the column V2 added). Keep writes the final columns.
@@ -14,7 +14,6 @@ import fs from 'node:fs';
 import { DRAFT, waitForDraft } from '../lib/draft.mjs';
 import { story } from '../lib/story.mjs';
 
-const FOUND = 'ERD Studio found CREATE TABLE scripts in this folder';
 const MIGRATIONS = 'src/main/resources/db/migration';
 const NODE = (name) => `[...doc.querySelectorAll('.react-flow__node')].find(n => n.innerText.split('\\n')[0].trim().split('.').pop() === ${JSON.stringify(name)})`;
 const TEXT = (name) => `(${NODE(name)}?.innerText ?? '')`;
@@ -34,17 +33,8 @@ export default story({
       await s.eventually(async () => (await s.ui.windowTitle()).includes('orders-service'), { message: 'the orders-service folder did not open' });
     }, { say: 'Given my service, with two Flyway migrations. The second renames a column, adds columns, and a foreign key.' });
 
-    await s.step('ERD Studio finds the migrations and offers to show them as a diagram', async () => {
-      const toast = await s.ui.waitForNotification(FOUND, { timeout: 30000 });
-      s.assert.equal(toast.message, `${FOUND} (3 tables). Show them as a diagram? Nothing is saved until you keep it.`);
-      await s.wb.highlight(s.sel.notification(FOUND));
-      await s.pause(1500);
-      await s.wb.unhighlight();
-    }, { at: 'left' });
-
     let draft;
-    await s.step('I click "Show Me": both migrations, read in order', async () => {
-      await s.ui.notificationButton(FOUND, 'Show Me');
+    await s.step('ERD Studio finds the migrations and opens a draft: both of them, read in order', async () => {
       draft = await waitForDraft(s, 'Draft: orders-service', { tables: 3 });
       s.expect(/^Draft from 2 SQL files \(PostgreSQL\) · 3 tables, 2 relationships · not saved$/.test(draft.headline), `the headline: ${draft.headline}`);
       s.assert.equal(draft.edges, 2, 'two relationship lines');
@@ -53,7 +43,7 @@ export default story({
       await s.wb.highlight(s.sel.activeEditor);
       await s.pause(1500);
       await s.wb.unhighlight();
-    }, { say: 'I click Show Me. The draft reads both migrations, in order: three tables, two relationships.', at: 'left' });
+    }, { say: 'ERD Studio finds the migrations and opens a draft. It reads both, in order: three tables, two relationships.', at: 'left' });
 
     await s.step('customer has email_address, not email, and the added loyalty_tier', async () => {
       const text = await draft.page.ev(TEXT('customer'));

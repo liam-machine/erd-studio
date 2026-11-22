@@ -1,5 +1,5 @@
 // A draft never saves a stale picture of the project. The folder holds
-// CREATE TABLE scripts (test/fixtures/sql-ddl/postgres); Show Me opens
+// CREATE TABLE scripts (test/fixtures/sql-ddl/postgres); the first run opens
 // "Draft: sales", four new tables. While it is open, something outside ERD
 // Studio (here: my AI assistant, or a git pull) writes a table into the
 // project's .erd-studio/ folder: dim_customer, with a loyalty_tier column the
@@ -25,7 +25,6 @@ import path from 'node:path';
 import { DRAFT, draftState, waitForDraft } from '../lib/draft.mjs';
 import { story } from '../lib/story.mjs';
 
-const FOUND = 'ERD Studio found CREATE TABLE scripts in this folder';
 const TEAMMATE_TABLE = `Table sales.dim_customer {
   customer_id integer [pk]
   customer_name text [not null]
@@ -47,11 +46,6 @@ export default story({
   steps: async (s) => {
     let draft;
     await s.step('Given a draft of my SQL scripts, four new tables, nothing saved', async () => {
-      await s.ui.waitForNotification(FOUND, { timeout: 30000 });
-      await s.wb.highlight(s.sel.notification(FOUND));
-      await s.pause(1200);
-      await s.wb.unhighlight();
-      await s.ui.notificationButton(FOUND, 'Show Me');
       draft = await waitForDraft(s, 'Draft: sales', { tables: 4 });
       s.assert.equal(draft.headline, 'Draft from 2 SQL files (PostgreSQL) · 4 tables, 3 relationships · not saved');
       s.assert.equal(draft.notice, '', 'no notice yet');

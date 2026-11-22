@@ -1,7 +1,6 @@
 // A big schema: eight CREATE TABLE scripts, 257 tables in eight schemas
-// (test/fixtures/sql-ddl/large, copied without its generate.mjs). The start
-// suggestion counts them ("…(257 tables). Show them as a diagram? …"), and
-// Show Me opens a large draft (Draft-first §2.3): the schema panel open
+// (test/fixtures/sql-ddl/large, copied without its generate.mjs). The first
+// run draws them at once, a large draft (Draft-first §2.3): the schema panel open
 // (All tables (257), then each schema with its count), the canvas on the
 // biggest schema only ("Showing sales: 80 of 257 tables"), a click on another
 // schema redraws it; Show details lists every table by schema, every
@@ -19,7 +18,6 @@ import { story } from '../lib/story.mjs';
 
 const TABLES = 257;
 const SCHEMAS = 8;
-const FOUND = 'ERD Studio found CREATE TABLE scripts in this folder';
 
 /** Every `.dbml` file under `dir`, recursively. */
 function dbmlFiles(dir) {
@@ -45,17 +43,11 @@ export default story({
       s.expectNoFile('warehouse/generate.mjs');
       s.assert.equal(fs.readdirSync(s.path('warehouse')).filter((f) => f.endsWith('.sql')).length, 8);
       await s.eventually(async () => (await s.ui.windowTitle()).includes('company-warehouse'), { message: 'the company-warehouse folder did not open' });
-      const toast = await s.ui.waitForNotification(FOUND, { timeout: 30000 });
-      s.assert.equal(toast.message, `${FOUND} (${TABLES} tables). Show them as a diagram? Nothing is saved until you keep it.`);
-      await s.wb.highlight(s.sel.notification(FOUND));
-      await s.pause(1500);
-      await s.wb.unhighlight();
-    }, { say: 'Given I open my warehouse folder: eight SQL scripts, with two hundred and fifty-seven tables. ERD Studio offers to show them as a diagram.', at: 'left' });
+    }, { say: 'Given I open my warehouse folder: eight SQL scripts, with two hundred and fifty-seven tables.', at: 'left' });
 
     let draft;
     let diagram;
-    await s.step('I click "Show Me": a draft opens on my biggest schema, the others listed beside it', async () => {
-      await s.ui.notificationButton(FOUND, 'Show Me');
+    await s.step('A draft opens by itself on my biggest schema, the others listed beside it', async () => {
       await s.eventually(async () => (await s.ui.tabs()).some((t) => t.active && t.label.startsWith('Draft: ')), { timeout: 60000, message: 'no draft tab opened' });
       const tab = (await s.ui.tabs()).find((t) => t.active).label;
       diagram = tab.slice('Draft: '.length);
@@ -73,7 +65,7 @@ export default story({
       await draft.page.highlight(DRAFT.schemas);
       await s.pause(2500);
       await s.wb.unhighlight();
-    }, { say: 'I click Show Me. A draft opens on my biggest schema, sales, with every schema listed beside it. Nothing is saved yet.' });
+    }, { say: 'A draft opens on my biggest schema, sales, with every schema listed beside it. Nothing is saved yet.' });
 
     await s.step('I look at the finance schema', async () => {
       await draft.page.click(DRAFT.schemaItem('finance'));

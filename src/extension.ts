@@ -238,7 +238,7 @@ import { DraftGeneration, draftPreviewEvents, trackedDraftPreview } from './prov
 import { DRAFT_DROP_FEATURES, STORAGE_FEATURES, draftUnavailableFeature, type DraftDropReason } from './services/importTelemetry';
 import { OnboardingGuide, guideDefersPrompt } from './providers/guideWiring';
 import { GUIDE_RERUN_STATUS_MS, GUIDE_STATE_KEY, SHOW_ME_AROUND_COMMAND, SHOW_ME_AROUND_LABEL, isGuideStatus } from './types/onboardingGuide';
-import { DRAFT_AFTER_OPEN_FOLDER_KEY, EXAMPLE_DRAFT_SHOWN_KEY, autoDraftDue, draftAfterOpenFolderDue, draftAfterOpenFolderShows, draftSourceForIntent, walkthroughAutoOpens, type AutoDraft, type DraftAfterOpenFolder } from './services/draftTriggers';
+import { DRAFT_AFTER_OPEN_FOLDER_KEY, EXAMPLE_DRAFT_SHOWN_KEY, autoDraftDue, draftAfterOpenFolderDue, draftAfterOpenFolderShows, draftSourceForIntent, firstRunDraftDue, walkthroughAutoOpens, type AutoDraft, type DraftAfterOpenFolder } from './services/draftTriggers';
 import type { Draft, DraftPreview, DraftTrigger } from './types/draft';
 import { StartIntentTracker } from './commands/startIntent';
 import { EXPORT_DIAGRAM_COMMAND, exportDiagramCommand } from './commands/exportDiagram';
@@ -292,6 +292,7 @@ import {
   startSuggestionDue,
   startSuggestionsOff,
   type StartSuggestionMachine,
+  type StartSuggestionRun,
   type StartSuggestionState,
 } from './services/startSuggestion';
 
@@ -5981,13 +5982,71 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
   // concrete hands the window to the next prompt (the walkthrough on a first
   // run). On a first run with a concrete start it takes the walkthrough's
   // place, and the walkthrough stays owed.
+  // A fresh install's first run draws the folder's find at once instead
+  // (firstRunDraftDue): the draft, quiet as the ERD Studio icon's, in the
+  // notification's place. It is still the window's one unasked thing, and a
+  // draft that cannot be built falls back to the notification.
   if (!afterOpenFolder && existingDiagrams.length === 0 && !hasOpenSubjectAreaCanvas()) {
     const settingOn = startSuggestionsSettingOn();
     if (startSuggestionDue({ settingOn, state: startSuggestionState(), machine: startSuggestionMachine(), hasDiagrams: false })) {
       const walkthroughOwed = (): boolean => activationPrompts.has('walkthrough');
+      /** The first run's draft of the folder's find; false when it is not due or could not be built. */
+      const showFirstRunDraft = async (): Promise<boolean> => {
+        if (!freshInstall) return false;
+        let intent: StartIntent | undefined;
+        try {
+          intent = await startIntent.refresh();
+        } catch {
+          // The start suggestion's own look decides (and reports nothing concrete).
+          return false;
+        }
+        // Checked after the look: a diagram or a table made meanwhile, a setting, a canvas.
+        const due = firstRunDraftDue({
+          firstRun: true,
+          settingOn: startSuggestionsSettingOn(),
+          state: startSuggestionState(),
+          hasDiagrams: subjectAreaService.listSubjectAreas(workspaceRoot, semanticDir).length > 0,
+          hasTables: tableLibraryService.listTableFiles().length > 0,
+          canvasOpen: hasOpenSubjectAreaCanvas(),
+          intent,
+          exampleShownOnMachine: context.globalState.get<boolean>(EXAMPLE_DRAFT_SHOWN_KEY) === true,
+        });
+        if (!due || !intent || draftPreview.isOpen()) return false;
+        // Written before it shows, so a crash cannot make it repeat (the icon's draft is spent with it).
+        await saveStartSuggestionState({ ...startSuggestionState(), draftShown: true });
+        log.info('Session prompt: draft (the first run, in place of the start suggestion)');
+        // Shown, or the quiet run ended without one (the run itself lasts until the draft is answered).
+        let shown = false;
+        let markShown: () => void = () => {};
+        const firstShown = new Promise<void>((resolve) => { markShown = resolve; });
+        onDraftAsk = () => { shown = true; markShown(); };
+        void Promise.resolve()
+          .then(() => runFindDraft(intent, 'sidebar'))
+          .catch((err: unknown) => {
+            telemetry.error('draftBuildFailed');
+            log.warn('[ERD Studio] The first run\'s draft failed:', err);
+          })
+          .finally(() => markShown());
+        await firstShown;
+        onDraftAsk = () => {};
+        if (!shown) {
+          telemetry.feature('draftUnavailable');
+          const unavailable = draftUnavailableFeature('find', intent);
+          if (unavailable) telemetry.feature(unavailable);
+          log.info('[ERD Studio] The first run\'s draft could not be built; the start suggestion asks instead.');
+          return false;
+        }
+        // The folder's one unasked start is spent: no notification here later.
+        const state = startSuggestionState();
+        const machine = startSuggestionMachine();
+        await saveStartSuggestionState({ ...state, shown: state.shown + 1 });
+        await saveStartSuggestionMachine({ ...machine, shown: machine.shown + 1 });
+        recordStartSuggested(intent);
+        return true;
+      };
       activationPrompts.set('startSuggestion', () => {
         setTimeout(() => {
-          void runStartSuggestion({
+          void showFirstRunDraft().then((drafted): StartSuggestionRun | Promise<StartSuggestionRun> => drafted ? { shown: true, done: Promise.resolve() } : runStartSuggestion({
             intent: () => startIntent.refresh(),
             sqlTables: () => startIntent.sqlTableCount(),
             dbtAbove: () => dbtProjectAboveOpenFolders(workspaceRoot, (vscode.workspace.workspaceFolders ?? []).map((f) => f.uri.fsPath)),
@@ -6011,7 +6070,7 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
             recordSuggested: recordStartSuggested,
             feature: (key) => telemetry.feature(key),
             setOffContext: (off) => { void vscode.commands.executeCommand('setContext', START_SUGGESTIONS_OFF_CONTEXT_KEY, off); },
-          }).then(async (run) => {
+          })).then(async (run) => {
             if (run.shown) {
               log.info('Activation prompt: startSuggestion shown');
               if (walkthroughOwed()) telemetry.featureOnce('walkthroughWaited');

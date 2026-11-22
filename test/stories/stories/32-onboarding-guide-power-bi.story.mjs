@@ -1,7 +1,7 @@
 // The onboarding guide, Show Me Around, the whole first-time walkthrough in a
 // Power BI project saved as PBIP (the semantic model as TMDL files, as story
 // 18), realistic: every VS Code prompt on, ERD Studio installed in the window
-// as from the Marketplace. The start suggestion's Show Me opens the draft of
+// as from the Marketplace. The first run opens the draft of
 // the semantic model, and because it is the first draft on this machine the
 // guide walks through it: the banner naming the model and the counts, More
 // ways to start (where else a data model can come from), and Keep as Diagram,
@@ -17,7 +17,6 @@ import { givenVSCode, installStep, theOneInterruption } from '../lib/firstMinute
 import { GUIDE_TARGET, markButton, nextMark, restOnEmptyCanvas, waitForMark } from '../lib/guide.mjs';
 import { story } from '../lib/story.mjs';
 
-const FOUND = 'ERD Studio found a Power BI or Fabric semantic model in this folder';
 const STAR_URL = 'https://github.com/liam-machine/erd-studio';
 
 export default story({
@@ -34,17 +33,9 @@ export default story({
     await givenVSCode(s, 'adventure-sales', { say: 'Given VS Code as I use it, with my Power BI project open, saved as PBIP.' });
     await installStep(s);
 
-    await s.step('It finds my semantic model and asks once: Show Me', async () => {
-      const event = await theOneInterruption(s, 'notification', new RegExp(`^${FOUND}`));
-      s.assert.equal(event.text, `${FOUND}. Show it as a diagram? Nothing is saved until you keep it.`);
-      await s.wb.highlight(s.sel.notification(FOUND));
-      await s.pause(1500);
-      await s.wb.unhighlight();
-    }, { at: 'left', say: 'ERD Studio finds my semantic model, and asks once if I want to see it as a diagram.' });
-
     let draft;
-    await s.step('Show Me: the draft of my model, and the guide starts on it (1 of 3)', async () => {
-      await s.ui.notificationButton(FOUND, 'Show Me');
+    await s.step('It finds my semantic model and opens the draft of my model, and the guide starts on it (1 of 3)', async () => {
+      await theOneInterruption(s, 'tab', /^Draft: /);
       draft = await waitForDraft(s, 'Draft: adventure-sales', { tables: 4 });
       const mark = await waitForMark(s, draft.page, 'Your draft', { progress: '1 of 3' });
       s.assert.equal(mark.text, 'This is a draft of your model, drawn from the semantic model AdventureSales: 4 tables, 4 relationships. Nothing is saved yet.');
@@ -52,7 +43,7 @@ export default story({
       s.assert.deepEqual(mark.buttons, ['Next', 'Skip guide']);
       s.expectNoFile('.erd-studio');
       await s.pause(2000);
-    }, { say: 'I press Show Me. A draft of my semantic model opens, and a short guide starts on it: 4 tables and 4 relationships. Nothing is saved yet.' });
+    }, { say: 'ERD Studio finds my semantic model and opens a draft of it, without asking. A short guide starts on it: 4 tables and 4 relationships. Nothing is saved yet.' });
 
     await s.step('2 of 3, More ways to start: Import… and Import Your Data Model…', async () => {
       const mark = await nextMark(s, draft.page, 'More ways to start', { progress: '2 of 3' });

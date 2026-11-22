@@ -1,7 +1,7 @@
 // The onboarding guide, Show Me Around, the whole first-time walkthrough in a
 // folder of CREATE TABLE scripts, realistic (every VS Code prompt on, ERD
 // Studio installed in the window as from the Marketplace; see story 17).
-// The start suggestion's Show Me opens the draft, and because it is the
+// The first run opens the draft by itself, and because it is the
 // first draft on this machine the guide's coach marks walk through it: the
 // banner naming the two SQL files and the counts, More ways to start (where
 // to import from), and Keep as Diagram, which the guide waits for. Keep
@@ -18,7 +18,6 @@ import { givenVSCode, installStep, theOneInterruption } from '../lib/firstMinute
 import { GUIDE_TARGET, markButton, nextMark, restOnEmptyCanvas, waitForMark } from '../lib/guide.mjs';
 import { story } from '../lib/story.mjs';
 
-const FOUND = 'ERD Studio found CREATE TABLE scripts in this folder';
 const STAR_URL = 'https://github.com/liam-machine/erd-studio';
 
 export default story({
@@ -35,17 +34,9 @@ export default story({
     await givenVSCode(s, 'shop-database', { say: 'Given VS Code as I use it, with my shop database folder of SQL scripts open.' });
     await installStep(s);
 
-    await s.step('It finds my CREATE TABLE scripts and asks once: Show Me', async () => {
-      const event = await theOneInterruption(s, 'notification', new RegExp(`^${FOUND}`));
-      s.assert.equal(event.text, `${FOUND} (4 tables). Show them as a diagram? Nothing is saved until you keep it.`);
-      await s.wb.highlight(s.sel.notification(FOUND));
-      await s.pause(1500);
-      await s.wb.unhighlight();
-    }, { at: 'left', say: 'ERD Studio finds my create table scripts, and asks once if I want to see them as a diagram.' });
-
     let draft;
-    await s.step('Show Me: the draft opens, and the guide starts on it (1 of 3)', async () => {
-      await s.ui.notificationButton(FOUND, 'Show Me');
+    await s.step('It finds my CREATE TABLE scripts and opens the draft opens, and the guide starts on it (1 of 3)', async () => {
+      await theOneInterruption(s, 'tab', /^Draft: /);
       draft = await waitForDraft(s, 'Draft: sales', { tables: 4 });
       const mark = await waitForMark(s, draft.page, 'Your draft', { progress: '1 of 3' });
       s.assert.equal(mark.text, 'This is a draft of your model, drawn from 2 SQL files (PostgreSQL): 4 tables, 3 relationships. Nothing is saved yet.');
@@ -53,7 +44,7 @@ export default story({
       s.assert.deepEqual(mark.buttons, ['Next', 'Skip guide']);
       s.expectNoFile('.erd-studio');
       await s.pause(2000);
-    }, { say: 'I press Show Me. A draft opens, and a short guide starts on it. This is a draft of my model, drawn from my 2 SQL files: 4 tables and 3 relationships. Nothing is saved yet.' });
+    }, { say: 'ERD Studio finds my create table scripts and opens a draft, without asking, and a short guide starts on it. This is a draft of my model, drawn from my 2 SQL files: 4 tables and 3 relationships. Nothing is saved yet.' });
 
     await s.step('2 of 3, More ways to start: Import… and Import Your Data Model…', async () => {
       const mark = await nextMark(s, draft.page, 'More ways to start', { progress: '2 of 3' });

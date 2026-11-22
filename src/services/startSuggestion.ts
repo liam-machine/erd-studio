@@ -32,6 +32,11 @@
  * Nothing concrete (a `blank` suggestion) gets no notification: the example
  * draft on the ERD Studio icon, once per machine, takes its place.
  *
+ * A fresh install's first run is not asked either: in a folder with a find
+ * the draft is drawn at once in this notification's place (`firstRunDraftDue`
+ * in `draftTriggers.ts`, wired in `activate()`), and the notification shows
+ * there only when that draft could not be built.
+ *
  * vscode-free: the look, the state, the notification and the commands are injected.
  */
 

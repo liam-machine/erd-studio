@@ -4,7 +4,7 @@
 // the quick path's answer. The folder holds CREATE TABLE scripts
 // (test/fixtures/sql-ddl/postgres) and a project that already has two layers
 // (Main and Reporting, in .erd-studio/layers.json, no diagram yet), so the
-// start suggestion still offers the scripts. Show Me → "Draft: sales" in the
+// first run still draws the scripts by itself: "Draft: sales" in the
 // Reporting layer (New Diagram's default: the last creatable layer). Change
 // options… → the scripts (every one picked), the dialect (PostgreSQL first),
 // the layer (Reporting first, Main picked) and the name ("Shop Orders") →
@@ -18,7 +18,6 @@ import path from 'node:path';
 import { DRAFT, waitForDraft } from '../lib/draft.mjs';
 import { story } from '../lib/story.mjs';
 
-const FOUND = 'ERD Studio found CREATE TABLE scripts in this folder';
 const LAYERS = {
   schemaVersion: 1,
   layers: [
@@ -51,19 +50,14 @@ export default story({
     }, { say: 'Given my project, with two layers, and SQL scripts in a database folder.' });
 
     let draft;
-    await s.step('I click "Show Me": a draft, with a name and layer chosen for me', async () => {
-      await s.ui.waitForNotification(FOUND, { timeout: 30000 });
-      await s.wb.highlight(s.sel.notification(FOUND));
-      await s.pause(1200);
-      await s.wb.unhighlight();
-      await s.ui.notificationButton(FOUND, 'Show Me');
+    await s.step('A draft opens, with a name and layer chosen for me', async () => {
       draft = await waitForDraft(s, 'Draft: sales', { tables: 4 });
       s.assert.equal(draft.detail, 'Keep saves it as sales in the Reporting layer (.erd-studio/reporting/diagrams/sales.dbml).');
       s.expect(draft.links.startsWith('Change options…'), `the banner's second line should start with Change options…: ${draft.links}`);
       await draft.page.highlight(`doc.querySelector('.draft-banner__detail')`);
       await s.pause(2200);
       await s.wb.unhighlight();
-    }, { say: 'I click Show Me. A draft opens, saving as sales, in the Reporting layer.' });
+    }, { say: 'A draft opens, saving as sales, in the Reporting layer.' });
 
     await s.step('I click "Change options…": the scripts it found, every one picked', async () => {
       await draft.page.highlight(DRAFT.link('Change options…'));

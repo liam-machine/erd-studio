@@ -76,6 +76,16 @@ type Context = import('vscode').ExtensionContext;
 
 /** The start suggestion was answered in this folder: it no longer takes the window's one prompt. */
 const SUGGESTIONS_ANSWERED: [string, unknown] = ['erdStudio.startSuggestion', { shown: 1, answered: true }];
+/**
+ * A new install's later window: ERD Studio has started on this machine before
+ * (the first run is spent), and the machine is on record as a new install, so
+ * the start suggestion is once per folder. The first run itself (an empty
+ * globalState) draws the folder's find as a draft instead of asking.
+ */
+const newInstallLaterWindow = (): Map<string, unknown> => new Map<string, unknown>([
+  ['erdStudio.gettingStartedShown', true],
+  ['erdStudio.startSuggestion.machine', { shown: 0, newInstall: true }],
+]);
 
 function makeContext(
   root: string,
@@ -4416,7 +4426,8 @@ describe('the start suggestion (a folder with no diagram whose start is obvious)
 
   it('a fresh SQL repo: after the look, one notification with the table count; Show Me opens the draft of the quick SQL import (nothing written)', async () => {
     folderWith({ 'db/schema.sql': SQL });
-    const globalState = new Map<string, unknown>();
+    // Not the first run (which draws the draft without asking: the draft-first block below).
+    const globalState = newInstallLaterWindow();
     const workspaceState = new Map<string, unknown>();
     context = makeContext(root, { globalState, workspaceState });
     const opens = spyWalkthrough();
@@ -4448,7 +4459,7 @@ describe('the start suggestion (a folder with no diagram whose start is obvious)
 
   it('Show Me pressed once a diagram was kept meanwhile shows the Diagrams view: the glass sidebar\'s section while it is on, never a second draft', async () => {
     folderWith({ 'db/schema.sql': SQL });
-    context = makeContext(root, { globalState: new Map<string, unknown>(), workspaceState: new Map<string, unknown>() });
+    context = makeContext(root, { globalState: newInstallLaterWindow(), workspaceState: new Map<string, unknown>() });
     // The notification stays up until the test presses Show Me.
     let press: (choice: string) => void = () => {};
     info.mockImplementation(((message: string) => (/^ERD Studio found/.test(message)
@@ -4917,9 +4928,136 @@ describe('draft-first (docs/dev/draft-first.md)', () => {
     await vi.waitFor(() => expect(fs.existsSync(path.join(ws, '.erd-studio', 'main', 'diagrams', 'shop.dbml'))).toBe(true));
   });
 
+  describe('a fresh install\'s first run draws the folder\'s find at once, in place of the start suggestion', () => {
+    const MACHINE_KEY = 'erdStudio.startSuggestion.machine';
+    const asked = () => info.mock.calls.filter((c) => /^ERD Studio found/.test(String(c[0])));
+
+    it('the draft opens without a question or a click, quiet as the icon\'s: nothing written, its flags first, no walkthrough, and never a second one', async () => {
+      const ws = folderWith({ 'design/shop.dbml': DBML });
+      const globalState = new Map<string, unknown>();
+      const workspaceState = new Map<string, unknown>([['erdStudio.harnessInstallPrompted', true]]);
+      context = makeContext(root, { globalState, workspaceState });
+      const opens = spyWalkthrough();
+      let stateWhenShown: unknown;
+      const createPanel = vscode.window.createWebviewPanel;
+      vi.spyOn(vscode.window, 'createWebviewPanel').mockImplementation(((...args: Parameters<typeof createPanel>) => {
+        if (args[0] === 'erdStudio.draftPreview') stateWhenShown = workspaceState.get(STATE_KEY);
+        return createPanel(...args);
+      }) as never);
+
+      await activate(context);
+      // Never on activation's own path: only after the deferred look.
+      expect(draftPanels()).toEqual([]);
+      await settle();
+      const draft = await nextDraft();
+      expect(draft.source).toBe('dbml');
+      expect(draft.trigger).toBe('sidebar');
+      expect(draft.banner.headline).toBe('Draft from shop.dbml · 2 tables, 1 relationship · not saved');
+      expect(draftPanels()).toHaveLength(1);
+      // The one unasked thing: no notification beside it, no walkthrough, nothing on disk.
+      expect(asked()).toEqual([]);
+      expect(opens()).toEqual([]);
+      expect(fs.existsSync(path.join(ws, '.erd-studio'))).toBe(false);
+      expect(stateWhenShown).toMatchObject({ draftShown: true });
+      expect(workspaceState.get(STATE_KEY)).toEqual({ shown: 1, draftShown: true });
+      expect(globalState.get(MACHINE_KEY)).toEqual({ shown: 1, newInstall: true });
+      expect(keys()).toEqual(expect.arrayContaining(['draftShown', 'draftShownAuto', 'draftSourceDbml']));
+      expect(keys().filter((k) => /^suggestPrompt|^draftUnavailable/.test(k))).toEqual([]);
+
+      // The ERD Studio icon in the same window opens no second draft.
+      await openDiagramsView();
+      expect(draftPanels()).toHaveLength(1);
+      closeDraft();
+      await settle();
+
+      // A later window in this folder: the start was shown, so nothing asks and nothing opens.
+      tearDownActivation();
+      vscode._resetMockWebviewPanels();
+      await activate(context);
+      await settle();
+      await openDiagramsView();
+      expect(asked()).toEqual([]);
+      expect(draftPanels()).toEqual([]);
+      expect(fs.existsSync(path.join(ws, '.erd-studio'))).toBe(false);
+    });
+
+    it('Keep on the first run\'s draft writes the diagram, as the icon\'s draft does', async () => {
+      const ws = folderWith({ 'shop.dbml': DBML });
+      context = makeContext(root, { globalState: new Map<string, unknown>(), workspaceState: new Map<string, unknown>([['erdStudio.harnessInstallPrompted', true]]) });
+      vi.spyOn(vscode.commands, 'executeCommand').mockImplementation((async (command: string, ...args: unknown[]) =>
+        (command === 'vscode.openWith' ? undefined : realExecute(command, ...args))) as never);
+      await activate(context);
+      await settle();
+      await nextDraft();
+      answerDraft({ type: 'keep' });
+      await vi.waitFor(() => expect(fs.existsSync(path.join(ws, '.erd-studio', 'main', 'diagrams', 'shop.dbml'))).toBe(true));
+    });
+
+    it('a draft that cannot be built falls back to the notification: the user is asked, as before', async () => {
+      const ws = folderWith({ 'broken.dbml': 'Table x {\n  id int [pk\n' });
+      const globalState = new Map<string, unknown>();
+      const workspaceState = new Map<string, unknown>([['erdStudio.harnessInstallPrompted', true]]);
+      context = makeContext(root, { globalState, workspaceState });
+      const errors = vi.spyOn(vscode.window, 'showErrorMessage');
+      await activate(context);
+      await settle();
+      await settle();
+      expect(draftPanels()).toEqual([]);
+      expect(errors).not.toHaveBeenCalled();
+      expect(asked()).toEqual([[
+        'ERD Studio found a DBML file in this folder. Show it as a diagram? Nothing is saved until you keep it.',
+        'Show Me', "Don't Ask Again for This Folder",
+      ]]);
+      expect(keys()).toEqual(expect.arrayContaining(['draftUnavailable', 'draftUnavailableDbml', 'suggestPromptShown']));
+      expect(workspaceState.get(STATE_KEY)).toEqual({ shown: 1, draftShown: true });
+      expect(fs.existsSync(path.join(ws, '.erd-studio'))).toBe(false);
+    });
+
+    it('only the first run: an upgrader and a new install\'s later window are asked, and nothing opens by itself', async () => {
+      for (const [who, globalState] of [
+        ['an upgrader', new Map<string, unknown>([['lastActivatedVersion', '1.7.2'], ['erdStudio.gettingStartedShown', true]])],
+        ['a new install, later', newInstallLaterWindow()],
+      ] as const) {
+        folderWith({ 'shop.dbml': DBML }, who.replace(/\W+/g, '-'));
+        info.mockClear();
+        vscode._resetMockWebviewPanels();
+        context = makeContext(root, { globalState, workspaceState: new Map<string, unknown>([['erdStudio.harnessInstallPrompted', true]]) });
+        await activate(context);
+        await settle();
+        expect(asked(), who).toHaveLength(1);
+        expect(draftPanels(), who).toEqual([]);
+        tearDownActivation();
+      }
+    });
+
+    it('never where the folder turned start suggestions off, or already holds a table', async () => {
+      // The setting, committed for a team: no draft and no notification, on a first run too.
+      folderWith({ 'shop.dbml': DBML }, 'setting-off');
+      vscode._setMockConfiguration('erdStudio', 'startSuggestions', { workspaceValue: false });
+      context = makeContext(root, { globalState: new Map<string, unknown>(), workspaceState: new Map<string, unknown>([['erdStudio.harnessInstallPrompted', true]]) });
+      await activate(context);
+      await settle();
+      expect(draftPanels()).toEqual([]);
+      expect(asked()).toEqual([]);
+      tearDownActivation();
+      vscode._setMockConfiguration('erdStudio', 'startSuggestions', {});
+
+      // A table already in the library and no diagram: the folder is not empty of a model, so nothing is drawn over it.
+      folderWith({
+        'shop.dbml': DBML,
+        '.erd-studio/layers.json': LAYERS_JSON,
+        '.erd-studio/main/tables/public/customers.dbml': 'Table public.customers {\n  id int [pk]\n}\n',
+      }, 'has-table');
+      context = makeContext(root, { globalState: new Map<string, unknown>(), workspaceState: new Map<string, unknown>([['erdStudio.harnessInstallPrompted', true]]) });
+      await activate(context);
+      await settle();
+      expect(draftPanels()).toEqual([]);
+    });
+  });
+
   it("Don't Ask Again: no draft and no walkthrough, in this window or a later one", async () => {
     const ws = folderWith({ 'shop.dbml': DBML });
-    const globalState = new Map<string, unknown>();
+    const globalState = newInstallLaterWindow();
     const workspaceState = new Map<string, unknown>();
     context = makeContext(root, { globalState, workspaceState });
     const opens = spyWalkthrough();

@@ -2,8 +2,8 @@
 // models/, as people do to keep the Explorer short): dbt_project.yml is one
 // folder up, outside the window. ERD Studio still finds the project (project
 // discovery looks upward from the opened folder for the nearest
-// dbt_project.yml: `findDbtProjectAbove`), so the start suggestion offers the
-// dbt draft, and Show Me draws the gold models from the project's manifest.
+// dbt_project.yml: `findDbtProjectAbove`), so the first run draws the dbt
+// draft: the gold models, from the project's manifest.
 // Keep writes the diagram into the dbt project's own .erd-studio/ folder (next
 // to dbt_project.yml), not into models/.
 
@@ -11,8 +11,6 @@ import path from 'node:path';
 
 import { DRAFT, waitForDraft } from '../lib/draft.mjs';
 import { story } from '../lib/story.mjs';
-
-const FOUND = 'ERD Studio found a dbt project in a folder above this one';
 
 export default story({
   id: 'dbt-found-from-models-folder',
@@ -35,22 +33,18 @@ export default story({
       await s.wb.unhighlight();
     }, { say: 'Given I open only the models folder of my dbt project. The dbt project file is one folder up.' });
 
-    await s.step('ERD Studio still finds the dbt project and offers its models as a diagram', async () => {
-      const toast = await s.ui.waitForNotification(FOUND, { timeout: 30000 });
-      s.assert.equal(toast.message, `${FOUND}. Show its models as a diagram? Nothing is saved until you keep it.`);
-      s.assert.deepEqual(toast.buttons, ['Show Me', "Don't Ask Again for This Folder"], 'the suggestion\'s buttons');
+    await s.step('ERD Studio still finds the dbt project, from inside it', async () => {
       await s.ui.openSidebar('ERD Studio');
       await s.expectVisible(s.sel.welcomeLink('Import Your Data Model…'), { what: 'the Import Your Data Model… button in the empty Diagrams view' });
       s.assert.deepEqual(await s.wb.ev(s.sel.welcomeButtons), ['Import Your Data Model…'], 'Import Your Data Model… should be the one button in the empty Diagrams view (the guide leads with the dbt card)');
       s.expect((await s.ui.sidebarText()).includes('This folder is a dbt project.'), 'the empty Diagrams view should say the folder is a dbt project');
-      await s.wb.highlight(s.sel.notification(FOUND));
+      await s.wb.highlight(s.sel.sidebar);
       await s.pause(1800);
       await s.wb.unhighlight();
     }, { at: 'left' });
 
     let draft;
-    await s.step('I click "Show Me": a draft of my gold models', async () => {
-      await s.ui.notificationButton(FOUND, 'Show Me');
+    await s.step('It opens a draft of my gold models', async () => {
       draft = await waitForDraft(s, 'Draft: gold');
       s.assert.equal(await draft.page.ev(DRAFT.scopeLabel), 'Folder');
       s.expect(/^Draft from your dbt models in gold · /.test(draft.headline), `the headline: ${draft.headline}`);
@@ -60,7 +54,7 @@ export default story({
       await draft.page.highlight(DRAFT.banner);
       await s.pause(2000);
       await s.wb.unhighlight();
-    }, { say: 'I click Show Me. A draft of my gold models opens, with a switcher for the others.', at: 'left' });
+    }, { say: 'A draft of my gold models opens, with a switcher for the others.', at: 'left' });
 
     await s.step('When I keep it, it is saved in my dbt project, beside dbt_project.yml', async () => {
       const count = draft.tables.length;

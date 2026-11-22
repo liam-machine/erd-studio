@@ -1,8 +1,8 @@
 // The onboarding guide, Show Me Around, the whole first-time walkthrough in a
 // dbt project that has never had ERD Studio (the dbt fixture without
 // .erd-studio/, as stories 07 and 19), realistic: every VS Code prompt on,
-// ERD Studio installed in the window as from the Marketplace. The start
-// suggestion's Show Me drafts the top-ranked models folder (gold: 2 tables,
+// ERD Studio installed in the window as from the Marketplace. The first
+// run drafts the top-ranked models folder (gold: 2 tables,
 // no relationships), and the guide starts on it. The Folder switcher moves
 // the draft to silver and the guide's first step follows it (5 tables, 5
 // relationships). More ways to start names Import… (no import guide in a dbt
@@ -19,7 +19,6 @@ import { givenVSCode, installStep, theOneInterruption } from '../lib/firstMinute
 import { GUIDE_TARGET, markButton, nextMark, restOnEmptyCanvas, waitForMark } from '../lib/guide.mjs';
 import { story } from '../lib/story.mjs';
 
-const FOUND = 'ERD Studio found a dbt project in this folder';
 const STAR_URL = 'https://github.com/liam-machine/erd-studio';
 const SILVER = ['dim_customer', 'dim_project', 'dim_task', 'fct_order', 'fct_sale'];
 const stageTab = (name) => `[...doc.querySelectorAll('[data-guide="canvas-stages"] button')].find(b => b.textContent.trim().startsWith(${JSON.stringify(name)}))`;
@@ -37,23 +36,15 @@ export default story({
     await givenVSCode(s, 'analytics', { say: 'Given VS Code as I use it, with my dbt project open.' });
     await installStep(s);
 
-    await s.step('It finds my dbt project and asks once: Show Me', async () => {
-      const event = await theOneInterruption(s, 'notification', new RegExp(`^${FOUND}`));
-      s.assert.equal(event.text, `${FOUND}. Show its models as a diagram? Nothing is saved until you keep it.`);
-      await s.wb.highlight(s.sel.notification(FOUND));
-      await s.pause(1500);
-      await s.wb.unhighlight();
-    }, { at: 'left', say: 'ERD Studio finds my dbt project, and asks once if I want to see its models as a diagram.' });
-
     let draft;
-    await s.step('Show Me: a draft of my gold models, and the guide starts on it (1 of 3)', async () => {
-      await s.ui.notificationButton(FOUND, 'Show Me');
+    await s.step('It finds my dbt project and opens a draft of my gold models, and the guide starts on it (1 of 3)', async () => {
+      await theOneInterruption(s, 'tab', /^Draft: /);
       draft = await waitForDraft(s, 'Draft: gold');
       const mark = await waitForMark(s, draft.page, 'Your draft', { progress: '1 of 3' });
       s.assert.equal(mark.text, 'This is a draft of your model, drawn from your dbt models in gold: 2 tables, no relationships. Nothing is saved yet.');
       s.expectNoFile('.erd-studio');
       await s.pause(1800);
-    }, { say: 'I press Show Me. A draft of my gold models opens, and a short guide starts on it: 2 tables, no relationships yet. Nothing is saved.' });
+    }, { say: 'ERD Studio finds my dbt project and opens a draft of my gold models, without asking. A short guide starts on it: 2 tables, no relationships yet. Nothing is saved.' });
 
     await s.step('I switch the folder to silver, and the guide follows: 5 tables, 5 relationships', async () => {
       await draft.page.highlight(DRAFT.select);

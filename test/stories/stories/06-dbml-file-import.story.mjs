@@ -1,9 +1,8 @@
 // A folder holding a single-file DBML export from dbdiagram.io (written from
 // its public syntax docs: inline and block refs, a composite ref, a table
 // partial, an enum, records, a second schema), opened for the first time.
-// ERD Studio's quick look finds the file, and the window's one prompt is the
-// start suggestion: "ERD Studio found a DBML file in this folder. Show it as
-// a diagram? Nothing is saved until you keep it." Show Me is Draft-first: no
+// ERD Studio's quick look finds the file, and this being its first run it
+// draws it at once, in place of the start suggestion's notification. No
 // file dialog, layer pick or name box, a read-only "Draft: ecommerce" (the
 // name from the file's Project) of all six tables and six relationships (the
 // composite once), and nothing on disk; the banner counts what ERD Studio
@@ -32,19 +31,11 @@ export default story({
     }, { say: 'Given I open my project folder, with an e-commerce DBML file from dbdiagram dot io.' });
 
     const FOUND = 'ERD Studio found a DBML file in this folder';
-    await s.step('ERD Studio finds the file and offers to show it as a diagram', async () => {
-      const toast = await s.ui.waitForNotification(FOUND, { timeout: 30000 });
-      s.assert.equal(toast.message, `${FOUND}. Show it as a diagram? Nothing is saved until you keep it.`);
-      s.assert.deepEqual(toast.buttons, ['Show Me', "Don't Ask Again for This Folder"], 'the suggestion\'s buttons');
-      await s.wb.highlight(s.sel.notification(FOUND));
-      await s.pause(1800);
-      await s.wb.unhighlight();
-    }, { at: 'left' });
-
     let draft;
-    await s.step('I click "Show Me": no file to pick, no name to type, just the draft', async () => {
-      await s.ui.notificationButton(FOUND, 'Show Me');
+    await s.step('ERD Studio finds the file and opens a draft: no file to pick, no name to type', async () => {
       draft = await waitForDraft(s, 'Draft: ecommerce', { tables: 6 });
+      // A first run is not asked first: the start suggestion's notification is not shown beside its draft.
+      s.expect(!(await s.ui.notifications()).some((t) => t.includes(FOUND)), 'the start suggestion should not show beside the first run\'s draft');
       s.assert.deepEqual([...draft.tables].sort(), [...TABLES].sort(), `the draft should draw ${TABLES.join(', ')}, but draws ${draft.tables.join(', ')}`);
       // Six references, the composite one (two column pairs) drawn as one line.
       await draft.page.waitFor(`${DRAFT.edges} === 6`, { what: 'six relationship lines in the draft' });
@@ -54,7 +45,7 @@ export default story({
       await s.wb.highlight(s.sel.activeEditor);
       await s.pause(2000);
       await s.wb.unhighlight();
-    }, { say: "I click Show Me. There's no file to pick and no name to type: the draft opens, with its six tables.", at: 'left' });
+    }, { say: "ERD Studio finds the file and opens a draft. There's no file to pick and no name to type: there it is, with its six tables.", at: 'left' });
 
     await s.step('Its details say what ERD Studio leaves out, in plain words', async () => {
       // What is left out (the database type, the sample rows, …): counted in the banner, listed in the drawer.

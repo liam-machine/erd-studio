@@ -12,6 +12,8 @@ heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that
 
 ### Changed
 
+- **The first time ERD Studio runs, it shows your model instead of asking.** In a folder where it finds CREATE TABLE scripts, a DBML file, a Power BI or Fabric semantic model or a dbt project, a brand-new install now opens the read-only draft straight away. Before, it showed a notification ("ERD Studio found … Show them as a diagram?") that most people never clicked. Nothing is saved until you press **Keep as Diagram**, and it is still the only thing that opens by itself. If the draft cannot be drawn without a question, you get the notification as before. Later windows, other folders, and anyone updating from an earlier version keep the notification, once per folder.
+
 - **Set Up My AI Helper** now asks which AI assistant you use (Claude Code, GitHub Copilot, Codex, Gemini CLI or Cursor) and installs its helper files for that one only. Before, it installed for every assistant it found on your computer, and for all of them when it found none. The assistants it finds come first in the list, and the next run leads with the one you picked last, so Enter keeps it. Nothing already installed is removed. **Install AI Helper Files…** still lets you tick several.
 
 ## 2.0.10 — 2026-11-18

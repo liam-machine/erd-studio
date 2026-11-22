@@ -1,10 +1,9 @@
 // A folder that already holds CREATE TABLE scripts (a pg_dump --schema-only
 // split in two files, the foreign keys in the second), opened for the first
-// time. ERD Studio's quick look finds them, and its one activation prompt is
-// the start suggestion: "ERD Studio found CREATE TABLE scripts in this folder
-// (4 tables). Show them as a diagram? Nothing is saved until you keep it."
-// with Show Me / Don't Ask Again for This Folder. Show Me is Draft-first:
-// asked nothing (no file, dialect, layer or name question: asserted), it
+// time. ERD Studio's quick look finds them, and this being its first run it
+// draws them at once, in place of the start suggestion's notification (the
+// one thing that opens by itself: `firstRunDraftDue`). Draft-first: asked
+// nothing (no notification, file, dialect, layer or name question), it
 // opens a read-only draft of the model ("Draft: sales") whose banner says
 // where it came from, what it holds and where Keep saves it, and nothing is
 // on disk. Keep as Diagram runs the import's own writer: one DBML file per
@@ -31,25 +30,17 @@ export default story({
       await s.eventually(async () => (await s.ui.windowTitle()).includes('shop-database'), { message: 'the shop-database folder did not open' });
     }, { say: 'Given I open my project folder, with SQL scripts in a database folder.' });
 
-    await s.step('ERD Studio finds the scripts and offers to show them as a diagram', async () => {
-      const toast = await s.ui.waitForNotification(FOUND, { timeout: 30000 });
-      s.assert.equal(toast.message, `${FOUND} (4 tables). Show them as a diagram? Nothing is saved until you keep it.`);
-      s.assert.deepEqual(toast.buttons, ['Show Me', "Don't Ask Again for This Folder"], 'the suggestion\'s buttons');
-      await s.wb.highlight(s.sel.notification(FOUND));
-      await s.pause(1800);
-      await s.wb.unhighlight();
-    }, { at: 'left' });
-
     let draft;
-    await s.step('I click "Show Me": a draft of my model, with nothing to answer first', async () => {
-      await s.ui.notificationButton(FOUND, 'Show Me');
+    await s.step('ERD Studio finds the scripts and opens a draft of my model, with nothing to answer first', async () => {
       draft = await waitForDraft(s, 'Draft: sales', { tables: 4 });
+      // A first run is not asked first: the start suggestion's notification is not shown beside its draft.
+      s.expect(!(await s.ui.notifications()).some((t) => t.includes(FOUND)), 'the start suggestion should not show beside the first run\'s draft');
       for (const t of TABLES) s.expect(draft.tables.some((n) => n.endsWith(t)), `the draft should draw ${t}, but draws ${draft.tables.join(', ')}`);
       await draft.page.waitFor(`${DRAFT.edges} === 3`, { what: 'three relationship lines in the draft' });
       await s.wb.highlight(s.sel.activeEditor);
       await s.pause(1800);
       await s.wb.unhighlight();
-    }, { say: "I click Show Me. I don't have to answer anything: a draft of my model opens straight away.", at: 'left' });
+    }, { say: "ERD Studio finds the scripts and opens a draft of my model straight away. I don't have to answer anything.", at: 'left' });
 
     await s.step('It says what it read and where Keep will save it; nothing is saved yet', async () => {
       s.assert.equal(draft.headline, 'Draft from 2 SQL files (PostgreSQL) · 4 tables, 3 relationships · not saved');

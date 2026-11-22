@@ -1,16 +1,20 @@
 // The start suggestion, turned off for one folder and back on. A folder of
-// CREATE TABLE scripts gets the popup ("ERD Studio found CREATE TABLE
-// scripts in this folder (4 tables). Show them as a diagram? Nothing is saved
-// until you keep it.");
-// "Don't Ask Again for This Folder" answers in one line, with Undo ("Start
-// suggestions are off for this folder."). Proves the choice
-// sticks (a reloaded window shows no popup, though the folder still suggests
-// the import in the sidebar), that the palette then offers Turn On and not
-// Turn Off (the erdStudio.startSuggestionsOff context key), and that Turn On
-// really turns it back on: the next window shows the popup again. Nothing is
-// written into the folder (workspace state only).
+// CREATE TABLE scripts is drawn as a draft the first time ERD Studio runs
+// (a first run is not asked first); in every later window, and for anyone
+// who had ERD Studio before, the folder gets the popup instead ("ERD Studio
+// found CREATE TABLE scripts in this folder (4 tables). Show them as a
+// diagram? Nothing is saved until you keep it."), once per folder.
+// "Turn Off Start Suggestions for This Folder" answers in one line, with Undo
+// ("Start suggestions are off for this folder."). Proves the choice sticks (a
+// reloaded window shows no popup, though the folder still suggests the import
+// in the sidebar), that the palette then offers Turn On and not Turn Off (the
+// erdStudio.startSuggestionsOff context key), that Turn On really turns it
+// back on (the next window shows the popup), and that the popup's own
+// "Don't Ask Again for This Folder" turns it off again. Nothing is written
+// into the folder (workspace state only).
 
 import { sleep } from '../lib/act.mjs';
+import { DRAFT, waitForDraft } from '../lib/draft.mjs';
 import { story } from '../lib/story.mjs';
 
 const FOUND = 'ERD Studio found CREATE TABLE scripts in this folder';
@@ -26,17 +30,21 @@ export default story({
   soThat: 'so that it does not ask every time, yet I can get the offer back',
   workspace: { name: 'shop-database', add: { database: 'test/fixtures/sql-ddl/postgres' } },
   steps: async (s) => {
-    await s.step('Given I open my folder of SQL scripts, ERD Studio offers to show them as a diagram', async () => {
+    await s.step('Given I open my folder of SQL scripts for the first time, ERD Studio shows them as a draft', async () => {
       await s.eventually(async () => (await s.ui.windowTitle()).includes('shop-database'), { message: 'the shop-database folder did not open' });
-      const toast = await s.ui.waitForNotification(FOUND, { timeout: 30000 });
-      s.assert.deepEqual(toast.buttons, ['Show Me', "Don't Ask Again for This Folder"], 'the suggestion\'s buttons');
-      await s.wb.highlight(s.sel.notificationButton(FOUND, "Don't Ask Again for This Folder"));
+      const draft = await waitForDraft(s, 'Draft: sales', { tables: 4 });
+      // A first run is not asked: the popup is for later windows.
+      s.expect(!(await s.ui.notifications()).some((t) => t.includes(FOUND)), 'the popup should not show beside the first run\'s draft');
       await s.pause(1500);
-      await s.wb.unhighlight();
-    }, { say: 'Given I open my folder of SQL scripts. ERD Studio offers to show them as a diagram.', at: 'left' });
+      await draft.page.click(DRAFT.button('Discard'));
+      draft.page.close();
+      s.expectNoFile('.erd-studio');
+    }, { say: 'Given I open my folder of SQL scripts for the first time. ERD Studio shows them as a draft, and I discard it.' });
 
-    await s.step('I click "Don\'t Ask Again for This Folder": it says so, with Undo', async () => {
-      await s.ui.notificationButton(FOUND, "Don't Ask Again for This Folder");
+    await s.step('I run "Turn Off Start Suggestions for This Folder": it says so, with Undo', async () => {
+      const items = await s.ui.paletteItems('Start Suggestions', { expect: TURN_OFF });
+      s.expect(items.includes(TURN_OFF), `the palette should offer ${TURN_OFF}: ${items.join(' | ')}`);
+      await s.wb.click(s.sel.quickPickRow(TURN_OFF));
       const toast = await s.ui.waitForNotification(OFF);
       s.assert.equal(toast.message, OFF);
       s.assert.deepEqual(toast.buttons, ['Undo'], 'the confirmation offers Undo');
@@ -45,7 +53,7 @@ export default story({
       await s.wb.unhighlight();
       s.expectNoFile('.erd-studio');
       s.expectNoFile('.vscode');
-    }, { say: "I click Don't Ask Again for This Folder. It says so in one line, with Undo.", at: 'left' });
+    }, { say: 'I turn off start suggestions for this folder, from the Command Palette. It says so in one line, with Undo.', at: 'left' });
 
     await s.step('When I reload the window, it does not ask again', async () => {
       await s.ui.reloadWindow();
@@ -81,16 +89,29 @@ export default story({
       await s.wb.unhighlight();
     }, { at: 'left' });
 
-    await s.step('And the next time the folder opens, the offer is back', async () => {
+    await s.step('And the next time the folder opens, it asks: the offer is back', async () => {
       await s.ui.reloadWindow();
       const toast = await s.ui.waitForNotification(FOUND, { timeout: 30000 });
       s.assert.equal(toast.message, `${FOUND} (4 tables). Show them as a diagram? Nothing is saved until you keep it.`);
+      s.assert.deepEqual(toast.buttons, ['Show Me', "Don't Ask Again for This Folder"], 'the suggestion\'s buttons');
       const items = await s.ui.paletteItems('Start Suggestions', { expect: TURN_OFF });
       s.expect(!items.includes(TURN_ON), `with suggestions on, the palette should not offer ${TURN_ON}: ${items.join(' | ')}`);
       await s.wb.press('Escape');
-      await s.wb.highlight(s.sel.notification(FOUND));
+      await s.wb.highlight(s.sel.notificationButton(FOUND, "Don't Ask Again for This Folder"));
       await s.pause(2000);
       await s.wb.unhighlight();
-    }, { at: 'left' });
+    }, { say: 'And the next time the folder opens, it asks if I want to see my scripts as a diagram.', at: 'left' });
+
+    await s.step('I click "Don\'t Ask Again for This Folder": off again, with Undo, and nothing written', async () => {
+      await s.ui.notificationButton(FOUND, "Don't Ask Again for This Folder");
+      const toast = await s.ui.waitForNotification(OFF);
+      s.assert.equal(toast.message, OFF);
+      s.assert.deepEqual(toast.buttons, ['Undo'], 'the confirmation offers Undo');
+      await s.wb.highlight(s.sel.notification(OFF));
+      await s.pause(2500);
+      await s.wb.unhighlight();
+      s.expectNoFile('.erd-studio');
+      s.expectNoFile('.vscode');
+    }, { say: "I click Don't Ask Again for This Folder. It is off again, in one line, with Undo.", at: 'left' });
   },
 });

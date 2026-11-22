@@ -104,6 +104,21 @@ export function autoDraftDue(input: AutoDraftInput): AutoDraft | undefined {
   return undefined;
 }
 
+/**
+ * Whether the first run draws the folder's find at once, in place of the
+ * start suggestion (§3.1, trigger `firstRun` in the table): only on the
+ * activation that was a fresh install on this machine, and only where the
+ * automatic draft of a find would be due ({@link autoDraftDue}: the one rule).
+ * Someone who has just installed ERD Studio and opened a folder it can draw
+ * came to see it; the notification that asked first went unanswered by most.
+ * Never for an upgrader, a later window, a later folder or a folder with
+ * nothing found (those keep the notification, the ERD Studio icon's draft and
+ * the example).
+ */
+export function firstRunDraftDue(input: AutoDraftInput & { firstRun: boolean }): boolean {
+  return input.firstRun && autoDraftDue(input) === 'find';
+}
+
 /** The draft source a start intent draws (`convert` and `blank` draw none of the user's files). */
 export function draftSourceForIntent(intent: StartIntent): DraftSource | undefined {
   switch (intent) {

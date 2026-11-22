@@ -9,6 +9,7 @@ import {
   EXAMPLE_DRAFT_SHOWN_KEY,
   autoDraftDue,
   draftSourceForIntent,
+  firstRunDraftDue,
   walkthroughAutoOpens,
   type AutoDraftInput,
 } from '../../src/services/draftTriggers';
@@ -74,6 +75,38 @@ describe('autoDraftDue', () => {
           if (open && intent === 'blank' && !exampleShownOnMachine) want = 'example';
           expect(got).toBe(want);
         }
+    }
+  });
+});
+
+describe('firstRunDraftDue (a fresh install draws the find in place of the start suggestion)', () => {
+  it.each(FINDS)('draws %s on the first run', (intent) => {
+    expect(firstRunDraftDue({ ...base({ intent }), firstRun: true })).toBe(true);
+  });
+
+  it.each(FINDS)('never draws %s for an upgrader or in a later window', (intent) => {
+    expect(firstRunDraftDue({ ...base({ intent }), firstRun: false })).toBe(false);
+  });
+
+  it('never the example, Convert or an undecided folder: only a find the folder holds', () => {
+    for (const intent of ['blank', 'convert', undefined] as const) {
+      expect(firstRunDraftDue({ ...base({ intent }), firstRun: true }), String(intent)).toBe(false);
+    }
+  });
+
+  it('is the automatic draft\'s own rule: wherever that is not due, neither is this', () => {
+    const blockers: Array<Partial<AutoDraftInput>> = [
+      { settingOn: false },
+      { state: { off: true } },
+      { state: { answered: true } },
+      { state: { draftShown: true } },
+      { hasDiagrams: true },
+      { hasTables: true },
+      { canvasOpen: true },
+    ];
+    for (const over of blockers) {
+      expect(autoDraftDue(base(over)), JSON.stringify(over)).toBeUndefined();
+      expect(firstRunDraftDue({ ...base(over), firstRun: true }), JSON.stringify(over)).toBe(false);
     }
   });
 });

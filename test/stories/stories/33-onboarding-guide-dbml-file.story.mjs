@@ -1,7 +1,7 @@
 // The onboarding guide, Show Me Around, the whole first-time walkthrough in a
 // folder with a single-file DBML export from dbdiagram.io (as story 06),
 // realistic: every VS Code prompt on, ERD Studio installed in the window as
-// from the Marketplace. The start suggestion's Show Me opens the draft of the
+// from the Marketplace. The first run opens the draft of the
 // file, and because it is the first draft on this machine the guide walks
 // through it: the banner naming the file and the counts, More ways to start,
 // and Keep as Diagram, which the guide waits for. Keep splits the file into
@@ -17,7 +17,6 @@ import { givenVSCode, installStep, theOneInterruption } from '../lib/firstMinute
 import { GUIDE_TARGET, markButton, nextMark, restOnEmptyCanvas, waitForMark } from '../lib/guide.mjs';
 import { story } from '../lib/story.mjs';
 
-const FOUND = 'ERD Studio found a DBML file in this folder';
 const STAR_URL = 'https://github.com/liam-machine/erd-studio';
 
 export default story({
@@ -35,17 +34,9 @@ export default story({
     await givenVSCode(s, 'online-shop', { say: 'Given VS Code as I use it, with my online shop folder open. It has my DBML file from dbdiagram dot io.' });
     await installStep(s);
 
-    await s.step('It finds my DBML file and asks once: Show Me', async () => {
-      const event = await theOneInterruption(s, 'notification', new RegExp(`^${FOUND}`));
-      s.assert.equal(event.text, `${FOUND}. Show it as a diagram? Nothing is saved until you keep it.`);
-      await s.wb.highlight(s.sel.notification(FOUND));
-      await s.pause(1500);
-      await s.wb.unhighlight();
-    }, { at: 'left', say: 'ERD Studio finds my DBML file, and asks once if I want to see it as a diagram.' });
-
     let draft;
-    await s.step('Show Me: the draft of my file, and the guide starts on it (1 of 3)', async () => {
-      await s.ui.notificationButton(FOUND, 'Show Me');
+    await s.step('It finds my DBML file and opens the draft of my file, and the guide starts on it (1 of 3)', async () => {
+      await theOneInterruption(s, 'tab', /^Draft: /);
       draft = await waitForDraft(s, 'Draft: ecommerce', { tables: 6 });
       const mark = await waitForMark(s, draft.page, 'Your draft', { progress: '1 of 3' });
       s.assert.equal(mark.text, 'This is a draft of your model, drawn from ecommerce.dbml: 6 tables, 6 relationships. Nothing is saved yet.');
@@ -53,7 +44,7 @@ export default story({
       s.assert.deepEqual(mark.buttons, ['Next', 'Skip guide']);
       s.expectNoFile('.erd-studio');
       await s.pause(2000);
-    }, { say: 'I press Show Me. A draft of my file opens, and a short guide starts on it: 6 tables and 6 relationships. Nothing is saved yet.' });
+    }, { say: 'ERD Studio finds my DBML file and opens a draft of it, without asking. A short guide starts on it: 6 tables and 6 relationships. Nothing is saved yet.' });
 
     await s.step('2 of 3, More ways to start: Import… and Import Your Data Model…', async () => {
       const mark = await nextMark(s, draft.page, 'More ways to start', { progress: '2 of 3' });
