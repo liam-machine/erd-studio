@@ -180,6 +180,7 @@ async function runOne({ def, file }, { extDir, vsix, opts }) {
         log(`video not written: ${e.message}`);
       }
     }
+    ctx?.sidebar.close();
     ctx?.wb.close();
     if (handle) handle.kill();
     live.delete(path.join(root, 'ud'));

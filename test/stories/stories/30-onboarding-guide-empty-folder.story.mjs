@@ -38,7 +38,8 @@ export default story({
     await s.step('The ERD Studio icon: an example, and the guide says why (1 of 3)', async () => {
       await s.ui.openSidebar('ERD Studio');
       draft = await waitForDraft(s, 'Example: Coffee shop');
-      s.assert.deepEqual(draft.buttons, ['New Diagram…', 'Import Your Data Model…', 'Keep This Example', 'More ways to start', 'Discard']);
+      // Import Your Data Model… leads (#328: toward my own model); New Diagram… and Keep This Example are beside it.
+      s.assert.deepEqual(draft.buttons, ['Import Your Data Model…', 'New Diagram…', 'Keep This Example', 'More ways to start', 'Discard']);
       const mark = await waitForMark(s, draft.page, 'An example', { progress: '1 of 3' });
       s.assert.equal(mark.text, 'Nothing here to draw from yet, so this is an example: 6 tables, 8 relationships. Nothing is saved yet.');
       s.expectNoFile('.erd-studio');

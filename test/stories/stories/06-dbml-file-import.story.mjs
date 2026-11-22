@@ -12,6 +12,7 @@
 // into one relationships file, saved as optional (?), and opens the diagram.
 
 import { DRAFT, waitForDraft } from '../lib/draft.mjs';
+import { SIDEBAR } from '../lib/sidebar.mjs';
 import { story } from '../lib/story.mjs';
 
 const TABLES = ['users', 'countries', 'ecommerce.merchants', 'ecommerce.products', 'orders', 'order_items'];
@@ -57,8 +58,9 @@ export default story({
     }, { say: "I click Show Me. There's no file to pick and no name to type: the draft opens, with its six tables.", at: 'left' });
 
     await s.step('Its details say what ERD Studio leaves out, in plain words', async () => {
-      // What is left out (the database type, the sample rows, …): counted in the banner, listed in the drawer.
-      s.expect(/left out: Show details$/.test(draft.links), `the banner should count what is left out: ${draft.links}`);
+      // What is left out (the database type, the sample rows, …): counted in the banner, listed in the drawer;
+      // the import's report (every statement and how it was read) is the link beside it.
+      s.expect(/\d+ left out: Show details · Show Import Report$/.test(draft.links), `the banner should count what is left out, then offer its details and the import report: ${draft.links}`);
       await draft.page.click(DRAFT.link('Show details'));
       await draft.page.waitFor(DRAFT.drawer, { what: 'the details drawer' });
       const text = await draft.page.ev(`${DRAFT.drawer}.innerText`);
@@ -90,8 +92,8 @@ export default story({
         await s.expectFile(rel, { contains: ref });
       }
       await s.ui.openSidebar('ERD Studio');
-      await s.expectVisible(s.sel.sidebarRow('merchants'), { what: 'merchants in the Table Library' });
-      await s.wb.highlight(s.sel.sidebarRow('merchants'));
+      await s.sidebar.expectVisible(SIDEBAR.row('merchants'), { what: 'merchants in the Table Library' });
+      await s.sidebar.highlight(SIDEBAR.row('merchants'));
       await s.pause(2000);
       await s.wb.unhighlight();
     });

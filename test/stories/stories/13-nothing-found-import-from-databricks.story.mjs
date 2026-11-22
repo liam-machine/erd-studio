@@ -2,9 +2,14 @@
 // with nothing ERD Studio can bring in yet (a README), and turns to ERD
 // Studio: the ERD Studio icon opens the example draft (Draft-first: nothing
 // found, so a finished example, once per machine, written nowhere), whose
-// Import Your Data Model… opens the import guide (its own webview). There
-// the Databricks card's Copy puts the notebook cell on the clipboard
-// (asserted: the clipboard holds the snippet, and the button says Copied).
+// Import Your Data Model… opens the import guide (its own webview). Its
+// cards are folded to their names; the Databricks card, opened, leads with
+// its recommended way (one query, downloaded as CSV: Import the CSV…) and
+// keeps the other, CREATE TABLE statements from a notebook, behind the line
+// that says when to use it ("Need column defaults or identity columns? Use a
+// notebook instead."). This story takes the notebook: its Copy puts the
+// notebook cell on the clipboard (asserted: the clipboard holds the snippet,
+// and the button says Copied).
 //
 // The export itself happens in Databricks, outside VS Code: the story puts
 // test/fixtures/sql-ddl/databricks-notebook/schema.sql (what the cell prints)
@@ -13,7 +18,7 @@
 // and their own draft instead of the example), so it must not be there
 // before; step 1 asserts it is not.
 //
-// The card's Import Databricks DDL… reads the picked script as Databricks
+// The notebook way's Import Databricks DDL… reads the picked script as Databricks
 // without asking the dialect (asserted: no dialect pick shows), the
 // step-by-step flow names the diagram (the name box, kept as suggested), and
 // it ends in a draft: "Draft from 1 SQL file (Databricks / Spark SQL) · …".
@@ -24,13 +29,18 @@ import fs from 'node:fs';
 
 import { sleep } from '../lib/act.mjs';
 import { REPO } from '../lib/launch.mjs';
-import { DRAFT, waitForDraft, waitForDraftKeepingName } from '../lib/draft.mjs';
+import { DRAFT, chooseSqlScript, waitForDraft, waitForDraftKeepingName } from '../lib/draft.mjs';
 import { story } from '../lib/story.mjs';
 
 const GUIDE_TAB = 'Import Your Data Model';
 const CARD = `doc.querySelector('[data-card="databricks"]')`;
-const COPY = `${CARD}.querySelector('[data-action="copy"][data-snippet="databricksSchema"]')`;
-const IMPORT = `${CARD}.querySelector('[data-action="run"][data-guide-action="databricks"]')`;
+/** The card's name: a click opens the card (and folds it again). */
+const CARD_NAME = `${CARD}.querySelector('.ig-card__summary')`;
+/** The other way in, folded behind the line that says when to use it. */
+const NOTEBOOK = `${CARD}.querySelector('details.ig-alt')`;
+const NOTEBOOK_LINE = `${NOTEBOOK}.querySelector('.ig-alt__summary')`;
+const COPY = `${NOTEBOOK}.querySelector('[data-action="copy"][data-snippet="databricksSchema"]')`;
+const IMPORT = `${NOTEBOOK}.querySelector('[data-action="run"][data-guide-action="databricks"]')`;
 const EXPORTED = 'test/fixtures/sql-ddl/databricks-notebook/schema.sql';
 
 export default story({
@@ -52,8 +62,9 @@ export default story({
       await s.ui.openSidebar('ERD Studio');
       // Nothing found: the example draft, once per machine, the Diagrams view keeping the focus.
       draft = await waitForDraft(s, 'Example: Coffee shop');
-      s.assert.deepEqual(draft.primary, ['New Diagram…'], 'New Diagram… is the example draft\'s primary');
-      s.expect(draft.buttons.includes('Import Your Data Model…'), `the draft should offer Import Your Data Model…: ${draft.buttons.join(', ')}`);
+      // The example leads toward my own model (#328); New Diagram… is beside it.
+      s.assert.deepEqual(draft.primary, ['Import Your Data Model…'], 'Import Your Data Model… is the example draft\'s primary');
+      s.expect(draft.buttons.includes('New Diagram…'), `the draft should offer New Diagram… too: ${draft.buttons.join(', ')}`);
       s.expectNoFile('.erd-studio');
       await draft.page.highlight(DRAFT.button('Import Your Data Model…'));
       await s.pause(2000);
@@ -76,17 +87,35 @@ export default story({
       await s.wb.unhighlight();
     }, { say: 'I click Import Your Data Model: a card for each place my model can come from.' });
 
-    await s.step('My tables are in Databricks: its card says what to export', async () => {
+    await s.step('My tables are in Databricks: I open its card, and it says what to export', async () => {
+      s.assert.equal(await guide.ev(`${CARD}.querySelector('.ig-card__title').textContent.trim()`), 'Databricks (Unity Catalog)');
+      // Folded to its name until I open it.
+      s.assert.equal(await guide.ev(`${CARD}.querySelector('.ig-card__fold').open`), false, 'the Databricks card starts folded');
+      await guide.click(CARD_NAME);
+      await guide.waitFor(`${CARD}.querySelector('.ig-card__fold').open`, { what: 'the Databricks card open' });
       await guide.ev(`(${CARD}.scrollIntoView({ block: 'start', behavior: 'smooth' }), true)`);
       await sleep(600);
-      s.assert.equal(await guide.ev(`${CARD}.querySelector('.ig-card__title').textContent.trim()`), 'Databricks (Unity Catalog)');
-      const what = await guide.ev(`${CARD}.querySelector('.ig-card__what').textContent`);
-      s.expect(what.includes('FOREIGN KEY constraints become keys and relationships'), `the card should say what becomes relationships: ${what}`);
-      s.assert.equal(await guide.ev(`${IMPORT}.textContent.trim()`), 'Import Databricks DDL…');
+      // It leads with the recommended way: one query, downloaded as CSV, its button the card's main one.
+      const main = await guide.ev(`[...${CARD}.querySelectorAll('.gp-button--primary[data-action="run"]')].map(b => b.textContent.trim())`);
+      s.assert.deepEqual(main, ['Import the CSV…'], 'the Databricks card\'s one main button');
+      // The other way is behind the line that says when to use it.
+      s.assert.equal(await guide.ev(`${NOTEBOOK_LINE}.textContent.trim()`), 'Need column defaults or identity columns? Use a notebook instead.');
+      s.assert.equal(await guide.ev(`${NOTEBOOK}.open`), false, 'the notebook way starts folded');
       await guide.highlight(CARD);
       await s.pause(2000);
       await s.wb.unhighlight();
-    });
+    }, { say: 'My tables are in Databricks. I open its card, and it says what to export.' });
+
+    await s.step('I want my column defaults too, so I open the notebook way', async () => {
+      await guide.click(NOTEBOOK_LINE);
+      await guide.waitFor(`${NOTEBOOK}.open`, { what: 'the notebook way open' });
+      const steps = await guide.ev(`[...${NOTEBOOK}.querySelectorAll('.ig-step')].map(li => li.firstChild.textContent.trim())`);
+      s.expect(steps[0] === 'Copy this notebook cell.' && /^Run it in a Python notebook with your catalog and schema/.test(steps[1] ?? ''), `the notebook way's steps: ${steps.join(' | ')}`);
+      s.assert.equal(await guide.ev(`${IMPORT}.textContent.trim()`), 'Import Databricks DDL…');
+      await guide.highlight(NOTEBOOK);
+      await s.pause(2000);
+      await s.wb.unhighlight();
+    }, { say: 'I want my column defaults too, so I open the notebook way.' });
 
     await s.step('I copy the notebook cell that prints a whole schema', async () => {
       await guide.click(COPY);
@@ -110,8 +139,7 @@ export default story({
 
     await s.step('Back in the guide, I click "Import Databricks DDL…" and pick schema.sql', async () => {
       await guide.click(IMPORT);
-      await s.ui.waitForQuickPick({ title: 'Import SQL DDL' });
-      await s.ui.chooseInFileDialog('schema.sql', 'Import');
+      await chooseSqlScript(s, 'schema.sql');
     }, { say: 'Back in the guide, I click Import Databricks DDL, and pick my file.' });
 
     let draft2;

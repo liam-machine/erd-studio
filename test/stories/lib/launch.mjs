@@ -206,6 +206,9 @@ export async function launchVSCode({ extDir, folder, root, settings = {}, env: s
   // cannot be found to store 'Code Safe Storage'" on every launch. A mock keychain keeps
   // Code's safe storage in memory and never touches the user's Keychain.
   if (process.platform === 'darwin') args.push('--use-mock-keychain');
+  // A debugging run's extra arguments: STORIES_VSCODE_ARGS="--log trace" puts debug and trace lines in
+  // ERD Studio's log and writes VS Code's own window1/fileWatcher.log (what the file watcher reported).
+  if (process.env.STORIES_VSCODE_ARGS) args.push(...process.env.STORIES_VSCODE_ARGS.split(/\s+/).filter(Boolean));
   if (folder) args.push(`--folder-uri=${pathToFileURL(folder).href}`);
 
   // A story's own variables (`env` in its definition, e.g. ERD_STUDIO_STORIES_NO_BROWSER) reach the extension host.

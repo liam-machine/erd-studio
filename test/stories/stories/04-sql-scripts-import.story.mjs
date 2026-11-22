@@ -12,6 +12,7 @@
 // diagram opens with all four tables and three relationships drawn.
 
 import { DRAFT, waitForDraft } from '../lib/draft.mjs';
+import { SIDEBAR } from '../lib/sidebar.mjs';
 import { story } from '../lib/story.mjs';
 
 const TABLES = ['dim_customer', 'dim_product', 'dim_date', 'fct_order_line'];
@@ -85,8 +86,8 @@ export default story({
       }
       await s.expectFile('.erd-studio/main/diagrams/sales.dbml', { contains: "use * from '../relationships/main.dbml'" });
       await s.ui.openSidebar('ERD Studio');
-      await s.expectVisible(s.sel.sidebarRow('fct_order_line'), { what: 'fct_order_line in the Table Library' });
-      await s.wb.highlight(s.sel.sidebarRow('fct_order_line'));
+      await s.sidebar.expectVisible(SIDEBAR.row('fct_order_line'), { what: 'fct_order_line in the Table Library' });
+      await s.sidebar.highlight(SIDEBAR.row('fct_order_line'));
       await s.pause(2000);
       await s.wb.unhighlight();
     }, { say: 'And each table, and the relationships, are DBML files in my project.' });

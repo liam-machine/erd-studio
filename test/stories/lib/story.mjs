@@ -13,7 +13,7 @@
 //     steps: async (s) => {
 //       await s.step('Given VS Code with no folder open', async () => { … });
 //       await s.step('When I open the ERD Studio sidebar', async () => { await s.ui.openSidebar('ERD Studio'); });
-//       await s.step('Then I see "Open an example"', async () => { await s.expectVisible(sel.welcomeLink('Open an example')); });
+//       await s.step('Then I see "Open an example"', async () => { await s.sidebar.expectVisible(SIDEBAR.welcomeLink('Open an example')); });
 //       // With --narrate a step's caption is also spoken; `say` replaces it when it reads badly aloud.
 //       await s.step('And it is its own file under .erd-studio/main/tables/', async () => { … }, { say: 'And it is saved as its own file.' });
 //     },
@@ -25,6 +25,7 @@ import path from 'node:path';
 
 import { Webview, Workbench, sleep } from './act.mjs';
 import { Noise } from './noise.mjs';
+import { Sidebar } from './sidebar.mjs';
 import { VSCodeUI, sel } from './vscode.mjs';
 
 const REQUIRED = ['id', 'title', 'persona', 'want', 'soThat', 'steps'];
@@ -65,6 +66,7 @@ export const PACES = {
  *   s.wb                         the workbench actor (click, press, type, waitFor, highlight, ev…)
  *   s.ui                         VS Code helpers (openSidebar, waitForQuickPick, pick, runCommand, tabs…)
  *   s.sel                        selector expressions (vscode.mjs)
+ *   s.sidebar                    the actor inside the ERD Studio sidebar's page (sidebar.mjs: SIDEBAR.* are its selectors)
  *   s.webview(opts)              an actor inside a webview (the ERD canvas)
  *   s.home / s.workspace         the temp HOME, and the folder the story opened (undefined: empty window)
  *   s.path(...parts)             a path inside the workspace (or HOME for an empty window)
@@ -84,7 +86,9 @@ export class StoryContext {
     this.log = log;
     this.outDir = outDir;
     this.wb = new Workbench({ port, pace, log, home });
-    this.ui = new VSCodeUI(this.wb);
+    /** The actor inside the ERD Studio sidebar's page (the glass sidebar: sidebar.mjs). */
+    this.sidebar = new Sidebar(this.wb);
+    this.ui = new VSCodeUI(this.wb, this.sidebar);
     /** Interruptions since ERD Studio was installed (a realistic story: `installErdStudio()` starts it). */
     this.noise = new Noise({ wb: this.wb, log });
     this.sel = sel;

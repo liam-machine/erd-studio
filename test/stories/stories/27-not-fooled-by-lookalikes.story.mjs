@@ -90,8 +90,7 @@ export default story({
       s.noise.expect(/^Example: /, { kind: 'tab', why: 'the ERD Studio icon' });
       await s.oneClick(() => s.ui.openSidebar('ERD Studio'));
       draft = await waitForDraft(s, 'Example: Coffee shop');
-      s.assert.deepEqual(draft.primary, ['New Diagram…']);
-      s.expect(draft.buttons.includes('Import Your Data Model…'), `the draft should offer Import Your Data Model…: ${draft.buttons.join(', ')}`);
+      s.assert.deepEqual(draft.primary, ['Import Your Data Model…']);
       const tabs = (await s.ui.tabs()).map((t) => t.label);
       s.expect(!tabs.some((t) => t.startsWith('Draft: ')), `no draft of the lookalikes: ${tabs.join(', ')}`);
       s.expectNoFile('.erd-studio');

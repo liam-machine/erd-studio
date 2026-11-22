@@ -1,8 +1,12 @@
 // The first five minutes, from nothing: ERD Studio installed, no folder open.
-// The empty Diagrams view's one button is Open Folder…; "More ways to start…"
-// is a command link with JSON arguments (command:erdStudio.start?[{"from":"sidebar"}])
-// that opens the other starts in a quick pick: this story proves the argument
-// reaches erdStudio.start in a real VS Code. Open an Example… shows a finished
+// The empty Diagrams section's one button is Open Folder…; "More ways to start…"
+// is a link beside it that opens the other starts in a quick pick: this story
+// proves the click reaches erdStudio.start in a real VS Code. (The sidebar is
+// the glass sidebar, a webview whose page names no command: it sends the
+// link's place in package.json's welcome text and the host runs
+// command:erdStudio.start?[{"from":"sidebar"}] from there, arguments included;
+// glassSidebarContributions.test.ts and glassSidebarProvider.test.ts hold
+// those. So there is no href here to read.) Open an Example… shows a finished
 // example as a read-only draft (the coffee shop first, an Example switcher
 // over the bundled projects); switching to the Medallion lakehouse offers
 // Save This Example…, which copies it to a folder of its own and opens it
@@ -12,6 +16,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { DRAFT, chooseScope, waitForDraft } from '../lib/draft.mjs';
+import { SIDEBAR } from '../lib/sidebar.mjs';
 import { story } from '../lib/story.mjs';
 
 export default story({
@@ -38,24 +43,18 @@ export default story({
       await s.ui.openSidebar('ERD Studio');
     });
 
-    const MORE = s.sel.welcomeLink('More ways to start…');
+    const MORE = SIDEBAR.welcomeLink('More ways to start…');
     await s.step('It offers "Open Folder…", and "More ways to start…"', async () => {
-      await s.expectVisible(MORE, { what: 'the "More ways to start…" link' });
+      await s.sidebar.expectVisible(MORE, { what: 'the "More ways to start…" link' });
       // No folder, no suggestion: Open Folder… is the one button, the other starts a link beside it.
-      s.assert.deepEqual(await s.wb.ev(s.sel.welcomeButtons), ['Open Folder…'], 'Open Folder… should be the one button in an empty window');
-      const href = await s.wb.ev(`${MORE}.getAttribute('href') ?? ''`);
-      s.assert.deepEqual(
-        JSON.parse(decodeURIComponent(href.replace(/^command:erdStudio\.start\?/, ''))),
-        [{ from: 'sidebar' }],
-        `the link should run erdStudio.start from the sidebar, but its href is ${href}`,
-      );
-      await s.wb.highlight(MORE);
+      s.assert.deepEqual(await s.sidebar.ev(SIDEBAR.welcomeButtons), ['Open Folder…'], 'Open Folder… should be the one button in an empty window');
+      await s.sidebar.highlight(MORE);
       await s.pause(1200);
       await s.wb.unhighlight();
     });
 
     await s.step('I click it, and choose "Open an Example…"', async () => {
-      await s.wb.click(MORE);
+      await s.sidebar.click(MORE);
       const pick = await s.ui.waitForQuickPick({ title: 'More ways to start' });
       s.expect(pick.items.includes('Open an Example…'), `the quick pick should offer Open an Example…: ${pick.items.join(' | ')}`);
       await s.wb.highlight(s.sel.quickPickRow('Open an Example…'));

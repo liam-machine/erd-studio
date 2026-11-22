@@ -4,6 +4,10 @@
 //
 // Selectors are VS Code's own DOM, which can change between VS Code releases:
 // keep them here, in one place, so a VS Code update is fixed once.
+//
+// What is inside the ERD Studio sidebar is not here: it is a webview (the
+// glass sidebar), a page of its own that the workbench's DOM does not hold.
+// Its selectors (`SIDEBAR.*`) and its actor (`s.sidebar`) are in sidebar.mjs.
 
 import { PRIMARY, sleep } from './act.mjs';
 
@@ -14,15 +18,6 @@ export const sel = {
   activity: (label) => `document.querySelector('.activitybar [aria-label^=${q(label)}]')`,
   sidebar: `document.querySelector('.part.sidebar:not([style*="display: none"])')`,
   sidebarTitle: `document.querySelector('.part.sidebar .composite.title h2, .part.sidebar .title-label h2')`,
-  /** A link or button in a view's welcome content, by its text. */
-  welcomeLink: (text) => `[...document.querySelectorAll('.part.sidebar .welcome-view-content a, .part.sidebar .welcome-view-content .monaco-button')].find(a => a.textContent.trim() === ${q(text)})`,
-  /**
-   * The welcome view's buttons, visible ones, by text: VS Code draws a link
-   * alone on its line as a full-width button, every other link inline.
-   */
-  welcomeButtons: `[...document.querySelectorAll('.part.sidebar .welcome-view-content .monaco-button')].filter(b => b.offsetParent).map(b => b.textContent.trim())`,
-  /** A view's title-bar action (an icon), by its command title. */
-  viewAction: (title) => `[...document.querySelectorAll('.part.sidebar .actions .action-label, .part.sidebar .title-actions .action-label')].find(a => (a.getAttribute('aria-label') ?? '').startsWith(${q(title)}))`,
   /** The buttons (not inline links) of the open walkthrough step, by text. */
   walkthroughButtons: `[...document.querySelectorAll('.gettingStartedContainer .getting-started-step.expanded .monaco-button')].filter(b => b.offsetParent).map(b => b.textContent.trim())`,
   quickInput: `[...document.querySelectorAll('.quick-input-widget')].find(w => w.style.display !== 'none' && w.offsetParent !== null)`,
@@ -36,10 +31,6 @@ export const sel = {
    * profile) VS Code draws the agents bar's pill in its place, whose label opens the same Quick Open.
    */
   commandCenter: `[...document.querySelectorAll('.command-center .command-center-center, .command-center-center, .agent-status-label')].find(e => { const r=e.getBoundingClientRect(); return r.width > 0 && r.height > 0; })`,
-  /** A view's collapsible header in the side bar (e.g. 'Help & Feedback'), by its title. */
-  viewHeader: (title) => `[...document.querySelectorAll('.part.sidebar .pane-header')].find(h => (h.querySelector('h3.title')?.textContent ?? '').trim().toUpperCase() === ${q(title)}.toUpperCase())`,
-  /** A row of a tree in the side bar (the Diagrams view, the Table Library, the Explorer), by its label. */
-  sidebarRow: (label) => `[...document.querySelectorAll('.part.sidebar .monaco-list-row')].find(r => (r.querySelector('.label-name')?.textContent ?? '').trim() === ${q(label)})`,
   /** A modal dialog (window.dialogStyle: custom draws it in the page). */
   dialog: `[...document.querySelectorAll('.monaco-dialog-box')].find(d => d.offsetParent !== null)`,
   dialogButton: (text) => `[...document.querySelectorAll('.monaco-dialog-box .monaco-button')].find(b => b.textContent.trim() === ${q(text)})`,
@@ -56,8 +47,10 @@ export const sel = {
 };
 
 export class VSCodeUI {
-  constructor(wb) {
+  constructor(wb, sidebar) {
     this.wb = wb;
+    /** The ERD Studio sidebar's page (sidebar.mjs), for `sidebarText`. */
+    this.sidebar = sidebar;
   }
 
   /**
@@ -92,9 +85,15 @@ export class VSCodeUI {
     await this.wb.waitFor(`${sel.sidebar} && (${sel.sidebar}.innerText || '').toUpperCase().includes(${q(label.toUpperCase())})`, { what: `the ${label} sidebar` });
   }
 
-  /** The sidebar's visible text. */
-  sidebarText() {
-    return this.wb.ev(`${sel.sidebar}?.innerText ?? ''`);
+  /**
+   * The side bar's visible text: the workbench's own (its title, a native
+   * view such as the Explorer) and, while the ERD Studio sidebar shows, what
+   * its page says (a webview: the workbench's text does not hold it).
+   */
+  async sidebarText() {
+    const frame = await this.wb.ev(`${sel.sidebar}?.innerText ?? ''`);
+    const page = (await this.sidebar?.text()) ?? '';
+    return page ? `${frame}\n${page}` : frame;
   }
 
   /** The open quick pick / input box: `{ title, placeholder, value, items: [label], message }`, or null. */

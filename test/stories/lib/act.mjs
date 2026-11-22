@@ -275,6 +275,9 @@ export class Workbench {
   close() { try { this.c?.close(); } catch { /* gone */ } }
 }
 
+/** Where `Webview.find` looks unless told otherwise: the active editor group's editor area. */
+const ACTIVE_EDITOR = `(document.querySelector('.editor-group-container.active .editor-container') ?? document.querySelector('.editor-group-container.active'))`;
+
 /**
  * An actor inside a webview (a custom editor such as the ERD canvas). VS Code
  * hosts each webview in an `iframe` target whose page holds the content in
@@ -295,8 +298,14 @@ export class Webview {
    * (default: an ERD Studio webview — the canvas). Other webviews of the same
    * extension (a walkthrough step's image, a hidden tab's editor) are skipped:
    * the one picked is visible and covers most of the active editor group.
+   *
+   * `within` (a workbench expression) and `where` (its name in the error)
+   * look in another part of the window instead: the side bar, for the ERD
+   * Studio sidebar (lib/sidebar.mjs). VS Code draws every webview's iframe in
+   * one layer over the workbench, never inside the part it shows in, so
+   * "in" is "over": the iframe's box overlaps the part's.
    */
-  static async find(wb, { match = 'extensionId=liamwynne.erd-studio', timeout = 20000 } = {}) {
+  static async find(wb, { match = 'extensionId=liamwynne.erd-studio', timeout = 20000, within = ACTIVE_EDITOR, where = 'the active editor' } = {}) {
     const until = Date.now() + timeout;
     for (;;) {
       const candidates = (await Webview.list(wb.port)).filter((t) => t.url.includes(match));
@@ -304,7 +313,7 @@ export class Webview {
       for (const t of candidates) {
         const id = new URL(t.url).searchParams.get('id');
         const area = await wb.ev(`(() => { const f=[...document.querySelectorAll('iframe')].find(f => (f.src||'').includes(${JSON.stringify(id)}));
-          const g=document.querySelector('.editor-group-container.active .editor-container') ?? document.querySelector('.editor-group-container.active');
+          const g=${within};
           if(!f||!g) return 0; const cs=getComputedStyle(f.parentElement ?? f); if(cs.visibility==='hidden'||cs.display==='none') return 0;
           const a=f.getBoundingClientRect(), b=g.getBoundingClientRect();
           const w=Math.min(a.right,b.right)-Math.max(a.left,b.left), h=Math.min(a.bottom,b.bottom)-Math.max(a.top,b.top);
@@ -312,7 +321,7 @@ export class Webview {
         if (area > 0 && (!best || area > best.area)) best = { t, area };
       }
       if (best) return new Webview(wb, best.t);
-      if (Date.now() > until) throw new Error(`no webview matching ${match} is showing in the active editor (${candidates.length} candidate${candidates.length === 1 ? '' : 's'})`);
+      if (Date.now() > until) throw new Error(`no webview matching ${match} is showing in ${where} (${candidates.length} candidate${candidates.length === 1 ? '' : 's'})`);
       await sleep(300);
     }
   }

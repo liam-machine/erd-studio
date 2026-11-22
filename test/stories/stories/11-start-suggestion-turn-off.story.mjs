@@ -11,6 +11,7 @@
 // written into the folder (workspace state only).
 
 import { sleep } from '../lib/act.mjs';
+import { SIDEBAR } from '../lib/sidebar.mjs';
 import { story } from '../lib/story.mjs';
 
 const FOUND = 'ERD Studio found CREATE TABLE scripts in this folder';
@@ -51,7 +52,7 @@ export default story({
       await s.ui.reloadWindow();
       // The folder still suggests the import (the sidebar says what it holds, under Import Your Data Model…): only the popup is off.
       await s.ui.openSidebar('ERD Studio');
-      await s.expectVisible(s.sel.welcomeLink('Import Your Data Model…'), { what: 'the sidebar\'s "Import Your Data Model…" button' });
+      await s.sidebar.expectVisible(SIDEBAR.welcomeLink('Import Your Data Model…'), { what: 'the sidebar\'s "Import Your Data Model…" button' });
       // The look at the folder has finished: the empty view names what it found.
       await s.eventually(async () => (await s.ui.sidebarText()).includes('This folder has CREATE TABLE scripts.'), { message: 'the sidebar never said the folder has CREATE TABLE scripts' });
       // The popup comes right after that look; give it time to (wrongly) show.

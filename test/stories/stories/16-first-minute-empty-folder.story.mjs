@@ -4,8 +4,8 @@
 // (its `when` lists it only once ERD Studio has started in a folder; Draft-
 // first §3.4), no notification. One click on the ERD Studio icon is the
 // start: a finished example as a read-only draft (once per machine), its
-// primary New Diagram…, nothing written. Nothing else may interrupt in the
-// first minute.
+// primary Import Your Data Model… (#328: toward my own model), nothing
+// written. Nothing else may interrupt in the first minute.
 
 import { DRAFT, waitForDraft } from '../lib/draft.mjs';
 import { givenVSCode, installStep, nothingPopsUp, quietFirstMinute } from '../lib/firstMinute.mjs';
@@ -28,7 +28,7 @@ export default story({
       s.noise.expect(/^Example: /, { kind: 'tab', why: 'the ERD Studio icon' });
       await s.oneClick(() => s.ui.openSidebar('ERD Studio'));
       const draft = await waitForDraft(s, 'Example: Coffee shop');
-      s.assert.deepEqual(draft.primary, ['New Diagram…'], 'New Diagram… is the example draft\'s one primary button');
+      s.assert.deepEqual(draft.primary, ['Import Your Data Model…'], 'Import Your Data Model… is the example draft\'s one primary button');
       s.expectNoFile('.erd-studio');
       await draft.page.highlight(DRAFT.banner);
       await s.pause(2500);

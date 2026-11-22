@@ -18,6 +18,16 @@
 // What it watches is the project's ERD Studio folder, not the scripts: an
 // edit to a .sql file while the draft is open is not picked up (the draft
 // is the scripts as they were read when it opened).
+//
+// The assistant's write makes .erd-studio/main/tables/sales/ and the file in
+// one go. On Linux VS Code's file watcher reports such a new folder tree in
+// part or not at all, so Keep cannot rely on a watcher event: it also
+// compares what the library holds on disk with what it held when the draft
+// was planned (`DraftGeneration.at`, `TableLibraryService.diskSignature`).
+// Before that, this story failed on Linux with "sales.dim_customer already
+// exists in layer main …; choose another name. Nothing was changed." at
+// every Keep (the unit test of the same name in extension.activate.test.ts
+// is "staleness needs no watcher event").
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -34,8 +44,10 @@ const TEAMMATE_TABLE = `Table sales.dim_customer {
   created_at timestamptz [not null]
 }
 `;
-const NODE_TEXT = (name) => `([...doc.querySelectorAll('.react-flow__node')].find(n => n.innerText.split('\\n')[0].trim().endsWith(${JSON.stringify(name)}))?.innerText ?? '')`;
-const NODE = (name) => `[...doc.querySelectorAll('.react-flow__node')].find(n => n.innerText.split('\\n')[0].trim().endsWith(${JSON.stringify(name)}))`;
+// A table's card, by the table's name: the header's own text. Its schema ("sales.") and, for a table kept
+// under another name than its warehouse table's, that table ("as dim_customer") are in spans of their own.
+const NODE = (name) => `[...doc.querySelectorAll('.react-flow__node')].find(n => [...(n.querySelector('.model-node__name')?.childNodes ?? [])].filter(c => c.nodeType === 3).map(c => c.textContent).join('').trim() === ${JSON.stringify(name)})`;
+const NODE_TEXT = (name) => `(${NODE(name)}?.innerText ?? '')`;
 
 export default story({
   id: 'draft-redraws-when-files-change',
@@ -69,7 +81,7 @@ export default story({
       fs.mkdirSync(path.dirname(tableFile), { recursive: true });
       fs.writeFileSync(tableFile, TEAMMATE_TABLE);
       await s.expectFile(tableFile, { contains: 'loyalty_tier' });
-      // The watcher sees it (its batch settles) before I press Keep.
+      // A beat for the viewer. Keep needs no watcher event to see the file: it reads the disk.
       await s.pause(2500);
     }, { say: 'Meanwhile, my AI assistant saves the customer table into my project, with a new loyalty tier column.' });
 

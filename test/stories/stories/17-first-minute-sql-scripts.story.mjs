@@ -33,6 +33,8 @@ export default story({
 
     await s.step('One click on "Show Me": the draft of my model', async () => {
       s.noise.expect(/^Draft: /, { kind: 'tab', why: 'Show Me' });
+      // Reading the scripts says how far it is while it runs: the click's own answer, as the dbt read's is (19).
+      s.noise.expect(/^Import SQL DDL: reading the scripts/, { kind: 'notification', why: 'Show Me (its progress)' });
       await s.oneClick(() => s.ui.notificationButton(FOUND, 'Show Me'));
       const draft = await waitForDraft(s, 'Draft: sales', { tables: 4 });
       s.assert.deepEqual(draft.primary, ['Keep as Diagram']);

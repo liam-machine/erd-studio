@@ -67,7 +67,7 @@ export default story({
       s.noise.expect(/^Example: /, { kind: 'tab', why: 'the ERD Studio icon' });
       await s.oneClick(() => s.ui.openSidebar('ERD Studio'));
       const draft = await waitForDraft(s, 'Example: Coffee shop');
-      s.assert.deepEqual(draft.primary, ['New Diagram…']);
+      s.assert.deepEqual(draft.primary, ['Import Your Data Model…']);
       s.expectNoFile('.erd-studio');
       await draft.page.highlight(DRAFT.banner);
       await s.pause(2500);

@@ -3,9 +3,11 @@
 // "Import Your Data Model…"; this story takes the other way in, Import… from
 // the Command Palette, whose picker's last item is "Import Your Data Model…"
 // (for a model that is not a file yet).
-// It opens the import guide, whose Microsoft Fabric card has two parts: a
-// semantic model (Git integration) and a Warehouse or SQL analytics endpoint
+// It opens the import guide, whose Microsoft Fabric card has three parts: a
+// semantic model (Git integration), and two ways in for a Warehouse or SQL
+// analytics endpoint: one query saved as CSV, or its CREATE TABLE scripts
 // (SQL Server Management Studio's Script Table as …, read as SQL Server).
+// This story takes the scripts.
 //
 // The scripting happens in SSMS, outside VS Code: the story puts
 // test/fixtures/sql-ddl/fabric-warehouse/warehouse.sql into the folder only
@@ -22,12 +24,15 @@ import fs from 'node:fs';
 
 import { sleep } from '../lib/act.mjs';
 import { REPO } from '../lib/launch.mjs';
-import { DRAFT, waitForDraft, waitForDraftKeepingName } from '../lib/draft.mjs';
+import { DRAFT, chooseSqlScript, waitForDraft, waitForDraftKeepingName } from '../lib/draft.mjs';
+import { SIDEBAR } from '../lib/sidebar.mjs';
 import { story } from '../lib/story.mjs';
 
 const GUIDE_ITEM = 'Import Your Data Model…';
 const GUIDE_TAB = 'Import Your Data Model';
 const CARD = `doc.querySelector('[data-card="fabric"]')`;
+/** The card's name: a click opens the card (the guide's cards are folded to their names). */
+const CARD_NAME = `${CARD}.querySelector('.ig-card__summary')`;
 const WAREHOUSE = `[...${CARD}.querySelectorAll('.ig-section')].find(s => s.querySelector('[data-guide-action="fabricWarehouse"]'))`;
 const IMPORT = `${CARD}.querySelector('[data-action="run"][data-guide-action="fabricWarehouse"]')`;
 const SCRIPTED = 'test/fixtures/sql-ddl/fabric-warehouse/warehouse.sql';
@@ -51,8 +56,8 @@ export default story({
     await s.step('When I open the ERD Studio sidebar it leads with Import Your Data Model…; I run Import… from the Command Palette', async () => {
       await s.ui.openSidebar('ERD Studio');
       // The empty project's one button is the guide itself (story 13's path); this story is Import…'s picker.
-      await s.expectVisible(s.sel.welcomeLink(GUIDE_ITEM), { what: 'the empty Diagrams view\'s "Import Your Data Model…" button' });
-      s.assert.deepEqual(await s.wb.ev(s.sel.welcomeButtons), [GUIDE_ITEM], 'the empty Diagrams view\'s one button');
+      await s.sidebar.expectVisible(SIDEBAR.welcomeLink(GUIDE_ITEM), { what: 'the empty Diagrams view\'s "Import Your Data Model…" button' });
+      s.assert.deepEqual(await s.sidebar.ev(SIDEBAR.welcomeButtons), [GUIDE_ITEM], 'the empty Diagrams view\'s one button');
       await s.ui.runCommand('ERD Studio: Import…');
     }, { say: 'When I open the ERD Studio sidebar it offers to import my data model. I run Import from the Command Palette instead.' });
 
@@ -75,11 +80,19 @@ export default story({
     });
 
     await s.step('The Microsoft Fabric card: a Warehouse comes in as its CREATE TABLE scripts', async () => {
+      // Folded to its name until I open it.
+      s.assert.equal(await guide.ev(`${CARD}.querySelector('.ig-card__fold').open`), false, 'the Fabric card starts folded');
+      await guide.click(CARD_NAME);
+      await guide.waitFor(`${CARD}.querySelector('.ig-card__fold').open`, { what: 'the Microsoft Fabric card open' });
       await guide.ev(`(${CARD}.scrollIntoView({ block: 'start', behavior: 'smooth' }), true)`);
       await sleep(600);
       const headings = await guide.ev(`[...${CARD}.querySelectorAll('.ig-section__heading')].map(h => h.textContent.trim())`);
-      s.assert.deepEqual(headings, ['Semantic model', 'Warehouse or SQL analytics endpoint'], 'the Fabric card\'s two parts');
-      s.assert.deepEqual(await guide.ev(`[...${CARD}.querySelectorAll('[data-action="run"]')].map(b => b.textContent.trim())`), ['Import Semantic Model…', 'Import SQL Server DDL…'], 'a button for each part');
+      s.assert.deepEqual(headings, [
+        'Semantic model',
+        'Warehouse or SQL analytics endpoint: one query, saved as CSV',
+        'Warehouse or SQL analytics endpoint: scripts from SQL Server Management Studio',
+      ], 'the Fabric card\'s three parts');
+      s.assert.deepEqual(await guide.ev(`[...${CARD}.querySelectorAll('[data-action="run"]')].map(b => b.textContent.trim())`), ['Import Semantic Model…', 'Import the CSV…', 'Import SQL Server DDL…'], 'a button for each part');
       const step = await guide.ev(`${WAREHOUSE}.querySelector('.ig-step').textContent`);
       s.expect(step.includes('Script Table as') && step.includes('ERD Studio reads it as SQL Server'), `the Warehouse step: ${step}`);
       await guide.highlight(WAREHOUSE);
@@ -96,8 +109,7 @@ export default story({
 
     await s.step('I click "Import SQL Server DDL…" and pick warehouse.sql', async () => {
       await guide.click(IMPORT);
-      await s.ui.waitForQuickPick({ title: 'Import SQL DDL' });
-      await s.ui.chooseInFileDialog('warehouse.sql', 'Import');
+      await chooseSqlScript(s, 'warehouse.sql');
     }, { say: 'I click Import SQL Server DDL, and pick my file.' });
 
     let draft;

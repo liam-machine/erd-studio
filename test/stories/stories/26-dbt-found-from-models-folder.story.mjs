@@ -10,6 +10,7 @@
 import path from 'node:path';
 
 import { DRAFT, waitForDraft } from '../lib/draft.mjs';
+import { SIDEBAR } from '../lib/sidebar.mjs';
 import { story } from '../lib/story.mjs';
 
 const FOUND = 'ERD Studio found a dbt project in a folder above this one';
@@ -40,8 +41,8 @@ export default story({
       s.assert.equal(toast.message, `${FOUND}. Show its models as a diagram? Nothing is saved until you keep it.`);
       s.assert.deepEqual(toast.buttons, ['Show Me', "Don't Ask Again for This Folder"], 'the suggestion\'s buttons');
       await s.ui.openSidebar('ERD Studio');
-      await s.expectVisible(s.sel.welcomeLink('Import Your Data Model…'), { what: 'the Import Your Data Model… button in the empty Diagrams view' });
-      s.assert.deepEqual(await s.wb.ev(s.sel.welcomeButtons), ['Import Your Data Model…'], 'Import Your Data Model… should be the one button in the empty Diagrams view (the guide leads with the dbt card)');
+      await s.sidebar.expectVisible(SIDEBAR.welcomeLink('Import Your Data Model…'), { what: 'the Import Your Data Model… button in the empty Diagrams view' });
+      s.assert.deepEqual(await s.sidebar.ev(SIDEBAR.welcomeButtons), ['Import Your Data Model…'], 'Import Your Data Model… should be the one button in the empty Diagrams view (the guide leads with the dbt card)');
       s.expect((await s.ui.sidebarText()).includes('This folder is a dbt project.'), 'the empty Diagrams view should say the folder is a dbt project');
       await s.wb.highlight(s.sel.notification(FOUND));
       await s.pause(1800);

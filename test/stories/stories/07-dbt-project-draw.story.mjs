@@ -13,6 +13,7 @@
 // shows the Logical / Physical switch dbt brings.
 
 import { DRAFT, chooseScope, draftState, waitForDraft } from '../lib/draft.mjs';
+import { SIDEBAR } from '../lib/sidebar.mjs';
 import { story } from '../lib/story.mjs';
 
 const MODELS = ['dim_customer', 'dim_project', 'dim_task', 'fct_order', 'fct_sale'];
@@ -40,8 +41,8 @@ export default story({
       s.assert.deepEqual(toast.buttons, ['Show Me', "Don't Ask Again for This Folder"], 'the suggestion\'s buttons');
       // The sidebar: the empty Diagrams view says it is a dbt project, and its one button is Import Your Data Model… (the guide leads with Import from dbt).
       await s.ui.openSidebar('ERD Studio');
-      await s.expectVisible(s.sel.welcomeLink('Import Your Data Model…'), { what: 'the Import Your Data Model… button in the empty Diagrams view' });
-      s.assert.deepEqual(await s.wb.ev(s.sel.welcomeButtons), ['Import Your Data Model…'], 'Import Your Data Model… should be the one button in the empty Diagrams view (the guide leads with the dbt card)');
+      await s.sidebar.expectVisible(SIDEBAR.welcomeLink('Import Your Data Model…'), { what: 'the Import Your Data Model… button in the empty Diagrams view' });
+      s.assert.deepEqual(await s.sidebar.ev(SIDEBAR.welcomeButtons), ['Import Your Data Model…'], 'Import Your Data Model… should be the one button in the empty Diagrams view (the guide leads with the dbt card)');
       s.expect((await s.ui.sidebarText()).includes('This folder is a dbt project.'), 'the empty Diagrams view should say the folder is a dbt project');
       await s.wb.highlight(s.sel.notification(FOUND));
       await s.pause(1800);
@@ -109,8 +110,8 @@ export default story({
       await s.expectFile('.erd-studio/silver/relationships/silver.dbml', { contains: /^Ref/m });
       const diagram = await s.expectFile('.erd-studio/silver/diagrams/silver.dbml', { contains: 'erd_layout' });
       for (const m of MODELS) await s.expectFile(diagram, { contains: new RegExp(`^\\s+${m} -?\\d+ -?\\d+$`, 'm') });
-      await s.expectVisible(s.sel.sidebarRow('fct_order'), { what: 'fct_order in the Table Library' });
-      await s.wb.highlight(s.sel.sidebarRow('fct_order'));
+      await s.sidebar.expectVisible(SIDEBAR.row('fct_order'), { what: 'fct_order in the Table Library' });
+      await s.sidebar.highlight(SIDEBAR.row('fct_order'));
       await s.pause(1800);
       await s.wb.unhighlight();
     });

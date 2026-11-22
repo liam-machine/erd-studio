@@ -10,6 +10,7 @@
 // diagram, removes the YAML and JSON, and the converted diagram opens with its
 // table, so the project keeps working.
 
+import { SIDEBAR } from '../lib/sidebar.mjs';
 import { story } from '../lib/story.mjs';
 
 export default story({
@@ -39,21 +40,21 @@ export default story({
       await s.wb.unhighlight();
     });
 
-    const ROW = s.sel.sidebarRow('Convert to DBML…');
+    const ROW = SIDEBAR.row('Convert to DBML…');
     await s.step('And the ERD Studio sidebar leads with "Convert to DBML…"', async () => {
       await s.ui.openSidebar('ERD Studio');
-      await s.expectVisible(ROW, { what: 'the Convert to DBML… row in the Diagrams view' });
-      await s.expectVisible(s.sel.sidebarRow('sales'), { what: 'the sales diagram in the Diagrams view' });
-      const rows = await s.wb.ev(`[...document.querySelectorAll('.part.sidebar .pane-body .monaco-list-row')].filter(r => r.offsetParent).map(r => (r.querySelector('.label-name')?.textContent ?? '').trim())`);
+      await s.sidebar.expectVisible(ROW, { what: 'the Convert to DBML… row in the Diagrams view' });
+      await s.sidebar.expectVisible(SIDEBAR.row('sales'), { what: 'the sales diagram in the Diagrams view' });
+      const rows = await s.sidebar.ev(SIDEBAR.rows('Diagrams'));
       s.assert.equal(rows[0], 'Convert to DBML…', `the Diagrams view's first row should be Convert, but the rows are: ${rows.join(' | ')}`);
-      await s.wb.highlight(ROW);
+      await s.sidebar.highlight(ROW);
       await s.pause(1800);
       await s.wb.unhighlight();
     });
 
     let panel;
     await s.step('When I click it, it shows what will change first', async () => {
-      await s.wb.click(ROW);
+      await s.sidebar.click(ROW);
       await s.ui.waitForActiveTab('Convert to DBML');
       panel = await s.webview();
       const text = await panel.waitFor(`doc.body.innerText.includes('Convert this project to DBML?') && doc.body.innerText`, { what: 'the Convert panel' });
@@ -95,8 +96,8 @@ export default story({
       await s.expectFile('.erd-studio/gold/diagrams/sales.dbml', { contains: "use { table public.customer } from '../tables/public/customer.dbml'" });
       s.expectNoFile('.erd-studio/tables/customer.yml');
       s.expectNoFile('.erd-studio/gold/sales.json');
-      await s.expectVisible(s.sel.sidebarRow('sales'), { what: 'the sales diagram in the Diagrams view' });
-      await s.wb.highlight(s.sel.sidebarRow('sales'));
+      await s.sidebar.expectVisible(SIDEBAR.row('sales'), { what: 'the sales diagram in the Diagrams view' });
+      await s.sidebar.highlight(SIDEBAR.row('sales'));
       await s.pause(2000);
       await s.wb.unhighlight();
     });

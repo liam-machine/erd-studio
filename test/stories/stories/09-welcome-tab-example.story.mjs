@@ -1,6 +1,9 @@
 // No folder open, and ERD Studio's tour tab ("ERD Studio Tour", the Getting
-// Started panel, a webview of its own), opened from the Diagrams view's ▶
-// (Watch the Tour, its one title-bar icon with no folder open).
+// Started panel, a webview of its own), opened from the Diagrams section's
+// "…" menu: Watch the Tour, its one entry with no folder open. (The native
+// Diagrams view drew it as a ▶ in its title bar; the glass sidebar keeps a
+// section header to a "+", Collapse All and "…", and every other title icon
+// is in the "…": glassSidebar/titleActions.ts.)
 // With no folder it offers Open Folder… and, under "Or see a finished data
 // model first:", Open an Example… — a start button that posts `start` /
 // `example` to the host, which opens the example draft. Proves the button
@@ -14,6 +17,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { DRAFT, chooseScope, waitForDraft } from '../lib/draft.mjs';
+import { SIDEBAR } from '../lib/sidebar.mjs';
 import { story } from '../lib/story.mjs';
 
 const OPEN_EXAMPLE = `[...doc.querySelectorAll('[data-action="start"][data-start="example"]')].find(b => b.offsetParent)`;
@@ -35,16 +39,26 @@ export default story({
       s.expect(!title.includes(' — '), `expected an empty window, but the title is "${title}"`);
     });
 
-    const PLAY = s.sel.viewAction('Watch the Tour');
-    await s.step('When I open the ERD Studio sidebar and press its ▶ button', async () => {
+    const MORE = SIDEBAR.moreActions('Diagrams');
+    const TOUR = SIDEBAR.menuItem('Watch the Tour');
+    await s.step('When I open the ERD Studio sidebar and choose "Watch the Tour" from the Diagrams menu', async () => {
       await s.ui.openSidebar('ERD Studio');
-      await s.expectVisible(PLAY, { what: 'the ▶ (Watch the Tour) button on the Diagrams view' });
-      await s.wb.highlight(PLAY);
+      // The header's icons show while the pointer is on it.
+      await s.sidebar.hover(SIDEBAR.sectionHeader('Diagrams'));
+      await s.sidebar.expectVisible(MORE, { what: 'the "…" (more actions) button on the Diagrams section' });
+      await s.sidebar.highlight(MORE);
       await s.pause(1200);
       await s.wb.unhighlight();
-      await s.wb.click(PLAY);
+      await s.sidebar.click(MORE);
+      await s.sidebar.expectVisible(TOUR, { what: 'Watch the Tour in the Diagrams section\'s menu' });
+      // With no folder open there is nothing else to offer there.
+      s.assert.deepEqual(await s.sidebar.ev(SIDEBAR.menuItems), ['Watch the Tour'], 'Watch the Tour should be the Diagrams menu\'s one entry with no folder open');
+      await s.sidebar.highlight(TOUR);
+      await s.pause(1200);
+      await s.wb.unhighlight();
+      await s.sidebar.click(TOUR);
       await s.ui.waitForActiveTab('ERD Studio Tour');
-    }, { say: 'When I open the ERD Studio sidebar and press its play button.' });
+    }, { say: 'When I open the ERD Studio sidebar and choose Watch the Tour from the Diagrams menu.' });
 
     let tour;
     await s.step('Then the tour offers "Open an Example…" to see a finished data model first', async () => {

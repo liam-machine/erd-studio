@@ -7,6 +7,7 @@
 // listed once ERD Studio has started there (the sidebar, here): its `when`
 // keeps VS Code from opening it on install beside the start suggestion.
 
+import { SIDEBAR } from '../lib/sidebar.mjs';
 import { story } from '../lib/story.mjs';
 
 export default story({
@@ -27,7 +28,7 @@ export default story({
     await s.step('When I open the ERD Studio walkthrough from the Command Palette', async () => {
       // Listed once ERD Studio has started in this window (its \`when\`: never opened on install in a folder).
       await s.ui.openSidebar('ERD Studio');
-      await s.expectVisible(s.sel.welcomeLink('New Diagram…'), { what: 'the empty Diagrams view' });
+      await s.sidebar.expectVisible(SIDEBAR.welcomeLink('New Diagram…'), { what: 'the empty Diagrams view' });
       await s.ui.runCommand('Welcome: Open Walkthrough', 'Welcome: Open Walkthrough');
       await s.ui.waitForQuickPick();
       await s.ui.pick('Get started with ERD Studio');

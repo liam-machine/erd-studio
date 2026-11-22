@@ -5,6 +5,7 @@
 // .erd-studio/main/tables/ (the file the user commits), and that the diagram
 // file lists it. Without dbt, so no dbt word or control may appear on the way.
 
+import { SIDEBAR } from '../lib/sidebar.mjs';
 import { story } from '../lib/story.mjs';
 
 /** An Explorer row by its label (and tree depth: the workspace folder's children are level 1). */
@@ -27,19 +28,19 @@ export default story({
 
     await s.step('When I open the ERD Studio sidebar, it offers "New Diagram…"', async () => {
       await s.ui.openSidebar('ERD Studio');
-      const button = s.sel.welcomeLink('New Diagram…');
-      await s.expectVisible(button, { what: 'the New Diagram… link in the empty Diagrams view' });
+      const button = SIDEBAR.welcomeLink('New Diagram…');
+      await s.sidebar.expectVisible(button, { what: 'the New Diagram… link in the empty Diagrams view' });
       // An empty project leads with Import Your Data Model… (the one button); New Diagram… is the one link under it.
-      s.assert.deepEqual(await s.wb.ev(s.sel.welcomeButtons), ['Import Your Data Model…'], 'Import Your Data Model… should be the one button in the empty Diagrams view');
+      s.assert.deepEqual(await s.sidebar.ev(SIDEBAR.welcomeButtons), ['Import Your Data Model…'], 'Import Your Data Model… should be the one button in the empty Diagrams view');
       const text = await s.ui.sidebarText();
       s.expect(!/\bdbt\b/i.test(text), `a folder without dbt_project.yml must show no dbt word, but the sidebar says: ${text}`);
-      await s.wb.highlight(button);
+      await s.sidebar.highlight(button);
       await s.pause(1200);
       await s.wb.unhighlight();
     });
 
     await s.step('When I click "New Diagram…", I am asked to name it', async () => {
-      await s.wb.click(s.sel.welcomeLink('New Diagram…'));
+      await s.sidebar.click(SIDEBAR.welcomeLink('New Diagram…'));
       const box = await s.ui.waitForQuickPick({ title: 'New Diagram' });
       s.expect(/Name the diagram/.test(box.message), `the name box should ask for a name, but says "${box.message}"`);
     });

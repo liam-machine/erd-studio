@@ -13,6 +13,7 @@
 // this story is the sidebar's path (04 and 06 are the popup's).
 
 import { DRAFT, waitForDraft } from '../lib/draft.mjs';
+import { SIDEBAR } from '../lib/sidebar.mjs';
 import { story } from '../lib/story.mjs';
 
 const TABLES = ['sales', 'customer', 'product', 'date_table'];
@@ -37,19 +38,19 @@ export default story({
     const START = 'Import your Power BI semantic model';
     await s.step('When I open the ERD Studio sidebar, it leads with "Import Your Data Model…"', async () => {
       await s.ui.openSidebar('ERD Studio');
-      const button = s.sel.welcomeLink(ENTRY);
-      await s.expectVisible(button, { what: `the "${ENTRY}" button in the empty Diagrams view` });
-      s.assert.deepEqual(await s.wb.ev(s.sel.welcomeButtons), [ENTRY], 'Import Your Data Model… should be the one button in the empty Diagrams view');
+      const button = SIDEBAR.welcomeLink(ENTRY);
+      await s.sidebar.expectVisible(button, { what: `the "${ENTRY}" button in the empty Diagrams view` });
+      s.assert.deepEqual(await s.sidebar.ev(SIDEBAR.welcomeButtons), [ENTRY], 'Import Your Data Model… should be the one button in the empty Diagrams view');
       const text = await s.ui.sidebarText();
       s.expect(text.includes('This folder has a Power BI or Fabric semantic model.'), `the view should say what the folder holds: ${text}`);
-      await s.wb.highlight(button);
+      await s.sidebar.highlight(button);
       await s.pause(1500);
       await s.wb.unhighlight();
     });
 
     let draft;
     await s.step('When I click it, the guide leads with my model; its button asks me nothing: a draft of my model opens', async () => {
-      await s.wb.click(s.sel.welcomeLink(ENTRY));
+      await s.sidebar.click(SIDEBAR.welcomeLink(ENTRY));
       await s.ui.waitForActiveTab('Import Your Data Model');
       const guide = await s.webview();
       // The folder's own find leads, open: "Found in this folder", with the start's own label and quick path.
@@ -103,8 +104,8 @@ export default story({
         '"inactive in Power BI": main.sales.ship_date_key >? main.date_table.date_key',
       ]) await s.expectFile(rel, { contains: ref });
       await s.ui.openSidebar('ERD Studio');
-      await s.expectVisible(s.sel.sidebarRow('date_table'), { what: 'date_table in the Table Library' });
-      await s.wb.highlight(s.sel.sidebarRow('date_table'));
+      await s.sidebar.expectVisible(SIDEBAR.row('date_table'), { what: 'date_table in the Table Library' });
+      await s.sidebar.highlight(SIDEBAR.row('date_table'));
       await s.pause(2000);
       await s.wb.unhighlight();
     }, { say: 'And each table, and the relationships, are DBML files in my project.' });

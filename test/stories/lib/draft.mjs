@@ -71,6 +71,25 @@ export async function chooseScope(s, page, label) {
 }
 
 /**
+ * Import SQL DDL…'s step-by-step file choice: VS Code's file dialog opens,
+ * `rel` is typed after the folder it shows, and Import is pressed. One dialog
+ * takes files and folders on macOS only; everywhere else the import asks
+ * which first ("SQL files…" or "A folder of SQL files…":
+ * `vscodeImportSqlDdlUi().pickSources`), and this answers "SQL files…".
+ */
+export async function chooseSqlScript(s, rel) {
+  const KIND = 'Import from files or from a folder?';
+  const first = await s.ui.waitForQuickPick({ title: 'Import SQL DDL' });
+  if (first.placeholder === KIND) {
+    s.assert.deepEqual(first.items, ['SQL files…', 'A folder of SQL files…'], 'files or a folder');
+    await s.ui.pick('SQL files…');
+    // The question closes and the file dialog (another quick input of the same title) opens.
+    await s.wb.waitFor(`${s.sel.quickInput} && ${s.sel.quickInputBox}?.placeholder !== ${q(KIND)} && ${s.sel.quickInputButton('Import')}`, { what: 'the file dialog' });
+  }
+  await s.ui.chooseInFileDialog(rel, 'Import');
+}
+
+/**
  * Through a step-by-step import that ends in a draft: a name box ("Name the
  * diagram…") is answered with its suggestion (Enter, after `beat` ms for the
  * viewer); any quick input whose title, placeholder or message matches
