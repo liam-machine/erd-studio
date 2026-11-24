@@ -8,6 +8,12 @@ The `Unreleased` heading below is renamed to the released version by the deploy 
 Releases are patch bumps by default. To ship a minor or major version, write it into the
 heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that.
 
+## Unreleased
+
+### Added
+
+- **Choose which columns Keys shows.** A new button beside Names / Keys / All opens a checklist: primary keys, foreign keys, natural (business) keys, and a "Name matches" box. A column is shown when it matches any rule that is ticked, so you can show foreign keys only, keys plus your audit columns (`*_at, dbt_*`), or every column with `customer` in its name, and see how many columns in how many tables match. Names are separated by commas; `*` stands for any text and `?` for one character. The choice is a view preference kept per diagram, like the level itself: nothing is written to your files. (#359)
+
 ## 2.0.10 — 2026-11-18
 
 ### Changed

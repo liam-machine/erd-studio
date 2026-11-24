@@ -2,7 +2,7 @@
  * useStatePersistence — persists webview UI state to VS Code's webview state API.
  *
  * Subscribes to relevant Zustand store slices (selectedNode, viewport,
- * detailPanelOpen, expandedNodes, allExpanded, tableDetail, canvasMode, discrepancy
+ * detailPanelOpen, expandedNodes, allExpanded, tableDetail, columnFilter, canvasMode, discrepancy
  * overlay state, sync-merge selections and the drag-to-relate tip's
  * dismissal) and debounces writes to
  * vscode.setState(). On mount, restores state from vscode.getState() if
@@ -18,7 +18,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Viewport } from '@xyflow/react';
 
 import { useVsCodeApi } from './useVsCodeApi';
-import { isTableDetail, type TableDetail } from '@erd-studio/renderer/editor';
+import { isTableDetail, normaliseColumnFilter, type ColumnFilter, type TableDetail } from '@erd-studio/renderer/editor';
 
 import { useEditorStore } from '../store/editorStore';
 import type { Stage } from '../../src/types/semantic';
@@ -42,6 +42,12 @@ export interface PersistedState {
    * and as `keys` (with `expandedNodes` still opened) otherwise.
    */
   tableDetail?: TableDetail;
+  /**
+   * Which columns the `keys` level shows. Optional: absent (every blob from
+   * before the filter) is the three key kinds. Read back through
+   * `normaliseColumnFilter`, so anything else found here is the default too.
+   */
+  columnFilter?: ColumnFilter;
   /** Canvas interaction mode (pan / select). Optional for pre-existing state blobs. */
   canvasMode?: 'pan' | 'select';
   /** Whether the cross-stage discrepancy overlay was on. */
@@ -84,6 +90,7 @@ export function useStatePersistence(): {
   const expandedNodes = useEditorStore((s) => s.expandedNodes);
   const allExpanded = useEditorStore((s) => s.allExpanded);
   const tableDetail = useEditorStore((s) => s.tableDetail ?? null);
+  const columnFilter = useEditorStore((s) => s.columnFilter ?? null);
   const canvasMode = useEditorStore((s) => s.canvasMode);
   const discrepancyVisible = useEditorStore((s) => s.discrepancyVisible);
   const discrepancyCompareStage = useEditorStore((s) => s.discrepancyCompareStage);
@@ -98,6 +105,7 @@ export function useStatePersistence(): {
   const setDetailPanelOpen = useEditorStore((s) => s.setDetailPanelOpen);
   const setExpandedNodes = useEditorStore((s) => s.setExpandedNodes);
   const setTableDetail = useEditorStore((s) => s.setTableDetail);
+  const setColumnFilter = useEditorStore((s) => s.setColumnFilter);
   const setCanvasMode = useEditorStore((s) => s.setCanvasMode);
   const setDiscrepancyVisible = useEditorStore((s) => s.setDiscrepancyVisible);
   const setDiscrepancyCompareStage = useEditorStore((s) => s.setDiscrepancyCompareStage);
@@ -137,6 +145,7 @@ export function useStatePersistence(): {
   const expandedNodesRef = useRef(expandedNodes);
   const allExpandedRef = useRef(allExpanded);
   const tableDetailRef = useRef(tableDetail);
+  const columnFilterRef = useRef(columnFilter);
   const canvasModeRef = useRef(canvasMode);
   const discrepancyVisibleRef = useRef(discrepancyVisible);
   const discrepancyCompareStageRef = useRef(discrepancyCompareStage);
@@ -153,6 +162,7 @@ export function useStatePersistence(): {
     expandedNodesRef.current = expandedNodes;
     allExpandedRef.current = allExpanded;
     tableDetailRef.current = tableDetail;
+    columnFilterRef.current = columnFilter;
     canvasModeRef.current = canvasMode;
     discrepancyVisibleRef.current = discrepancyVisible;
     discrepancyCompareStageRef.current = discrepancyCompareStage;
@@ -161,7 +171,7 @@ export function useStatePersistence(): {
     syncInferredTableKeysRef.current = syncInferredTableKeys;
     dragHintDismissedRef.current = dragHintDismissed;
   }, [
-    selectedNode, viewport, detailPanelOpen, expandedNodes, allExpanded, tableDetail,
+    selectedNode, viewport, detailPanelOpen, expandedNodes, allExpanded, tableDetail, columnFilter,
     canvasMode, discrepancyVisible, discrepancyCompareStage, syncMode, syncSelections,
     syncInferredTableKeys, dragHintDismissed,
   ]);
@@ -175,6 +185,7 @@ export function useStatePersistence(): {
       expandedNodes: [...expandedNodesRef.current],
       allExpanded: allExpandedRef.current,
       ...(tableDetailRef.current ? { tableDetail: tableDetailRef.current } : {}),
+      ...(columnFilterRef.current ? { columnFilter: columnFilterRef.current } : {}),
       canvasMode: canvasModeRef.current,
       discrepancyVisible: discrepancyVisibleRef.current,
       discrepancyCompareStage: discrepancyCompareStageRef.current,
@@ -246,6 +257,11 @@ export function useStatePersistence(): {
       setExpandedNodes(level === 'all' ? [] : opened, level === 'all');
     }
 
+    // Restore which columns the `keys` level shows. Whatever is in the blob
+    // (nothing, from before the filter; or not a filter at all) is read as
+    // the default rather than trusted.
+    setColumnFilter(normaliseColumnFilter(restored.columnFilter));
+
     // Restore canvas interaction mode
     if (restored.canvasMode === 'pan' || restored.canvasMode === 'select') {
       setCanvasMode(restored.canvasMode);
@@ -292,7 +308,7 @@ export function useStatePersistence(): {
       vscode.postMessage(message);
     }
   }, [
-    domain, vscode, setDetailPanelOpen, setViewport, selectNode, setExpandedNodes, setTableDetail,
+    domain, vscode, setDetailPanelOpen, setViewport, selectNode, setExpandedNodes, setTableDetail, setColumnFilter,
     setCanvasMode, setDiscrepancyVisible, setDiscrepancyCompareStage, setSyncMode, setSyncSelectionBulk,
     restoreSyncInferredTableKeys, setDragHintDismissed,
   ]);
@@ -326,7 +342,7 @@ export function useStatePersistence(): {
       }
     };
   }, [
-    selectedNode, viewport, detailPanelOpen, expandedNodes, allExpanded, tableDetail,
+    selectedNode, viewport, detailPanelOpen, expandedNodes, allExpanded, tableDetail, columnFilter,
     canvasMode, discrepancyVisible, discrepancyCompareStage, syncMode, syncSelections,
     syncInferredTableKeys, dragHintDismissed, persistState,
   ]);

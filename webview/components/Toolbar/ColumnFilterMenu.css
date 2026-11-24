@@ -1,0 +1,205 @@
+/* ColumnFilterMenu — the button beside Names / Keys / All and the panel it
+   opens: which columns the Keys level shows. Tokens only (theme.css). */
+
+.column-filter {
+  position: relative;
+  display: inline-flex;
+}
+
+.column-filter__button {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--control-height);
+  height: var(--control-height);
+  padding: 0;
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-md);
+  background: var(--control-fill);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition:
+    color var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
+    background-color var(--duration-fast) var(--ease-standard);
+}
+
+.column-filter__button:hover {
+  color: var(--text-primary);
+  border-color: var(--control-border-hover);
+}
+
+.column-filter__button:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: 1px;
+}
+
+.column-filter__button--open,
+.column-filter__button--custom {
+  color: var(--text-primary);
+  border-color: var(--control-border-selected);
+  background: var(--control-fill-selected);
+}
+
+/* The rules are not the three key kinds: a dot says so with the menu closed. */
+.column-filter__dot {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+}
+
+.column-filter__panel {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: var(--z-popover);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  width: 264px;
+  margin-top: var(--space-5);
+  padding: var(--space-5);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+  background: var(--glass-surface-3);
+  -webkit-backdrop-filter: var(--glass-backdrop);
+  backdrop-filter: var(--glass-backdrop);
+  box-shadow: var(--glass-elevation-3);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  box-sizing: border-box;
+}
+
+.column-filter__heading {
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+}
+
+.column-filter__rule {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  min-height: var(--control-height-sm);
+  cursor: pointer;
+}
+
+.column-filter__checkbox {
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.column-filter__rule-label {
+  flex: 1;
+}
+
+.column-filter__badge {
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+.column-filter__pattern {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.column-filter__pattern-label {
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+}
+
+.column-filter__input {
+  height: var(--control-height);
+  padding: 0 var(--space-4);
+  border: 1px solid var(--glass-input-border);
+  border-radius: var(--radius-md);
+  background: var(--glass-input-bg);
+  color: var(--input-fg, var(--text-primary));
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  box-sizing: border-box;
+}
+
+.column-filter__input:focus {
+  outline: none;
+  border-color: var(--glass-input-border-focus);
+  box-shadow: var(--focus-halo);
+}
+
+.column-filter__input::placeholder {
+  color: var(--text-tertiary);
+  opacity: 1;
+}
+
+.column-filter__hint {
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+  line-height: 1.4;
+}
+
+.column-filter__hint code {
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+}
+
+.column-filter__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  margin-top: var(--space-2);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--glass-border);
+}
+
+.column-filter__summary {
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+}
+
+.column-filter__reset {
+  height: var(--control-height-sm);
+  padding: 0 var(--space-4);
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+.column-filter__reset:hover:not(:disabled) {
+  border-color: var(--control-border-hover);
+}
+
+.column-filter__reset:disabled {
+  color: var(--text-tertiary);
+  cursor: default;
+}
+
+.column-filter__reset:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: 1px;
+}
+
+/* Folded into the View popover (a narrow editor): that popover hangs from the
+   right edge and is itself a backdrop root, so the panel opens leftwards from
+   its button and is opaque rather than frosting the popover behind it. */
+@media (max-width: 1140px) {
+  .toolbar__view-group .column-filter__panel {
+    right: 0;
+    left: auto;
+    background: var(--editor-bg);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}

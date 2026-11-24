@@ -42,7 +42,7 @@
 /* While one of its menus or popovers is open, the toolbar's Panel rises to
    the popover layer, so the menu hangs over the detail panel (a later Panel
    at the same z-index) instead of under it. */
-.react-flow__panel.toolbar-container:has(.toolbar__dropdown-menu, .toolbar__lp, .toolbar__island--view-open) {
+.react-flow__panel.toolbar-container:has(.toolbar__dropdown-menu, .toolbar__lp, .toolbar__island--view-open, .column-filter__panel) {
   z-index: var(--z-popover);
 }
 
@@ -80,7 +80,7 @@
 }
 
 /* An island with an open popover sits above its neighbours and the tabs. */
-.toolbar__island:has(.toolbar__dropdown-menu, .toolbar__lp),
+.toolbar__island:has(.toolbar__dropdown-menu, .toolbar__lp, .column-filter__panel),
 .toolbar__island--view-open {
   z-index: 1;
 }

@@ -118,3 +118,16 @@ describe('TableDetailSwitch', () => {
     expect(radios().map((r) => r.tabIndex)).toEqual([0, -1, -1]);
   });
 });
+
+describe('TableDetailSwitch with a column filter', () => {
+  it('Keys says what it shows once the rules are not the three key kinds', () => {
+    useEditorStore.getState().setTableDetail('keys');
+    useEditorStore.getState().setColumnFilter({ primaryKeys: false, naturalKeys: false, namePattern: '*_at' });
+    render(<TableDetailSwitch />);
+
+    const keys = screen.getByRole('radio', { name: 'Chosen columns only' });
+    expect(keys.textContent).toBe('Keys');
+    expect(keys.title).toBe('Chosen columns only: foreign keys, names matching *_at');
+    expect(screen.getByRole('radio', { name: 'Table names only' }).title).toBe(TABLE_DETAIL_LABELS.name.title);
+  });
+});
