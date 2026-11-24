@@ -4605,7 +4605,7 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
             return;
           }
           // No diagrams yet, so nothing to tell the layers apart by: the first
-          // diagram goes in the last creatable layer in layers.json order (gold,
+          // diagram goes in the last layer in layers.json order (gold,
           // of silver and gold; defaultDiagramLayer, the import's quick path
           // shares it). The question comes once there are diagrams to count.
           const defaulted = defaultDiagramLayer(
