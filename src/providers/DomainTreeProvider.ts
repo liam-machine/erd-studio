@@ -7,9 +7,9 @@
  * diagram belongs to one layer but can show any table). With
  * `erdStudio.sidebar.rowDetails` set to `full` (`rowDetails.ts`), each row
  * also says how many diagrams or tables it holds; compact, those counts are
- * in the hover only. A creatable layer row has an inline + (New Diagram in
- * that layer); a layer with no diagram yet ends with a labelled
- * "New Diagram…" row (full: every creatable layer does), and the tree ends
+ * in the hover only. Every layer row has an inline + (New Diagram in that
+ * layer, whatever its `creatable` flag says: #360); a layer with no diagram
+ * yet ends with a labelled "New Diagram…" row (full: every layer does), and the tree ends
  * with "New Layer…" (the + menu is a shortcut to the same commands).
  *
  * Supports drag-and-drop to reorder layers. Stages are handled entirely
@@ -901,7 +901,7 @@ export class SubjectAreaTreeProvider
       vscode.TreeItemCollapsibleState.Expanded,
     );
     item.id = `erdStudio.diagrams.layer:${element.layer}`;
-    // `layerCreatable` offers New Diagram on the row (inline + and right-click).
+    // `layerCreatable` offers New Diagram on the row (inline + and right-click): every layer (#360).
     item.contextValue = this.layerService.isCreatable(element.layer) ? 'layerCreatable' : 'layer';
     // The layer's own colour, on its icon: the label keeps the theme's text colour, so it reads in every theme.
     item.iconPath = layerSwatchIcon(layerConfig?.color);

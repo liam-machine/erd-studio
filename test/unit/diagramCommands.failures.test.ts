@@ -180,11 +180,12 @@ describe.skipIf(AS_ROOT)('New Diagram when it cannot write (#229)', () => {
 });
 
 describe('New Diagram: no layers, and a name taken since (#229)', () => {
-  it('no creatable layers: Add Layer runs Add Layer', async () => {
+  it('no layer a diagram can go in: Add Layer runs Add Layer', async () => {
     fs.cpSync(FIXTURE_ROOT, project, { recursive: true });
     const layersPath = path.join(project, '.erd-studio', 'layers.json');
-    const layers = JSON.parse(fs.readFileSync(layersPath, 'utf-8'));
-    for (const layer of layers.layers) layer.creatable = false;
+    // `creatable: false` no longer stops New Diagram (#360); a layers.json whose
+    // only layer is named for a stage, never a diagram folder, still does.
+    const layers = { schemaVersion: 1, layers: [{ id: 'logical', label: 'Logical', abbreviation: 'LOG', color: '#888888', creatable: true, order: 0 }] };
     fs.writeFileSync(layersPath, JSON.stringify(layers, null, 2));
     await openProject(project);
     const exec = vi.spyOn(vscode.commands, 'executeCommand');

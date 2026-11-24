@@ -8,6 +8,12 @@ The `Unreleased` heading below is renamed to the released version by the deploy 
 Releases are patch bumps by default. To ship a minor or major version, write it into the
 heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that.
 
+## Unreleased
+
+### Fixed
+
+- **You can start a diagram in any layer, Bronze included.** A Bronze layer that ERD Studio had found as a folder was saved as closed to new diagrams, and nothing in ERD Studio could open it: its row had no **+** and no **New Diagram…**, New Diagram… put the diagram in the other layer without asking, and in a project with only a Bronze layer New Diagram and the imports stopped with "No layers are configured for new diagrams". Now every layer row has the **+** and **New Diagram…**, New Diagram… and the imports offer every layer, and an import whose file or dbt folder names Bronze goes there. Nothing in `layers.json` is rewritten: its `creatable` value is kept for older versions of ERD Studio, and no longer hides New Diagram in this one. (#360)
+
 ## 2.0.10 — 2026-11-18
 
 ### Changed

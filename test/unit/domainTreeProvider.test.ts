@@ -96,11 +96,12 @@ function createMockLayerService(): LayerService {
     getLayer: (id: string) => layers.find(l => l.id === id),
     hasLayer: (id: string) => layers.some(l => l.id === id),
     getValidLayerIds: () => layers.map(l => l.id),
-    getCreatableLayers: () => layers.filter(l => l.creatable),
+    // As the real service: every layer takes a new diagram, whatever `creatable` says (#360).
+    getCreatableLayers: () => layers,
     getLabel: (id: string) => layers.find(l => l.id === id)?.label ?? id,
     getAbbreviation: (id: string) => layers.find(l => l.id === id)?.abbreviation ?? id.substring(0, 3).toUpperCase(),
     getColor: (id: string) => layers.find(l => l.id === id)?.color ?? '#808080',
-    isCreatable: (id: string) => layers.find(l => l.id === id)?.creatable ?? false,
+    isCreatable: (id: string) => layers.some(l => l.id === id),
     getConfigPath: () => path.join(PROJECT_PATH, '.erd-studio', 'layers.json'),
   } as LayerService;
 }
@@ -321,10 +322,10 @@ describe('SubjectAreaTreeProvider', () => {
       expect(children.map((c) => c.type)).toEqual(['domain', 'newDomain']);
     });
 
-    it('returns empty array for bronze (no domains, not creatable)', () => {
+    it('bronze (no diagrams, creatable: false in layers.json) still offers New Diagram… (#360)', () => {
       const children = provider.getChildren({ type: 'layer', layer: 'bronze' })!;
 
-      expect(children).toHaveLength(0);
+      expect(children).toEqual([{ type: 'newDomain', layer: 'bronze', first: true }]);
     });
 
     it('returns correct logical model counts', () => {
@@ -340,15 +341,15 @@ describe('SubjectAreaTreeProvider', () => {
     it('ends every creatable layer with a New Diagram… row, saying so when the layer has none yet', () => {
       expect(provider.getChildren({ type: 'layer', layer: 'silver' })!.at(-1)).toEqual({ type: 'newDomain', layer: 'silver', first: false });
       expect(provider.getTreeItem({ type: 'newDomain', layer: 'silver', first: false }).description).toBeUndefined();
-      layerService.isCreatable = () => true;
       expect(provider.getChildren({ type: 'layer', layer: 'bronze' })).toEqual([{ type: 'newDomain', layer: 'bronze', first: true }]);
     });
 
-    it('hides New Domain node for non-creatable layers', () => {
+    it('hides the New Diagram… row only where the layer service says no diagram can go', () => {
+      layerService.isCreatable = () => false;
       const children = provider.getChildren({ type: 'layer', layer: 'bronze' })!;
-      const hasNewDomain = children.some(c => c.type === 'newDomain');
 
-      expect(hasNewDomain).toBe(false);
+      expect(children.some(c => c.type === 'newDomain')).toBe(false);
+      expect(provider.getTreeItem({ type: 'layer', layer: 'bronze' }).contextValue).toBe('layer');
     });
 
     it('handles getSubjectArea errors gracefully with 0 model count', () => {
@@ -389,9 +390,9 @@ describe('SubjectAreaTreeProvider', () => {
 
       expect(item.label).toBe('Silver');
       expect(item.collapsibleState).toBe(TreeItemCollapsibleState.Expanded);
-      // Creatable: the row offers New Diagram (inline + and right-click).
+      // Every layer row offers New Diagram (inline + and right-click), bronze's `creatable: false` included (#360).
       expect(item.contextValue).toBe('layerCreatable');
-      expect(provider.getTreeItem({ type: 'layer', layer: 'bronze' }).contextValue).toBe('layer');
+      expect(provider.getTreeItem({ type: 'layer', layer: 'bronze' }).contextValue).toBe('layerCreatable');
     });
 
     it('creates domain item with its table count', () => {
@@ -920,8 +921,8 @@ describe('SubjectAreaTreeProvider: compact rows (the default)', () => {
     const bronzeItem = provider.getTreeItem(bronze);
     expect(bronzeItem.description).toBe('Layer');
     expect(tipOf(bronzeItem)).toContain('No diagrams yet.');
-    // Bronze takes no new diagrams: no + to point at.
-    expect(tipOf(bronzeItem)).not.toContain('**+**');
+    // Every layer takes a new diagram, bronze's `creatable: false` included (#360).
+    expect(tipOf(bronzeItem)).toContain('**+** on this row starts a new diagram in Bronze.');
     // The inline + shows on a creatable layer row (package.json: viewItem == layerCreatable).
     expect(silverItem.contextValue).toBe('layerCreatable');
   });
