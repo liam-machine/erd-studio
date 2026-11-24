@@ -1,5 +1,5 @@
-/* ColumnFilterMenu — the button beside Names / Keys / All and the panel it
-   opens: which columns the Keys level shows. Tokens only (theme.css). */
+/* ColumnFilterMenu — the toolbar's Columns button and the checklist it opens:
+   which columns every table shows. Tokens only (theme.css). */
 
 .column-filter {
   position: relative;
@@ -7,17 +7,21 @@
 }
 
 .column-filter__button {
-  position: relative;
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  width: var(--control-height);
+  gap: var(--space-3);
+  max-width: 260px;
   height: var(--control-height);
-  padding: 0;
+  padding: 0 var(--space-5);
   border: 1px solid var(--control-border);
   border-radius: var(--radius-md);
   background: var(--control-fill);
   color: var(--text-secondary);
+  font-family: inherit;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  line-height: 1;
+  white-space: nowrap;
   cursor: pointer;
   transition:
     color var(--duration-fast) var(--ease-standard),
@@ -26,7 +30,6 @@
 }
 
 .column-filter__button:hover {
-  color: var(--text-primary);
   border-color: var(--control-border-hover);
 }
 
@@ -35,22 +38,21 @@
   outline-offset: 1px;
 }
 
-.column-filter__button--open,
-.column-filter__button--custom {
-  color: var(--text-primary);
+.column-filter__button--open {
   border-color: var(--control-border-selected);
   background: var(--control-fill-selected);
 }
 
-/* The rules are not the three key kinds: a dot says so with the menu closed. */
-.column-filter__dot {
-  position: absolute;
-  top: 3px;
-  right: 3px;
-  width: 6px;
-  height: 6px;
-  border-radius: var(--radius-pill);
-  background: var(--accent);
+/* What is shown now: the part of the button that changes. */
+.column-filter__button-value {
+  overflow: hidden;
+  color: var(--text-primary);
+  text-overflow: ellipsis;
+}
+
+.column-filter__button-arrow {
+  display: inline-flex;
+  flex-shrink: 0;
 }
 
 .column-filter__panel {
@@ -86,6 +88,18 @@
   gap: var(--space-4);
   min-height: var(--control-height-sm);
   cursor: pointer;
+}
+
+.column-filter__rule--all {
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--glass-border);
+  font-weight: var(--weight-medium);
+}
+
+/* "All columns" is on: the rules below it are not what decides. */
+.column-filter__rule--off {
+  opacity: 0.5;
+  cursor: default;
 }
 
 .column-filter__checkbox {
@@ -195,6 +209,13 @@
    right edge and is itself a backdrop root, so the panel opens leftwards from
    its button and is opaque rather than frosting the popover behind it. */
 @media (max-width: 1140px) {
+  .toolbar__view-group .column-filter,
+  .toolbar__view-group .column-filter__button {
+    width: 100%;
+    max-width: none;
+    justify-content: center;
+  }
+
   .toolbar__view-group .column-filter__panel {
     right: 0;
     left: auto;

@@ -130,13 +130,11 @@
 .toolbar__island .toolbar__button,
 .toolbar__island .toolbar__dropdown-trigger,
 .toolbar__island .toolbar__split-group,
-.toolbar__island .table-detail-switch,
+.toolbar__island .column-filter__button,
 .toolbar__island .line-style-switch {
   border-radius: var(--radius-pill);
 }
 
-.toolbar__island .table-detail-switch::before,
-.toolbar__island .table-detail-switch__option,
 .toolbar__island .line-style-switch::before,
 .toolbar__island .line-style-switch__option {
   border-radius: var(--radius-pill);
@@ -1427,7 +1425,6 @@
     justify-content: center;
   }
 
-  .toolbar__view-group .table-detail-switch,
   .toolbar__view-group .line-style-switch {
     width: 100%;
   }
