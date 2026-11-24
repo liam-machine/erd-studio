@@ -86,8 +86,9 @@ describe('#360: the Diagrams tree over bronze/ + gold/', () => {
     expect(children.map((c) => c.type)).toContain('domain');
     // What the user needs: an inline + / right-click New Diagram on the Bronze row…
     expect(provider.getTreeItem(bronze!).contextValue).toBe('layerCreatable');
-    // …and (full rows) a "New Diagram…" child row, as Gold has.
-    expect(children.map((c) => c.type)).toContain('newDomain');
+    // …and no "New Diagram…" row under a layer that has diagrams, full rows included: the + is enough.
+    expect(children.map((c) => c.type)).toEqual(['domain']);
+    expect((provider.getChildren(layerRow(provider, 'gold')!) ?? []).map((c) => c.type)).toEqual(['domain']);
   });
 
   it('reads the flag as written and never rewrites layers.json to open the layer', () => {

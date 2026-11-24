@@ -9,7 +9,7 @@
  * also says how many diagrams or tables it holds; compact, those counts are
  * in the hover only. Every layer row has an inline + (New Diagram in that
  * layer, whatever its `creatable` flag says: #360); a layer with no diagram
- * yet ends with a labelled "New Diagram…" row (full: every layer does), and the tree ends
+ * yet ends with a labelled "New Diagram…" row (no other layer does), and the tree ends
  * with "New Layer…" (the + menu is a shortcut to the same commands).
  *
  * Supports drag-and-drop to reorder layers. Stages are handled entirely
@@ -854,8 +854,9 @@ export class SubjectAreaTreeProvider
 
     const children: TreeElement[] = [...domainNodes];
 
-    // Compact: only where it is the call to action (a layer with no diagram); elsewhere the layer row's inline + does it.
-    if (this.layerService.isCreatable(layer) && (this.rowDetails === 'full' || domainNodes.length === 0)) {
+    // Only where it is the call to action (a layer with no diagram); elsewhere the layer row's inline + does it.
+    // Full rows used to end every layer with one: a line per layer that said nothing the + did not (#360).
+    if (this.layerService.isCreatable(layer) && domainNodes.length === 0) {
       children.push({ type: 'newDomain', layer, first: domainNodes.length === 0 });
     }
 

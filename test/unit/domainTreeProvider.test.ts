@@ -311,15 +311,15 @@ describe('SubjectAreaTreeProvider', () => {
     it('returns domain nodes for silver layer', () => {
       const children = provider.getChildren({ type: 'layer', layer: 'silver' })!;
 
-      // 2 silver domains, then New Diagram… (silver is creatable)
-      expect(children.map((c) => c.type)).toEqual(['domain', 'domain', 'newDomain']);
+      // 2 silver domains, and no New Diagram… row: the layer row's + does it (#360)
+      expect(children.map((c) => c.type)).toEqual(['domain', 'domain']);
     });
 
     it('returns domain nodes for gold layer', () => {
       const children = provider.getChildren({ type: 'layer', layer: 'gold' })!;
 
-      // 1 gold domain, then New Diagram…
-      expect(children.map((c) => c.type)).toEqual(['domain', 'newDomain']);
+      // 1 gold domain, and no New Diagram… row
+      expect(children.map((c) => c.type)).toEqual(['domain']);
     });
 
     it('bronze (no diagrams, creatable: false in layers.json) still offers New Diagram… (#360)', () => {
@@ -338,10 +338,10 @@ describe('SubjectAreaTreeProvider', () => {
       }
     });
 
-    it('ends every creatable layer with a New Diagram… row, saying so when the layer has none yet', () => {
-      expect(provider.getChildren({ type: 'layer', layer: 'silver' })!.at(-1)).toEqual({ type: 'newDomain', layer: 'silver', first: false });
-      expect(provider.getTreeItem({ type: 'newDomain', layer: 'silver', first: false }).description).toBeUndefined();
+    it('ends only a layer with no diagram with a New Diagram… row, which says so; full rows too (#360)', () => {
+      expect(provider.getChildren({ type: 'layer', layer: 'silver' })!.some((c) => c.type === 'newDomain')).toBe(false);
       expect(provider.getChildren({ type: 'layer', layer: 'bronze' })).toEqual([{ type: 'newDomain', layer: 'bronze', first: true }]);
+      expect(provider.getTreeItem({ type: 'newDomain', layer: 'bronze', first: true }).description).toBe('none in this layer yet');
     });
 
     it('hides the New Diagram… row only where the layer service says no diagram can go', () => {
@@ -934,9 +934,10 @@ describe('SubjectAreaTreeProvider: compact rows (the default)', () => {
     expect(provider.getChildren({ type: 'layer', layer: 'bronze' })).toEqual([{ type: 'newDomain', layer: 'bronze', first: true }]);
     expect(provider.getTreeItem({ type: 'newDomain', layer: 'bronze', first: true }).description).toBe('none in this layer yet');
     expect(provider.getChildren()!.at(-1)).toEqual({ type: 'newLayer' });
-    // Full rows keep today's New Diagram… under every creatable layer.
+    // Full rows too: a layer that has diagrams ends with no New Diagram… row (#360).
     provider.setRowDetails('full');
-    expect(provider.getChildren({ type: 'layer', layer: 'silver' })!.map((c) => c.type)).toEqual(['domain', 'domain', 'newDomain']);
+    expect(provider.getChildren({ type: 'layer', layer: 'silver' })!.map((c) => c.type)).toEqual(['domain', 'domain']);
+    expect(provider.getChildren({ type: 'layer', layer: 'bronze' })).toEqual([{ type: 'newDomain', layer: 'bronze', first: true }]);
   });
 
   it('a diagram row drops its table count (the hover has it) and keeps only the cross-layer exception', () => {
