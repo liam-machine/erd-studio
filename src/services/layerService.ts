@@ -291,7 +291,9 @@ export class LayerService {
           label: known.label,
           abbreviation: known.abbreviation,
           color: known.color,
-          creatable: known.creatable,
+          // Not `known.creatable` (false for bronze): every layer takes a new
+          // diagram (#360), and an older version reading this file honours the flag.
+          creatable: true,
           order: index,
         });
       } else {
@@ -388,10 +390,16 @@ export class LayerService {
   }
 
   /**
-   * Get layers where creatable is true.
+   * The layers a new diagram can go in: every layer (#360). A layer's
+   * `creatable` flag in layers.json is still read and written (older versions
+   * honour it), but it no longer hides New Diagram: the flag was saved as
+   * `false` for a detected `bronze/` folder and nothing in the UI could turn
+   * it on, so a layer that already held diagrams could not take another.
+   * The stage names (`logical`, `physical`) are never diagram folders, so a
+   * layers.json that lists one still gets no New Diagram there.
    */
   getCreatableLayers(): LayerConfig[] {
-    return this.loadConfig().filter(l => l.creatable);
+    return this.loadConfig().filter(l => !STAGE_DIR_NAMES.has(l.id));
   }
 
   /**
@@ -419,11 +427,11 @@ export class LayerService {
   }
 
   /**
-   * Check if layer is creatable.
+   * Whether a new diagram can go in this layer: any layer there is
+   * (see {@link getCreatableLayers}), whatever its `creatable` flag says.
    */
   isCreatable(id: string): boolean {
-    const layer = this.getLayer(id);
-    return layer?.creatable ?? false;
+    return this.getCreatableLayers().some(l => l.id === id);
   }
 
   /**

@@ -43,6 +43,9 @@ permissions: {}
 jobs:
   prerelease:
     runs-on: ubuntu-latest
+    # The full test suite runs on this one runner, and a publish retries; the
+    # limit only stops a hung run.
+    timeout-minutes: 45
     permissions:
       contents: write # create the pre-release GitHub Release and its tag
     env:
@@ -54,7 +57,7 @@ jobs:
       # predate the pre-release checks. The ref itself goes in ext/, so nothing
       # from tooling/ can be swept into the VSIX.
       - name: Check out the release tooling
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
           path: tooling
@@ -62,16 +65,16 @@ jobs:
           persist-credentials: false
 
       - name: Check out the ref to release
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ inputs.ref }}
           path: ext
           fetch-depth: 0 # the telemetry-worker-deployed tag and its history
           persist-credentials: false # this workflow never pushes
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
           cache-dependency-path: ext/package-lock.json
 

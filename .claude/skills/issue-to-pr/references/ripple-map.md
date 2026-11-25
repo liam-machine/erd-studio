@@ -78,7 +78,8 @@ this file is out of date: say so in the report.
 | If the fix touches… | …then also | Tag |
 |---|---|---|
 | New files that would ship | `.vscodeignore`: CI fails above 60 VSIX files | [CI] |
-| A new top-level folder that never ships | Both `paths-ignore` **and** the `dorny/paths-filter` list in `deploy.yml` (`deployWorkflow.test.ts` holds them equal) | [CI] |
+| A new top-level folder that never ships | A `!` pattern in `deploy.yml`'s `paths` trigger **and** in its `dorny/paths-filter` `every` list (`deployWorkflow.test.ts` holds them equal) | [CI] |
+| A file under a skipped path (`docs/`, any `.md`) that the build inlines | A plain re-include at the end of `deploy.yml`'s `paths` **and** in its `inlined` filter, or merging it releases nothing (`docs/examples/*/**/*` and `src/harness/*/**/*.md` are there already) | [CI] |
 | `engines.vscode`, or a VS Code API newer than 1.85 | Not allowed. Feature-detect at runtime, like `getLanguageModelApi()`. | [convention] |
 | Something that looks like a breaking change (dropping a `schemaVersion`, removing a command or setting, a layout change) | Ship it as a patch, but **name it in the PR** so Liam can decide on a minor | [convention] |
 

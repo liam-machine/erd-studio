@@ -61,7 +61,7 @@
         },
         "creatable": {
           "type": "boolean",
-          "description": "Whether new domains can be created in this layer."
+          "description": "Write true. Kept for older versions of ERD Studio, which offer New Diagram only in layers where this is true; the current version offers it in every layer, whatever this says."
         },
         "order": {
           "type": "number",

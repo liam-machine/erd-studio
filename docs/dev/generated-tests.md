@@ -16,7 +16,7 @@ importer keeps on every input.
 | Nothing swallowed | every table the break did not touch is imported (by name when the names are plain), with all its columns; a column missing from the table the break hit is named in the ledger, or that table is reported as a whole (SQL, with plain names, for every break that does not rename or delete a column: `columnLossViolations` in `sqlRun.ts`); SQL: every `CREATE TABLE` still in the file is counted in `tablesFound` |
 | Located | every problem has its file and a line inside it (`lineCount` counts the empty line after a final line break, as an editor shows it); every `problem` ledger entry has a file and line, unless it is about a whole file |
 | No long echo | no string the user can read (problem messages, notes, Not imported, the log lines, the draft) holds more than 100 characters of the source verbatim; table and column names are allowed (a long one is cut by the importer) |
-| Linear time | sizes n and 8·n (tables; one statement's columns): the big run's time ≤ 4 × 8 × the small one's (`timeRatio`: alternating runs, the fastest of each, measured again up to 3 times when over the limit, so a busy machine does not fail it but a quadratic step does) |
+| Linear time | sizes n and 8·n (tables; one statement's columns): the big run's time ≤ 4 × 8 × the small one's (`timeRatio`: alternating runs, the fastest of each, measured again up to 3 times when over the limit, so a busy machine does not fail it but a quadratic step does); the three `*.property.test.ts` files that check it are in `test/timingTests.ts`, so CI runs them one at a time in `test-timing` |
 | Converted DBML reads | the DBML a SQL or Power BI import converts to always reads back through Import DBML |
 
 ## What is generated

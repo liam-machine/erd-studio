@@ -268,10 +268,10 @@ describe('Diagrams filtered', () => {
 
   it('lists the matching diagrams under their layers, without the New Diagram… / New Layer… rows, and clears back', () => {
     const p = provider();
-    // Full rows: every creatable layer ends with New Diagram…, and a layer row counts its diagrams (compact: below).
+    // Full rows: a layer row counts its diagrams (compact: below); a layer that has diagrams ends with no New Diagram… row (#360).
     p.setRowDetails('full');
     const seen = outcomes(p);
-    expect(listing(p)).toEqual([['silver', ['staging', 'newDomain']], ['gold', ['sales', 'newDomain']], ['newLayer', []]]);
+    expect(listing(p)).toEqual([['silver', ['staging']], ['gold', ['sales']], ['newLayer', []]]);
     p.setFilter('sales');
     expect(listing(p)).toEqual([['gold', ['sales']]]);
     expect(seen.at(-1)).toMatchObject({ shown: 1, total: 2 });
@@ -283,7 +283,7 @@ describe('Diagrams filtered', () => {
     const [sales] = p.getChildren(gold)!;
     expect(p.getTreeItem(sales).label).toEqual({ label: 'sales', highlights: [[0, 5]] });
     p.setFilter('');
-    expect(listing(p)).toEqual([['silver', ['staging', 'newDomain']], ['gold', ['sales', 'newDomain']], ['newLayer', []]]);
+    expect(listing(p)).toEqual([['silver', ['staging']], ['gold', ['sales']], ['newLayer', []]]);
     expect(p.getTreeItem(p.getChildren()![0]).id).toBe('erdStudio.diagrams.layer:silver');
   });
 

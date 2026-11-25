@@ -672,7 +672,7 @@ async function runImportDbml(
   const diagramCount = subjectAreaService.listSubjectAreas(workspaceRoot, semanticDir).length;
   let layer = creatable.find((l) => l.id === resume?.layer)?.id;
   if (!layer && creatable.length === 1) layer = creatable[0].id;
-  // The quick path: the layer the file names, else New Diagram's default (the last creatable layer).
+  // The quick path: the layer the file names, else New Diagram's default (the last layer).
   if (!layer && quick) {
     layer = creatable.find((l) => l.id === analysis.suggestedLayer)?.id
       ?? defaultDiagramLayer(creatable.map((l) => l.id), 0);

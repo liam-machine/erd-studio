@@ -12,6 +12,11 @@ export {
 export {
   defaultTableDetail,
   resolveVisibleColumns,
+  normaliseColumnFilter,
+  sameColumnFilter,
+  columnNameTerms,
+  COLUMN_NAME_PATTERN_MAX,
+  type ColumnFilter,
   type VisibleColumns,
   type VisibleColumnsInput,
 } from './lib/tableDetail';

@@ -1,26 +1,37 @@
 name: CI
 
+# Every pull request, whatever its base: a stacked PR (into a feature branch)
+# gets the same checks as one into develop or main.
 on:
   pull_request:
-    branches: [main, develop]
   # Also run after every merge into develop: GitHub checks a PR against the
   # base it was opened on, so two PRs that each passed can still break develop
   # together. main needs no push trigger — deploy.yml builds and tests it.
   push:
     branches: [develop]
 
+# A PR's runs share one group, and a new push cancels the run still going.
+# Pushes are grouped per branch and never cancelled: GitHub keeps the running
+# run and replaces any pending one, so a burst of merges into develop runs the
+# current run plus only the newest merge.
+concurrency:
+  group: ci-${{ github.event.pull_request.number && format('pr-{0}', github.event.pull_request.number) || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   check:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
 
-      - run: npm ci
+      # The audit runs as its own step below, with its own threshold.
+      - run: npm ci --no-audit --no-fund
       # Fail on high/critical advisories in shipped (non-dev) dependencies.
       - run: npm audit --omit=dev --audit-level=high
       - run: npm run compile
@@ -42,13 +53,14 @@ jobs:
       # after, and every written .dbml compiles in DBML 9.1.1, 10.3.1 and 11.0.0.
       # Uses the build above (no second build).
       - run: npm run test:e2e:dbml -- --no-build
-      # The extension builds the workspace packages from source; this checks
-      # their own publishable builds (esbuild + declarations) still succeed.
-      - run: npm run build:packages
       # What publish-packages.yml would upload: fails here, not after a merge,
-      # when a package's `files` or `prepack` stops producing a tarball.
+      # when a package's `files` or `prepack` stops producing a tarball. The
+      # extension builds the workspace packages from source; each package's
+      # `prepack` (npm run build, which --dry-run still runs, core before the
+      # renderer) checks their own publishable builds (esbuild + declarations)
+      # still succeed, so there is no separate `npm run build:packages` step.
       - run: npm pack --dry-run -w @erd-studio/core -w @erd-studio/renderer
-      - run: npm run test
+      # The tests run in the `test` job below.
       - run: npm run package
 
       # Guard against .vscodeignore regressions: the marketplace package should
@@ -67,27 +79,98 @@ jobs:
             exit 1
           fi
 
-  # mcp-server relative-imports ../src/services/* and bundles ../src/workers/manifestWorker.ts,
-  # so it needs the root install as well as its own: the shared services under ../src are in
-  # this project's tsconfig `include`, and some of them import `vscode` and `yaml`, which
-  # resolve from the repo-root node_modules (@types/vscode, yaml). Without the root install
-  # the type-check step fails on unresolved modules. An accidental `import 'vscode'` in a
-  # shared service still fails the esbuild step here, because `vscode` is not in the bundle's
-  # `external` list.
+  # The vitest suite, split four ways. Vitest shards by a hash of each file's
+  # path, so every file runs in exactly one shard. No build needed:
+  # test/globalSetup.ts builds dist/manifestWorker.js itself, and the tests that
+  # need a package's dist/ build their own into a scratch folder.
+  # ERD_TEST_SET=main leaves out the wall-clock-budget files listed in
+  # test/timingTests.ts; the test-timing job below runs those.
+  test:
+    name: test (${{ matrix.shard }}/4)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci --no-audit --no-fund
+
+      # Vitest's per-file durations from this shard's last run (it writes them
+      # to node_modules/.vite/vitest/results.json), so the shard starts its
+      # slowest files first. Restored after `npm ci`, which empties node_modules.
+      - name: Restore vitest timings
+        uses: actions/cache/restore@v6
+        with:
+          path: node_modules/.vite/vitest/results.json
+          key: vitest-results-${{ matrix.shard }}-${{ github.run_id }}
+          restore-keys: vitest-results-${{ matrix.shard }}-
+
+      - run: npm run test -- --shard=${{ matrix.shard }}/4
+        env:
+          ERD_TEST_SET: main
+
+      # Failed runs record durations too; only a cancelled run has none worth keeping.
+      - name: Save vitest timings
+        if: ${{ !cancelled() }}
+        uses: actions/cache/save@v6
+        with:
+          path: node_modules/.vite/vitest/results.json
+          key: vitest-results-${{ matrix.shard }}-${{ github.run_id }}
+
+  # The test files that assert how long CPU work takes (test/timingTests.ts).
+  # Beside other test files on the same cores they were slow and failed
+  # without a regression, so here each runs alone: one file at a time
+  # (ERD_TEST_SET=timing turns file parallelism off), on its own runner. Run
+  # one after another they take longer than a shard, so they are split two
+  # ways the same way as the shards (a hash of each file's path).
+  test-timing:
+    name: test-timing (${{ matrix.shard }}/2)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci --no-audit --no-fund
+
+      - run: npm run test -- --shard=${{ matrix.shard }}/2
+        env:
+          ERD_TEST_SET: timing
+
   # Preview of what publish-packages.yml will release to npm once this reaches
   # main, in the run summary. Informational only: it needs the npm registry,
   # and a registry hiccup must not block a PR.
   packages-plan:
     runs-on: ubuntu-latest
     continue-on-error: true
+    timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
+      # Full history for the release tags; blobless, because the plan only
+      # compares trees (`git diff --quiet <tag> HEAD -- <package>`).
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+          filter: blob:none
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
-          node-version: 20
+          node-version: 24
 
       - name: npm release preview
         run: |
@@ -101,24 +184,34 @@ jobs:
             jq -r '.[] | "| `\(.name)` | \(.published // "—") | \(.next // "skipped") | \(.reason) |"' "$PLAN"
           } >> "$GITHUB_STEP_SUMMARY"
 
+  # mcp-server relative-imports ../src/services/* and bundles ../src/workers/manifestWorker.ts,
+  # so it needs the root install as well as its own: the shared services under ../src are in
+  # this project's tsconfig `include`, and some of them import `vscode` and `yaml`, which
+  # resolve from the repo-root node_modules (@types/vscode, yaml). Without the root install
+  # the type-check step fails on unresolved modules. An accidental `import 'vscode'` in a
+  # shared service still fails the esbuild step here, because `vscode` is not in the bundle's
+  # `external` list.
   mcp-server:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
           cache-dependency-path: |
             package-lock.json
             mcp-server/package-lock.json
 
+      # --no-audit: the check job audits the root install, and the last step
+      # here audits mcp-server's.
       - name: Install root dependencies (shared services)
-        run: npm ci
+        run: npm ci --no-audit --no-fund
 
       - name: Install mcp-server dependencies
-        run: npm ci
+        run: npm ci --no-audit --no-fund
         working-directory: mcp-server
 
       - name: Type check
@@ -153,14 +246,19 @@ jobs:
     defaults:
       run:
         working-directory: telemetry
+    timeout-minutes: 10
     env:
       WRANGLER_SEND_METRICS: 'false'
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
+      # telemetry/ reads nothing outside itself (cone mode still checks out
+      # the root's own files).
+      - uses: actions/checkout@v7
         with:
-          node-version: 20
+          sparse-checkout: telemetry
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
 
       - run: npm test
       - run: npm run check

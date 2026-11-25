@@ -210,3 +210,33 @@ describe('CanvasStoreProvider', () => {
     }
   });
 });
+
+describe('canvas store: the column filter', () => {
+  it('starts with none, keeps a filter normalised, and changes neither the level nor the opened tables', () => {
+    const store = createCanvasStore();
+    expect(store.getState().columnFilter).toBeNull();
+    store.getState().setTableDetail('all');
+    store.getState().setColumnFilter({ foreignKeys: false });
+    expect(store.getState().columnFilter).toEqual({ primaryKeys: true, foreignKeys: false, naturalKeys: true, namePattern: '' });
+    expect(store.getState().tableDetail).toBe('all');
+  });
+
+  it('an equal filter keeps the same object, so no table redraws', () => {
+    const store = createCanvasStore();
+    store.getState().setColumnFilter({ namePattern: 'date' });
+    const first = store.getState().columnFilter;
+    const before = store.getState();
+    store.getState().setColumnFilter({ primaryKeys: true, namePattern: 'date' });
+    expect(store.getState().columnFilter).toBe(first);
+    expect(store.getState()).toBe(before);
+  });
+
+  it('the default, and anything that is not a filter, is null', () => {
+    const store = createCanvasStore();
+    store.getState().setColumnFilter({ namePattern: 'x' });
+    store.getState().setColumnFilter({ primaryKeys: true, foreignKeys: true, naturalKeys: true, namePattern: '' });
+    expect(store.getState().columnFilter).toBeNull();
+    store.getState().setColumnFilter('keys' as never);
+    expect(store.getState().columnFilter).toBeNull();
+  });
+});

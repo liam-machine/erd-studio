@@ -8,6 +8,17 @@ The `Unreleased` heading below is renamed to the released version by the deploy 
 Releases are patch bumps by default. To ship a minor or major version, write it into the
 heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that.
 
+## Unreleased
+
+### Changed
+
+- **One Columns menu replaces Names / Keys / All.** The toolbar now has a single **Columns** button that says what the tables show and opens a checklist: **All columns**, primary keys, foreign keys, natural (business) keys, and a "Name matches" box. A column is shown when it matches any rule that is ticked, so you can show foreign keys only, keys plus your audit columns (`*_at, etl_*`), or every column with `customer` in its name, and see how many columns in how many tables match. Names are separated by commas; `*` stands for any text and `?` for one character. All three key kinds ticked is the old Keys, "All columns" is the old All, and nothing ticked is the old Names. The choice is a view preference kept per diagram: nothing is written to your files. (#359)
+- **With row details shown, a layer that has diagrams no longer ends with a New Diagram… row.** The **+** on the layer's row starts one, so the extra line under every layer only took up space. A layer with no diagram yet still shows **New Diagram…**, as it does with row details hidden. (#360)
+
+### Fixed
+
+- **You can start a diagram in any layer, Bronze included.** A Bronze layer that ERD Studio had found as a folder was saved as closed to new diagrams, and nothing in ERD Studio could open it: its row had no **+** and no **New Diagram…**, New Diagram… put the diagram in the other layer without asking, and in a project with only a Bronze layer New Diagram and the imports stopped with "No layers are configured for new diagrams". Now every layer row has the **+** (and **New Diagram…** on its right-click menu), New Diagram… and the imports offer every layer, and an import whose file or dbt folder names Bronze goes there. Nothing in `layers.json` is rewritten: its `creatable` value is kept for older versions of ERD Studio, and no longer hides New Diagram in this one. (#360)
+
 ## 2.0.10 — 2026-11-18
 
 ### Changed
