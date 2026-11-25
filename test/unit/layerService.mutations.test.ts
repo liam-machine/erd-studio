@@ -45,11 +45,13 @@ describe('LayerService lookups and mutations', () => {
       expect(service.getAbbreviation('silver')).toBe('SLV');
       expect(service.getColor('silver')).toBe('#a0a0a0');
       expect(service.isCreatable('silver')).toBe(true);
-      expect(service.isCreatable('staging')).toBe(false);
     });
 
-    it('getCreatableLayers filters on the creatable flag', () => {
-      expect(service.getCreatableLayers().map((l) => l.id)).toEqual(['bronze', 'silver']);
+    it('every layer takes a new diagram, whatever its creatable flag says (#360)', () => {
+      // staging is `creatable: false` on disk: still read as that, no longer a gate.
+      expect(service.getLayer('staging')?.creatable).toBe(false);
+      expect(service.isCreatable('staging')).toBe(true);
+      expect(service.getCreatableLayers().map((l) => l.id)).toEqual(['bronze', 'silver', 'staging']);
     });
 
     it('derives label / abbreviation / colour for an unknown layer id', () => {

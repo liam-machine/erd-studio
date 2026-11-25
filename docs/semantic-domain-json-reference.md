@@ -837,10 +837,10 @@ left_out: [dimension, metrics]     # dbt meta: keys that are another tool's sett
 | `label` | string | Yes | Display name. |
 | `abbreviation` | string | Yes | Short badge label. |
 | `color` | string | Yes | Hex colour. |
-| `creatable` | boolean | Yes | Whether new subject areas can be created in this layer. |
+| `creatable` | boolean | Yes | Write `true`. Kept for older versions of ERD Studio, which offer **New Diagram** only in layers where it is `true`; the current version reads and keeps the value but offers New Diagram in every layer, whatever it says. |
 | `order` | number | Yes | Display order (lower first). |
 
-Defaults if `layers.json` is missing: `bronze` (`#cd7f32`, not creatable), `silver` (`#a0a0a0`), `gold` (`#d4a800`).
+Defaults if `layers.json` is missing: `silver` (`#a0a0a0`) and `gold` (`#d4a800`); a brand-new folder without dbt starts with one layer, `main`. Layer folders found on disk (a `bronze/` folder, say) join the list once **Initialize Layer Configuration** or the "Detected layers" prompt saves them.
 
 <a id="model-templates-erd-studiotemplatesidjson"></a>
 

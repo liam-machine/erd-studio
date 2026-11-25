@@ -39,11 +39,12 @@ function createMockLayerService(): LayerService {
     getLayer: (id: string) => layers.find(l => l.id === id),
     hasLayer: (id: string) => layers.some(l => l.id === id),
     getValidLayerIds: () => layers.map(l => l.id),
-    getCreatableLayers: () => layers.filter(l => l.creatable),
+    // As the real service: every layer takes a new diagram, whatever `creatable` says (#360).
+    getCreatableLayers: () => layers,
     getLabel: (id: string) => layers.find(l => l.id === id)?.label ?? id,
     getAbbreviation: (id: string) => layers.find(l => l.id === id)?.abbreviation ?? id.substring(0, 3).toUpperCase(),
     getColor: (id: string) => layers.find(l => l.id === id)?.color ?? '#808080',
-    isCreatable: (id: string) => layers.find(l => l.id === id)?.creatable ?? false,
+    isCreatable: (id: string) => layers.some(l => l.id === id),
   } as LayerService;
 }
 

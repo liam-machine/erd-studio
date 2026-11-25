@@ -342,6 +342,29 @@ describe('Import DBML — a file from another tool', () => {
     expect(ui.picks[0].items.map((i) => [i.id, i.description])).toEqual([['gold', 'suggested by the file'], ['silver', undefined]]);
   });
 
+  it('offers a layer saved as creatable: false, and imports into it when the file names it (#360)', async () => {
+    makeProject('v5');
+    // As the "Detected layers" prompt used to save a bronze/ folder: closed to new diagrams.
+    fs.writeFileSync(erd('layers.json'), JSON.stringify({
+      schemaVersion: 1,
+      layers: [
+        { id: 'bronze', label: 'Bronze', abbreviation: 'BRZ', color: '#cd7f32', creatable: false, order: 0 },
+        { id: 'gold', label: 'Gold', abbreviation: 'GLD', color: '#d4a800', creatable: true, order: 1 },
+      ],
+    }, null, 2));
+    const file = dbmlFile('b.dbml', 'Table bronze.a {\n  id int [pk]\n}\n');
+    const ui = fakeUi({ file, layer: 'bronze' });
+
+    const result = await importDbml(deps(ui));
+
+    // It was never listed: Gold, the one creatable layer, was taken without asking.
+    expect(ui.picks[0].items.map((i) => [i.id, i.description])).toEqual([['bronze', 'suggested by the file'], ['gold', undefined]]);
+    expect(path.relative(erd(), result!.domainPath).split(path.sep)[0]).toBe('bronze');
+    // The quick path (no questions) takes the layer the file names too.
+    const quick = await importDbml(deps(fakeUi({})), { filePath: dbmlFile('b2.dbml', 'Table bronze.b {\n  id int [pk]\n}\n'), quick: true });
+    expect(path.relative(erd(), quick!.domainPath).split(path.sep)[0]).toBe('bronze');
+  });
+
   it('asks no layer when there is only one to choose', async () => {
     makeProject('v5');
     const file = dbmlFile('shop.dbml', SHOP_DBML);
