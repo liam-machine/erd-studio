@@ -298,3 +298,62 @@ describe('useStatePersistence table detail level', () => {
     expect(mockVsCode.setState.mock.calls.at(-1)![0]).toMatchObject({ tableDetail: 'all', expandedNodes: [], allExpanded: true });
   });
 });
+
+describe('useStatePersistence column filter', () => {
+  const base = { selectedNode: null, viewport: { x: 0, y: 0, zoom: 1 }, detailPanelOpen: false, expandedNodes: [], allExpanded: false };
+
+  it('restores the filter beside the level', () => {
+    const columnFilter = { primaryKeys: false, foreignKeys: true, naturalKeys: false, namePattern: '*_at' };
+    mockVsCode.getState.mockReturnValue({ ...base, tableDetail: 'keys', columnFilter } satisfies PersistedState);
+    useEditorStore.setState({ domain: subjectArea });
+
+    renderHook(() => useStatePersistence());
+
+    expect(useEditorStore.getState().columnFilter).toEqual(columnFilter);
+    expect(useEditorStore.getState().tableDetail).toBe('keys');
+  });
+
+  it('a blob from before the filter is the three key kinds', () => {
+    mockVsCode.getState.mockReturnValue({ ...base, tableDetail: 'keys' } satisfies PersistedState);
+    useEditorStore.setState({ domain: subjectArea });
+
+    renderHook(() => useStatePersistence());
+
+    expect(useEditorStore.getState().columnFilter ?? null).toBeNull();
+  });
+
+  it.each([
+    ['a string', 'keys'],
+    ['an array', [1, 2]],
+    ['a pattern that is not text', { namePattern: {} }],
+    ['a pattern no regex would compile', { primaryKeys: false, namePattern: '*xyz*(' }],
+    ['null', null],
+  ])('reads %s without throwing', (_label, columnFilter) => {
+    mockVsCode.getState.mockReturnValue({ ...base, tableDetail: 'keys', columnFilter });
+    useEditorStore.setState({ domain: subjectArea });
+
+    expect(() => renderHook(() => useStatePersistence())).not.toThrow();
+    const restored = useEditorStore.getState().columnFilter ?? null;
+    expect(restored === null || typeof restored.namePattern === 'string').toBe(true);
+  });
+
+  it('writes a filter change on its own, and drops the field again at the default', () => {
+    vi.useFakeTimers();
+    useEditorStore.setState({ domain: subjectArea });
+    renderHook(() => useStatePersistence());
+    act(() => { useEditorStore.getState().setTableDetail('keys'); });
+    act(() => { vi.advanceTimersByTime(400); });
+    mockVsCode.setState.mockClear();
+
+    act(() => { useEditorStore.getState().setColumnFilter({ foreignKeys: false, namePattern: 'date' }); });
+    act(() => { vi.advanceTimersByTime(400); });
+    expect(mockVsCode.setState.mock.calls.at(-1)![0]).toMatchObject({
+      tableDetail: 'keys',
+      columnFilter: { primaryKeys: true, foreignKeys: false, naturalKeys: true, namePattern: 'date' },
+    });
+
+    act(() => { useEditorStore.getState().setColumnFilter(null); });
+    act(() => { vi.advanceTimersByTime(400); });
+    expect(mockVsCode.setState.mock.calls.at(-1)![0]).not.toHaveProperty('columnFilter');
+  });
+});

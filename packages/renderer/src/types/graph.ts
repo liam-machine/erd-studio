@@ -11,7 +11,7 @@ import type { AnnotationColor, Cardinality, ColumnPair, DbtKeyHint, Layer, Meta,
 import type { LayerConfig } from '@erd-studio/core';
 import type { TableDiscrepancy } from '@erd-studio/core';
 import type { PhysicalProvenance } from '@erd-studio/core';
-import type { TableDetail } from '../lib/tableDetail';
+import type { ColumnFilter, TableDetail } from '../lib/tableDetail';
 
 // ---------------------------------------------------------------------------
 // Column display
@@ -106,6 +106,11 @@ export type TableNodeData = {
    * levels existed. See `resolveVisibleColumns`.
    */
   tableDetail?: TableDetail;
+  /**
+   * Which columns the `keys` level shows, copied to the node by
+   * `applyNodeOverlays`. Absent: the three key kinds, as before the filter.
+   */
+  columnFilter?: ColumnFilter;
   /** Callback to toggle expansion state. Receives model name as argument. */
   onToggleExpansion?: (modelName: string) => void;
   /** Whether this model has design rationale metadata. */

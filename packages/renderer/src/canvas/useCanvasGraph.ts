@@ -91,6 +91,7 @@ export function useCanvasGraph({
 
   const { isExpanded, toggleExpansion } = useColumnExpansion();
   const tableDetail = useEditorStore((s) => s.tableDetail ?? null);
+  const columnFilter = useEditorStore((s) => s.columnFilter ?? null);
 
   // Latest callback without re-running the transform when it changes.
   const onTransformedRef = useRef(onTransformed);
@@ -130,6 +131,7 @@ export function useCanvasGraph({
         nodeDimensions,
         isExpanded: isExpandedNow,
         ...(tableDetailNow ? { tableDetail: tableDetailNow } : {}),
+        ...(state.columnFilter ? { columnFilter: state.columnFilter } : {}),
       };
       let { nodes: newNodes, edges: newEdges } = transformSubjectArea(domain, transformOptions);
 
@@ -149,6 +151,7 @@ export function useCanvasGraph({
         isExpanded: isExpandedNow,
         toggleExpansion,
         tableDetail: tableDetailNow,
+        columnFilter: state.columnFilter ?? null,
       }));
 
       // Preserve React Flow's current selection across this rebuild.
@@ -208,11 +211,12 @@ export function useCanvasGraph({
       isExpanded,
       toggleExpansion,
       tableDetail,
+      columnFilter,
     });
     if (result.nodes !== currentNodes) setNodes(result.nodes);
     if (result.edges !== currentEdges) setEdges(result.edges);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentSelectedNode, selectedEdge, searchQuery, isExpanded, toggleExpansion, tableDetail, setNodes, setEdges]);
+  }, [currentSelectedNode, selectedEdge, searchQuery, isExpanded, toggleExpansion, tableDetail, columnFilter, setNodes, setEdges]);
 
   // Handle node clicks to open the detail panel (model nodes) or select (annotations).
   const onNodeClick = useCallback(

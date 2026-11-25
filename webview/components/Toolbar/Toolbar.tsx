@@ -54,7 +54,7 @@ import {
 import { StageTabs } from './StageTabs';
 import { ConvertInfo } from './ConvertInfo';
 import { LineStyleSwitch } from './LineStyleSwitch';
-import { TableDetailSwitch } from './TableDetailSwitch';
+import { ColumnFilterMenu } from './ColumnFilterMenu';
 import { FIT_MAX_ZOOM, fitViewPadding, measureTopInsetFrom } from '../../lib/fitViewPadding';
 import { isSingleLayerProject, matchesTableSearch } from '@erd-studio/renderer/editor';
 import type { TableFlowNode, FkFlowEdge, AnnotationFlowNode, AnnotationFlowEdge } from '@erd-studio/renderer/editor';
@@ -1080,7 +1080,7 @@ export function Toolbar({ nodes, edges }: ToolbarProps) {
           type="button"
           className={`toolbar__button toolbar__view-toggle${viewMenuOpen ? ' toolbar__button--active' : ''}`}
           onClick={() => setViewMenuOpen((open) => !open)}
-          title="View options: table detail, line style, select mode"
+          title="View options: columns, line style, select mode"
           aria-label="View options"
           aria-haspopup="true"
           aria-expanded={viewMenuOpen}
@@ -1091,9 +1091,9 @@ export function Toolbar({ nodes, edges }: ToolbarProps) {
           className="toolbar__view-group"
           onKeyDown={(e) => { if (e.key === 'Escape' && viewMenuOpen) { e.stopPropagation(); setViewMenuOpen(false); } }}
         >
-        {/* Table detail level — a view preference, on every stage and read-only diagram too */}
+        {/* Which columns the tables show — a view preference, on every stage and read-only diagram too */}
         <div className="toolbar__section">
-          <TableDetailSwitch />
+          <ColumnFilterMenu />
         </div>
 
         {/* Line style — a view preference, so on every stage and read-only diagram too */}

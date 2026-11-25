@@ -65,7 +65,7 @@ export function estimateNodeHeight(rowCount: number, hasGrain: boolean, bare = f
 /** What the row and width estimates read to know which rows a table draws. */
 type VisibleRowsData =
   Pick<TableNodeData, 'columns' | 'isStub' | 'isExpanded'>
-  & Partial<Pick<TableNodeData, 'tableDetail' | 'loadError'>>;
+  & Partial<Pick<TableNodeData, 'tableDetail' | 'columnFilter' | 'loadError'>>;
 
 /**
  * Number of rows TableNode actually renders in its columns section: the
@@ -179,7 +179,7 @@ const MAX_NODE_WIDTH = 560;
  * measured; without one every column is, as before.
  */
 export function estimateNodeWidth(
-  data: Pick<TableNodeData, 'modelName' | 'label' | 'columns' | 'provenance'> & Partial<Pick<TableNodeData, 'tableName' | 'tableLayer' | 'shownSchema' | 'alias' | 'singleLayer' | 'isStub' | 'isExpanded' | 'tableDetail'>>,
+  data: Pick<TableNodeData, 'modelName' | 'label' | 'columns' | 'provenance'> & Partial<Pick<TableNodeData, 'tableName' | 'tableLayer' | 'shownSchema' | 'alias' | 'singleLayer' | 'isStub' | 'isExpanded' | 'tableDetail' | 'columnFilter'>>,
 ): number {
   const { modelName, label, provenance, shownSchema, alias, singleLayer } = data;
   // The name the header prints after its schema (the table's own name for one of two same-named tables).

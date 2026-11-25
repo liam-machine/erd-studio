@@ -233,3 +233,33 @@ describe('TableNode with no level (as before the levels)', () => {
     expect(screen.getByRole('button', { name: 'Show less' })).toBeTruthy();
   });
 });
+
+describe('TableNode with a column filter (#359)', () => {
+  const NONE = { primaryKeys: false, foreignKeys: false, naturalKeys: false };
+
+  it('keys draws the columns the filter matches, and counts them', () => {
+    const { rows, footer } = renderNode({ tableDetail: 'keys', columnFilter: { ...NONE, foreignKeys: true, namePattern: '*_at' } });
+    expect(rows()).toEqual(['placed_at', 'customer_id']);
+    expect(footer()).toBe('2 of 6 columns');
+    expect(screen.getByRole('button', { name: 'Show all 6 columns' })).toBeTruthy();
+  });
+
+  it('a table opened on its own offers the way back to the matching columns, not "the keys"', () => {
+    renderNode({ tableDetail: 'keys', isExpanded: true, columnFilter: { ...NONE, namePattern: 'amount' } });
+    const back = screen.getByRole('button', { name: 'Show matching only' });
+    expect(back.getAttribute('title')).toBe('Show only the matching columns of this table again');
+    expect(screen.queryByRole('button', { name: 'Show keys only' })).toBeNull();
+  });
+
+  it('a table with no match is its header, a "Show all" row and its footer', () => {
+    const { rows, container } = renderNode({ tableDetail: 'keys', columnFilter: { ...NONE, namePattern: 'no_such_column' } });
+    expect(rows()).toEqual([]);
+    expect(container.querySelector('.model-node__empty')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Show all 6 columns' })).toBeTruthy();
+  });
+
+  it('a stub keeps listing its keys, and says so', () => {
+    const { rows } = renderNode({ tableDetail: 'keys', isStub: true, columnFilter: { ...NONE, namePattern: 'amount' } });
+    expect(rows()).toEqual(['order_id', 'order_number']);
+  });
+});

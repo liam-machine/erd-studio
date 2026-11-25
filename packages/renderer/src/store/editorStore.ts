@@ -20,7 +20,7 @@ import type { TableFlowNode, FkFlowEdge, FkEdgeData, AnnotationFlowNode, Annotat
 import { sameFocus, type CanvasFocus } from '../lib/canvasFocus';
 import type { RoutedEdge } from '../lib/edgeRouting/types';
 import { DEFAULT_LINE_STYLE, type LineStyle } from '../lib/edgeRouting/lineStyle';
-import type { TableDetail } from '../lib/tableDetail';
+import { normaliseColumnFilter, sameColumnFilter, type ColumnFilter, type TableDetail } from '../lib/tableDetail';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -124,6 +124,14 @@ export interface CanvasState {
    * that hand-builds `CanvasState` need not add it.
    */
   tableDetail?: TableDetail | null;
+  /**
+   * Which columns the `keys` level shows (`ColumnFilter` in
+   * `lib/tableDetail.ts`): any of primary / foreign / natural keys and a
+   * name pattern. Null or absent: the three key kinds, as before the filter
+   * existed. Kept normalised, one object per value. A view preference, never
+   * written to a file or posted.
+   */
+  columnFilter?: ColumnFilter | null;
   /** Selected column names in the DetailPanel (scoped to current model). */
   selectedColumns: string[];
   /** Anchor column for Shift+click range selection. */
@@ -237,6 +245,12 @@ export interface CanvasActions {
    * every table collapsed.
    */
   setTableDetail: (tableDetail: TableDetail | null) => void;
+  /**
+   * Choose which columns the `keys` level shows. Anything that is not a
+   * filter, or is the default, becomes null. Changes neither the level nor
+   * the tables opened on their own; an equal filter changes nothing.
+   */
+  setColumnFilter: (columnFilter: ColumnFilter | null) => void;
   /** Select a single column (replaces selection, sets anchor). */
   selectColumn: (name: string) => void;
   /** Toggle a column in/out of the selection (Ctrl+click). */
@@ -296,6 +310,7 @@ export function createCanvasSlice(set: CanvasSet): CanvasStore {
     expandedNodes: new Set<string>(),
     allExpanded: false,
     tableDetail: null,
+    columnFilter: null,
     selectedColumns: [],
     lastSelectedColumn: null,
     editingColumn: null,
@@ -400,6 +415,12 @@ export function createCanvasSlice(set: CanvasSet): CanvasStore {
           allExpanded: tableDetail === 'all',
         };
       }),
+    setColumnFilter: (columnFilter) =>
+      set((state) =>
+        sameColumnFilter(state.columnFilter, columnFilter)
+          ? state
+          : { columnFilter: normaliseColumnFilter(columnFilter) },
+      ),
 
     // Column selection actions
     selectColumn: (name) => set({ selectedColumns: [name], lastSelectedColumn: name, editingColumn: null }),
