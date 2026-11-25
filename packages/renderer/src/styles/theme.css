@@ -618,7 +618,7 @@ body.vscode-high-contrast-light {
   background: var(--accent-hover);
 }
 
-/* A segmented control (stage tabs, line style, table detail): a recessed
+/* A segmented control (stage tabs, line style): a recessed
    track with a raised thumb on the selected segment. */
 :where(.glass-segmented) {
   display: inline-flex;

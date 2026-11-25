@@ -752,25 +752,25 @@ describe('Toolbar Fit leaves room for itself (dev-host finding 7)', () => {
   });
 });
 
-describe('Toolbar table detail switch', () => {
+describe('Toolbar columns menu', () => {
   afterEach(() => {
     cleanup();
     mockStoreState.domain = mockSubjectArea;
     delete mockStoreState.tableDetail;
   });
 
-  it('offers Names / Keys / All in place of the Expand All / Collapse All button', () => {
+  it('offers one Columns button in place of the Names / Keys / All switch', () => {
     mockStoreState.tableDetail = 'keys';
     render(<Toolbar {...defaultProps} />);
-    const group = screen.getByRole('radiogroup', { name: 'Table detail' });
-    expect([...group.querySelectorAll('[role="radio"]')].map((r) => r.textContent)).toEqual(['Names', 'Keys', 'All']);
-    expect(screen.getByRole('radio', { name: 'Key columns only' }).getAttribute('aria-checked')).toBe('true');
+    expect(screen.getByRole('button', { name: 'Columns: Keys' })).toBeTruthy();
+    expect(screen.queryByRole('radiogroup', { name: 'Table detail' })).toBeNull();
     expect(screen.queryByRole('button', { name: /expand all columns|collapse all columns/i })).toBeNull();
   });
 
   it('is there on a read-only diagram too (a view preference, not an edit)', () => {
     mockStoreState.domain = { ...mockSubjectArea, stage: 'physical' as const, readOnly: true };
+    mockStoreState.tableDetail = 'all';
     render(<Toolbar {...defaultProps} />);
-    expect(screen.getByRole('radiogroup', { name: 'Table detail' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Columns: All' })).toBeTruthy();
   });
 });

@@ -573,7 +573,7 @@ function describeLoadWarning(warning: TableLoadWarning): string {
 }
 
 function TableNodeComponent({ id, data, selected }: NodeProps<TableFlowNode>) {
-  const { modelName, tableName, label, stage, layer, layerConfig, schema, tableLayer, tableLayerConfig, otherLayer, shownSchema, singleLayer, alias, columns, grain, meta, dimmed, readOnly, isGhost, ghostReason, provenance, loadError, loadWarning, isStub, isExpanded = false, tableDetail, onToggleExpansion, discrepancy, discrepancySourceStage, discrepancyTargetStage } = data;
+  const { modelName, tableName, label, stage, layer, layerConfig, schema, tableLayer, tableLayerConfig, otherLayer, shownSchema, singleLayer, alias, columns, grain, meta, dimmed, readOnly, isGhost, ghostReason, provenance, loadError, loadWarning, isStub, isExpanded = false, tableDetail, columnFilter, onToggleExpansion, discrepancy, discrepancySourceStage, discrepancyTargetStage } = data;
   const openNodeContextMenu = useEditorStore((s) => s.openNodeContextMenu);
   // Hover preview (useHoverFocus): the hovered table and its related tables
   // stay bright. A primitive, so a table outside the focus never re-renders.
@@ -602,14 +602,17 @@ function TableNodeComponent({ id, data, selected }: NodeProps<TableFlowNode>) {
   // this table's own override, and the stub rule (PK / NK only), all decided
   // by the helper the size estimate also calls.
   const visible = useMemo(
-    () => resolveVisibleColumns({ columns, isStub, isExpanded, tableDetail, loadError }),
-    [columns, isExpanded, isStub, tableDetail, loadError],
+    () => resolveVisibleColumns({ columns, isStub, isExpanded, tableDetail, columnFilter, loadError }),
+    [columns, isExpanded, isStub, tableDetail, columnFilter, loadError],
   );
   const { columns: displayColumns, hiddenCount, toggle, toggleInFooter, isFullList } = visible;
   // The button row under the columns; at the name level the footer is the button instead.
   const rowToggle = toggleInFooter ? null : toggle;
   // With a level the buttons name what they do; without one they read as before.
   const hasLevel = tableDetail != null;
+  // With a column filter the `keys` level is no longer "the keys": the way
+  // back names what it shows. A stub lists its keys whatever the filter.
+  const closedNoun = columnFilter != null && !isStub ? 'matching' : 'key';
   const rowNoun = isStub ? 'key column' : 'column';
   // A stub's footer counts its key columns: all of them at a level, the rows drawn without one (as before).
   const stubKeyCount = hasLevel ? visible.expandedCount : displayColumns.length;
@@ -841,10 +844,10 @@ function TableNodeComponent({ id, data, selected }: NodeProps<TableFlowNode>) {
             className="model-node__expand-button"
             onClick={handleToggleClick}
             title={hasLevel
-              ? (tableDetail === 'name' ? 'Show only the name of this table again' : 'Show only the key columns of this table again')
+              ? (tableDetail === 'name' ? 'Show only the name of this table again' : `Show only the ${closedNoun} columns of this table again`)
               : 'Show fewer columns'}
           >
-            {hasLevel ? (tableDetail === 'name' ? 'Show name only' : 'Show keys only') : 'Show less'}
+            {hasLevel ? (tableDetail === 'name' ? 'Show name only' : closedNoun === 'key' ? 'Show keys only' : 'Show matching only') : 'Show less'}
           </button>
         )}
 

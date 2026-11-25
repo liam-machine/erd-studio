@@ -5,6 +5,7 @@
  *   - `dimmed`: search-miss or not-connected-to-selection dimming (F402)
  *   - `isExpanded` / `onToggleExpansion`: column expansion (F405)
  *   - `tableDetail`: the diagram's table detail level
+ *   - `columnFilter`: which columns its `keys` level shows
  *
  * `applyNodeOverlays` is a pure function that preserves object identity for
  * every node/edge whose overlay values did not change, so React Flow's
@@ -31,7 +32,7 @@ import type {
 } from '../types/graph';
 import { matchesTableSearch } from './modelLabels';
 import { computeCanvasFocus } from './canvasFocus';
-import type { TableDetail } from './tableDetail';
+import type { ColumnFilter, TableDetail } from './tableDetail';
 
 export type GraphNode = TableFlowNode | AnnotationFlowNode;
 export type GraphEdge = FkFlowEdge | AnnotationFlowEdge;
@@ -52,6 +53,12 @@ export interface OverlayState {
    * no level, and the nodes carry none (they draw as before the levels).
    */
   tableDetail?: TableDetail | null;
+  /**
+   * Which columns the `keys` level shows, copied to every table. Compared by
+   * identity: the store keeps one object per filter value, so a filter that
+   * did not change leaves every node as it was.
+   */
+  columnFilter?: ColumnFilter | null;
 }
 
 /**
@@ -66,6 +73,7 @@ export function applyNodeOverlays(
 ): { nodes: GraphNode[]; edges: GraphEdge[] } {
   const { selectedNode, selectedEdge, searchQuery, isExpanded, toggleExpansion } = state;
   const tableDetail = state.tableDetail ?? undefined;
+  const columnFilter = state.columnFilter ?? undefined;
   const hasSelection = selectedNode !== null || selectedEdge !== null;
   // The shared connectivity rule (`computeCanvasFocus`): a selected node and
   // its FK neighbours, or a selected edge's two endpoints. An unknown edge
@@ -91,6 +99,7 @@ export function applyNodeOverlays(
       (data.dimmed ?? false) === dimmed &&
       (data.isExpanded ?? false) === expanded &&
       data.tableDetail === tableDetail &&
+      data.columnFilter === columnFilter &&
       data.onToggleExpansion === toggleExpansion
     ) {
       return node;
@@ -103,6 +112,7 @@ export function applyNodeOverlays(
         dimmed,
         isExpanded: expanded,
         tableDetail,
+        columnFilter,
         onToggleExpansion: toggleExpansion,
       },
     } as TableFlowNode;

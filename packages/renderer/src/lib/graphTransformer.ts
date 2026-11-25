@@ -29,7 +29,7 @@ import type {
 } from '../types/graph';
 import { RATIONALE_FIELD_KEYS } from '@erd-studio/core';
 import { resolveNodeDimensions } from './nodeSizing';
-import type { TableDetail } from './tableDetail';
+import type { ColumnFilter, TableDetail } from './tableDetail';
 import { columnPairs, foldComposites, relationshipDisplayKey, relationshipEdgeId } from './relationshipDisplayKey';
 import { computeTableLabels, headerName } from './modelLabels';
 import { isSingleLayerProject } from './layerCues';
@@ -62,6 +62,8 @@ export interface TransformOptions {
   isExpanded?: (modelName: string) => boolean;
   /** The diagram's table detail level, for the same size estimate. Absent: no level. */
   tableDetail?: TableDetail;
+  /** Which columns the `keys` level shows, for the size estimate; absent is the three key kinds. */
+  columnFilter?: ColumnFilter;
 }
 
 // ---------------------------------------------------------------------------
@@ -192,6 +194,7 @@ export function transformSubjectArea(
           ...data,
           isExpanded: options?.isExpanded?.(id) ?? false,
           ...(options?.tableDetail ? { tableDetail: options.tableDetail } : {}),
+          ...(options?.columnFilter ? { columnFilter: options.columnFilter } : {}),
         },
         measured: undefined,
       });

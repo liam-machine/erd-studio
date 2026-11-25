@@ -183,3 +183,29 @@ describe('applyNodeOverlays table detail level', () => {
     expect(applyNodeOverlays(nodes, [], { ...baseState, tableDetail: null }).nodes).toBe(nodes);
   });
 });
+
+describe('applyNodeOverlays: the column filter', () => {
+  const filter = { primaryKeys: true, foreignKeys: false, naturalKeys: true, namePattern: '*_at' };
+
+  it('copies the filter to every table, and leaves annotations alone', () => {
+    const note = { id: 'n', type: 'annotation', position: { x: 0, y: 0 }, data: { text: 'x' } } as unknown as AnnotationFlowNode;
+    const nodes = [makeNode('a', { onToggleExpansion: toggle }), note];
+    const result = applyNodeOverlays(nodes, [], { ...baseState, tableDetail: 'keys', columnFilter: filter });
+    expect((result.nodes[0] as TableFlowNode).data.columnFilter).toBe(filter);
+    expect(result.nodes[1]).toBe(note);
+  });
+
+  it('the same filter object changes nothing; a new one rebuilds; null takes it off again', () => {
+    const state = { ...baseState, tableDetail: 'keys' as const, columnFilter: filter };
+    const first = applyNodeOverlays([makeNode('a', { onToggleExpansion: toggle })], [], state);
+    expect(applyNodeOverlays(first.nodes, [], state).nodes).toBe(first.nodes);
+
+    const other = { ...filter, namePattern: 'date' };
+    const second = applyNodeOverlays(first.nodes, [], { ...state, columnFilter: other });
+    expect(second.nodes).not.toBe(first.nodes);
+    expect((second.nodes[0] as TableFlowNode).data.columnFilter).toBe(other);
+
+    const cleared = applyNodeOverlays(second.nodes, [], { ...state, columnFilter: null });
+    expect((cleared.nodes[0] as TableFlowNode).data.columnFilter).toBeUndefined();
+  });
+});
