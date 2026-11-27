@@ -68,8 +68,11 @@ The read-only `erd-studio` helper (installed in `~/.erd-studio-cli` by **Set Up 
 | Relationships, with their names and composite keys | `Ref` lines, written from the foreign key |
 | Sticky notes, their colour and linked table | `Note` blocks |
 | Table and sticky-note positions | `erd_layout` in the `Project` |
+| A table's sample rows (up to 100) | a `records` block at the end of the table, a value from an enum written as text |
 
 dbdiagram.io and dbdocs show the properties on each table and column, rather than burying them in notes.
+
+Sample rows can be real data. Look at what the export holds before you share it or push it to dbdiagram.io. The plain DBML and Mermaid exports never write rows.
 
 ## What doesn't
 
@@ -98,6 +101,7 @@ What to expect:
 - **A table already in your Table Library is used as it is**, never overwritten, matching names regardless of case (in a DBML project, in the same schema), **when it has the same columns**. One with other columns is imported as its own table, named after the new diagram (`sales_customer`), so nothing in your Table Library changes. If you changed one of those tables in dbdiagram.io and want the project's table to take the change, edit it in the project, or delete it from the Table Library first and import again.
 - **Names ERD Studio can't use are fixed.** A table called `Order Items` becomes `Order_Items`. Two tables called `date` in the `silver` and `gold` schemas keep their name in a DBML project, one in each schema folder; a project from before 2.0, whose names are unique across the project, gets `silver_date` and `gold_date`. The original name is kept as the table's warehouse name (`alias`) when it is a valid one, as `date` is there; otherwise, as for `Order Items`, it is kept under `dbml` in the table's metadata (`meta.dbml.name`). The summary lists each change.
 - **DBML settings ERD Studio has no field for are kept.** Not null, unique, defaults, increments, checks, enum values, indexes, header colours and another tool's own properties are saved under `dbml` in the table's or column's metadata (`meta`, a `meta_json` property in a `.dbml` table), so the next export carries them back out.
-- **Some things are left out**, and the summary lists them: sample rows (`Records`), a relationship's `delete` / `update` actions, colour and `inactive` flag, the project's database type, table groups other than the layer, and diagram views.
+- **Sample rows (`records`) are kept** for the tables the import creates in a DBML project: up to 100 per table, a value from an enum as text. The summary names the tables and counts what it did not keep (rows past the first 100, a row that would start with a minus or plus sign, rows for a table already in your Table Library, and every row in a project from before 2.0, which has no place for them).
+- **Some things are left out**, and the summary lists them: a relationship's `delete` / `update` actions, colour and `inactive` flag, the project's database type, table groups other than the layer, and diagram views.
 
 Property names are read with or without an `erd_` prefix (`erd_grain` as well as `grain`), for teams whose own DBML already uses the plain name for something else.

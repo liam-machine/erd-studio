@@ -13,6 +13,8 @@ heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that
 ### Added
 
 - **Add a table's related tables from its right-click menu.** Right-click a table on the diagram and choose **Add Related Tables (n)** to bring every table it has a relationship with, either way, onto the diagram in one step (one undo takes them all back off). The number counts tables, not relationships, and the item only appears when there is something to add: on an editable diagram, on the Logical tab. It adds what the detail panel's **Add all related** button adds. (#365)
+- **Import DBML… keeps a table's sample rows.** A `records` block (DBML's sample data, nested in a table or written separately) is now kept for each table the import creates in a DBML project: up to 100 rows per table, each value as the file wrote it, with columns renamed as the table's are and a value from an enum written as plain text. The rows show in the draft and in the table's Detail panel. The summary says which tables kept rows and counts what it did not keep (rows past the first 100, rows that would start with a minus or plus sign, rows for a table already in your Table Library, and every row in a project that stores tables as YAML); it never shows a value.
+- **The Rich DBML export writes each table's sample rows**, as a `records` block at the end of the table: up to 100 rows, a value from an enum as text, with a comment counting any rows left in the table file. dbdiagram.io and other DBML 9.1+ tools read them. Sample rows can be real data, so check them before you share or push the export. Plain DBML and Mermaid exports never write rows.
 
 ### Changed
 
