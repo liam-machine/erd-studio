@@ -15,6 +15,7 @@ import type { FkDialogEditData } from '../../store/editorStore';
 import type { WebviewMessage } from '../../../src/types/messages';
 import { swapCardinality } from '@erd-studio/renderer/editor';
 import { ANNOTATION_COLORS } from '@erd-studio/renderer/editor';
+import { ADD_TABLES_LIMIT, addTablesMessage, relatedTablesToAdd } from '@erd-studio/renderer/editor';
 import { CARDINALITY_NAMES } from '../../lib/relationshipDialog';
 import './ContextMenu.css';
 
@@ -30,23 +31,46 @@ const CARDINALITY_OPTIONS: { value: Cardinality; label: string }[] = (
   ['many-to-one', 'one-to-one', 'one-to-many', 'many-to-many'] as const
 ).map((value) => ({ value, label: CARDINALITY_NAMES[value] }));
 
-/** One item of a table's context menu: the message it posts with `{ modelName }`. */
+/**
+ * One item of a table's context menu: the message it posts with
+ * `{ modelName }`, except `addRelatedTables`, which posts
+ * `addExistingModel(s)` for the related tables (`addTablesMessage`).
+ */
 export interface TableMenuAction {
-  id: 'openModelFile' | 'showTableOnOtherDiagrams' | 'moveTable' | 'copyTablePath' | 'revealTableInLibrary' | 'removeModel';
+  id: 'openModelFile' | 'showTableOnOtherDiagrams' | 'addRelatedTables' | 'moveTable' | 'copyTablePath' | 'revealTableInLibrary' | 'removeModel';
   label: string;
   title: string;
 }
 
+/** The Add Related Tables item's label: how many tables it adds (at most `ADD_TABLES_LIMIT` in one go). */
+export function addRelatedTablesLabel(count: number): string {
+  return count > ADD_TABLES_LIMIT
+    ? `Add Related Tables (${ADD_TABLES_LIMIT} of ${count})`
+    : `Add Related Tables (${count})`;
+}
+
 /**
  * A table's context-menu items, in order. A read-only canvas (the physical
- * stage) keeps only the ones that write nothing; Move Table… is for a DBML
- * table (one with a layer of its own). Remove from Diagram asks twice.
+ * stage) keeps only the ones that write nothing; Add Related Tables is there
+ * when the table has related tables off this diagram (`related`, a count of
+ * tables, not relationships; #365); Move Table… is for a DBML table (one
+ * with a layer of its own). Remove from Diagram asks twice.
  */
-export function tableMenuActions(options: { readOnly: boolean; dbml: boolean }): TableMenuAction[] {
+export function tableMenuActions(options: { readOnly: boolean; dbml: boolean; related?: number }): TableMenuAction[] {
+  const related = options.related ?? 0;
   const actions: TableMenuAction[] = [
     { id: 'openModelFile', label: 'Open Table File', title: "Open the table's file" },
     { id: 'showTableOnOtherDiagrams', label: 'Show on Other Diagrams…', title: 'Open another diagram that shows this table' },
   ];
+  if (!options.readOnly && related > 0) {
+    actions.push({
+      id: 'addRelatedTables',
+      label: addRelatedTablesLabel(related),
+      title: related === 1
+        ? 'Add the table this one has a relationship with to this diagram'
+        : 'Add every table this one has a relationship with (either way) to this diagram',
+    });
+  }
   if (!options.readOnly && options.dbml) {
     actions.push({ id: 'moveTable', label: 'Move Table…', title: 'Move the table to another layer or schema folder' });
   }
@@ -74,7 +98,10 @@ export function ContextMenu() {
   const closeContextMenu = useEditorStore((s) => s.closeContextMenu);
   const openFkDialogForEdit = useEditorStore((s) => s.openFkDialogForEdit);
   const domain = useEditorStore((s) => s.domain);
+  const canvasContext = useEditorStore((s) => s.canvasContext);
   const isReadOnly = domain?.readOnly ?? false;
+  // A table's related tables off the diagram (the host's context, logical stage only): Add Related Tables (n).
+  const related = contextMenu?.type === 'node' ? relatedTablesToAdd(canvasContext, domain, contextMenu.modelName) : [];
 
   // Track whether cardinality dropdown is open
   const [cardinalityOpen, setCardinalityOpen] = useState(false);
@@ -96,11 +123,15 @@ export function ContextMenu() {
     }
   }, [contextMenu]);
 
-  // Adjust position after render to keep menu within viewport bounds
+  // A new menu asks afresh before removing.
+  useLayoutEffect(() => {
+    if (contextMenu) setConfirmingDelete(false);
+  }, [contextMenu]);
+
+  // Adjust position after render to keep menu within viewport bounds (again
+  // when Add Related Tables comes or goes: the context can arrive while it is open).
   useLayoutEffect(() => {
     if (!contextMenu || !menuRef.current) return;
-
-    setConfirmingDelete(false);
 
     const menu = menuRef.current;
     const menuRect = menu.getBoundingClientRect();
@@ -122,7 +153,7 @@ export function ContextMenu() {
     newY = Math.max(VIEWPORT_PADDING, Math.min(newY, viewportHeight - menuRect.height - VIEWPORT_PADDING));
 
     setAdjustedPosition({ x: newX, y: newY });
-  }, [contextMenu]);
+  }, [contextMenu, related.length]);
 
   // Adjust cardinality dropdown position when it opens
   useLayoutEffect(() => {
@@ -255,6 +286,7 @@ export function ContextMenu() {
       readOnly: isReadOnly,
       // Move Table moves DBML table files: only a table with a layer of its own has one.
       dbml: domain?.models.find((m) => m.name === modelName)?.layer !== undefined,
+      related: related.length,
     });
 
     const runAction = (action: TableMenuAction) => {
@@ -262,7 +294,13 @@ export function ContextMenu() {
         setConfirmingDelete(true);
         return;
       }
-      vscode.postMessage({ type: action.id, payload: { modelName } } as WebviewMessage);
+      if (action.id === 'addRelatedTables') {
+        // The same message as the detail panel's "Add all related": one edit, one undo step.
+        const message = addTablesMessage(related);
+        if (message) vscode.postMessage(message);
+      } else {
+        vscode.postMessage({ type: action.id, payload: { modelName } } as WebviewMessage);
+      }
       closeContextMenu();
     };
 

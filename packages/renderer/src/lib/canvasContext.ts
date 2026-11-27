@@ -3,7 +3,13 @@
  * and "Not on this diagram" list, the node's "+n" chip). A viewer never has
  * one, so every helper answers "nothing" for a null context.
  */
-import type { CanvasContext, DisplaySubjectArea, OffDiagramRelationship } from '@erd-studio/core';
+import type {
+  AddExistingModelMessage,
+  AddExistingModelsMessage,
+  CanvasContext,
+  DisplaySubjectArea,
+  OffDiagramRelationship,
+} from '@erd-studio/core';
 
 const NONE: readonly OffDiagramRelationship[] = Object.freeze([]);
 
@@ -57,6 +63,47 @@ export function offDiagramTableRows(rows: readonly OffDiagramRelationship[]): Ar
     out.push(r.otherTablePath !== undefined ? { otherTable: r.otherTable, otherTablePath: r.otherTablePath } : { otherTable: r.otherTable });
   }
   return out;
+}
+
+/** Most tables one add asks for (the extension's `addExistingModels` limit). */
+export const ADD_TABLES_LIMIT = 200;
+
+/**
+ * The message that adds `tables` (from {@link offDiagramTableRows}) to the
+ * diagram: `addExistingModel` for one, `addExistingModels` for several (the
+ * first {@link ADD_TABLES_LIMIT}), each with its file when the host named
+ * one (`''` for a table without, beside one with); `null` for none. The
+ * detail panel's "+ Add" and "Add all related" and the editor's
+ * "Add Related Tables" all post through this, so they ask for the same thing.
+ */
+export function addTablesMessage(
+  tables: ReadonlyArray<{ otherTable: string; otherTablePath?: string }>,
+): AddExistingModelMessage | AddExistingModelsMessage | null {
+  if (tables.length === 0) return null;
+  // A table the host named by its file is added by it too (another schema folder may have its name).
+  const byFile = tables.some((t) => t.otherTablePath !== undefined);
+  if (tables.length === 1) {
+    const [only] = tables;
+    return { type: 'addExistingModel', payload: { modelName: only.otherTable, ...(byFile ? { sourcePath: only.otherTablePath! } : {}) } };
+  }
+  const picked = tables.slice(0, ADD_TABLES_LIMIT);
+  return {
+    type: 'addExistingModels',
+    payload: { modelNames: picked.map((t) => t.otherTable), ...(byFile ? { sourcePaths: picked.map((t) => t.otherTablePath ?? '') } : {}) },
+  };
+}
+
+/**
+ * The tables related to `modelName` (a relationship either way) that are
+ * not on the diagram, each once: what "Add Related Tables" adds. Empty off
+ * the logical stage and without the host's context, like {@link offDiagramRows}.
+ */
+export function relatedTablesToAdd(
+  context: CanvasContext | null,
+  domain: DisplaySubjectArea | null,
+  modelName: string,
+): Array<{ otherTable: string; otherTablePath?: string }> {
+  return offDiagramTableRows(offDiagramRows(context, domain, modelName));
 }
 
 /** The distinct tables of `rows`, in their order. */
