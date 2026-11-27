@@ -1166,7 +1166,13 @@ export class TableLibraryService {
     try {
       // Its schema folder is the schema of an unqualified Table (§1.2), as core's loader reads it.
       const schemaFolder = dbmlTreePathOf(this.semanticRelative(filePath))?.schema;
-      reading = parseTableDbml(fs.readFileSync(filePath, 'utf-8'), dbmlStem(path.basename(filePath)), schemaFolder !== undefined ? { schemaFolder } : {});
+      // The one place the extension asks for a table's sample rows (D37): the Detail panel shows them
+      // read-only. They ride on the table as a sidecar that no writer reads and no log line, message or
+      // telemetry field carries; every other reader (Convert, doctor, the CLI's snapshot) goes without.
+      reading = parseTableDbml(fs.readFileSync(filePath, 'utf-8'), dbmlStem(path.basename(filePath)), {
+        ...(schemaFolder !== undefined ? { schemaFolder } : {}),
+        sampleData: true,
+      });
     } catch (err) {
       reading = { ok: false, error: { kind: 'read', message: err instanceof Error ? err.message : String(err) } };
     }

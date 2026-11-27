@@ -2257,7 +2257,8 @@ export function memoisedDbmlReader(base: DbmlStorageReader = dbmlStorageReader):
   const relationships = new Map<string, ReturnType<DbmlStorageReader['readRelationships']>>();
   return {
     parseTable: (text, fileStem, options) => {
-      const key = `${fileStem}\u0000${options?.schemaFolder ?? ''}\u0000${text}`;
+      // A reading with sample rows is never served to a caller that did not ask for them (G4).
+      const key = `${fileStem}\u0000${options?.schemaFolder ?? ''}\u0000${options?.sampleData ? '1' : ''}\u0000${text}`;
       let reading = tables.get(key);
       if (!reading) { reading = base.parseTable(text, fileStem, options); tables.set(key, reading); }
       return structuredClone(reading);
@@ -2299,7 +2300,9 @@ function dbmlTablesAsYaml(set: Readonly<Record<string, string>>, reader: DbmlSto
   for (const { table } of tables) {
     if (yamlNames.has(lower(table.name)) || out.has(lower(table.name))) continue;
     const relationships = attached.byOwner.get(lower(table.name)) ?? [];
-    out.set(lower(table.name), stringifyYaml({ ...table, relationships }));
+    // A second guard behind the reader's default (no rows unless asked for): sample rows never reach a YAML text.
+    const { sampleData: _sampleData, ...rest } = table as SemanticTable & { sampleData?: unknown };
+    out.set(lower(table.name), stringifyYaml({ ...rest, relationships }));
   }
   return out;
 }

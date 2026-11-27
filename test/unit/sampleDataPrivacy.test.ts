@@ -13,6 +13,7 @@
  * - Format Document's log line for a file with a broken block;
  * - the telemetry heartbeat with its trail;
  * - Import DBML's log, ledger and report, for a broken block and a top-level one;
+ * - the canvas's "Not shown" notes (the `filesNotShown` payload);
  * - `doctor`, `inventory`, `diff` and `changes` with `--json`.
  *
  * Modelled on feedbackRedaction.test.ts: the wiring is tested, not only the
@@ -45,6 +46,7 @@ import { importDbml, type ImportDbmlDeps, type ImportDbmlUi } from '../../src/co
 import { buildImportReportView } from '../../src/services/importReport';
 import { _resetImportReports, latestImportReport } from '../../src/services/importReportStore';
 import { main } from '../../src/cli/index';
+import { collectFilesNotShown } from '../../src/services/filesNotShown';
 import type { FeedbackDraft } from '../../src/types/feedback';
 import { fakeDraftPreview } from './helpers/draftDriver';
 
@@ -174,6 +176,23 @@ describe('the log, the host error log and Send Feedback', () => {
     const unified = service.getSubjectArea(path.join(root, '.erd-studio', 'gold', 'diagrams', 'catalog.dbml'));
     expect(unified).toBeDefined();
     expect(recentLogLines().join('\n')).not.toMatch(LEAK);
+  });
+});
+
+describe('the canvas\'s "Not shown" notes (the filesNotShown payload)', () => {
+  it('name each table whose rows do not read by its file and line, and hold no value', () => {
+    const root = project();
+    const library = readAll(root);
+    const memberTables = Object.keys(TABLES).flatMap((name) => {
+      const found = library.dbmlTableProblems(name);
+      return found ? [{ file: path.relative(path.join(root, '.erd-studio'), found.filePath).split(path.sep).join('/'), problems: found.problems }] : [];
+    });
+    const items = collectFilesNotShown({ importDrift: [], canAddImports: false, memberTables, relationshipsFiles: [], unreadFiles: [], shown: (rel) => `.erd-studio/${rel}` });
+    expect(items.map((n) => [n.code, n.file, n.line])).toEqual([
+      ['sampleDataNotRead', '.erd-studio/gold/tables/gold/dim_dotted.dbml', 5],
+      ['sampleDataNotRead', '.erd-studio/gold/tables/gold/dim_header.dbml', 5],
+    ]);
+    expect(JSON.stringify({ items })).not.toMatch(LEAK);
   });
 });
 

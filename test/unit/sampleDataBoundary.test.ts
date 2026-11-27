@@ -63,7 +63,19 @@ const SAMPLE_DATA_FILES: readonly string[] = [
   'packages/core/src/dbml/index.ts',
   'packages/core/src/displayDomain.ts',
   'packages/core/src/loadDisplayDomain.ts',
+  // The host: the one table read that asks for rows, and Convert's guard that drops them before a YAML text.
+  'src/services/logicalModelService.ts',
+  'src/services/dbmlConversion.ts',
+  // The renderer: the Detail panel's read-only Sample data section, and the panel that places it.
+  'packages/renderer/src/components/DetailPanel/SampleDataSection.tsx',
+  'packages/renderer/src/components/DetailPanel/DetailPanel.tsx',
 ];
+
+/**
+ * The sample-data type and field names. The "Not shown" note's code for rows that do not read
+ * (`sampleDataNotRead`, and the helpers named after it) names no row: it is not one of them.
+ */
+const SAMPLE_DATA_NAMES = /sampleData(?!NotRead)|SampleData/;
 
 describe('sample rows stay where they are allowed (G5)', () => {
   it('no runtime code calls a parser API whose messages quote cell values', () => {
@@ -92,8 +104,13 @@ describe('sample rows stay where they are allowed (G5)', () => {
   });
 
   it('the sample-data names appear only in the allowed files', () => {
-    const named = runtimeFiles().filter((file) => /sampleData|SampleData/.test(fs.readFileSync(file, 'utf-8'))).map(rel).sort();
+    const named = runtimeFiles().filter((file) => SAMPLE_DATA_NAMES.test(fs.readFileSync(file, 'utf-8'))).map(rel).sort();
     expect(named).toEqual([...SAMPLE_DATA_FILES].sort());
+  });
+
+  it('the names pattern finds the field and the type, and not the note code', () => {
+    for (const line of ['model.sampleData', 'type X = SampleData;', 'sampleData: true', 'tableSampleDataOf(t)']) expect(SAMPLE_DATA_NAMES.test(line), line).toBe(true);
+    for (const line of ["code: 'sampleDataNotRead'", 'sampleDataNotReadMessage(file, line)']) expect(SAMPLE_DATA_NAMES.test(line), line).toBe(false);
   });
 
   it('no allowed file sends anything off the machine (telemetry) or reads the log buffer (Send Feedback)', () => {
@@ -102,7 +119,7 @@ describe('sample rows stay where they are allowed (G5)', () => {
       expect(FEEDBACK_LOG_READERS, file).not.toContain(file);
     }
     for (const file of [...TELEMETRY_MODULES, ...FEEDBACK_LOG_READERS]) {
-      expect(fs.readFileSync(path.join(ROOT, file), 'utf-8'), file).not.toMatch(/sampleData|SampleData/);
+      expect(fs.readFileSync(path.join(ROOT, file), 'utf-8'), file).not.toMatch(SAMPLE_DATA_NAMES);
     }
   });
 });

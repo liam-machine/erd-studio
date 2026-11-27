@@ -657,6 +657,27 @@ describe('DisplaySubjectArea golden output (extension host)', () => {
     });
   });
 
+  // Sample rows (D37): the extension reads each DBML table's rows for the Detail panel, so the canvas
+  // draws the sample-rows twin as core draws it with `readSampleData` (sample-rows.shop.rows.display.json,
+  // owned by core's loadDisplayDomain.golden.test.ts): every table, column and row alike.
+  describe('the sample-rows twin (packages/core/test/fixtures/dbml/sample-rows), read by the host', () => {
+    const root = path.join(FIXTURES, 'dbml', 'sample-rows');
+
+    it('posts the tables of sample-rows.shop.rows.display.json, rows included', async () => {
+      if (UPDATE) return;
+      const posted = await sendSubjectAreaData(buildHost(root), subjectAreaFile(root, 'gold/diagrams/shop.dbml'));
+      logLines = [];
+      expect(posted).toHaveLength(1);
+      expect(posted[0].type).toBe('domainLoaded');
+      const payload = (normalise(posted[0], root) as { payload: Record<string, unknown> }).payload;
+      const golden = readGolden('sample-rows.shop.rows.display.json') as Record<string, unknown>;
+      expect(payload.models).toEqual(golden.models);
+      expect(payload.relationships).toEqual(golden.relationships);
+      expect((payload.models as Array<{ name: string; sampleData?: unknown }>).filter((m) => m.sampleData !== undefined).map((m) => m.name).sort())
+        .toEqual(['dim_customer', 'dim_product', 'dim_region', 'fct_order_line']);
+    });
+  });
+
   it('the golden directory holds exactly the expected files', () => {
     if (UPDATE) return;
     expect(fs.readdirSync(GOLDEN_DIR).sort()).toEqual(EXPECTED_FILES);
