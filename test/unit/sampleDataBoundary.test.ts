@@ -5,7 +5,7 @@
  *
  * - The parser's data lints quote cell values (`Duplicate PK: … = "…"`,
  *   `FK violation: … = …`, `Numeric value … exceeds precision`): no runtime
- *   code calls `getInfos()`, reads `parse.warnings`, uses
+ *   code calls `getInfos()` or `getWarnings()`, reads `parse.warnings`, uses
  *   `DBMLDiagnosticsProvider` or the validate helpers.
  * - The sample-data type and field names appear only in the files listed
  *   here, and none of those is a telemetry module or a reader of the log's
@@ -45,7 +45,7 @@ const rel = (file: string): string => path.relative(ROOT, file).split(path.sep).
 const runtimeFiles = (): string[] => RUNTIME_DIRS.flatMap(filesUnder);
 
 /** The parser APIs whose messages quote cell values. */
-const FORBIDDEN_PARSER_APIS = /\bgetInfos\b|\bparse\s*\??\.\s*warnings\b|\bDBMLDiagnosticsProvider\b|\bvalidateForeignKeys\b|\bvalidatePrimaryKey\b|\bvalidateUnique\b/;
+const FORBIDDEN_PARSER_APIS = /\bgetInfos\b|\bgetWarnings\b|\bparse\s*\??\.\s*warnings\b|\bDBMLDiagnosticsProvider\b|\bvalidateForeignKeys\b|\bvalidatePrimaryKey\b|\bvalidateUnique\b/;
 
 /**
  * The files that may name the sample-data types or field. Stage 1 has the
@@ -71,6 +71,8 @@ describe('sample rows stay where they are allowed (G5)', () => {
   it('the pattern catches each forbidden API', () => {
     for (const line of [
       'compiler.interpretFile(fp).getInfos()',
+      'compiler.interpretFile(fp).getWarnings()',
+      'compiler.interpretProject(fp).getWarnings()',
       'compiler.parse.warnings(entry)',
       'const p = new DBMLDiagnosticsProvider(compiler)',
       'validateForeignKeys(db)',

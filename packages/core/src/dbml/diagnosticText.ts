@@ -19,7 +19,8 @@
  *   read as DBML`.
  *
  * Any other message is the parser's own. A false match costs only a plainer
- * message. Nothing here reads the parser's data lints (its infos, its
+ * message. A reader that quotes a node in its own message (a `use` or `Ref`
+ * to move) quotes it through {@link messageSourceOf}. Nothing here reads the parser's data lints (its infos, its
  * warnings or its diagnostics provider): their messages quote values
  * (a boundary test keeps them out of every runtime file).
  */
@@ -38,6 +39,20 @@ export const UNREADABLE_LINE_MESSAGE = 'this line does not read as DBML';
 /** Whether `text` may hold a `records` token (a cheap test: a comment or a string may match too). */
 export function mayHoldRecords(text: string): boolean {
   return /\brecords\b/i.test(text);
+}
+
+/**
+ * A node's source, collapsed to one line, for a message ERD Studio writes
+ * itself (a `use` or `Ref` to move, a Ref that is not drawn). When the
+ * slice may hold a `records` block (a parser accepts one nested where no
+ * reader looks, such as inside a `Ref r { … }`), only its text up to the
+ * first `{` is kept, as in `Ref r {…}`, so no row rides along.
+ */
+export function messageSourceOf(text: string, node: AstNode): string {
+  const slice = text.slice(node.start, node.end);
+  const brace = slice.indexOf('{');
+  const shown = mayHoldRecords(slice) && brace >= 0 ? `${slice.slice(0, brace + 1)}…}` : slice;
+  return shown.replace(/\s+/g, ' ').trim();
 }
 
 /**

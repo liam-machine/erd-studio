@@ -24,6 +24,7 @@ import { describe, expect, it } from 'vitest';
 import * as DbmlParse from '@dbml/parse';
 
 import { parseTableDbml } from '../../src/dbml/readTable';
+import { readRelationshipsDbml } from '../../src/dbml/readRelationships';
 import { editTableDbml } from '../../src/dbml/writeTable';
 import { compileDbmlProject } from '../../src/dbml/compileProject';
 import { formatDbml } from '../../src/dbml/format';
@@ -59,6 +60,8 @@ const SHAPES: Record<string, (name: string) => string> = {
   'a top-level Records block with a dotted value': (n) => `${head(n)}}\n\nRecords gold.${n}(id, name) {\n  1, ${SENTINEL}.y\n}\n`,
   'two blocks': (n) => `${head(n)}\n  records (id, name) {\n    1, '${SENTINEL}'\n  }\n  records (id, name) {\n    2, ${SENTINEL}.y\n  }\n}\n`,
   'a header the parser does not read as records': (n) => `${head(n)}\n  records (id, name) // c\n  {\n    1, ${SENTINEL}.y\n  }\n}\n`,
+  // Every parser accepts a block nested in a Ref; the reader's own message names the Ref to move.
+  'a records block inside a Ref block': (n) => `${head(n)}}\n\nRef r {\n  gold.${n}.id > gold.${n}.id\n  records (a) { ${SENTINEL}.y }\n}\n`,
 };
 
 function thrown(fn: () => unknown): Error | undefined {
@@ -248,6 +251,31 @@ describe('a parser that throws', () => {
   });
 });
 
+describe.each(STORAGE_PARSERS)('a records block nested in a Ref (%s)', (_label, parser) => {
+  const ref = `Ref r {\n  gold.t.id > gold.t.id\n  records (a) { ${SENTINEL}.y }\n}\n`;
+
+  it('in a table file: the Ref to move is named by its head alone', () => {
+    const reading = parseTableDbml(`${head('t')}}\n\n${ref}`, 't', { schemaFolder: 'gold' }, parser);
+    if (!reading.ok) throw new Error('the table file did not read');
+    const problem = reading.problems.find((p) => p.code === 'refInTableFile');
+    expect(problem?.message).toBe('Relationships live in a relationships file (<layer>/relationships/): move `Ref r {…}` there. It is not drawn from here, and ERD Studio will not edit the file until it is moved.');
+    expect(JSON.stringify(reading)).not.toMatch(LEAK);
+  });
+
+  it('in a relationships file: the Ref that is not drawn is named by its head alone', () => {
+    const reading = readRelationshipsDbml(`use { table gold.t } from '../tables/gold/t.dbml'\n\n${ref}`, parser);
+    const problem = reading.problems.find((p) => p.code === 'unreadableRef');
+    expect(problem?.message).toMatch(/^Line 3: `Ref r \{…\}` /);
+    expect(JSON.stringify(reading)).not.toMatch(LEAK);
+  });
+
+  it('a Ref without a records block is still quoted whole', () => {
+    const reading = parseTableDbml(`${head('t')}}\n\nRef: gold.t.id > gold.t.owner_id\n`, 't', { schemaFolder: 'gold' }, parser);
+    if (!reading.ok) throw new Error('the table file did not read');
+    expect(reading.problems.find((p) => p.code === 'refInTableFile')?.message).toContain('move `Ref: gold.t.id > gold.t.owner_id` there');
+  });
+});
+
 describe("the writer's own refusals hold no value", () => {
   const HEAD = 'Table gold.t {\n  id int\n  name varchar\n  amount decimal\n\n';
   const keep = (...names: string[]): SemanticTable => ({
@@ -271,7 +299,7 @@ describe("the writer's own refusals hold no value", () => {
   });
 
   it('the cut guard (a cut that would cross a line break)', () => {
-    const text = `${HEAD}  records (id, name) {\n    1, /* a note\n    over two lines */ '${SENTINEL}'\n  }\n}\n`;
+    const text = `${HEAD}  records (id, name) {\n    1\n    , '${SENTINEL}'\n  }\n}\n`;
     const err = thrown(() => editTableDbml(text, keep('name', 'amount'), { fileStem: 't', file: 't.dbml' }));
     expect(err).toBeDefined();
     expect(err!.message).not.toMatch(LEAK);

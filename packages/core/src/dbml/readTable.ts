@@ -47,7 +47,7 @@ import { findConflictMarkers } from '../mergeConflict.js';
 import { DBML_QUOTE_HINT, DBML_TABLE_QUOTE_HINT_CODES, classifyDbmlTableError, type DbmlTableStructureRule } from '../domain.js';
 import type { DbmlMetadataTarget, TableLoadError } from '../types/semantic.js';
 import type { DbmlParserModule } from './parserModule.js';
-import { dbmlMessageSanitiser, parserStoppedMessage, type DbmlMessageSanitiser } from './diagnosticText.js';
+import { dbmlMessageSanitiser, messageSourceOf, parserStoppedMessage, type DbmlMessageSanitiser } from './diagnosticText.js';
 import {
   PINNED_PARSER,
   attributeName,
@@ -92,11 +92,6 @@ function diagnosticFailure(d: ParserDiagnostic, sanitise: DbmlMessageSanitiser):
   return failure(`Line ${d.line}, column ${d.column}: ${message} [${d.code}].${hint}`, {
     dbmlCode: d.code, line: d.line, column: d.column,
   });
-}
-
-/** One line of the source, collapsed to single spaces, for a message. */
-function sourceOf(text: string, node: AstNode): string {
-  return text.slice(node.start, node.end).replace(/\s+/g, ' ').trim();
 }
 
 /** The Ref line a column `[ref: <op> <target>]` stands for, as the writer would write it (FK end marked, D18). */
@@ -275,7 +270,7 @@ export function readTableFile(
       writable = false;
       problems.push({
         code: 'useInTableFile', severity: 'warning', line: lineAt(text, node.start),
-        message: `A table file needs no other file: remove \`${sourceOf(text, node)}\`. ERD Studio will not edit the file until it is gone.`,
+        message: `A table file needs no other file: remove \`${messageSourceOf(text, node)}\`. ERD Studio will not edit the file until it is gone.`,
       });
       continue;
     }
@@ -285,7 +280,7 @@ export function readTableFile(
       writable = false;
       problems.push({
         code: 'refInTableFile', severity: 'warning', line: lineAt(text, node.start),
-        message: `Relationships live in a relationships file (<layer>/relationships/): move \`${sourceOf(text, node)}\` there. It is not drawn from here, and ERD Studio will not edit the file until it is moved.`,
+        message: `Relationships live in a relationships file (<layer>/relationships/): move \`${messageSourceOf(text, node)}\` there. It is not drawn from here, and ERD Studio will not edit the file until it is moved.`,
       });
       continue;
     }
@@ -359,8 +354,8 @@ export function readTableFile(
       problems.push({
         code: 'inlineRefInTableFile', severity: 'warning', line: lineAt(text, attribute.start),
         message: line
-          ? `Move \`${sourceOf(text, attribute)}\` on ${declaredName}.${columnName} to a relationships file (<layer>/relationships/) as \`${line}\`, then remove it here. It is not drawn from here, and ERD Studio will not edit the file until it is moved.`
-          : `Move \`${sourceOf(text, attribute)}\` on ${declaredName}.${columnName} to a relationships file (<layer>/relationships/) as a Ref line, then remove it here.`,
+          ? `Move \`${messageSourceOf(text, attribute)}\` on ${declaredName}.${columnName} to a relationships file (<layer>/relationships/) as \`${line}\`, then remove it here. It is not drawn from here, and ERD Studio will not edit the file until it is moved.`
+          : `Move \`${messageSourceOf(text, attribute)}\` on ${declaredName}.${columnName} to a relationships file (<layer>/relationships/) as a Ref line, then remove it here.`,
       });
     });
     if (remove.size > 0) {
