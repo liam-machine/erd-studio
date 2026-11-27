@@ -68,6 +68,8 @@ const SAMPLE_DATA_FILES: readonly string[] = [
   // The host: the one table read that asks for rows, and Convert's guard that drops them before a YAML text.
   'src/services/logicalModelService.ts',
   'src/services/dbmlConversion.ts',
+  // The draft's strip: a reused Table Library table reaches a draft without its rows.
+  'src/services/draftDisplay.ts',
   // The renderer: the Detail panel's read-only Sample data section, and the panel that places it.
   'packages/renderer/src/components/DetailPanel/SampleDataSection.tsx',
   'packages/renderer/src/components/DetailPanel/DetailPanel.tsx',

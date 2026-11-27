@@ -1168,7 +1168,10 @@ export class TableLibraryService {
       const schemaFolder = dbmlTreePathOf(this.semanticRelative(filePath))?.schema;
       // The one place the extension asks for a table's sample rows (D37): the Detail panel shows them
       // read-only. They ride on the table as a sidecar that no writer reads and no log line, message or
-      // telemetry field carries; every other reader (Convert, doctor, the CLI's snapshot) goes without.
+      // telemetry field carries. Every read through this service carries them, the CLI's (doctor,
+      // inventory, diff, changes) and the MCP server's included, and those outputs list their fields
+      // one by one; a draft drops them from a reused table (`displayFromTables`). Readers that do not
+      // come through here (Convert and its self-check, Import's own parse) go without.
       reading = parseTableDbml(fs.readFileSync(filePath, 'utf-8'), dbmlStem(path.basename(filePath)), {
         ...(schemaFolder !== undefined ? { schemaFolder } : {}),
         sampleData: true,

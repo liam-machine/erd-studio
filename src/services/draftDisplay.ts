@@ -60,9 +60,13 @@ export interface DisplayFromTablesInput {
 /** No warning from a draft's own pipeline reaches anyone: the draft is never written. */
 const quiet = (): void => {};
 
-/** A table without its own `relationships`: the draft passes every link once, beside the tables. */
+/**
+ * A table without its own `relationships` (the draft passes every link once,
+ * beside the tables) and without the sample rows a Table Library read
+ * attaches (D37): a draft carries no rows unless they are given to it.
+ */
 function withoutRelationships(table: SemanticTable): SemanticTable {
-  const { relationships: _relationships, ...rest } = table;
+  const { relationships: _relationships, sampleData: _sampleData, ...rest } = table as SemanticTable & { sampleData?: unknown };
   return { ...rest, columns: (rest.columns ?? []).map((c) => ({ ...c })) };
 }
 
