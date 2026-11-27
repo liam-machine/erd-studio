@@ -1065,6 +1065,9 @@ export class SubjectAreaService {
     // of that name (another schema's): that model's tests must not land on them.
     const notTheirDbtModel = new Set<string>();
 
+    // Each physical table is built field by field, so a logical table's sample rows (D37) never reach it:
+    // the rows are keyed to the logical columns, and the physical stage shows what the dbt project holds.
+    // `test/unit/sampleRowsStages.test.ts` holds this.
     const models: DisplayTable[] = logicalStage.models.map(model => {
         const { byName, byRelation, dbtName, tableName, schemas } = match(model);
         if (byRelation) {

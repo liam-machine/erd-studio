@@ -6,7 +6,7 @@ import type { TableTemplate, NodePosition, Relationship, SemanticSubjectArea, Vi
 import type { DisplaySubjectArea, ExistingTablePreview, ManifestModelPreview } from './types/display.js';
 import type { LayerConfig } from './types/layer.js';
 import { computeNewTablePositions } from './positions.js';
-import { tableLoadErrorOf, tableLoadWarningOf, tableNameOf } from './types/semantic.js';
+import { tableLoadErrorOf, tableLoadWarningOf, tableNameOf, tableSampleDataOf } from './types/semantic.js';
 import { foreignKeyEnd, keysContradictedRelationships } from './relationships.js';
 import type { DbtKeyIndex } from './keyEvidence.js';
 import type { FieldList } from './fields.js';
@@ -89,6 +89,8 @@ export function toDisplaySubjectArea(domain: SemanticSubjectArea, options: ToDis
   const models = domain.models.map((model) => {
     const loadError = tableLoadErrorOf(model);
     const loadWarning = tableLoadWarningOf(model);
+    // Sample rows (D37): carried only when the reader attached them (a DBML table read with them).
+    const sampleData = tableSampleDataOf(model);
     const fkCols = fkColumnsByModel.get(model.name) ?? new Set<string>();
     const columns = (model.columns ?? []).map((col) => ({
       name: col.name,
@@ -116,6 +118,7 @@ export function toDisplaySubjectArea(domain: SemanticSubjectArea, options: ToDis
       ...(model.meta ? { meta: model.meta } : {}),
       ...(loadError ? { loadError: { ...loadError } } : {}),
       ...(loadWarning ? { loadWarning: { ...loadWarning } } : {}),
+      ...(sampleData ? { sampleData } : {}),
     };
   });
 

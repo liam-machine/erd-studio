@@ -600,6 +600,82 @@ describe('doctor via main', () => {
 });
 
 describe('doctor on native DBML storage (§7.1, S4)', () => {
+  it('a sample value the parser quotes (a dotted bare word in records) never reaches the JSON; the table reads without its rows and is reported in fixed words (D37)', async () => {
+    const root = copyFixture('dbml-native');
+    fs.writeFileSync(path.join(root, '.erd-studio', DIM_REGION), [
+      'Table gold.dim_region {',
+      '  region_key INT [pk]',
+      '  region_name VARCHAR',
+      '',
+      '  records (region_key, region_name) {',
+      '    1, zqSENTX7.north',
+      '  }',
+      '}',
+      '',
+    ].join('\n'));
+    let out = '';
+    await main(['doctor', '--project', root, '--no-dbt', '--json'], {
+      stdout: { write: (s: string) => { out += s; } },
+      stderr: { write: () => undefined },
+      cwd: tmp,
+      env: cleanEnv,
+    });
+    expect(out).not.toMatch(/SENTX7/);
+    const r = JSON.parse(out) as DoctorResult;
+    // The table is no longer unreadable: it loads without its rows, read-only. The block is one problem, an
+    // error at its line (recordsUnreadable): the compile's own diagnostic inside the block is not said again.
+    expect(r.erd.unreadableModelFiles.find((u) => u.file.endsWith('dim_region.dbml'))).toBeUndefined();
+    const problems = r.erd.dbmlProblems.filter((p) => p.file?.endsWith('dim_region.dbml'));
+    expect(problems.map((p) => ({ code: p.code, line: p.line, severity: p.severity }))).toEqual([{ code: 'recordsUnreadable', line: 5, severity: 'error' }]);
+    expect(problems[0].message).toBe('Line 5: the sample data (records) does not read as DBML, so it is not shown. Other DBML tools reject this file, '
+      + 'and ERD Studio will not edit this table until the rows are fixed or removed.');
+    // An error: doctor routes it to fixing the file and never says Ready while the editor refuses to edit the table.
+    const ids = r.nextSteps.map((s) => s.id);
+    expect(ids).toContain('fix-dbml-file');
+    expect(ids).not.toContain('ready');
+  });
+
+  it('a sample-rows block that does not read is one problem per block; a block that runs to the end of the file stays the parser\'s (D37)', async () => {
+    const root = copyFixture('dbml-native');
+    fs.writeFileSync(path.join(root, '.erd-studio', DIM_REGION), [
+      'Table gold.dim_region {',
+      '  region_key INT [pk]',
+      '  region_name VARCHAR',
+      '',
+      '  records (region_key, region_name) {',
+      "    1, 'O'Brien'",
+      "    2, 'North', 'extra'",
+      '  }',
+      '}',
+      '',
+    ].join('\n'));
+    let out = '';
+    await main(['doctor', '--project', root, '--no-dbt', '--json'], {
+      stdout: { write: (s: string) => { out += s; } },
+      stderr: { write: () => undefined },
+      cwd: tmp,
+      env: cleanEnv,
+    });
+    const r = JSON.parse(out) as DoctorResult;
+    // An unescaped apostrophe and a long row: several parser errors inside one block, said once.
+    const problems = r.erd.dbmlProblems.filter((p) => p.file?.endsWith('dim_region.dbml'));
+    expect(problems.map((p) => [p.code, p.line])).toEqual([['recordsUnreadable', 5]]);
+    expect(out).not.toMatch(/Brien|North|extra/);
+
+    // Unclosed to the end of the file: the table does not load, and the parser's diagnostic stays (sanitised).
+    fs.writeFileSync(path.join(root, '.erd-studio', DIM_REGION), "Table gold.dim_region {\n  region_key INT [pk]\n\n  records (region_key) {\n    '''open\n");
+    out = '';
+    await main(['doctor', '--project', root, '--no-dbt', '--json'], {
+      stdout: { write: (s: string) => { out += s; } },
+      stderr: { write: () => undefined },
+      cwd: tmp,
+      env: cleanEnv,
+    });
+    const unclosed = (JSON.parse(out) as DoctorResult).erd.dbmlProblems.filter((p) => p.file?.endsWith('dim_region.dbml'));
+    expect(unclosed.some((p) => p.code === 'recordsUnreadable')).toBe(false);
+    expect(unclosed.some((p) => typeof p.code === 'number')).toBe(true);
+  });
+
   it('lists every DBML diagram, reports storage dbml and reads no .dbml as JSON', async () => {
     const root = copyFixture('dbml-native');
     const parse = vi.spyOn(JSON, 'parse');

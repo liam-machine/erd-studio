@@ -1,0 +1,479 @@
+{
+  "schemaVersion": 7,
+  "domain": "shop",
+  "layer": "gold",
+  "stage": "logical",
+  "description": "Tables with sample rows in every form a table file may hold them",
+  "models": [
+    {
+      "name": "dim_product",
+      "schema": "gold",
+      "description": "Products, with every column named in the sample data",
+      "columns": [
+        {
+          "name": "product_key",
+          "dataType": "INT",
+          "description": "Surrogate key",
+          "isPrimaryKey": true,
+          "isForeignKey": false,
+          "isNaturalKey": false
+        },
+        {
+          "name": "product_name",
+          "dataType": "VARCHAR",
+          "description": "Display name",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNaturalKey": false
+        },
+        {
+          "name": "list_price",
+          "dataType": "DECIMAL(10,2)",
+          "description": "",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNaturalKey": false
+        },
+        {
+          "name": "price_change",
+          "dataType": "DECIMAL(10,2)",
+          "description": "",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNaturalKey": false
+        },
+        {
+          "name": "is_active",
+          "dataType": "BOOLEAN",
+          "description": "",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNaturalKey": false
+        },
+        {
+          "name": "launched_on",
+          "dataType": "DATE",
+          "description": "",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNaturalKey": false
+        }
+      ],
+      "sampleData": {
+        "columns": [
+          "product_key",
+          "product_name",
+          "list_price",
+          "price_change",
+          "is_active",
+          "launched_on"
+        ],
+        "rows": [
+          [
+            {
+              "text": "1",
+              "kind": "number"
+            },
+            {
+              "text": "Blue widget",
+              "kind": "string"
+            },
+            {
+              "text": "4.50",
+              "kind": "number"
+            },
+            {
+              "text": "-0.25",
+              "kind": "number"
+            },
+            {
+              "text": "true",
+              "kind": "boolean"
+            },
+            {
+              "text": "2020-01-15",
+              "kind": "string"
+            }
+          ],
+          [
+            {
+              "text": "2",
+              "kind": "number"
+            },
+            {
+              "text": "Red gadget",
+              "kind": "string"
+            },
+            {
+              "text": "12.00",
+              "kind": "number"
+            },
+            null,
+            {
+              "text": "FALSE",
+              "kind": "boolean"
+            },
+            {
+              "text": "2021-06-01",
+              "kind": "string"
+            }
+          ],
+          [
+            {
+              "text": "3",
+              "kind": "number"
+            },
+            {
+              "text": "Green gizmo",
+              "kind": "string"
+            },
+            {
+              "text": "7.25",
+              "kind": "number"
+            },
+            {
+              "text": "1.5",
+              "kind": "number"
+            },
+            null,
+            null
+          ]
+        ],
+        "totalRows": 3
+      },
+      "layer": "gold"
+    },
+    {
+      "name": "dim_customer",
+      "schema": "gold",
+      "description": "Customers, with sample data that names no columns (every column, in order)",
+      "columns": [
+        {
+          "name": "customer_key",
+          "dataType": "INT",
+          "description": "Surrogate key",
+          "isPrimaryKey": true,
+          "isForeignKey": false,
+          "isNaturalKey": false
+        },
+        {
+          "name": "customer_name",
+          "dataType": "VARCHAR",
+          "description": "",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNaturalKey": false
+        },
+        {
+          "name": "segment",
+          "dataType": "VARCHAR",
+          "description": "",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNaturalKey": false
+        }
+      ],
+      "sampleData": {
+        "columns": [
+          "customer_key",
+          "customer_name",
+          "segment"
+        ],
+        "rows": [
+          [
+            {
+              "text": "10",
+              "kind": "number"
+            },
+            {
+              "text": "Harbour Stores",
+              "kind": "string"
+            },
+            {
+              "text": "retail",
+              "kind": "string"
+            }
+          ],
+          [
+            {
+              "text": "11",
+              "kind": "number"
+            },
+            {
+              "text": "Hilltop Traders",
+              "kind": "string"
+            },
+            null
+          ],
+          [
+            {
+              "text": "12",
+              "kind": "number"
+            },
+            null,
+            {
+              "text": "online",
+              "kind": "string"
+            }
+          ]
+        ],
+        "totalRows": 3
+      },
+      "layer": "gold"
+    },
+    {
+      "name": "fct_order_line",
+      "schema": "gold",
+      "description": "Order lines, whose sample data names a status from the Enum below",
+      "columns": [
+        {
+          "name": "order_line_id",
+          "dataType": "BIGINT",
+          "description": "",
+          "isPrimaryKey": true,
+          "isForeignKey": false,
+          "isNaturalKey": false
+        },
+        {
+          "name": "product_key",
+          "dataType": "INT",
+          "description": "",
+          "isPrimaryKey": false,
+          "isForeignKey": true,
+          "isNaturalKey": false,
+          "isForeignKeyDeclared": true
+        },
+        {
+          "name": "customer_key",
+          "dataType": "INT",
+          "description": "",
+          "isPrimaryKey": false,
+          "isForeignKey": true,
+          "isNaturalKey": false,
+          "isForeignKeyDeclared": true
+        },
+        {
+          "name": "quantity",
+          "dataType": "INT",
+          "description": "Negative for a return",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNaturalKey": false
+        },
+        {
+          "name": "status",
+          "dataType": "order_status",
+          "description": "",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNaturalKey": false
+        }
+      ],
+      "grain": "One row per order line",
+      "sampleData": {
+        "columns": [
+          "order_line_id",
+          "product_key",
+          "customer_key",
+          "quantity",
+          "status"
+        ],
+        "rows": [
+          [
+            {
+              "text": "100",
+              "kind": "number"
+            },
+            {
+              "text": "1",
+              "kind": "number"
+            },
+            {
+              "text": "10",
+              "kind": "number"
+            },
+            {
+              "text": "2",
+              "kind": "number"
+            },
+            {
+              "text": "order_status.shipped",
+              "kind": "enum"
+            }
+          ],
+          [
+            {
+              "text": "101",
+              "kind": "number"
+            },
+            {
+              "text": "3",
+              "kind": "number"
+            },
+            {
+              "text": "12",
+              "kind": "number"
+            },
+            {
+              "text": "-1",
+              "kind": "number"
+            },
+            {
+              "text": "order_status.returned",
+              "kind": "enum"
+            }
+          ],
+          [
+            {
+              "text": "102",
+              "kind": "number"
+            },
+            {
+              "text": "2",
+              "kind": "number"
+            },
+            {
+              "text": "11",
+              "kind": "number"
+            },
+            {
+              "text": "5",
+              "kind": "number"
+            },
+            null
+          ]
+        ],
+        "totalRows": 3
+      },
+      "layer": "gold"
+    },
+    {
+      "name": "dim_region",
+      "schema": "gold",
+      "description": "Regions, with sample data for one column",
+      "columns": [
+        {
+          "name": "region_code",
+          "dataType": "VARCHAR",
+          "description": "",
+          "isPrimaryKey": true,
+          "isForeignKey": false,
+          "isNaturalKey": false
+        },
+        {
+          "name": "region_name",
+          "dataType": "VARCHAR",
+          "description": "",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNaturalKey": false
+        }
+      ],
+      "sampleData": {
+        "columns": [
+          "region_code"
+        ],
+        "rows": [
+          [
+            {
+              "text": "R-NORTH",
+              "kind": "string"
+            }
+          ],
+          [
+            {
+              "text": "R-SOUTH",
+              "kind": "string"
+            }
+          ]
+        ],
+        "totalRows": 2
+      },
+      "layer": "gold"
+    },
+    {
+      "name": "dim_channel",
+      "schema": "gold",
+      "description": "Sales channels, with an empty records list, which is never shown or touched",
+      "columns": [
+        {
+          "name": "channel_code",
+          "dataType": "VARCHAR",
+          "description": "",
+          "isPrimaryKey": true,
+          "isForeignKey": false,
+          "isNaturalKey": false
+        },
+        {
+          "name": "channel_name",
+          "dataType": "VARCHAR",
+          "description": "",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNaturalKey": false
+        }
+      ],
+      "layer": "gold"
+    }
+  ],
+  "relationships": [
+    {
+      "fromModel": "fct_order_line",
+      "fromColumn": "customer_key",
+      "toModel": "dim_customer",
+      "toColumn": "customer_key",
+      "cardinality": "many-to-one"
+    },
+    {
+      "fromModel": "fct_order_line",
+      "fromColumn": "product_key",
+      "toModel": "dim_product",
+      "toColumn": "product_key",
+      "cardinality": "many-to-one"
+    }
+  ],
+  "viewConfig": {
+    "positions": {
+      "dim_product": {
+        "x": 40,
+        "y": 40
+      },
+      "dim_customer": {
+        "x": 400,
+        "y": 40
+      },
+      "fct_order_line": {
+        "x": 220,
+        "y": 360
+      },
+      "dim_region": {
+        "x": 580,
+        "y": 360
+      },
+      "dim_channel": {
+        "x": 760,
+        "y": 40
+      }
+    }
+  },
+  "layerConfig": {
+    "id": "gold",
+    "label": "Gold",
+    "abbreviation": "GLD",
+    "color": "#d4af37",
+    "creatable": true,
+    "order": 0
+  },
+  "readOnly": false,
+  "positionDraggable": true,
+  "layerConfigs": [
+    {
+      "id": "gold",
+      "label": "Gold",
+      "abbreviation": "GLD",
+      "color": "#d4af37",
+      "creatable": true,
+      "order": 0
+    }
+  ]
+}

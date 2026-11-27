@@ -14,6 +14,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { describe, expect, it } from 'vitest';
+import { FEEDBACK_LOG_READERS, TELEMETRY_MODULES } from './helpers/privacyModules';
 
 const ROOT = path.resolve(__dirname, '../..');
 
@@ -36,15 +37,6 @@ const read = (file: string): string => fs.readFileSync(file, 'utf-8');
 const IMPORTS_LOGGER = /from\s+['"][^'"]*\/logger['"]|require\(\s*['"][^'"]*\/logger['"]\s*\)/;
 const BUFFER_READERS = /\b(recentLogLines|redactedRecentLog)\b/;
 
-/** The extension's telemetry modules: the heartbeat, its payload, the known-fixes check and the relationship survey. */
-const TELEMETRY_MODULES = [
-  'src/services/telemetryService.ts',
-  'src/services/telemetryPayload.ts',
-  'src/services/knownFixes.ts',
-  'src/services/knownFixesService.ts',
-  'src/services/relationshipHealth.ts',
-  'src/services/physicalTooling.ts',
-];
 
 describe('the ERD Studio log stays out of telemetry', () => {
   it('no telemetry module imports the logger or reads its buffer', () => {
@@ -66,7 +58,7 @@ describe('the ERD Studio log stays out of telemetry', () => {
   });
 
   it('only Send Feedback reads the buffer', () => {
-    const allowed = new Set(['src/services/feedbackService.ts', 'src/services/logger.ts']);
+    const allowed = new Set(FEEDBACK_LOG_READERS);
     const readers = filesUnder(path.join(ROOT, 'src'))
       .filter((file) => BUFFER_READERS.test(read(file)))
       .map(rel);

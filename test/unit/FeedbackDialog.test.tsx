@@ -1370,6 +1370,47 @@ describe('Copy report', () => {
   });
 });
 
+describe('sample rows (D37) in the store', () => {
+  // A table's sample rows may hold real data: the diagram in the store carries them (the Detail panel shows
+  // them), and neither Send nor Copy report may carry one, nor any other message the dialog posts.
+  const SENTINEL = 'zqSENTX7';
+  const withRows = () => resetStore({
+    domain: {
+      domain: 'showcase',
+      layer: 'silver',
+      stage: 'logical',
+      models: [{
+        name: 'dim_customer',
+        schema: 'silver',
+        description: '',
+        columns: [{ name: 'customer_key', dataType: 'int', description: '', isPrimaryKey: true, isForeignKey: false, isNaturalKey: false }],
+        sampleData: { columns: ['customer_key'], rows: [[{ text: SENTINEL, kind: 'string' }], [{ text: `${SENTINEL}.x`, kind: 'enum' }]], totalRows: 2 },
+      }],
+      relationships: [],
+      schemaVersion: 7,
+    },
+  });
+
+  it('submit and Copy report hold no value, and nor does anything else the dialog posts', async () => {
+    withRows();
+    render(<FeedbackDialog />);
+    fireEvent.change(titleInput(), { target: { value: 'The panel shows sample data' } });
+    fireEvent.change(descriptionInput(), { target: { value: 'Opening a table with sample rows, the panel scrolls sideways.' } });
+    act(() => {
+      fireEvent.click(buttonWithText('Copy report')!);
+    });
+    await act(async () => {
+      fireEvent.click(primaryButton());
+    });
+    await waitFor(() => expect(submitted()).toBeTruthy());
+    const copied = send.mock.calls.map((c) => c[0]).find((m) => m.type === 'copyFeedbackReport');
+    expect(copied).toBeTruthy();
+    // The diagram travels as counts only.
+    expect(submitted().domain).toEqual({ stage: 'logical', modelCount: 1, relationshipCount: 0, schemaVersion: 7 });
+    expect(JSON.stringify(send.mock.calls)).not.toMatch(/SENTX7/);
+  });
+});
+
 describe('diagnostics', () => {
   it('shows the host\'s chips and the exact text, never a reconstruction', () => {
     render(<FeedbackDialog />);

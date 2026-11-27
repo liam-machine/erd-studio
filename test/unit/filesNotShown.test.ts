@@ -13,7 +13,7 @@ import * as path from 'path';
 
 import { buildCliContext } from '../../src/cli/context';
 import { collectDbmlProblems } from '../../src/cli/dbmlProblems';
-import { NOT_DRAWN_IN_TABLE_FILE_CODES, collectFilesNotShown, relationshipsNotImportedMessage } from '../../src/services/filesNotShown';
+import { NOT_DRAWN_IN_TABLE_FILE_CODES, collectFilesNotShown, relationshipsNotImportedMessage, sampleDataNotReadMessage } from '../../src/services/filesNotShown';
 import { outsideKnownFoldersHint } from '../../src/services/unreadDbmlFile';
 import { projectStorageOf } from '../../src/services/projectStorage';
 import { subjectAreaTableNames } from '../../src/services/domainService';
@@ -129,6 +129,23 @@ describe('collectFilesNotShown', () => {
     expect(byLine('refInTableFile')).toBe(`A Ref in ${table} is not drawn: relationships go in a relationships file. ERD Studio cannot edit this table until it is moved.`);
   });
 
+  it('a table file\'s sample rows that do not read: one note at doctor\'s file and line, in fixed words that hold no value (D37)', async () => {
+    const table = 'gold/tables/gold/dim_region.dbml';
+    const text = read(table);
+    const end = text.lastIndexOf('}');
+    // A dotted bare word: the parser reads it as an Enum reference, and its own message would quote it.
+    write(table, `${text.slice(0, end)}\n  records (region_code, region_name) {\n    'N1', zqSENTX7.north\n  }\n}\n`);
+    const line = read(table).split('\n').findIndex((l) => l.trim().startsWith('records')) + 1;
+    const { notes, doctor } = await notesAndDoctor();
+    expect(notes).toEqual([{ code: 'sampleDataNotRead', message: sampleDataNotReadMessage(table, line), file: shown(table), line }]);
+    expect(notes[0].message).toBe(`${table} line ${line}: the sample data (records) does not read as DBML, so it is not shown, `
+      + 'and ERD Studio will not edit this table until it is fixed or removed.');
+    // doctor: the same file and line, an error, and only that one problem for the block (not the parser's 4000 too).
+    const theirs = doctor.filter((p) => p.file === shown(table));
+    expect(theirs.map((p) => ({ code: p.code, line: p.line, severity: p.severity }))).toEqual([{ code: 'recordsUnreadable', line, severity: 'error' }]);
+    expect(JSON.stringify([notes, doctor])).not.toMatch(/SENTX7/);
+  });
+
   it('a relationships file that does not read: a note at the line doctor reports its error at', async () => {
     const file = 'gold/relationships/gold.dbml';
     write(file, `${read(file)}\nRef: gold.fct_order.customer_key >\n`);
@@ -195,6 +212,7 @@ describe('the shared note type', () => {
   it('isFileNote accepts only what the strip can draw', () => {
     expect(isFileNote({ code: 'fileNotRead', message: 'm' })).toBe(true);
     expect(isFileNote({ code: 'fileNotRead', message: 'm', file: 'a/b.dbml', line: 2, action: 'reloadFromDisk' })).toBe(true);
+    expect(isFileNote({ code: 'sampleDataNotRead', message: 'm', file: 'a/b.dbml', line: 6 })).toBe(true);
     expect(isFileNote({ code: 'somethingNew', message: 'm' })).toBe(false);
     expect(isFileNote({ code: 'fileNotRead', message: '' })).toBe(false);
     expect(isFileNote({ code: 'fileNotRead', message: 'm', line: 0 })).toBe(false);

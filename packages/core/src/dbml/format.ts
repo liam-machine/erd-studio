@@ -56,6 +56,7 @@
 import type { DbmlDiagnostic } from '../types/dbmlStorage.js';
 import type { DbmlParserModule } from './parserModule.js';
 import { PINNED_PARSER, parseSyntax, type AstNode } from './parser.js';
+import { dbmlMessageSanitiser } from './diagnosticText.js';
 
 /** Why {@link formatDbml} returned its input unchanged. */
 export type DbmlFormatSkipReason = 'parse-errors' | 'self-check';
@@ -128,7 +129,12 @@ export function formatDbml(text: string, options: DbmlFormatOptions = {}): DbmlF
 
   const parsed = parseSyntax(body, parser);
   if (parsed.errors.length > 0) {
-    return unchanged({ skipped: 'parse-errors', errors: parsed.errors.map(({ code, message, line, column }) => ({ code, message, line, column })) });
+    // A message that may quote a sample value (D37) is replaced by fixed words; the code, line and column stay.
+    const sanitise = dbmlMessageSanitiser(body, parser);
+    return unchanged({
+      skipped: 'parse-errors',
+      errors: parsed.errors.map(({ code, message, line, column, start }) => ({ code, message: sanitise(message, start), line, column })),
+    });
   }
   const items = itemsOf(parsed.tokens, body);
   if (items === undefined) return unchanged({ skipped: 'parse-errors', errors: [] });
@@ -228,15 +234,19 @@ function shapeOf(ast: AstNode): string {
   return out.join(' ');
 }
 
-/** Why `formatted` is not a whitespace-only change of `original`, or undefined when it is. */
+/**
+ * Why `formatted` is not a whitespace-only change of `original`, or undefined
+ * when it is. Never quotes the text: a token may be a sample value (D37), and
+ * this detail reaches the log; it says which token and its kind.
+ */
 function selfCheck(items: readonly Item[], ast: AstNode, formatted: string, parser: DbmlParserModule): string | undefined {
   const again = parseSyntax(formatted, parser);
-  if (again.errors.length > 0) return `the formatted text has a syntax error: [${again.errors[0].code}] ${again.errors[0].message}`;
+  if (again.errors.length > 0) return `the formatted text has a syntax error [${again.errors[0].code}] at line ${again.errors[0].line}`;
   const after = itemsOf(again.tokens, formatted);
   if (!after) return 'the formatted text has an invalid token';
   if (after.length !== items.length) return `the token count changed (${items.length} → ${after.length})`;
   for (let i = 0; i < items.length; i++) {
-    if (after[i].kind !== items[i].kind || after[i].text !== items[i].text) return `token ${i + 1} changed (${JSON.stringify(items[i].text)} → ${JSON.stringify(after[i].text)})`;
+    if (after[i].kind !== items[i].kind || after[i].text !== items[i].text) return `token ${i + 1} changed (${items[i].kind})`;
   }
   if (!gapsAreWhitespace(after, formatted)) return 'the formatted text holds something between its tokens';
   if (shapeOf(ast) !== shapeOf(again.ast)) return 'the syntax tree changed shape';

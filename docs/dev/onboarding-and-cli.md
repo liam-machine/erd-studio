@@ -58,6 +58,7 @@ Onboarding has three starting points — no folder open, a folder without dbt (l
   | `layoutBadLine`, `layoutDuplicateKey` | warning | the line (or the later key) is skipped; that table is placed automatically |
   | `legacyDbmlTree` (once per project: an ERD Studio 1.9 pre-release tree, `tables/**/*.dbml` or a `<layer>/*.dbdiagram`) | error | `reconvert-dbml-project`; every per-file check of the listed files is skipped |
   | `inlineRefInTableFile`, `useInTableFile`, `refInTableFile` | error | breaks every other DBML tool; ERD Studio refuses to write the file until fixed |
+  | `recordsUnreadable` (D37: a table's sample rows do not read) | error, at the block's line | breaks every other DBML tool; ERD Studio draws the table without its rows and refuses to write it until the rows are fixed or removed. The parser's own diagnostics inside that block are not listed again |
   | `duplicateEnum` | warning | affects only hand-written `use *` lines (ERD Studio writes selective `use` lines) |
   | `duplicateRef` (same link in two relationships files, or twice in one) | error | `[5001]` in every DBML tool |
   | `missingUse` (a relationships file lacks a `use` line its Refs need) | warning, with the line | ERD Studio reads it anyway and adds the line on its next write to that Ref; the parser's own `[4000]` for it is dropped (reported once) |

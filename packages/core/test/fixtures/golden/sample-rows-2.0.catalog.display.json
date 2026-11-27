@@ -1,0 +1,122 @@
+{
+  "schemaVersion": 7,
+  "domain": "catalog",
+  "layer": "gold",
+  "stage": "logical",
+  "description": "Two tables with sample rows, as ERD Studio 2.0.10 left them",
+  "models": [
+    {
+      "name": "dim_product",
+      "schema": "gold",
+      "description": "Products",
+      "columns": [
+        {
+          "name": "product_key",
+          "dataType": "INT",
+          "description": "Surrogate key",
+          "isPrimaryKey": true,
+          "isForeignKey": false,
+          "isNaturalKey": false
+        },
+        {
+          "name": "product_name",
+          "dataType": "VARCHAR",
+          "description": "Display name",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNaturalKey": false
+        },
+        {
+          "name": "list_price",
+          "dataType": "DECIMAL(10,2)",
+          "description": "",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNaturalKey": false
+        },
+        {
+          "name": "is_active",
+          "dataType": "BOOLEAN",
+          "description": "",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNaturalKey": false
+        },
+        {
+          "name": "updated_at",
+          "dataType": "TIMESTAMP",
+          "description": "",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNaturalKey": false
+        }
+      ],
+      "layer": "gold"
+    },
+    {
+      "name": "dim_store",
+      "schema": "gold",
+      "description": "Stores",
+      "columns": [
+        {
+          "name": "store_key",
+          "dataType": "INT",
+          "description": "Surrogate key",
+          "isPrimaryKey": true,
+          "isForeignKey": false,
+          "isNaturalKey": false
+        },
+        {
+          "name": "store_name",
+          "dataType": "VARCHAR",
+          "description": "Display name",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNaturalKey": false
+        },
+        {
+          "name": "opened_on",
+          "dataType": "DATE",
+          "description": "",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNaturalKey": false
+        }
+      ],
+      "layer": "gold"
+    }
+  ],
+  "relationships": [],
+  "viewConfig": {
+    "positions": {
+      "dim_product": {
+        "x": 40,
+        "y": 40
+      },
+      "dim_store": {
+        "x": 400,
+        "y": 40
+      }
+    }
+  },
+  "layerConfig": {
+    "id": "gold",
+    "label": "Gold",
+    "abbreviation": "GLD",
+    "color": "#d4af37",
+    "creatable": true,
+    "order": 0
+  },
+  "readOnly": false,
+  "positionDraggable": true,
+  "layerConfigs": [
+    {
+      "id": "gold",
+      "label": "Gold",
+      "abbreviation": "GLD",
+      "color": "#d4af37",
+      "creatable": true,
+      "order": 0
+    }
+  ]
+}

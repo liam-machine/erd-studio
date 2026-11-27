@@ -24,13 +24,17 @@ export type { DbmlDiagramSummary, DiagramUseRole } from './readDiagram.js';
 export { compileDbmlProject } from './compileProject.js';
 export { outlineDbmlFile } from './outline.js';
 export { renderNewTableDbml, editTableDbml, renamedColumnsOf } from './writeTable.js';
-export type { EditTableDbmlOptions, ForeignDbmlMetadata } from './writeTable.js';
+export type { EditTableDbmlOptions, ForeignDbmlMetadata, RenderNewTableDbmlOptions } from './writeTable.js';
 export { editRelationshipsDbml, refEndsDbml, relationshipUnits, relationshipUnitsWithMembers, refUnitSortKey, usePathBetween, DBML_CONVERT_FIRST_MESSAGE } from './writeRelationships.js';
 export type { RefUnit, RelationshipsFileEdit, DbmlResolvedTable, DbmlTableText, DbmlWrittenRefEnd } from './writeRelationships.js';
 export { renderNewSubjectAreaDbml, editSubjectAreaDbml, pendingRelationshipRef } from './writeDiagram.js';
 export type { SubjectAreaDbmlEdit, NewSubjectAreaDbml, DbmlDiagramTable } from './writeDiagram.js';
 export { readErdLayoutDbml, erdLayoutEntrySpan, editDiagramLayoutDbml } from './erdLayoutDbml.js';
 export type { ErdLayoutDbmlReading, ErdLayoutProblem, DiagramLayoutEdit } from './erdLayoutDbml.js';
+export { recordsSpansOf, readRecordsBlocks } from './records.js';
+export type { RecordsSpan, RecordsBlockReading } from './records.js';
+export { dbmlMessageSanitiser, parserStoppedMessage } from './diagnosticText.js';
+export type { DbmlMessageSanitiser } from './diagnosticText.js';
 export { formatDbml } from './format.js';
 export type { DbmlFormatOptions, DbmlFormatResult, DbmlFormatSkipReason } from './format.js';
 export { applyTextEdits } from './splice.js';
@@ -43,7 +47,7 @@ export { attachRelationships, dbmlTableLookup } from '../dbmlAttach.js';
 
 /** The readers `loadDisplaySubjectArea` takes as its `dbml` option, bound to the pinned parser. */
 export const dbmlStorageReader: DbmlStorageReader = Object.freeze({
-  parseTable: (text: string, fileStem: string, options?: { schemaFolder?: string }) => parseTableDbml(text, fileStem, options),
+  parseTable: (text: string, fileStem: string, options?: { schemaFolder?: string; sampleData?: boolean }) => parseTableDbml(text, fileStem, options),
   readRelationships: (text: string) => readRelationshipsDbml(text),
   parseSubjectArea: (text: string, filePath: string) => parseSubjectAreaDbml(text, filePath),
   subjectAreaMembers: (text: string, filePath: string) => subjectAreaMembersDbml(text, filePath),

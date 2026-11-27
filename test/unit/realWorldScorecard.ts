@@ -160,6 +160,10 @@ export interface ImportRun {
   scope?: { id: string; models: string[] };
   /** SQL and Power BI: the DBML the import converted to, before Import DBML's flow read it (for the round trip). */
   convertedDbml?: string;
+  /** Import DBML's flow: the draft's diagram (its strings are shown too: `draftDisplayStrings`). */
+  draftDisplay?: unknown;
+  /** Import DBML's flow: how many new tables keep sample rows (D37). */
+  sampleRowsTables?: number;
 }
 
 const MAIN_LAYER: LayerConfig = { id: 'main', label: 'Main', abbreviation: 'MN', color: '#888888', creatable: true, order: 1 } as LayerConfig;
@@ -210,6 +214,8 @@ export function importDbmlFlow(
     libraryRelationships: true,
     diagramCopies: [],
     diagramHoldsNoRelationships: true,
+    // A fresh DBML project: its table files keep sample rows (D37).
+    sampleRows: true,
   });
   const describe: DescribeDbmlImportOptions = {
     layerLabel: 'Main',
@@ -243,6 +249,8 @@ export function importDbmlFlow(
     leftOutTables: [],
     report: { relationships: plan.report.relationships, optionalRefs: plan.report.optionalRefs, requiredRefs: plan.report.requiredRefs },
     ledger: [...plan.report.ledger, ...(origin?.ledger ?? [])],
+    draftDisplay: draft.display,
+    sampleRowsTables: plan.sampleData?.size ?? 0,
   };
 }
 

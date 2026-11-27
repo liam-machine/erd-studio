@@ -4,6 +4,8 @@
  * Displays at top-right when a node is clicked. Shows:
  * - Model metadata (its file, when the editing host says, then name, schema, description)
  * - Editable column list
+ * - "Sample data": the table's sample rows (its DBML file's records block),
+ *   read-only, logical stage only, below the columns
  * - Incoming and outgoing FK relationships, then (editing host only) the
  *   relationships to tables not on this diagram, each with "+ Add"
  * - "Modelling detail (optional)": the table's Fields (its context fields,
@@ -37,6 +39,7 @@ import { DescriptionEditor } from './DescriptionEditor';
 import { AliasEditor } from './AliasEditor';
 import { ColumnEditor } from './ColumnEditor';
 import { FieldsSection, fieldRows, tableFieldsShown, type FieldsTable } from './FieldsSection';
+import { SampleDataSection } from './SampleDataSection';
 import { IconChevron, IconClose, IconOpen, IconPencil } from './panelIcons';
 import { roleLabel } from '../../lib/roleOptions';
 import { useEditorStore, useEditorStoreApi } from '../../store/editorStore';
@@ -48,7 +51,7 @@ import type { ColumnPair, DisplayRelationship, FieldList, PhysicalColumnSource, 
 import { swapCardinality } from '../../lib/cardinalityUtils';
 import type { FkEdgeData } from '../../types/graph';
 import { columnPairs, foldComposites, relationshipEdgeId } from '../../lib/relationshipDisplayKey';
-import { cardinalityLabel, offDiagramRows, offDiagramTableRows, ownValue, schemaFolderOfFile } from '../../lib/canvasContext';
+import { addTablesMessage, cardinalityLabel, offDiagramRows, offDiagramTableRows, ownValue, schemaFolderOfFile } from '../../lib/canvasContext';
 import './DetailPanel.css';
 
 /** A relationship row: a composite foreign key carries all its column pairs. */
@@ -145,9 +148,6 @@ export function removeConfirmText(
   return `${question} ${going === 1 ? 'Its 1 relationship in this diagram file' : `Its ${going} relationships in this diagram file`} will also be removed.`;
 }
 
-/** Most tables one "Add all related" asks for (the host's `addExistingModels` limit). */
-const ADD_ALL_RELATED_LIMIT = 200;
-
 /**
  * A relationship's cardinality in crow's-foot shorthand (`N:1`), read left
  * to right as the row reads (from → to). The editor's rows show it; the
@@ -197,6 +197,8 @@ export function DetailPanel() {
   const [nameError, setNameError] = useState('');
   // The viewer's Fields fold: closed until the reader opens it, then kept open for the next table.
   const [viewerFieldsOpen, setViewerFieldsOpen] = useState(false);
+  // The Sample data fold: open in the editor, closed in the viewer until the reader opens it; either way kept for the next table.
+  const [sampleDataOpen, setSampleDataOpen] = useState(() => (viewer ? false : true));
 
   // Handle pending delete confirmation from keyboard shortcut
   useEffect(() => {
@@ -435,18 +437,8 @@ export function DetailPanel() {
 
   const handleAddTables = useCallback(
     (tables: ReadonlyArray<{ otherTable: string; otherTablePath?: string }>) => {
-      if (tables.length === 0) return;
-      // A table the host named by its file is added by it too (another schema folder may have its name).
-      const byFile = tables.some((t) => t.otherTablePath !== undefined);
-      if (tables.length === 1) {
-        host.postMessage({ type: 'addExistingModel', payload: { modelName: tables[0].otherTable, ...(byFile ? { sourcePath: tables[0].otherTablePath! } : {}) } });
-      } else {
-        const picked = tables.slice(0, ADD_ALL_RELATED_LIMIT);
-        host.postMessage({
-          type: 'addExistingModels',
-          payload: { modelNames: picked.map((t) => t.otherTable), ...(byFile ? { sourcePaths: picked.map((t) => t.otherTablePath ?? '') } : {}) },
-        });
-      }
+      const message = addTablesMessage(tables);
+      if (message) host.postMessage(message);
     },
     [host],
   );
@@ -590,6 +582,18 @@ export function DetailPanel() {
       </div>
     </>
   );
+
+  // The table's sample rows: logical stage only, and only when the table carries some.
+  const sampleData = domain.stage === 'logical' ? model.sampleData : undefined;
+  const sampleDataSection = sampleData && sampleData.rows.length > 0 ? (
+    <SampleDataSection
+      tableName={model.tableName || model.name}
+      columns={model.columns}
+      data={sampleData}
+      open={sampleDataOpen}
+      onOpenChange={setSampleDataOpen}
+    />
+  ) : null;
 
   // The editor's pill reads N:1 (the wording is its tooltip); the viewer's wrapping row keeps the words.
   const cardinalityPill = (cardinality: string) => (
@@ -925,6 +929,7 @@ export function DetailPanel() {
           {fieldsSection}
           {removeSection}
           {columnsSection}
+          {sampleDataSection}
           {relationshipsSection}
         </>
       ) : (
@@ -936,6 +941,7 @@ export function DetailPanel() {
             {metadataCard}
           </div>
           {columnsSection}
+          {sampleDataSection}
           {relationshipsSection}
           {/* Editing host, logical stage: relationships to tables not on this diagram. */}
           {showOffDiagram && (

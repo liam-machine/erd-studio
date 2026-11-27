@@ -1,0 +1,65 @@
+// A foreign DBML file with sample rows (Records) in every form the DBML
+// docs give: a block nested in its Table with a column list, one with no
+// list (every column, a table partial's included), top-level blocks naming
+// their table by name and by alias, and values of every kind: decimals and
+// signs as written, escapes, triple-quoted text, backtick expressions,
+// null, an empty field and an enum reference. All values are invented.
+
+Project sample_shop {
+  database_type: 'PostgreSQL'
+}
+
+Enum sales.order_status {
+  placed
+  shipped
+}
+
+TablePartial audited {
+  created_at timestamp
+}
+
+Table sales.orders as O {
+  id int [pk]
+  amount "decimal(10,2)"
+  status sales.order_status
+  note text
+  customer_id int [ref: > customers.id]
+
+  records (id, amount, status, note, customer_id) {
+    1, 1.50, sales.order_status.placed, 'it\'s a gift', 10
+    2, -0.0, sales.order_status.shipped, '''two
+lines''', 11
+    3, 12.00, null, `now()`, 10
+  }
+}
+
+Table customers {
+  id int [pk]
+  name varchar
+  ~audited
+
+  records {
+    10, 'Harbour Stores', '2024-01-02 03:04:05'
+    11, "Hilltop Traders",
+  }
+}
+
+Table "Order Items" {
+  "line no" int [pk]
+  qty int
+}
+
+Records "Order Items"("line no", qty) {
+  1, 5
+  2, 007
+}
+
+Table sales.products as P {
+  id int [pk]
+  name varchar
+}
+
+Records P(name, id) {
+  'Blue widget', 1
+  'Red gadget', 2
+}

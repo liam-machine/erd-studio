@@ -7,7 +7,7 @@
  * directly from its data source.
  */
 
-import type { Cardinality, Layer, Meta, TableLoadError, TableLoadWarning, TableRole, TableTemplate, Rationale, Stage, ViewConfig } from './semantic.js';
+import type { Cardinality, Layer, Meta, SampleData, TableLoadError, TableLoadWarning, TableRole, TableTemplate, Rationale, Stage, ViewConfig } from './semantic.js';
 import type { LayerConfig } from './layer.js';
 import type { DbtKeyHint } from '../keyEvidence.js';
 import type { FieldList } from '../fields.js';
@@ -178,6 +178,15 @@ export interface DisplayTable {
    * older cores, which left such a model out instead.
    */
   loadWarning?: TableLoadWarning;
+  /**
+   * The table's sample rows (D37: its DBML file's nested `records` block),
+   * read-only, logical stage only, and only when the host asked for them
+   * (`loadDisplaySubjectArea`'s `readSampleData`). Absent for a YAML table,
+   * a table with no block, no row or an empty list, a block that does not
+   * read, the physical stage, and from older cores. It may hold real data:
+   * never put it in a message, a log line or telemetry.
+   */
+  sampleData?: SampleData;
 }
 
 // ---------------------------------------------------------------------------

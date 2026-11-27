@@ -153,6 +153,19 @@ const EXPECTED_FILES = [
   // packages/core/test/unit/loadDisplayDomain.sharedUseSpelling.test.ts.
   'same-name-unqualified.bqs-only.display.json',
   'same-name-unqualified.sap.display.json',
+  // Table files with sample rows (DBML records) as 2.0.10 left them: a valid nested block and a stale
+  // list, which 2.0.10 drew as a placeholder and which now loads without its rows
+  // (packages/core/test/fixtures/dbml/sample-rows-2.0); owned by
+  // packages/core/test/unit/loadDisplayDomain.sampleRows20.test.ts.
+  'sample-rows-2.0.catalog.display.json',
+  // Sample rows in every form a table file may hold them (packages/core/test/fixtures/dbml/sample-rows): drawn
+  // without rows and with them (readSampleData), the plain exports, which never carry rows, and the rich
+  // export, which writes them; owned by packages/core/test/unit/loadDisplayDomain.golden.test.ts.
+  'sample-rows.shop.display.json',
+  'sample-rows.shop.rows.display.json',
+  'sample-rows.shop.dbml',
+  'sample-rows.shop.mmd',
+  'sample-rows.shop.rich.dbml',
 ].sort();
 
 /**
@@ -642,6 +655,27 @@ describe('DisplaySubjectArea golden output (extension host)', () => {
       const twin = normalise(posted[0], DBT_PROJECT_DBML) as { payload: Record<string, unknown> };
       const golden = readGolden('dbt-project.physical.host.json') as { payload: Record<string, unknown> };
       same(twin.payload, golden.payload);
+    });
+  });
+
+  // Sample rows (D37): the extension reads each DBML table's rows for the Detail panel, so the canvas
+  // draws the sample-rows twin as core draws it with `readSampleData` (sample-rows.shop.rows.display.json,
+  // owned by core's loadDisplayDomain.golden.test.ts): every table, column and row alike.
+  describe('the sample-rows twin (packages/core/test/fixtures/dbml/sample-rows), read by the host', () => {
+    const root = path.join(FIXTURES, 'dbml', 'sample-rows');
+
+    it('posts the tables of sample-rows.shop.rows.display.json, rows included', async () => {
+      if (UPDATE) return;
+      const posted = await sendSubjectAreaData(buildHost(root), subjectAreaFile(root, 'gold/diagrams/shop.dbml'));
+      logLines = [];
+      expect(posted).toHaveLength(1);
+      expect(posted[0].type).toBe('domainLoaded');
+      const payload = (normalise(posted[0], root) as { payload: Record<string, unknown> }).payload;
+      const golden = readGolden('sample-rows.shop.rows.display.json') as Record<string, unknown>;
+      expect(payload.models).toEqual(golden.models);
+      expect(payload.relationships).toEqual(golden.relationships);
+      expect((payload.models as Array<{ name: string; sampleData?: unknown }>).filter((m) => m.sampleData !== undefined).map((m) => m.name).sort())
+        .toEqual(['dim_customer', 'dim_product', 'dim_region', 'fct_order_line']);
     });
   });
 

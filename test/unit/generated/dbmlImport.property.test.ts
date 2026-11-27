@@ -11,6 +11,12 @@
  * and no message may echo more than a short snippet of it. A file that reads
  * imports every table it holds (or reports it in the plan's ledger).
  *
+ * Sample rows (D37): the writer puts a `records` block in about half the
+ * tables. A valid file keeps a table's rows for every block; no message,
+ * note, log line or draft string holds any part of a value (the draft's own
+ * rows aside: `draftDisplayStrings`), whether the file reads or not (dotted
+ * bare words make it fail, so Import's message sanitiser is fuzzed).
+ *
  * Round trip: import → export (core's `toDbmlRich`) → import gives the same
  * tables, columns, keys and relationships (`dbmlRoundTrip.ts`), for
  * generated DBML, every committed DBML sample, and DBML other tools wrote
@@ -32,7 +38,7 @@ import { sqlCaseArb, sqlStyleArb, writeSql } from './sqlWriter';
 import { applyBreak, breakArb, headersIn } from './breaks';
 import { dbmlKit, dbmlStyleArb, writeDbml } from './dbmlWriter';
 import { roundTripDbml } from './dbmlRoundTrip';
-import { echoViolations, ledgerCount, lineCount, timeRatio } from './invariants';
+import { draftDisplayStrings, echoViolations, ledgerCount, lineCount, sampleValueViolations, timeRatio } from './invariants';
 import { allPlain, BIG_RUN, copies, params, runs, schemaArb, schemaTruth, timeout, type GSchema } from './schemaArbitraries';
 
 const namesOf = (schema: GSchema): string[] => schema.tables.flatMap((t) => [t.name, ...t.columns.map((c) => c.name)]);
@@ -60,14 +66,19 @@ describe('Import DBML (generated): valid DBML imports whole', () => {
           : `${l.fromModel}.${l.fromColumn}>${l.toModel}.${l.toColumn} ${l.cardinality === 'one-to-one' ? '1:1' : 'n:1'}`)).sort();
         expect(got, cut(text)).toEqual(want);
       }
-      expect(echoViolations(run.shown, [text], namesOf(schema)), cut(text)).toEqual([]);
+      // Every block's rows are kept, in a DBML project (the tables are all new).
+      const blocks = (text.match(/^\s*records\b|^Records\b/gm) ?? []).length;
+      expect(run.sampleRowsTables, cut(text)).toBe(blocks);
+      const shown = [...run.shown, ...draftDisplayStrings(run.draftDisplay)];
+      expect(echoViolations(shown, [text], namesOf(schema)), cut(text)).toEqual([]);
+      expect(sampleValueViolations(shown), cut(text)).toEqual([]);
     }), params(runs(60, 0.5)));
   }, timeout(30_000));
 });
 
 describe('Import DBML (generated): broken DBML reads whole or fails with located problems', () => {
   it('never throws; a failure names its problems by line; what reads imports every table; no long echo', () => {
-    fc.assert(fc.property(schemaArb({ maxTables: 4, maxColumns: 4 }), dbmlStyleArb(), breakArb(), (schema, style, brk) => {
+    fc.assert(fc.property(schemaArb({ maxTables: 4, maxColumns: 4 }), dbmlStyleArb({ dotted: true }), breakArb(), (schema, style, brk) => {
       const written = writeDbml(schema, style);
       const broken = applyBreak(written.text, written.spans, brk, dbmlKit(), style.eol);
       const text = broken.text.replace(/^﻿/, '');
@@ -85,13 +96,16 @@ describe('Import DBML (generated): broken DBML reads whole or fails with located
           if (p.line === undefined || p.line < 1 || p.line > lineCount(text)) v.push(`problem line ${p.line} outside the file (${lineCount(text)} lines): ${p.message.slice(0, 120)}`);
         }
         v.push(...echoViolations([...run.shown, ...run.problems.map((p) => p.message)], [text], namesOf(schema)));
+        v.push(...sampleValueViolations([...run.shown, ...run.problems.map((p) => p.message)]));
       } else {
         // Read whole: every table defined in the text is imported, or reported in the plan's ledger.
         const reported = ledgerCount(run.ledger ?? [], (e) => e.unit === 'table' && e.outcome !== 'changed' && e.outcome !== 'repaired');
         const defined = headersIn(text, written.spans);
         const intact = broken.intact.filter(Boolean).length;
         if (run.tables.length + reported < Math.min(defined, intact)) v.push(`${run.tables.length} imported + ${reported} reported < ${intact} untouched tables`);
-        v.push(...echoViolations(run.shown, [text], namesOf(schema)));
+        const shown = [...run.shown, ...draftDisplayStrings(run.draftDisplay)];
+        v.push(...echoViolations(shown, [text], namesOf(schema)));
+        v.push(...sampleValueViolations(shown));
       }
       expect(v, `${where}\nproblems: ${JSON.stringify(run.problems.slice(0, 3))}`).toEqual([]);
     }), params(runs(100)));

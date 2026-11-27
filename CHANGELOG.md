@@ -8,6 +8,26 @@ The `Unreleased` heading below is renamed to the released version by the deploy 
 Releases are patch bumps by default. To ship a minor or major version, write it into the
 heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that.
 
+## Unreleased
+
+### Added
+
+- **Add a table's related tables from its right-click menu.** Right-click a table on the diagram and choose **Add Related Tables (n)** to bring every table it has a relationship with, either way, onto the diagram in one step (one undo takes them all back off). The number counts tables, not relationships, and the item only appears when there is something to add: on an editable diagram, on the Logical tab. It adds what the detail panel's **Add all related** button adds. (#365)
+- **See a table's sample rows in the Detail panel.** When a table's DBML file has sample rows (a `records` block inside its `Table`), the Detail panel shows them in a **Sample data** section under Columns, on the Logical tab: one line per column, the first 10 rows (and how many more the file holds), `NULL` and `(empty)` marked, every value as the file wrote it. It is read-only: ERD Studio never adds, edits or reorders a row.
+- **Import DBML… keeps a table's sample rows.** A `records` block (DBML's sample data, nested in a table or written separately) is now kept for each table the import creates in a DBML project: up to 100 rows per table, each value as the file wrote it, with columns renamed as the table's are and a value from an enum written as plain text. The rows show in the draft and in the table's Detail panel. The summary says which tables kept rows and counts what it did not keep (rows past the first 100, rows that would start with a minus or plus sign, rows for a table already in your Table Library, and every row in a project that stores tables as YAML); it never shows a value.
+- **The Rich DBML export writes each table's sample rows**, as a `records` block at the end of the table: up to 100 rows, a value from an enum as text, with a comment counting any rows left in the table file. dbdiagram.io and other DBML 9.1+ tools read them. Sample rows can be real data, so check them before you share or push the export. Plain DBML and Mermaid exports never write rows.
+
+### Changed
+
+- **A table whose sample rows don't read still shows.** If a script writes a row DBML can't read (an unescaped `'`, SQL's `''`, a bare word, a row with too few values), the table now loads with its columns and without its rows, instead of as a "DBML error" card. The canvas's **Not shown** strip names the file and line, `erd-studio doctor` reports it as an error, and ERD Studio won't edit that table until the rows are fixed or removed. A block left open to the end of the file still makes the table unreadable.
+- **A `Records` block written outside its table now says how to fix it**: move it into the table and write its header as `records (column, …)`, without the table name.
+- **The AI helper files are harness v50.** They teach your assistant sample rows: one `records` block inside the table, always with its column list; values quoted with `\'`, never `''`; the list and every row changed with a column rename or removal; rows written only when you ask, invented unless you give real ones, and never copied into issues, pull requests, commits or summaries. Your assistant also tells you before it pushes a Rich DBML export to dbdiagram.io that the export may carry those rows.
+
+### Fixed
+
+- **Renaming, removing or reordering a column no longer breaks a table with sample rows.** Removing or renaming a column that a table's `records` block names made the table unreadable (a "DBML error" card that refused every later edit), and adding, removing or reordering columns in a table whose `records` block names no columns left each row a value short or its values under the wrong columns. ERD Studio now keeps the rows in step: a rename changes the block's column list, a removal takes the column's value out of every row (and the whole block goes with its last column), and a block with no column list gets one before columns are added or moved. A removal that would start a row with a minus or plus sign, which DBML 9 and 10 tools reject, is refused with the row and line, and every save of such a file is checked to keep exactly the old rows.
+- **Error messages no longer show sample row values.** A value DBML could not read (an unquoted `jane.doe`, say) was quoted in the canvas's error message, the ERD Studio log, Send Feedback's prefilled report, `erd-studio doctor --json`, Import DBML's error and Convert Project to DBML's check. Those messages now give the file, line and column and say that the sample data does not read, and a `records` block written inside a `Ref` is no longer quoted either.
+
 ## 2.0.11 — 2026-11-25
 
 ### Changed

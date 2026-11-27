@@ -65,6 +65,7 @@ export { columnPairs, foldComposites, relationshipDisplayKey, relationshipEdgeId
 export { computeTableLabels, headerName, matchesTableSearch, type LabelledTable } from './lib/modelLabels';
 export { LAYER_BADGE_FALLBACK, layerAbbreviation, isSingleLayerProject } from './lib/layerCues';
 export { ANNOTATION_COLORS } from './lib/annotationColors';
+export { ADD_TABLES_LIMIT, addTablesMessage, relatedTablesToAdd } from './lib/canvasContext';
 export {
   applyClickAway,
   clickAwayStep,

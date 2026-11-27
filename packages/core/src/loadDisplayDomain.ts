@@ -249,6 +249,14 @@ export interface LoadDisplaySubjectAreaOptions {
    * not read and the result has no `fields` (the starting set).
    */
   readFieldsFile?: boolean;
+  /**
+   * Read each DBML table's sample rows (D37: its nested `records` block)
+   * into the table's `sampleData`: at most 100 rows, each value as written.
+   * Default false: no table carries rows, and the result is exactly what it
+   * was without this option. The rows may be real data: a host that caches
+   * or logs the result should leave this off.
+   */
+  readSampleData?: boolean;
 }
 
 /** Split a domain path into its semantic-dir prefix (with trailing separator), parent dir and file name. */
@@ -349,6 +357,7 @@ export async function loadDisplaySubjectArea(options: LoadDisplaySubjectAreaOpti
     dbml,
     findDbmlTable,
     readFieldsFile = false,
+    readSampleData = false,
   } = options;
   const sink = options.warn ?? ((message: string) => console.warn(message));
   // Every warning carries its code; one passed only a message is `other`.
@@ -620,7 +629,7 @@ export async function loadDisplaySubjectArea(options: LoadDisplaySubjectAreaOpti
         const tree = dbmlTreePathOf(rel);
         const schemaFolder = tree?.schema;
         if (tree) tableLayers?.set(ref.toLowerCase(), tree.layer);
-        parsed.set(ref, named(parseDbmlTable(name, text, dbml, maxYamlChars, warn, schemaFolder), ref, tableNames.has(ref)));
+        parsed.set(ref, named(parseDbmlTable(name, text, dbml, maxYamlChars, warn, schemaFolder, readSampleData), ref, tableNames.has(ref)));
         return;
       }
       // The YAML table's own warnings (a parse error, say) follow the mixed-state one.
@@ -1016,7 +1025,10 @@ function parseTable(
   }
 }
 
-/** Parse one `.dbml` table file's text (`schemaFolder`: its `{layer}/tables/{schema}` folder), charging it (as written) to the character budget. */
+/**
+ * Parse one `.dbml` table file's text (`schemaFolder`: its `{layer}/tables/{schema}` folder), charging it (as written)
+ * to the character budget; `sampleData`: with the table's sample rows (D37).
+ */
 function parseDbmlTable(
   name: string,
   text: string,
@@ -1024,12 +1036,17 @@ function parseDbmlTable(
   maxChars: number,
   warn: (message: string, code?: LoaderWarningCode) => void,
   schemaFolder: string | undefined,
+  sampleData: boolean,
 ): ParsedTable {
   if (text.length > maxChars) {
     warn(`Model "${name}" is ${text.length} characters long; at most ${maxChars} are read`, 'modelUnreadable');
     return NO_TABLE;
   }
-  const reading = dbml.parseTable(text, name, schemaFolder !== undefined ? { schemaFolder } : undefined);
+  // The options object is the one it always was when no sample rows are asked for.
+  const options = sampleData
+    ? { ...(schemaFolder !== undefined ? { schemaFolder } : {}), sampleData: true }
+    : schemaFolder !== undefined ? { schemaFolder } : undefined;
+  const reading = dbml.parseTable(text, name, options);
   if (!reading.ok) {
     warn(`Failed to read model "${name}": ${reading.error.message}`, 'modelUnreadable');
     const { kind, line, mergeConflict, code, target } = reading.error;

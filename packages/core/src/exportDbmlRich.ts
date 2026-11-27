@@ -15,8 +15,13 @@
  * same text, it opens with {@link DBML_RICH_EXPORT_HEADER}, and every mapping
  * change is a deliberate golden update (`<fixture>.rich.dbml`) plus a
  * CHANGELOG line. Every golden is held to `@dbml/parse` 9.1.1, 10.3.1 and
- * 11.0.0 with no errors or warnings. The property names are
- * `dbmlRichProperties.ts`'s, shared with the importer.
+ * 11.0.0 with no errors or warnings, the parsers' data lints on sample rows
+ * included (only a round trip of another tool's DBML allows a data lint, and
+ * only inside a `records` block: it says what the user's own rows hold). The
+ * property names are `dbmlRichProperties.ts`'s, shared with the importer.
+ * The `DBML 9.1+` floor covers sample rows too: every 9.1+ parser reads a
+ * nested `records` block and the comments inside it, and the older ones
+ * reject it as they reject custom properties.
  *
  * | ERD Studio                          | DBML                                                                    |
  * |-------------------------------------|-------------------------------------------------------------------------|
@@ -46,6 +51,10 @@
  * | sticky note                         | `Note sticky_<n> [color: <swatch hex>, linked_table: '<model>'] { '<text>' }` |
  * | canvas positions, sticky-note boxes | the Project's last key, `erd_layout: '''…'''`: a line per placed table (`<name> <x> <y>`, the name the diagram calls it, so `bqs.addresse` for one of two same-named tables, as a stored diagram writes it) and per placed note (`note/sticky_<n> <x> <y>[ <w> <h>]`) |
  * | table without columns               | one placeholder column `_erd_no_columns unknown [erd_placeholder: 'true', note: …]` (DBML needs one), which import drops |
+ * | sample rows (`DisplayTable.sampleData`, there only when the host read them) | the Table's last block, after a blank line: `records (<columns>) { … }`, one row per line, naming the exported columns the rows hold in the rows' order (a column the table does not export goes with its values), the first column with no signed value in rows 2 and later leading. Written by `renderRecordsBlock`, as Import writes a new table file's rows |
+ * | sample value: text / number, boolean, expression / none | `'…'` (`'''…'''` with a line break, `\'` and `\\` escaped) / as written (`007`, `1.50`, `TRUE`, `` `now()` ``) / `null` |
+ * | sample value naming an enum         | the text of its last segment: `status.active` → `'active'` (the export declares no Enum; Import's rule too) |
+ * | sample rows past the reader's limit, or that would start with a sign | not written; a `// N more rows are in the table file` / `// N rows left out: DBML 9 and 10 read no row that starts with a sign` comment inside the block, holding no value. No block for no row or no exported column |
  *
  * Strings: custom-property values are always quoted strings (`scd_type:
  * '2'`): unquoted typed values exist only from DBML 11.0. A one-line value is
@@ -58,8 +67,10 @@
  * reads every name back exactly, so nothing is renamed. Comments say why
  * anything is left out: a relationship whose ends are not in the diagram, a
  * column pointing at itself, a second copy of a link (DBML refuses two Refs
- * between the same columns), meta that cannot be written as JSON, and the
- * canvas's layout options.
+ * between the same columns), meta that cannot be written as JSON, sample
+ * rows the export leaves out (counted, never quoted: a row may be real
+ * data), and the canvas's layout options. Plain DBML (`toDbml`) and Mermaid
+ * never write sample rows.
  */
 
 import type { DisplaySubjectArea } from './types/display.js';
@@ -83,6 +94,7 @@ import {
 import { erdLayoutOf, renderErdLayoutValue } from './erdLayout.js';
 import type { Annotation, NodePosition } from './types/semantic.js';
 import { dbmlColumnType as columnType, dbmlName as ident, dbmlNoteText as noteText, dbmlString as str } from './dbmlText.js';
+import { renderRecordsBlock } from './sampleRows.js';
 
 /** The first line of every rich DBML export. */
 export const DBML_RICH_EXPORT_HEADER = '// erd-studio dbml-export v2 (DBML 9.1+)';
@@ -189,6 +201,33 @@ function columnLine(model: ExportTable, column: ExportColumn, singlePk: boolean,
 
 const PLACEHOLDER_NOTE = DBML_STORAGE_PLACEHOLDER_NOTE;
 
+/**
+ * The table's sample rows as its last block, after a blank line: a
+ * `records (<columns>) { … }` naming the exported columns the rows hold, in
+ * the rows' own order (a column the table does not export, or one listed
+ * twice, is dropped with its values), written by `renderRecordsBlock` (the
+ * writer Import's new table files use): every cell so it reads back as the
+ * same value, an enum reference as text, the lead column chosen so no row
+ * after the first starts with a sign (rows that cannot be helped are left
+ * out), and value-free comments counting the rows past the reader's limit
+ * and those left out. Nothing for no row or no exported column.
+ */
+function recordsLines(model: ExportTable): string[] {
+  const data = model.sampleData;
+  if (!data || data.rows.length === 0) return [];
+  const exported = new Set(model.columns.map((c) => c.name));
+  const keep = data.columns.map((name, i) => (exported.has(name) && data.columns.indexOf(name) === i ? i : -1)).filter((i) => i >= 0);
+  if (keep.length === 0) return [];
+  const { text: block } = renderRecordsBlock(
+    keep.map((i) => data.columns[i]),
+    data.rows.map((row) => keep.map((i) => row[i] ?? null)),
+    '  ',
+    '\n',
+    { comments: true, totalRows: data.totalRows },
+  );
+  return block ? ['', block] : [];
+}
+
 function tableBlock(model: ExportTable, facts: RefFacts): string[] {
   const lines: string[] = [];
   for (const sentence of model.skippedColumns) lines.push(`// ${oneLine(model.name)}: ${sentence}; not exported`);
@@ -220,6 +259,7 @@ function tableBlock(model: ExportTable, facts: RefFacts): string[] {
 
   const description = noteText(model.description);
   if (description) lines.push(`  Note: ${str(description)}`);
+  lines.push(...recordsLines(model));
   lines.push('}');
   return lines;
 }
