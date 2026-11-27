@@ -39,6 +39,7 @@ import { DBML_IMPORT_META_KEY, RATIONALE_FIELD_KEYS, rationaleKeyToFieldKey, typ
 import { readMeta } from '../meta.js';
 import { isLibraryFolderName } from '../storage.js';
 import { DbmlEditRefused } from './errors.js';
+import { parserStoppedMessage } from './diagnosticText.js';
 import type { DbmlParserModule } from './parserModule.js';
 import {
   PINNED_PARSER,
@@ -539,7 +540,8 @@ function editTableOnce(
   } catch (err) {
     // The reader reports a parser that throws as "The DBML parser stopped"; the writer refuses the same way.
     const file = options.file ?? `${options.fileStem ?? desired.name}.dbml`;
-    refuse(file, `Fix the DBML in ${file} first (the DBML parser stopped: ${err instanceof Error ? err.message : String(err)}). ERD Studio never rewrites a file it cannot read.`);
+    const stopped = parserStoppedMessage(err, text).replace(/\.$/, '');
+    refuse(file, `Fix the DBML in ${file} first (${stopped.charAt(0).toLowerCase()}${stopped.slice(1)}). ERD Studio never rewrites a file it cannot read.`);
   }
   const tableNodes = topLevel(compiled.ast).filter((n) => elementType(n)?.toLowerCase() === 'table');
   const declared = tableNodes.length > 0 ? plainNames(tableNodes[0].name) : null;

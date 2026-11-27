@@ -12,6 +12,7 @@
 import type { DbmlDiagnostic } from '../types/dbmlStorage.js';
 import type { DbmlParserModule } from './parserModule.js';
 import { PINNED_PARSER, diagnosticOf, stripBom, withKeptFilepathKeys } from './parser.js';
+import { dbmlMessageSanitiser, type DbmlMessageSanitiser } from './diagnosticText.js';
 
 /** The virtual root every file is mounted under. */
 const VIRTUAL_ROOT = '/erd-studio/';
@@ -27,7 +28,10 @@ function relativeTo(absolute: string | undefined, fallback: string): string {
  * (a leading byte-order mark is dropped). The result holds every
  * diagnostic once, keyed by the relative path of the file it is in (an entry
  * with none is present with `[]`); a file two entries reach reports each of
- * its diagnostics once.
+ * its diagnostics once. A message that may quote a sample value (a
+ * diagnostic in a `records` block, or one the value backstop catches) is
+ * replaced by fixed words (`diagnosticText.ts`); its code, line and column
+ * stay.
  */
 export function compileDbmlProject(
   files: Readonly<Record<string, string>>,
@@ -45,6 +49,15 @@ export function compileDbmlProject(
   const compiler = new parser.Compiler(layout);
   const result: Record<string, DbmlDiagnostic[]> = {};
   const seen = new Set<string>();
+  const sanitisers = new Map<string, DbmlMessageSanitiser>();
+  const sanitiserOf = (file: string): DbmlMessageSanitiser => {
+    let s = sanitisers.get(file);
+    if (!s) {
+      s = dbmlMessageSanitiser(texts.get(file) ?? '', parser);
+      sanitisers.set(file, s);
+    }
+    return s;
+  };
   // The Compiler rebuilds each file's cache key per query: kept once each while it runs.
   withKeptFilepathKeys(parser, () => {
     for (const entry of entries) {
@@ -54,7 +67,8 @@ export function compileDbmlProject(
       for (const error of errors) {
         const e = error as { filepath?: { absolute?: string }; nodeOrToken?: { filepath?: { absolute?: string } } };
         const file = relativeTo(e.filepath?.absolute ?? e.nodeOrToken?.filepath?.absolute, clean);
-        const d = diagnosticOf(error, texts.get(file) ?? '');
+        const raw = diagnosticOf(error, texts.get(file) ?? '');
+        const d = { ...raw, message: sanitiserOf(file)(raw.message, raw.start) };
         const key = `${file}\u0000${d.code}\u0000${d.line}\u0000${d.column}\u0000${d.message}`;
         if (seen.has(key)) continue;
         seen.add(key);

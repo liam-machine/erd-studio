@@ -33,6 +33,8 @@ export { readErdLayoutDbml, erdLayoutEntrySpan, editDiagramLayoutDbml } from './
 export type { ErdLayoutDbmlReading, ErdLayoutProblem, DiagramLayoutEdit } from './erdLayoutDbml.js';
 export { recordsSpansOf } from './records.js';
 export type { RecordsSpan } from './records.js';
+export { dbmlMessageSanitiser, parserStoppedMessage } from './diagnosticText.js';
+export type { DbmlMessageSanitiser } from './diagnosticText.js';
 export { formatDbml } from './format.js';
 export type { DbmlFormatOptions, DbmlFormatResult, DbmlFormatSkipReason } from './format.js';
 export { applyTextEdits } from './splice.js';
