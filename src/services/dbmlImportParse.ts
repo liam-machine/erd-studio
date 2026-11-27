@@ -26,7 +26,7 @@
 
 import { Compiler, DEFAULT_ENTRY, MemoryProjectLayout } from '@dbml/parse';
 import { ERD_STUDIO_DBML_HEADER_PREFIX } from '@erd-studio/core';
-import { readErdLayoutDbml } from '@erd-studio/core/dbml';
+import { dbmlMessageSanitiser, parserStoppedMessage, readErdLayoutDbml, type DbmlMessageSanitiser } from '@erd-studio/core/dbml';
 import type { DbmlImportLayout } from './dbmlImport';
 
 // ---------------------------------------------------------------------------
@@ -311,11 +311,13 @@ export function readDbml(input: string, parser: DbmlParserModule = PINNED_PARSER
     const compiler = new parser.Compiler(layout);
     const errors: unknown[] = compiler.parse.errors(parser.DEFAULT_ENTRY) ?? [];
     if (errors.length > 0) {
-      return { ok: false, diagnostics: errors.map((e) => diagnosticOf(e, text)) };
+      // A message that may quote a sample value (a records block's) is replaced by fixed words.
+      const sanitise = dbmlMessageSanitiser(text);
+      return { ok: false, diagnostics: errors.map((e) => diagnosticOf(e, text, sanitise)) };
     }
     raw = compiler.parse.rawDb(parser.DEFAULT_ENTRY);
   } catch (err) {
-    return { ok: false, threw: true, diagnostics: [{ line: 1, column: 1, message: `The DBML parser stopped: ${messageOf(err)}` }] };
+    return { ok: false, threw: true, diagnostics: [{ line: 1, column: 1, message: parserStoppedMessage(err, text) }] };
   }
   if (!isObject(raw)) {
     return { ok: false, threw: true, diagnostics: [{ line: 1, column: 1, message: 'The DBML parser returned nothing for this file.' }] };
@@ -373,10 +375,11 @@ export function isErdStudioPlainExport(text: string): boolean {
   return firstLine(text)?.startsWith(`${ERD_STUDIO_DBML_HEADER_PREFIX} v1`) === true;
 }
 
-function diagnosticOf(error: unknown, text: string): DbmlDiagnostic {
+function diagnosticOf(error: unknown, text: string, sanitise: DbmlMessageSanitiser): DbmlDiagnostic {
   const e = isObject(error) ? error : {};
-  const message = typeof e.diagnostic === 'string' && e.diagnostic ? e.diagnostic : messageOf(error);
   const node = isObject(e.nodeOrToken) ? e.nodeOrToken : {};
+  const offset = typeof e.start === 'number' ? e.start : typeof node.start === 'number' ? node.start : undefined;
+  const message = sanitise(typeof e.diagnostic === 'string' && e.diagnostic ? e.diagnostic : messageOf(error), offset);
   const pos = isObject(node.startPos) ? node.startPos : undefined;
   if (pos && typeof pos.line === 'number' && typeof pos.column === 'number') {
     // The parser counts lines and columns from 0.

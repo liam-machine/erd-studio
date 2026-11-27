@@ -62,7 +62,7 @@ describe('a broken .dbml table file', () => {
   it('words a structure tip by its rule, never about Ref or use lines', () => {
     expect(notice('dbmlStructure', 1, 'structure:notOneTable')).toContain('Tip: a table file holds exactly one Table. Move any other Table to its own file.');
     expect(notice('dbmlStructure', 1, 'structure:nameMismatch')).toContain("Tip: name the Table as its file, or rename the file to the Table's name.");
-    expect(notice('dbmlStructure', 1, 'structure:unsupportedElement')).toContain('Remove the Project, TableGroup, Note or other block.');
+    expect(notice('dbmlStructure', 1, 'structure:unsupportedElement')).toContain('Remove the Project, TableGroup or Note block, or move a Records block into its Table.');
     expect(notice('dbmlStructure')).toContain('Tip: a table file holds exactly one Table, named as its file, and no Project, TableGroup or Note.');
     // A parser (binding) code is fixed where the parser points.
     expect(notice('dbmlStructure', 3, '4000')).toContain('Tip: fix the DBML on that line.');
@@ -99,7 +99,7 @@ describe('a broken .dbml table file', () => {
       ({ name: 'fct_order', file: '.erd-studio/tables/gold/fct_order.dbml', kind: 'dbmlStructure', line: 1, ...(code ? { code } : {}), message: 'm' }) as UnreadableTableFile;
     expect(unreadableHint(unreadable('structure:notOneTable'))).toBe('a table file holds exactly one Table — move any other Table to its own file');
     expect(unreadableHint(unreadable('structure:nameMismatch'))).toBe("name the Table as its file (or rename the file to the Table's name)");
-    expect(unreadableHint(unreadable('structure:unsupportedElement'))).toBe('a table file holds one Table and nothing else — remove the Project, TableGroup, Note or other block');
+    expect(unreadableHint(unreadable('structure:unsupportedElement'))).toBe('a table file holds one Table and nothing else — remove the Project, TableGroup or Note block, or move a Records block into its Table');
     expect(unreadableHint(unreadable())).toBe(TABLE_FILE_HINTS.dbmlStructure);
     expect(unreadableHint(unreadable('4000'))).toBe('fix the DBML at line 1');
   });
