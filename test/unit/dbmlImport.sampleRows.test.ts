@@ -205,3 +205,51 @@ describe('rows the import does not keep are reported by table and count', () => 
     expect(p.report.notes.join('\n')).not.toMatch(/Sample data/);
   });
 });
+
+describe('two schemas share a table name', () => {
+  const rows = (n: number) => Array.from({ length: n }, (_, i) => `    ${i + 1}`).join('\n');
+  const TWO = [
+    'Table a.t {', '  id int [pk]', '  records (id) {', rows(SAMPLE_ROWS_LIMIT + 2), '  }', '}',
+    'Table b.t {', '  id int [pk]', '  v int', '  records (id, v) {', '    1, 2', '    -3, -4', '  }', '}', '',
+  ].join('\n');
+  const p = plan(TWO);
+  const draftOf = (q: DbmlImportPlan) => draftFromImportPlan({
+    plan: q,
+    importSource: 'file',
+    trigger: 'palette',
+    target: { layer: 'gold', layerLabel: 'Gold', name: 'shop', diagramFile: '.erd-studio/gold/diagrams/shop.dbml' },
+    fileName: 'shop.dbml',
+    describe: { layerLabel: 'Gold', dbml: { relationshipsFiles: [] } },
+    libraryTable: () => undefined,
+    layers: DEFAULT_LAYERS,
+    logicalOnly: true,
+    hasFolder: true,
+    changeOptions: false,
+  });
+
+  it('the report names each table by schema, as its New line does', () => {
+    expect(p.modelNames).toEqual(['a.t', 'b.t']);
+    expect(p.report.notes).toContain('Sample data kept for 2 tables (a.t, b.t).');
+    expect(p.report.dropped.filter((d) => d.kind === 'records')).toEqual([
+      { kind: 'records', what: 'Sample data for a.t', item: 'a.t', why: `kept the first ${SAMPLE_ROWS_LIMIT} of ${SAMPLE_ROWS_LIMIT + 2} rows.` },
+      { kind: 'records', what: 'Sample data for b.t', item: 'b.t', why: '1 row left out, because DBML 9 and 10 tools reject a row that starts with a minus or plus sign.' },
+    ]);
+  });
+
+  it('the draft draws both tables under those names, each with its own columns and rows', () => {
+    const shown = draftOf(p).display.models.map((m) => [m.name, m.schema, m.columns.map((c) => c.name), m.sampleData?.columns, m.sampleData?.rows.length]);
+    expect(shown).toEqual([
+      ['a.t', 'a', ['id'], ['id'], SAMPLE_ROWS_LIMIT],
+      ['b.t', 'b', ['id', 'v'], ['id', 'v'], 1],
+    ]);
+    const b = draftOf(p).display.models.find((m) => m.name === 'b.t')!;
+    expect(b.sampleData?.rows).toEqual([[num('1'), num('2')]]);
+  });
+});
+
+describe('a value with escaped line-break characters', () => {
+  it('is kept as the parser reads it: a carriage return and line feed written as escapes stay both', () => {
+    const p = plan("Table t {\n  id int [pk]\n  v varchar\n  records (id, v) {\n    1, 'x\\r\\ny'\n  }\n}\n");
+    expect(rowsOf(p, 't')?.rows).toEqual([[num('1'), str('x\r\ny')]]);
+  });
+});

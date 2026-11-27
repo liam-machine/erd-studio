@@ -813,16 +813,17 @@ function planSampleRows(
     const rows = keptSampleRows(records, p.columns);
     if (!rows) continue;
     out.set(table, rows.data);
-    kept.push(table.name);
+    // By its name in the plan (`<schema>.<name>` when another table shares the name), as the rest of the report names it.
+    kept.push(p.name);
     enumCells += rows.enumCells;
     if (records.totalRows > records.rows.length) {
-      notImported.push({ kind: 'records', what: `Sample data for ${table.name}`, item: table.name, why: `kept the first ${records.rows.length} of ${records.totalRows} rows.` });
+      notImported.push({ kind: 'records', what: `Sample data for ${p.name}`, item: p.name, why: `kept the first ${records.rows.length} of ${records.totalRows} rows.` });
     }
     if (rows.leftOut > 0) {
       notImported.push({
         kind: 'records',
-        what: `Sample data for ${table.name}`,
-        item: table.name,
+        what: `Sample data for ${p.name}`,
+        item: p.name,
         why: `${plural(rows.leftOut, 'row')} left out, because DBML 9 and 10 tools reject a row that starts with a minus or plus sign.`,
       });
     }

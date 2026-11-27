@@ -327,21 +327,62 @@ function tableAndRelationshipSections(
   return sections.filter((s) => s.items.length > 0);
 }
 
-/** `name`'s table among `lists`, first match (exact, then ignoring case), else the library's, else an empty placeholder. */
+/**
+ * `name`'s table among `lists`, first match (exact, then ignoring case, then
+ * by `<schema>.<name>`, the name a plan gives a table whose name another
+ * schema shares), else the library's, else an empty placeholder. A table
+ * found by `<schema>.<name>` is drawn under that name, as the diagram Keep
+ * writes loads it, so two schemas' same-named tables stay two tables.
+ */
 function resolveTables(
   names: readonly string[],
   lists: ReadonlyArray<readonly SemanticTable[]>,
   libraryTable: (name: string) => SemanticTable | undefined,
 ): SemanticTable[] {
+  return resolveDrawnTables(names, lists, libraryTable).map((r) => r.drawn);
+}
+
+/** {@link resolveTables}, each drawn table beside the table of `lists` it was found as (by identity). */
+function resolveDrawnTables(
+  names: readonly string[],
+  lists: ReadonlyArray<readonly SemanticTable[]>,
+  libraryTable: (name: string) => SemanticTable | undefined,
+): Array<{ drawn: SemanticTable; found?: SemanticTable }> {
   const exact = new Map<string, SemanticTable>();
   const lower = new Map<string, SemanticTable>();
+  const qualified = new Map<string, SemanticTable>();
+  const qualifiedLower = new Map<string, SemanticTable>();
   for (const list of lists) {
     for (const t of list) {
       if (!exact.has(t.name)) exact.set(t.name, t);
       if (!lower.has(t.name.toLowerCase())) lower.set(t.name.toLowerCase(), t);
+      if (!t.schema) continue;
+      const ref = `${t.schema}.${t.name}`;
+      if (!qualified.has(ref)) qualified.set(ref, t);
+      if (!qualifiedLower.has(ref.toLowerCase())) qualifiedLower.set(ref.toLowerCase(), t);
     }
   }
-  return names.map((name) => exact.get(name) ?? lower.get(name.toLowerCase()) ?? libraryTable(name) ?? { name, columns: [] });
+  return names.map((name) => {
+    const found = exact.get(name) ?? lower.get(name.toLowerCase());
+    if (found) return { drawn: found, found };
+    const byRef = qualified.get(name) ?? qualifiedLower.get(name.toLowerCase());
+    if (byRef) return { drawn: { ...byRef, name }, found: byRef };
+    return { drawn: libraryTable(name) ?? { name, columns: [] } };
+  });
+}
+
+/** `given` (rows by a plan's own tables) keyed by the tables the draft draws for them. */
+function rowsByDrawnTable<T>(
+  resolved: ReadonlyArray<{ drawn: SemanticTable; found?: SemanticTable }>,
+  given: ReadonlyMap<SemanticTable, T> | undefined,
+): Map<SemanticTable, T> | undefined {
+  if (!given || given.size === 0) return undefined;
+  const out = new Map<SemanticTable, T>();
+  for (const { drawn, found } of resolved) {
+    const rows = found ? given.get(found) : undefined;
+    if (rows !== undefined) out.set(drawn, rows);
+  }
+  return out.size > 0 ? out : undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -485,7 +526,9 @@ export function draftFromImportPlan(input: ImportPlanDraftInput): Draft {
     ...input.describe,
     ...(input.origin && !input.describe.origin ? { origin: input.origin } : {}),
   };
-  const tables = resolveTables(plan.modelNames, [plan.newTables, plan.changedLibraryTables], input.libraryTable);
+  const resolved = resolveDrawnTables(plan.modelNames, [plan.newTables, plan.changedLibraryTables], input.libraryTable);
+  const tables = resolved.map((r) => r.drawn);
+  const rows = rowsByDrawnTable(resolved, plan.sampleData);
   const { display, autoLayout } = displayFromTables({
     name: plan.subjectAreaName,
     layer: plan.layer,
@@ -495,7 +538,7 @@ export function draftFromImportPlan(input: ImportPlanDraftInput): Draft {
     viewConfig: plan.document.viewConfig,
     layers: input.layers,
     // The rows of the tables the import creates (D37), never a reused table's.
-    ...(plan.sampleData ? { sampleData: plan.sampleData } : {}),
+    ...(rows ? { sampleData: rows } : {}),
   });
   const { report } = plan;
   const summary: DraftSummary = {

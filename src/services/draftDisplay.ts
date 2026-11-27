@@ -146,15 +146,19 @@ export function displayFromTables(input: DisplayFromTablesInput): DraftDisplay {
 /**
  * The display with the rows `input.sampleData` gives attached to each of
  * their tables (by the name the draft draws it under, the last key of its
- * display table, as core places it). A table given no rows is left as it is.
+ * display table, as core places it). A table given no rows is left as it is,
+ * and so is a name two tables share: the draft draws one table for it, so
+ * rows given for either could land on the other.
  */
 function withSampleData(display: DisplaySubjectArea, input: DisplayFromTablesInput): DisplaySubjectArea {
   const given = input.sampleData;
   if (!given || given.size === 0) return display;
+  const uses = new Map<string, number>();
+  for (const t of input.tables) uses.set(t.name, (uses.get(t.name) ?? 0) + 1);
   const byName = new Map<string, SampleData>();
   for (const t of input.tables) {
     const data = given.get(t);
-    if (data && data.rows.length > 0 && data.columns.length > 0 && !byName.has(t.name)) byName.set(t.name, data);
+    if (data && data.rows.length > 0 && data.columns.length > 0 && uses.get(t.name) === 1) byName.set(t.name, data);
   }
   if (byName.size === 0) return display;
   return {
