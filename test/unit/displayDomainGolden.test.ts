@@ -159,12 +159,13 @@ const EXPECTED_FILES = [
   // packages/core/test/unit/loadDisplayDomain.sampleRows20.test.ts.
   'sample-rows-2.0.catalog.display.json',
   // Sample rows in every form a table file may hold them (packages/core/test/fixtures/dbml/sample-rows): drawn
-  // without rows and with them (readSampleData), and the plain exports, which never carry rows; owned by
-  // packages/core/test/unit/loadDisplayDomain.golden.test.ts.
+  // without rows and with them (readSampleData), the plain exports, which never carry rows, and the rich
+  // export, which writes them; owned by packages/core/test/unit/loadDisplayDomain.golden.test.ts.
   'sample-rows.shop.display.json',
   'sample-rows.shop.rows.display.json',
   'sample-rows.shop.dbml',
   'sample-rows.shop.mmd',
+  'sample-rows.shop.rich.dbml',
 ].sort();
 
 /**

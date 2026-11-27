@@ -3,8 +3,8 @@ Table gold.dim_region {
   region_name VARCHAR
   Note: 'Regions, with sample data for one column'
 
-  records (region_name) {
-    'North coast'
-    'South plains'
+  records (region_code) {
+    'R-NORTH'
+    'R-SOUTH'
   }
 }

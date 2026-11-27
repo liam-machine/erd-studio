@@ -60,6 +60,9 @@ const SAMPLE_DATA_FILES: readonly string[] = [
   'packages/core/src/dbml/records.ts',
   // The one writer of row text (a new table file's block, an export's), parser-free.
   'packages/core/src/sampleRows.ts',
+  // The rich DBML export writes a table's rows (the shared traversal carries them; plain DBML and Mermaid never read them).
+  'packages/core/src/exportShared.ts',
+  'packages/core/src/exportDbmlRich.ts',
   'packages/core/src/dbml/readTable.ts',
   'packages/core/src/dbml/writeTable.ts',
   'packages/core/src/dbml/index.ts',

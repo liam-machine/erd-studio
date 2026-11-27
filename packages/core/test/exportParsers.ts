@@ -20,7 +20,10 @@
  *   `readDbmlRich` reads with all three, through each one's
  *   `DBMLDiagnosticsProvider`, so warnings and lint infos count too, into
  *   one shape (11.0 gives a custom property as `{ value, type }`, the others
- *   as a plain string), and requires them to agree.
+ *   as a plain string), and requires them to agree. Sample rows (`records`)
+ *   are read too, each value as `[value, type]`; a data lint about them
+ *   (a missing or repeated key, a value that does not join) is refused like
+ *   any other diagnostic, except with `{ dataLints: 'records' }`.
  * - Mermaid: `mermaid-current` (the current release) reads the diagram;
  *   `mermaid` is pinned to 10.0.0, the oldest 10.x, and must accept it too
  *   (`parseMermaidOldest`). Mermaid needs a DOM, so a test file that calls
@@ -47,6 +50,7 @@ import { Parser as ParserV2 } from 'dbml-core-v2';
 import { Parser as ParserV24 } from 'dbml-core-v24';
 import { Parser as ParserV3 } from 'dbml-core-v3';
 import type { DisplayColumn, DisplaySubjectArea, DisplayTable, DisplayRelationship } from '../src/types/display';
+import { recordsSpansOf } from '../src/dbml/records';
 import { DIAGRAM_EXPORT_FILE_EXTENSIONS, type DiagramExportFormat } from '../src/exportDiagram';
 
 /** The parser versions the tests run, for messages and docs. */
@@ -246,6 +250,8 @@ export interface RichDbmlReading {
   refs: Array<{ name: string | null; ends: Array<[string, string, string[], string]> }>;
   groups: Array<{ name: string; color: string | null; note: string | null; tables: string[] }>;
   notes: Array<{ name: string; content: string; color: string | null; properties: Record<string, string> }>;
+  /** Sample rows (`records` blocks), each value as `[value, type]`; absent when the text has none. */
+  records?: Array<{ schema: string; table: string; columns: string[]; rows: Array<Array<[unknown, string]>> }>;
 }
 
 function readRich(db: Loose): RichDbmlReading {
@@ -275,7 +281,37 @@ function readRich(db: Loose): RichDbmlReading {
       tables: g.tables.map((t: Loose) => `${schemaOf(t.schemaName)}.${t.name}`),
     })),
     notes: (db.notes ?? []).map((n: Loose) => ({ name: n.name, content: n.content, color: n.color ?? null, properties: propertiesOf(n.metadata) })),
+    ...recordsOf(db),
   };
+}
+
+/** The sample rows a parser read, without its token positions; nothing when there are none (so no other reading changes). */
+function recordsOf(db: Loose): Pick<RichDbmlReading, 'records'> {
+  const records = Array.isArray(db.records) ? db.records : [];
+  if (records.length === 0) return {};
+  return {
+    records: records.map((r: Loose) => ({
+      schema: schemaOf(r.schemaName),
+      table: r.tableName,
+      columns: [...r.columns],
+      rows: r.values.map((row: Loose[]) => row.map((v: Loose) => [v.value, v.type] as [unknown, string])),
+    })),
+  };
+}
+
+/**
+ * The 0-based lines of `text` that a `records` block spans, keyword to
+ * closing brace: where `{ dataLints: 'records' }` lets a diagnostic sit. The
+ * rich export writes each block's keyword and closing brace on lines of
+ * their own, so a line is in a block or out of it.
+ */
+function recordsLines(text: string): Set<number> {
+  const lines = new Set<number>();
+  const lineOf = (offset: number): number => text.slice(0, offset).split('\n').length - 1;
+  for (const span of recordsSpansOf(text)) {
+    for (let line = lineOf(span.start); line <= lineOf(Math.max(span.start, span.end - 1)); line++) lines.add(line);
+  }
+  return lines;
 }
 
 /**
@@ -286,17 +322,36 @@ function readRich(db: Loose): RichDbmlReading {
  */
 export const MODEL_LINT_INFOS = [/should be unique or primary key/, /should have a composite unique index/, /is unique but operator .* allows many/];
 
+/** Options for {@link readDbmlRich}. */
+export interface ReadDbmlRichOptions {
+  /** `'model'` (the default) allows the {@link MODEL_LINT_INFOS}; `'none'` refuses every lint info. */
+  infos?: 'model' | 'none';
+  /**
+   * `'records'` also allows a warning or lint info that sits inside a
+   * `records` block of `text`: a data lint about the rows themselves (a
+   * missing or repeated key, a value that does not join), which says what
+   * the user's own rows hold, not how the export wrote them. Errors are
+   * never allowed, nor any diagnostic outside a block. Only the round trip
+   * of other tools' DBML passes it (test/unit/dbmlRoundTrip.test.ts); every
+   * golden stays strict.
+   */
+  dataLints?: 'records';
+}
+
 /**
  * `text` read by all three 9.1+ parsers. Throws, naming the parser, on any
  * error or warning, on a lint info other than {@link MODEL_LINT_INFOS} (or
  * any info at all with `{ infos: 'none' }`), and when the parsers read it
- * differently; returns the shared reading.
+ * differently; returns the shared reading. With `{ dataLints: 'records' }`
+ * a warning or info inside a `records` block is allowed.
  */
-export function readDbmlRich(text: string, options: { infos?: 'model' | 'none' } = {}): RichDbmlReading {
+export function readDbmlRich(text: string, options: ReadDbmlRichOptions = {}): RichDbmlReading {
   let first: { parser: string; reading: RichDbmlReading; json: string } | undefined;
+  const inRecords = options.dataLints === 'records' ? recordsLines(text) : new Set<number>();
   for (const { parser, diagnostics, db } of parseDbmlRich(text)) {
     const refused = diagnostics.filter(
-      (d) => d.type !== 'info' || options.infos === 'none' || !MODEL_LINT_INFOS.some((pattern) => pattern.test(d.text)),
+      (d) => !(d.type !== 'error' && inRecords.has(d.line))
+        && (d.type !== 'info' || options.infos === 'none' || !MODEL_LINT_INFOS.some((pattern) => pattern.test(d.text))),
     );
     if (refused.length > 0 || !db) {
       throw new Error(`${parser}: ${refused.map((d) => `${d.type} ${d.line + 1}: ${d.text}`).join('; ') || 'no database'}`);
