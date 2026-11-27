@@ -287,6 +287,41 @@ export function tableLoadWarningOf(model: SemanticTable): TableLoadWarning | und
   return candidate && typeof candidate === 'object' ? candidate : undefined;
 }
 
+/** One sample value. A string's text unescaped; any other value exactly as written (007, 1.50, TRUE, `now()`, status.active). */
+export interface SampleCell {
+  text: string;
+  kind: 'string' | 'number' | 'boolean' | 'expression' | 'enum';
+}
+
+/**
+ * A table's sample rows (D37): its nested `records` block, read-only.
+ * Runtime-only, like `loadWarning`: an ordinary enumerable sidecar, never
+ * written to a file (the writers never read it). It may hold real data, so
+ * it never goes into a message, a log line or telemetry.
+ */
+export interface SampleData {
+  /** The block's list as written, or every column in file order for `records {`. */
+  columns: string[];
+  /** Rows in file order, at most {@link SAMPLE_ROWS_LIMIT}. null = `null` (any case) or an empty field. */
+  rows: Array<Array<SampleCell | null>>;
+  /** Rows in the file, counting any past the limit. */
+  totalRows: number;
+}
+
+/** The most sample rows a reading carries; {@link SampleData.totalRows} counts the rest. */
+export const SAMPLE_ROWS_LIMIT = 100;
+
+/** A table read with its {@link SampleData}. */
+export interface TableWithSampleData extends SemanticTable {
+  sampleData: SampleData;
+}
+
+/** The sample rows carried by a table that was read with them, if any. */
+export function tableSampleDataOf(t: SemanticTable): SampleData | undefined {
+  const candidate = (t as Partial<TableWithSampleData>).sampleData;
+  return candidate && typeof candidate === 'object' && Array.isArray(candidate.rows) ? candidate : undefined;
+}
+
 /**
  * Why a model file that exists could not be read. A fixed set derived from
  * the YAML parser's error code (never its message), so it is safe to branch on

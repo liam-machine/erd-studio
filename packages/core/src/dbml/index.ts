@@ -31,6 +31,8 @@ export { renderNewSubjectAreaDbml, editSubjectAreaDbml, pendingRelationshipRef }
 export type { SubjectAreaDbmlEdit, NewSubjectAreaDbml, DbmlDiagramTable } from './writeDiagram.js';
 export { readErdLayoutDbml, erdLayoutEntrySpan, editDiagramLayoutDbml } from './erdLayoutDbml.js';
 export type { ErdLayoutDbmlReading, ErdLayoutProblem, DiagramLayoutEdit } from './erdLayoutDbml.js';
+export { recordsSpansOf } from './records.js';
+export type { RecordsSpan } from './records.js';
 export { formatDbml } from './format.js';
 export type { DbmlFormatOptions, DbmlFormatResult, DbmlFormatSkipReason } from './format.js';
 export { applyTextEdits } from './splice.js';
