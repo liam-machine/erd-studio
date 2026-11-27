@@ -21,7 +21,7 @@ This page shows how to move every diagram to dbdiagram.io, what goes with it, an
 2. Choose **Rich DBML**.
 3. Pick a folder and click **Export Here**. If any of the files are already there, ERD Studio asks once before replacing them.
 
-You get one file for each diagram, such as `sales.dbml`: the tables, columns, keys and relationships, with ERD Studio's fields as DBML properties, and where each table and sticky note sits (`erd_layout`, which only ERD Studio reads).
+You get one file for each diagram, such as `sales.dbml`: the tables, columns, keys and relationships, with ERD Studio's fields as DBML properties, a table's sample rows when it has some (check them before you upload: they can be real data), and where each table and sticky note sits (`erd_layout`, which only ERD Studio reads).
 
 Each file is named after its diagram. When two layers have a diagram with the same name, the layer goes in front (`gold-sales.dbml`). Save the export outside `.erd-studio/`: ERD Studio refuses a folder inside it, where the files are your diagrams' own storage.
 

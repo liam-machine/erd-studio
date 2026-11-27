@@ -66,6 +66,10 @@ Your assistant reads the list before it creates or edits a table, and:
 
 To change the list, edit the file, ask your assistant ("we don't use Open questions"), or run **ERD Studio: Customise Fields…**. The [file format reference](semantic-domain-json-reference.md#field-list-erd-studiofieldsyml) has every option.
 
+## Sample rows
+
+A table can hold a few sample rows, a `records` block at the end of its `Table`, which ERD Studio shows in the Detail panel's **Sample data** section. Your assistant writes rows only when you ask, invents them unless you give it real ones, and never queries a warehouse for them. When it renames or removes a column, it changes the block's column list and every row to match, as ERD Studio does on the canvas. Rows may be real data, so it never copies them into an issue, a pull request, a commit message, feedback or a summary: it gives a row count instead. Before it pushes a Rich DBML export to dbdiagram.io, it tells you the export may carry those rows.
+
 ## Where the instructions go
 
 The guide is an [Agent Skill](https://agentskills.io): Claude Code reads it from `.claude/skills/`, and GitHub Copilot, Codex, Gemini CLI and Cursor read the copy in `.agents/skills/`. It has been tested end to end with Claude Code; the other four read the same skill from the shared `.agents/skills/` folder.
