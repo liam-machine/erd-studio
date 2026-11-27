@@ -112,6 +112,22 @@ describe('erd-studio changes --json', () => {
     expect(Object.values(result.summary).every((n) => n === 0)).toBe(true);
   });
 
+  it('a sample value the parser quotes (a dotted bare word in records) never reaches the problems (D37)', async () => {
+    const project = repoWithBase();
+    write(project, '.erd-studio/gold/tables/gold/dim_customer.dbml', DIM_CUSTOMER.replace(
+      '}\n',
+      '\n  records (customer_key, customer_id) {\n    1, zqSENTX7.doe\n  }\n}\n',
+    ));
+    const { out } = await run(['changes', '--base', 'HEAD', '--json'], project);
+    expect(out).not.toMatch(/SENTX7/);
+    const result = JSON.parse(out) as ChangesResult;
+    expect(result.problems).toEqual([expect.objectContaining({
+      side: 'head',
+      file: '.erd-studio/gold/tables/gold/dim_customer.dbml',
+      message: expect.stringContaining('a value in the sample data (records) does not read as DBML [4000]'),
+    })]);
+  });
+
   it('has the documented shape, with project-relative paths', async () => {
     const project = repoWithBase();
     changeModel(project);

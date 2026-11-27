@@ -600,6 +600,33 @@ describe('doctor via main', () => {
 });
 
 describe('doctor on native DBML storage (§7.1, S4)', () => {
+  it('a sample value the parser quotes (a dotted bare word in records) never reaches the JSON; the table is reported in fixed words with its code (D37)', async () => {
+    const root = copyFixture('dbml-native');
+    fs.writeFileSync(path.join(root, '.erd-studio', DIM_REGION), [
+      'Table gold.dim_region {',
+      '  region_key INT [pk]',
+      '  region_name VARCHAR',
+      '',
+      '  records (region_key, region_name) {',
+      '    1, zqSENTX7.north',
+      '  }',
+      '}',
+      '',
+    ].join('\n'));
+    let out = '';
+    await main(['doctor', '--project', root, '--no-dbt', '--json'], {
+      stdout: { write: (s: string) => { out += s; } },
+      stderr: { write: () => undefined },
+      cwd: tmp,
+      env: cleanEnv,
+    });
+    expect(out).not.toMatch(/SENTX7/);
+    const r = JSON.parse(out) as DoctorResult;
+    const unreadable = r.erd.unreadableModelFiles.find((u) => u.file.endsWith('dim_region.dbml'));
+    expect(unreadable).toMatchObject({ code: '4000', line: 6 });
+    expect(unreadable!.message).toContain('a value in the sample data (records) does not read as DBML [4000]');
+  });
+
   it('lists every DBML diagram, reports storage dbml and reads no .dbml as JSON', async () => {
     const root = copyFixture('dbml-native');
     const parse = vi.spyOn(JSON, 'parse');
