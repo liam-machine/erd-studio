@@ -23,6 +23,7 @@
  */
 
 import { dbmlName } from '../dbmlText.js';
+import { SAMPLE_ROWS_LIMIT, type SampleCell, type SampleData } from '../types/semantic.js';
 import { DbmlEditRefused } from './errors.js';
 import type { DbmlParserModule } from './parserModule.js';
 import { PINNED_PARSER, elementType, lineAt, nameFragments, parseSyntax, stripBom, topLevel, type AstNode } from './parser.js';
@@ -190,6 +191,76 @@ export function recordsCellsOf(text: string, block: RecordsBlock): RecordsCells 
       : block.form === 'other' ? [`\u0000${text.slice(block.node.name?.start ?? block.node.start, block.node.name?.end ?? block.node.start)}`]
         : block.list!.elements.map((e) => listName(text, e));
   return { header, rows: block.rows.map((row) => row.elements.map((e) => cellText(text, e))) };
+}
+
+// ---------------------------------------------------------------------------
+// Reading a block's rows for display (capped)
+// ---------------------------------------------------------------------------
+
+const BOOLEAN_WORDS: ReadonlySet<string> = new Set(['true', 'false']);
+
+/**
+ * One value as {@link SampleData} holds it, read from the source text by its
+ * token (never from the interpreted database, which turns `007` into 7,
+ * rounds a 20-digit integer and empties an enum reference). The kind comes
+ * from the token: a string literal or a double-quoted name is a `string`
+ * (its text as the parser reads it, a line break inside a `'''` string read
+ * as `\n` in a CRLF file too); `null` (any case) and an empty field are
+ * null; `true` / `false` (any case) are a `boolean`; a number, signed or
+ * not, is a `number`; a backtick expression an `expression` (backticks
+ * kept); a dotted name an `enum` reference. Every kind but `string` keeps
+ * its source text exactly as written.
+ */
+export function sampleCellOf(text: string, node: AstNode): SampleCell | null {
+  if (isDummy(node)) return null;
+  const source = text.slice(node.start, node.end);
+  if (node.kind === '<primary-expression>') {
+    const expression = node.expression as AstNode | undefined;
+    const token = (expression?.literal ?? expression?.variable) as AstNode | undefined;
+    if (token?.kind === '<string>' || token?.kind === '<variable>') {
+      return { text: typeof token.value === 'string' ? token.value.replace(/\r\n/g, '\n') : source, kind: 'string' };
+    }
+    if (token?.kind === '<number>') return { text: source, kind: 'number' };
+    if (token?.kind === '<identifier>' && typeof token.value === 'string') {
+      const word = token.value.toLowerCase();
+      if (word === 'null') return null;
+      if (BOOLEAN_WORDS.has(word)) return { text: source, kind: 'boolean' };
+    }
+  }
+  if (node.kind === '<prefix-expression>') return { text: source, kind: 'number' };
+  if (node.kind === '<infix-expression>' && node.op?.value === '.') return { text: source, kind: 'enum' };
+  // A backtick expression, or (in a block the parser did not refuse) anything else: as written.
+  return { text: source, kind: 'expression' };
+}
+
+/**
+ * A nested block's rows for display: its list's names (or, for `records {`,
+ * `tableColumns`, the Table's columns in file order) and at most
+ * {@link SAMPLE_ROWS_LIMIT} rows, with `totalRows` counting every row.
+ * Undefined for `records ()`, any other form, a block with no column or no
+ * row: there is nothing to show.
+ */
+export function sampleDataOf(text: string, block: RecordsBlock, tableColumns: readonly string[]): SampleData | undefined {
+  let columns: string[];
+  if (block.form === 'none') columns = [...tableColumns];
+  else if (block.form === 'tuple' || block.form === 'group') columns = block.list!.elements.map((e) => listName(text, e));
+  else return undefined;
+  if (columns.length === 0 || columns.some((c) => c.startsWith('\u0000')) || block.rows.length === 0) return undefined;
+  const rows = block.rows.slice(0, SAMPLE_ROWS_LIMIT).map((row) => row.elements.map((e) => sampleCellOf(text, e)));
+  return { columns, rows, totalRows: block.rows.length };
+}
+
+/**
+ * The reader's problem for a nested block that does not read
+ * (`recordsUnreadable`): the line of its keyword, no value.
+ */
+export function recordsUnreadableMessage(line: number): string {
+  return `Line ${line}: the sample data (records) does not read as DBML, so it is not shown. Other DBML tools reject this file, and ERD Studio will not edit this table until the rows are fixed or removed.`;
+}
+
+/** The writer's refusal (R1) for a table read with a block that does not read: the file and the block's line, no value. */
+export function recordsUnreadableRefusal(file: string, line: number | undefined): string {
+  return `${file}: the sample data (records)${line !== undefined ? ` on line ${line}` : ''} does not read as DBML. Fix or remove it in the file; ERD Studio will not edit this table until it reads.`;
 }
 
 // ---------------------------------------------------------------------------

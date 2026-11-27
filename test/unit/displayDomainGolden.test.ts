@@ -154,9 +154,17 @@ const EXPECTED_FILES = [
   'same-name-unqualified.bqs-only.display.json',
   'same-name-unqualified.sap.display.json',
   // Table files with sample rows (DBML records) as 2.0.10 left them: a valid nested block and a stale
-  // list, drawn as a placeholder (packages/core/test/fixtures/dbml/sample-rows-2.0); owned by
+  // list, which 2.0.10 drew as a placeholder and which now loads without its rows
+  // (packages/core/test/fixtures/dbml/sample-rows-2.0); owned by
   // packages/core/test/unit/loadDisplayDomain.sampleRows20.test.ts.
   'sample-rows-2.0.catalog.display.json',
+  // Sample rows in every form a table file may hold them (packages/core/test/fixtures/dbml/sample-rows): drawn
+  // without rows and with them (readSampleData), and the plain exports, which never carry rows; owned by
+  // packages/core/test/unit/loadDisplayDomain.golden.test.ts.
+  'sample-rows.shop.display.json',
+  'sample-rows.shop.rows.display.json',
+  'sample-rows.shop.dbml',
+  'sample-rows.shop.mmd',
 ].sort();
 
 /**

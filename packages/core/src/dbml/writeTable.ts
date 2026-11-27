@@ -68,6 +68,7 @@ import {
   recordsBlocksOf,
   recordsCellsOf,
   recordsOutOfStepMessage,
+  recordsUnreadableRefusal,
   type RecordsCells,
   type RecordsPlan,
 } from './records.js';
@@ -564,6 +565,9 @@ function editTableOnce(
   }
   if (!reading.writable) {
     const problem = reading.problems.find((p) => p.code === 'useInTableFile' || p.code === 'refInTableFile' || p.code === 'inlineRefInTableFile');
+    // R1 (D37): sample rows that do not read. The writer never splices a block it could not parse.
+    const records = problem ? undefined : reading.problems.find((p) => p.code === 'recordsUnreadable');
+    if (records) refuse(file, recordsUnreadableRefusal(file, records.line), records.line);
     refuse(file, `${file}: ${problem?.message ?? 'move the use, Ref or ref: lines out of the table file first.'}`, problem?.line);
   }
   const tableNode = tableNodes[0];

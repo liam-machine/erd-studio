@@ -1,0 +1,60 @@
+erDiagram
+%% erd-studio mermaid-export v1
+%% Not exported: canvas positions and sizes, sticky-note colours, nested meta values (lists and maps).
+%% Types and column names keep only letters, digits and _; a column comment gives the original when it differs.
+%% Diagram: shop (layer gold, logical stage)
+%% Description: Tables with sample rows in every form a table file may hold them
+
+  %% Table dim_product
+  %%   schema: gold
+  %%   description: Products, with every column named in the sample data
+  "dim_product" {
+    INT product_key PK "Surrogate key"
+    VARCHAR product_name "Display name"
+    DECIMAL_10_2 list_price "type DECIMAL(10,2)"
+    DECIMAL_10_2 price_change "type DECIMAL(10,2)"
+    BOOLEAN is_active
+    DATE launched_on
+  }
+
+  %% Table dim_customer
+  %%   schema: gold
+  %%   description: Customers, with sample data that names no columns (every column, in order)
+  "dim_customer" {
+    INT customer_key PK "Surrogate key"
+    VARCHAR customer_name
+    VARCHAR segment
+  }
+
+  %% Table fct_order_line
+  %%   schema: gold
+  %%   grain: One row per order line
+  %%   description: Order lines, whose sample data names a status from the Enum below
+  "fct_order_line" {
+    BIGINT order_line_id PK
+    INT product_key FK
+    INT customer_key FK
+    INT quantity "Negative for a return"
+    order_status status
+  }
+
+  %% Table dim_region
+  %%   schema: gold
+  %%   description: Regions, with sample data for one column
+  "dim_region" {
+    VARCHAR region_code PK
+    VARCHAR region_name
+  }
+
+  %% Table dim_channel
+  %%   schema: gold
+  %%   description: Sales channels, with an empty records list, which is never shown or touched
+  "dim_channel" {
+    VARCHAR channel_code PK
+    VARCHAR channel_name
+  }
+
+  %% fct_order_line.customer_key -> dim_customer.customer_key, many-to-one
+  "fct_order_line" }o--|| "dim_customer" : "customer_key"
+  %% fct_order_line.product_key -> dim_product.product_key, many-to-one
+  "fct_order_line" }o--|| "dim_product" : "product_key"

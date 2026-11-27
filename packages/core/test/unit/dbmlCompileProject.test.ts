@@ -98,10 +98,10 @@ const UNCLEAN_TWINS = new Set(['missing-model', 'same-name-unqualified', 'sample
 const CLEAN_TWINS = fs.readdirSync(TWINS_DIR).filter((name) => !UNCLEAN_TWINS.has(name));
 
 describe('the DBML twins compile clean as multi-file projects, the way other DBML tools read them', () => {
-  it('the clean twins are the four §9.2 cases, Convert\'s missing-model output (D26/D27), the context-field spellings, an imported table\'s settings, the alias workaround and two tables of one name in two schema folders', () => {
+  it('the clean twins are the four §9.2 cases, Convert\'s missing-model output (D26/D27), the context-field spellings, an imported table\'s settings, the alias workaround, two tables of one name in two schema folders and sample rows in every form (D37)', () => {
     expect([...CLEAN_TWINS].sort()).toEqual([
       'alias-workaround', 'composite-and-self', 'fields-new', 'fields-old', 'import-settings-new', 'import-settings-old', 'library-relationships', 'missing-model-converted',
-      'missing-positions', 'same-name-two-schemas', 'showcase',
+      'missing-positions', 'same-name-two-schemas', 'sample-rows', 'showcase',
     ]);
   });
 

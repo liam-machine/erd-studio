@@ -1,0 +1,53 @@
+// erd-studio dbml-export v1
+// Not exported: canvas positions and sizes, sticky-note colours, nested meta values (lists and maps).
+// ERD Studio's own fields (role, grain, alias, rationale, natural keys, SCD type, additivity, meta) are in the notes.
+
+Project shop {
+  Note: '''Layer: gold
+Stage: logical
+
+Tables with sample rows in every form a table file may hold them'''
+}
+
+Table gold.dim_product {
+  product_key INT [pk, note: 'Surrogate key']
+  product_name VARCHAR [note: 'Display name']
+  list_price "DECIMAL(10,2)"
+  price_change "DECIMAL(10,2)"
+  is_active BOOLEAN
+  launched_on DATE
+  Note: 'Products, with every column named in the sample data'
+}
+
+Table gold.dim_customer {
+  customer_key INT [pk, note: 'Surrogate key']
+  customer_name VARCHAR
+  segment VARCHAR
+  Note: 'Customers, with sample data that names no columns (every column, in order)'
+}
+
+Table gold.fct_order_line {
+  order_line_id BIGINT [pk]
+  product_key INT
+  customer_key INT
+  quantity INT [note: 'Negative for a return']
+  status order_status
+  Note: '''Grain: One row per order line
+
+Order lines, whose sample data names a status from the Enum below'''
+}
+
+Table gold.dim_region {
+  region_code VARCHAR [pk]
+  region_name VARCHAR
+  Note: 'Regions, with sample data for one column'
+}
+
+Table gold.dim_channel {
+  channel_code VARCHAR [pk]
+  channel_name VARCHAR
+  Note: 'Sales channels, with an empty records list, which is never shown or touched'
+}
+
+Ref: gold.fct_order_line.customer_key > gold.dim_customer.customer_key
+Ref: gold.fct_order_line.product_key > gold.dim_product.product_key

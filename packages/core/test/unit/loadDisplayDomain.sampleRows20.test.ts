@@ -8,12 +8,12 @@
  *   reaches the display.
  * - `dim_store` holds a block exactly as extension 2.0.10 (core 0.5.1)
  *   leaves it after a column drop: the column line is gone, but the
- *   records list still names it, so every parser refuses the file ([4000])
- *   and the table is drawn as a placeholder.
- *
- * The placeholder golden is the one a later change to the reader replaces
- * deliberately (a block that does not read loads the table without its
- * rows); the valid table's display must stay as it is.
+ *   records list still names it, so every parser refuses the file ([4000]).
+ *   2.0.10 drew the table as a placeholder; since the reader learnt that a
+ *   block that does not read leaves the table readable (D37), it loads with
+ *   its columns and without its rows, read-only, with a `recordsUnreadable`
+ *   warning. That change replaced this golden deliberately; the valid
+ *   table's display stayed as it was.
  *
  * Goldens (packages/core/test/fixtures/golden/sample-rows-2.0.*):
  * regenerate with UPDATE_GOLDEN=1 for an intended change.
@@ -71,11 +71,39 @@ describe('a table file with sample rows, as 2.0.10 reads it', () => {
     expect(Object.keys(product)).not.toContain('sampleData');
   });
 
-  it('a stale records list (a dropped column still named): the table is a placeholder ([4000]) with no columns', async () => {
-    const { display } = await load();
+  it('a stale records list (a dropped column still named): the table loads with its columns, without its rows, and says so by line', async () => {
+    const { display, warnings } = await load();
     const store = display.models.find((m) => m.name === 'dim_store')!;
-    expect(store.loadError).toEqual({ kind: 'dbmlStructure', line: 7, code: '4000' });
-    expect(store.columns).toEqual([]);
+    expect(store.loadError).toBeUndefined();
+    expect(store.columns.map((c) => c.name)).toEqual(['store_key', 'store_name', 'opened_on']);
+    expect(Object.keys(store)).not.toContain('sampleData');
+    expect(warnings).toContain('Model "dim_store": Line 7: the sample data (records) does not read as DBML, so it is not shown. Other DBML tools reject this file, and ERD Studio will not edit this table until the rows are fixed or removed.');
+    const reading = dbmlStorageReader.parseTable(fixture()['.erd-studio/gold/tables/gold/dim_store.dbml'], 'dim_store', { schemaFolder: 'gold' });
+    expect(reading.ok && reading.writable).toBe(false);
+    expect(reading.ok ? reading.problems.map((p) => [p.code, p.line]) : []).toEqual([['recordsUnreadable', 7]]);
+  });
+
+  it('with the rows asked for: the valid table carries them, the stale one still none', async () => {
+    const files = fixture();
+    const display = await loadDisplaySubjectArea({
+      domainPath: DIAGRAM,
+      readFile: async (p) => files[p] ?? null,
+      readOnly: false,
+      warn: () => {},
+      dbml: dbmlStorageReader,
+      readSampleData: true,
+    });
+    const product = display.models.find((m) => m.name === 'dim_product')!;
+    expect(product.sampleData).toEqual({
+      columns: ['product_name', 'list_price', 'is_active'],
+      rows: [
+        [{ text: 'Blue widget', kind: 'string' }, { text: '4.50', kind: 'number' }, { text: 'true', kind: 'boolean' }],
+        [{ text: 'Red gadget', kind: 'string' }, { text: '12.00', kind: 'number' }, { text: 'false', kind: 'boolean' }],
+        [{ text: 'Green gizmo', kind: 'string' }, null, { text: 'true', kind: 'boolean' }],
+      ],
+      totalRows: 3,
+    });
+    expect(Object.keys(display.models.find((m) => m.name === 'dim_store')!)).not.toContain('sampleData');
   });
 
   it('no row value appears in the display or in a warning', async () => {

@@ -113,16 +113,40 @@ describe('the messages a records block gets (pinned parser)', () => {
     return reading.error.message;
   };
 
+  /** The multi-file compile's first diagnostic for `text`, worded as the reader words one. */
+  const compiled = (text: string): string => {
+    const [d] = compileDbmlProject({ 't.dbml': text }, ['t.dbml'])['t.dbml'] ?? [];
+    return d ? `Line ${d.line}, column ${d.column}: ${d.message} [${d.code}].` : '';
+  };
+  /** The reader's `recordsUnreadable` problem for a block that does not read: the block's line, never a value. */
+  const unreadable = (line: number) => ({
+    code: 'recordsUnreadable', severity: 'warning', line,
+    message: `Line ${line}: the sample data (records) does not read as DBML, so it is not shown. Other DBML tools reject this file, and ERD Studio will not edit this table until the rows are fixed or removed.`,
+  });
+  const problems = (text: string): unknown[] => {
+    const reading = parseTableDbml(text, 't', { schemaFolder: 'gold' });
+    if (!reading.ok) throw new Error('expected the file to read without its rows');
+    expect(reading.writable).toBe(false);
+    return reading.problems;
+  };
+
   it('a value: located in the body, fixed words with the line, column and code', () => {
-    expect(read(SHAPES['a dotted bare word']('t'))).toBe('Line 7, column 8: a value in the sample data (records) does not read as DBML [4000].');
-    expect(read(SHAPES['a bare word with a space']('t'))).toBe('Line 7, column 5: a value in the sample data (records) does not read as DBML [3084].');
+    expect(compiled(SHAPES['a dotted bare word']('t'))).toBe('Line 7, column 8: a value in the sample data (records) does not read as DBML [4000].');
+    expect(compiled(SHAPES['a bare word with a space']('t'))).toBe('Line 7, column 5: a value in the sample data (records) does not read as DBML [3084].');
+    // The reader loads such a table without its rows (D37), and says so by the block's line alone.
+    expect(problems(SHAPES['a dotted bare word']('t'))).toEqual([unreadable(6)]);
+    expect(problems(SHAPES['a bare word with a space']('t'))).toEqual([unreadable(6)]);
+    // A block open to the end of the file still makes the file unreadable, in the same fixed words.
     expect(read(SHAPES["an unclosed '''"]('t'))).toBe('Line 7, column 8: a value in the sample data (records) does not read as DBML [1002].');
   });
 
   it('the header: a value or an unknown column in the list, and two blocks', () => {
-    expect(read(SHAPES['a value in the header']('t'))).toBe('Line 6, column 16: the header of the sample data (records) does not read as DBML [4000].');
+    expect(compiled(SHAPES['a value in the header']('t'))).toBe('Line 6, column 16: the header of the sample data (records) does not read as DBML [4000].');
     const twoBlocks = `${head('t')}\n  records (id, name) {\n    1, '${SENTINEL}'\n  }\n  records (id, name) {\n    2, 'b'\n  }\n}\n`;
-    expect(read(twoBlocks)).toBe('Line 6, column 3: the header of the sample data (records) does not read as DBML [3086].');
+    expect(compiled(twoBlocks)).toBe('Line 6, column 3: the header of the sample data (records) does not read as DBML [3086].');
+    expect(problems(SHAPES['a value in the header']('t'))).toEqual([unreadable(6)]);
+    // Both blocks of two are left out; the problem names each block an error lies in.
+    expect(problems(twoBlocks)).toEqual([unreadable(6), unreadable(9)]);
   });
 
   it('a top-level Records block: told to nest it, its header without the table name', () => {
@@ -343,4 +367,60 @@ describe('the loader: no warning holds a value', () => {
       expect(JSON.stringify(display)).not.toMatch(LEAK);
     });
   }
+});
+
+/**
+ * Positive controls (G4): the sentinel above is absent because nothing
+ * carries a value, not because nothing could find one. A loader that asks for
+ * rows (`readSampleData`) carries the sentinel in `sampleData`, through the
+ * spread that names a table two schema folders share; one that does not ask
+ * carries no value at all.
+ */
+describe('the rows reach the display only when asked (positive controls)', () => {
+  function project(dir: string): Record<string, string> {
+    const root = path.resolve(__dirname, '../fixtures/dbml', dir);
+    const out: Record<string, string> = {};
+    const walk = (d: string): void => {
+      for (const entry of fs.readdirSync(d, { withFileTypes: true })) {
+        const full = path.join(d, entry.name);
+        if (entry.isDirectory()) walk(full);
+        else out[path.relative(root, full).split(path.sep).join('/')] = fs.readFileSync(full, 'utf-8');
+      }
+    };
+    walk(root);
+    return out;
+  }
+  /** `file` with a records block of one `row` under `list`, before the Table's closing brace. */
+  const withRows = (file: string, list: string, row: string): string => file.replace(/\n\}\s*$/, `\n\n  records (${list}) {\n    ${row}\n  }\n}\n`);
+  const load = (files: Record<string, string>, domainPath: string, readSampleData?: boolean) => loadDisplaySubjectArea({
+    domainPath,
+    readFile: async (p) => files[p] ?? null,
+    readOnly: false,
+    warn: () => {},
+    dbml: dbmlStorageReader,
+    ...(readSampleData !== undefined ? { readSampleData } : {}),
+  });
+
+  it('one table: absent by default and when off, present when asked', async () => {
+    const files = project('sample-rows-2.0');
+    const product = '.erd-studio/gold/tables/gold/dim_product.dbml';
+    files[product] = files[product].replace("'Blue widget'", `'${SENTINEL}'`);
+    for (const off of [undefined, false]) expect(JSON.stringify(await load(files, '.erd-studio/gold/diagrams/catalog.dbml', off))).not.toMatch(LEAK);
+    const display = await load(files, '.erd-studio/gold/diagrams/catalog.dbml', true);
+    expect(display.models.find((m) => m.name === 'dim_product')!.sampleData!.rows[0][0]).toEqual({ text: SENTINEL, kind: 'string' });
+  });
+
+  it('two tables of one name in two schema folders: each carries its own rows when asked', async () => {
+    const files = project('same-name-two-schemas');
+    const bqs = '.erd-studio/bronze/tables/bqs/addresse.dbml';
+    const ccc = '.erd-studio/bronze/tables/ccc/addresse.dbml';
+    files[bqs] = withRows(files[bqs], 'id, ort', `1, '${SENTINEL}b'`);
+    files[ccc] = withRows(files[ccc], 'id, city', `1, '${SENTINEL}c'`);
+    const diagram = '.erd-studio/bronze/diagrams/kunden.dbml';
+    expect(JSON.stringify(await load(files, diagram))).not.toMatch(LEAK);
+    const display = await load(files, diagram, true);
+    const rowsOf = (name: string) => display.models.find((m) => m.name === name)?.sampleData;
+    expect(rowsOf('bqs.addresse')).toEqual({ columns: ['id', 'ort'], rows: [[{ text: '1', kind: 'number' }, { text: `${SENTINEL}b`, kind: 'string' }]], totalRows: 1 });
+    expect(rowsOf('ccc.addresse')).toEqual({ columns: ['id', 'city'], rows: [[{ text: '1', kind: 'number' }, { text: `${SENTINEL}c`, kind: 'string' }]], totalRows: 1 });
+  });
 });

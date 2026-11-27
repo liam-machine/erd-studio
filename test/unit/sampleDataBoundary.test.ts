@@ -48,13 +48,21 @@ const runtimeFiles = (): string[] => RUNTIME_DIRS.flatMap(filesUnder);
 const FORBIDDEN_PARSER_APIS = /\bgetInfos\b|\bgetWarnings\b|\bparse\s*\??\.\s*warnings\b|\bDBMLDiagnosticsProvider\b|\bvalidateForeignKeys\b|\bvalidatePrimaryKey\b|\bvalidateUnique\b/;
 
 /**
- * The files that may name the sample-data types or field. Stage 1 has the
- * types and the writer only; each later file that reads, carries or draws
- * rows is added here deliberately.
+ * The files that may name the sample-data types or field. Each file that
+ * reads, carries or draws rows is added here deliberately: core's types,
+ * the table reader and writer, the reader object, the display mapping and
+ * the loader's opt-in.
  */
 const SAMPLE_DATA_FILES: readonly string[] = [
   'packages/core/src/types/semantic.ts',
+  'packages/core/src/types/dbmlStorage.ts',
+  'packages/core/src/types/display.ts',
+  'packages/core/src/dbml/records.ts',
+  'packages/core/src/dbml/readTable.ts',
   'packages/core/src/dbml/writeTable.ts',
+  'packages/core/src/dbml/index.ts',
+  'packages/core/src/displayDomain.ts',
+  'packages/core/src/loadDisplayDomain.ts',
 ];
 
 describe('sample rows stay where they are allowed (G5)', () => {

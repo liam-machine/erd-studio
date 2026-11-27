@@ -5,7 +5,9 @@
  * line, a `Ref` or a column `[ref: …]` is blanked out before compiling
  * (offsets kept) and reported: the table still loads, but writes are refused
  * until the line moves to a relationships file. The table's schema is its
- * qualifier (`Table gold.x`), else its schema folder.
+ * qualifier (`Table gold.x`), else its schema folder. A nested `records`
+ * block (sample rows, D37) that does not read is blanked the same way; one
+ * that reads is carried as `sampleData` only when the caller asks.
  *
  * Context fields: a built-in text field reads into `rationale` and every
  * other field into `meta`, from any of its spellings (bare `purpose: '…'`,
@@ -18,7 +20,7 @@
  * spelling found, for `doctor`.
  */
 
-import type { ColumnDef, SemanticTable } from '../types/semantic.js';
+import type { ColumnDef, SemanticTable, TableWithSampleData } from '../types/semantic.js';
 import type { DbmlFieldSpelling, DbmlProblem, DbmlTableReading } from '../types/dbmlStorage.js';
 import {
   DBML_DEFAULT_SCHEMA,
@@ -47,7 +49,8 @@ import { findConflictMarkers } from '../mergeConflict.js';
 import { DBML_QUOTE_HINT, DBML_TABLE_QUOTE_HINT_CODES, classifyDbmlTableError, type DbmlTableStructureRule } from '../domain.js';
 import type { DbmlMetadataTarget, TableLoadError } from '../types/semantic.js';
 import type { DbmlParserModule } from './parserModule.js';
-import { dbmlMessageSanitiser, messageSourceOf, parserStoppedMessage, type DbmlMessageSanitiser } from './diagnosticText.js';
+import { dbmlMessageSanitiser, mayHoldRecords, messageSourceOf, parserStoppedMessage, type DbmlMessageSanitiser } from './diagnosticText.js';
+import { recordsBlocksOf, recordsSpansOf, recordsUnreadableMessage, sampleDataOf, type RecordsSpan } from './records.js';
 import {
   PINNED_PARSER,
   attributeName,
@@ -63,6 +66,7 @@ import {
   stripBom,
   topLevel,
   type AstNode,
+  type CompiledFile,
   type ParserDiagnostic,
 } from './parser.js';
 
@@ -196,6 +200,15 @@ export interface ParseTableDbmlOptions {
    * are warned about. Without it, the schema is the qualifier alone.
    */
   schemaFolder?: string;
+  /**
+   * Attach the table's sample rows (D37: its nested `records` block) as the
+   * enumerable `sampleData` of the table (`tableSampleDataOf`): at most
+   * `SAMPLE_ROWS_LIMIT` rows, each value as written, with the total row
+   * count. Default false: the reading is exactly what it was without rows.
+   * Never set for `records ()`, a block with no row, or a block that does
+   * not read (`recordsUnreadable`).
+   */
+  sampleData?: boolean;
 }
 
 /**
@@ -209,6 +222,13 @@ export interface ParseTableDbmlOptions {
  * Never throws for bad DBML: a file that cannot be read comes back as
  * `{ ok: false }` with the `TableLoadError` the canvas shows and a message
  * for logs. `parser` is the pinned DBML parser unless a test passes another.
+ *
+ * Sample rows (D37): a nested `records` block that does not read (every
+ * syntax error, and at least one error, inside a block) does not hide the
+ * table. The file is read with its blocks blanked (offsets kept): the table
+ * loads without its rows, not writable, with a `recordsUnreadable` warning
+ * naming the block's line. A block open to the end of the file, whose
+ * blanking leaves the Table unclosed, still makes the file unreadable.
  */
 export function parseTableDbml(
   rawText: string,
@@ -257,8 +277,94 @@ export function readTableFile(
       return reading(failure(`${fileStem}.dbml has unresolved git merge conflicts (first at line ${conflict})`, { mergeConflict: true, line: conflict }));
     }
   }
+  // A nested `records` block that does not read (D37): every syntax error, and at least one error, in a
+  // block. The table loads without its rows and read-only, when the file reads with its blocks blanked.
+  if (first.errors.length > 0) {
+    const broken = brokenRecordsBlocks(text, first.errors, parser);
+    if (broken) {
+      const read = readWithoutRecords(text, fileStem, options, parser, broken, sanitise);
+      if (read) return read;
+    }
+  }
   if (syntax.length > 0) return reading(diagnosticFailure(syntax[0], sanitise));
+  return readCompiled(text, fileStem, options, parser, first, sanitise, []);
+}
 
+/** The nested `records` blocks to blank in a file whose errors all lie in them, and the line of each block an error lies in. */
+interface BrokenRecords {
+  blanks: Array<{ start: number; end: number }>;
+  lines: number[];
+}
+
+/**
+ * The broken-block case (D37, §3.2 of the sample-rows plan): undefined
+ * unless every syntax error, and at least one error of any class, lies
+ * inside a nested block's span (from the keyword to its `}`, or to the end
+ * of the file when it is not closed). Every nested block is blanked then
+ * (both of two blocks); the lines are the blocks an error lies in.
+ */
+function brokenRecordsBlocks(text: string, errors: readonly ParserDiagnostic[], parser: DbmlParserModule): BrokenRecords | undefined {
+  if (!mayHoldRecords(text)) return undefined;
+  const nested = recordsSpansOf(text, parser).filter((s) => s.nested);
+  if (nested.length === 0) return undefined;
+  const spanOf = (d: ParserDiagnostic): RecordsSpan | undefined => nested.find((s) => d.start >= s.start
+    && (d.start < s.end || (d.start === s.end && s.end === text.length)));
+  if (errors.some((d) => d.errorClass === 'syntax' && spanOf(d) === undefined)) return undefined;
+  const hit = new Set(errors.map(spanOf).filter((s): s is RecordsSpan => s !== undefined));
+  if (hit.size === 0) return undefined;
+  return {
+    blanks: nested.map((s) => ({ start: s.start, end: s.end })),
+    lines: nested.filter((s) => hit.has(s)).map((s) => s.line),
+  };
+}
+
+/**
+ * The file read with its nested blocks blanked: the table without its rows,
+ * not writable, and a `recordsUnreadable` warning per block an error lies
+ * in (its line only: the parser's text never travels). Undefined when the
+ * blanked file still does not read (a block open to the end of the file):
+ * the caller then reports the file as it always did.
+ */
+function readWithoutRecords(
+  text: string,
+  fileStem: string,
+  options: ParseTableDbmlOptions,
+  parser: DbmlParserModule,
+  broken: BrokenRecords,
+  sanitise: DbmlMessageSanitiser,
+): { reading: DbmlTableReading; fields?: TableFieldSettings } | undefined {
+  let base: CompiledFile;
+  try {
+    base = compileOne(blankSpans(text, broken.blanks), parser);
+  } catch {
+    return undefined;
+  }
+  if (base.errors.some((d) => d.errorClass === 'syntax')) return undefined;
+  const read = readCompiled(text, fileStem, options, parser, base, sanitise, broken.blanks);
+  if (!read.reading.ok) return undefined;
+  read.reading.writable = false;
+  for (const line of broken.lines) {
+    read.reading.problems.push({ code: 'recordsUnreadable', severity: 'warning', line, message: recordsUnreadableMessage(line) });
+  }
+  return read;
+}
+
+/**
+ * The reader after the compile: structure, blanking, the second compile and
+ * the mapping. `first` is the compile of `text` with `preBlanks` (the
+ * nested blocks of the broken-block case) already blanked; offsets are
+ * `text`'s either way.
+ */
+function readCompiled(
+  text: string,
+  fileStem: string,
+  options: ParseTableDbmlOptions,
+  parser: DbmlParserModule,
+  first: CompiledFile,
+  sanitise: DbmlMessageSanitiser,
+  preBlanks: ReadonlyArray<{ start: number; end: number }>,
+): { reading: DbmlTableReading; fields?: TableFieldSettings } {
+  const reading = (r: DbmlTableReading): { reading: DbmlTableReading } => ({ reading: r });
   // Structure (§2.2): exactly one Table, named as the file, and nothing a table file may not hold.
   const problems: DbmlProblem[] = [];
   const blanks: Array<{ start: number; end: number }> = [];
@@ -367,7 +473,7 @@ export function readTableFile(
   let compiled = first;
   if (blanks.length > 0) {
     try {
-      compiled = compileOne(blankSpans(text, blanks), parser);
+      compiled = compileOne(blankSpans(text, [...preBlanks, ...blanks]), parser);
     } catch (err) {
       return reading(failure(parserStoppedMessage(err, text), { dbmlCode: 1000, line: 1, column: 1 }));
     }
@@ -407,6 +513,13 @@ export function readTableFile(
     blocks: metadataBlocksOf(compiled.ast, declaredName, dbmlAlias),
     spellings,
   });
+  if (options.sampleData === true && preBlanks.length === 0) {
+    // The Table's one nested block (a second is a parser error), read from the source by token.
+    const block = recordsBlocksOf(compiled.ast).find((b) => b.nested);
+    const rawFields: AstNode[] = Array.isArray(rawTable.fields) ? rawTable.fields : [];
+    const data = block ? sampleDataOf(text, block, rawFields.map((f) => (typeof f?.name === 'string' ? f.name : ''))) : undefined;
+    if (data) (table as TableWithSampleData).sampleData = data;
+  }
   return {
     reading: {
       ok: true,

@@ -1,0 +1,15 @@
+Table gold.dim_product {
+  product_key INT [pk, note: 'Surrogate key']
+  product_name VARCHAR [note: 'Display name']
+  list_price DECIMAL(10,2)
+  price_change DECIMAL(10,2)
+  is_active BOOLEAN
+  launched_on DATE
+  Note: 'Products, with every column named in the sample data'
+
+  records (product_key, product_name, list_price, price_change, is_active, launched_on) {
+    1, 'Blue widget', 4.50, -0.25, true, '2020-01-15'
+    2, 'Red gadget', 12.00, , FALSE, '2021-06-01'
+    3, "Green gizmo", 7.25, 1.5, NULL,
+  }
+}

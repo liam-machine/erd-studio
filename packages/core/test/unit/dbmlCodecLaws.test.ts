@@ -39,7 +39,8 @@ import { readMeta } from '../../src/meta';
 import { classifySemanticFile } from '../../src/storage';
 import { erdLayoutOf } from '../../src/erdLayout';
 import { readRelationshipsDbml } from '../../src/dbml/readRelationships';
-import { compileOne, elementType, isUseDeclaration, plainNames, topLevel, type AstNode } from '../../src/dbml/parser';
+import { compileOne, elementType, isUseDeclaration, lineAt, plainNames, topLevel, type AstNode } from '../../src/dbml/parser';
+import { recordsSpansOf } from '../../src/dbml/records';
 import { cutSpan } from '../../src/dbml/splice';
 import { DbmlEditRefused } from '../../src/dbml/errors';
 import { DBML_RICH_PLACEHOLDER_COLUMN } from '../../src/dbmlRichProperties';
@@ -390,6 +391,24 @@ function cleanIn(files: Record<string, string>, entry: string): string[] {
   return ALL.filter((v) => projectDiagnostics(files, [entry], [v]).length === 0);
 }
 
+/**
+ * Law 5's diagnostics for a table file, without the data lints on its sample
+ * rows (D37): a warning on a line of a nested `records` block (9.1.1 reports
+ * a row's NULL or duplicate key as one) is about the file's values under the
+ * edited keys (a mutation that makes every column a key), never something the
+ * writer wrote, since it never changes a value (the rows law holds that).
+ * Errors, and warnings anywhere else, still count.
+ */
+function tableDiagnostics(files: Record<string, string>, entry: string, baseline: string[]): ReturnType<typeof projectDiagnostics> {
+  const text = files[entry];
+  const blocks = recordsSpansOf(text).filter((s) => s.nested).map((s) => [lineAt(text, s.start), lineAt(text, s.end)] as const);
+  return projectDiagnostics(files, [entry], baseline).filter((d) => {
+    if (d.type !== 'warning') return true;
+    const line = Number.parseInt(d.text, 10);
+    return !blocks.some(([from, to]) => line >= from && line <= to);
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Fixtures
 // ---------------------------------------------------------------------------
@@ -550,10 +569,11 @@ describe('the laws over every DBML fixture', () => {
     expect(PROJECTS.length).toBeGreaterThanOrEqual(7);
   });
 
-  it('skips sample-rows-2.0\'s stale table, which does not read, and holds the laws for its valid one', () => {
+  it('skips sample-rows-2.0\'s stale table, which reads without its rows but is not writable, and holds the laws for its valid one', () => {
     const files = PROJECTS.find((p) => p.name.endsWith('dbml/sample-rows-2.0/.erd-studio'))!.files;
     const read = (file: string) => parseTableDbml(files[file], stemOf(file), { schemaFolder: 'gold' });
-    expect(read('gold/tables/gold/dim_store.dbml').ok).toBe(false);
+    const store = read('gold/tables/gold/dim_store.dbml');
+    expect(store.ok && !store.writable && store.problems.some((p) => p.code === 'recordsUnreadable')).toBe(true);
     const product = read('gold/tables/gold/dim_product.dbml');
     expect(product.ok && product.writable).toBe(true);
   });
@@ -565,7 +585,8 @@ describe('the laws over every DBML fixture', () => {
       const stem = stemOf(file);
       const reading = parseTableDbml(text, stem, { schemaFolder: classifySemanticFile(file, { tablesDirIsLayer: false }).schema });
       // A table file that is unreadable on purpose has no laws to hold: missing-model's `broken`,
-      // and sample-rows-2.0's `dim_store` (a records list still naming a dropped column, [4000]).
+      // and sample-rows-2.0's `dim_store` (a records list still naming a dropped column, [4000]: it reads
+      // without its rows, read-only).
       if (!reading.ok || !reading.writable) continue;
       it(`${project.name}/${file}: Laws 1–5 for its table`, () => {
         // Law 1.
@@ -598,7 +619,7 @@ describe('the laws over every DBML fixture', () => {
           expect(normTable(readOk(out, desired.name, reading.table.schema))).toEqual(normTable(desired)); // Law 3
           expect(editTableDbml(out, desired, { schemaFolder: reading.table.schema })).toBe(out); // Law 2
           expectPreserved(text, out, tableRemovedSpans(text, reading.table, desired)); // Law 4
-          expect(projectDiagnostics({ [file]: out }, [file], baseline)).toEqual([]); // Law 5
+          expect(tableDiagnostics({ [file]: out }, file, baseline)).toEqual([]); // Law 5 (a row's data lint is the file's)
           expectRowsKept(text, out, reading.table, desired); // the rows law (D37)
         }
       });

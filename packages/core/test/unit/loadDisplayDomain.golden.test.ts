@@ -22,6 +22,9 @@ import { loadDisplaySubjectArea } from '../../src/loadDisplayDomain';
 import { SubjectAreaFileError, SubjectAreaValidationError } from '../../src/domain';
 import { STORAGE_EQUIVALENCE_ROWS, normaliseStorageRows, type StorageEquivalenceRow } from '../../src/storageEquivalence';
 import { dbmlStorageReader } from '../../src/dbml/index';
+import { DIAGRAM_EXPORT_FILE_EXTENSIONS, exportDiagram } from '../../src/exportDiagram';
+import type { DisplaySubjectArea } from '../../src/types/display';
+import { readDbmlEverywhere } from '../exportParsers';
 
 /** The sentence the extension's not-a-diagram page ends with (§1.8), which core does not write. */
 const REOPEN_AS_TEXT = 'To edit it as text, right-click the tab and choose Reopen Editor With… > Text Editor.';
@@ -299,5 +302,62 @@ describe('loadDisplaySubjectArea matches the extension host golden output', () =
     ]);
     // Its parse error still follows the mixed-state warning.
     expect(warnings.indexOf(mixed[0])).toBeLessThan(warnings.findIndex((w) => w.startsWith('Failed to read model "broken"')));
+  });
+});
+
+/**
+ * Sample rows (D37): the sample-rows twin (packages/core/test/fixtures/dbml/sample-rows) holds a
+ * nested `records` block in every form a table file may hold one: a full list (dim_product, with
+ * empty fields in later rows and a negative value), no list (dim_customer: every column, in order),
+ * one name (dim_region), an empty list (dim_channel, never shown) and a list beside an Enum whose
+ * values it names (fct_order_line, whose keys join the dimensions'). Core draws it without rows by
+ * default (`<…>.display.json`, which every older core would also draw) and with them when asked
+ * (`<…>.rows.display.json`). The plain DBML and Mermaid exports never carry rows: their goldens are
+ * the same with and without them.
+ *
+ * Goldens (packages/core/test/fixtures/golden/sample-rows.shop.*): regenerate with UPDATE_GOLDEN=1
+ * for an intended change.
+ */
+describe('sample rows (the sample-rows twin)', () => {
+  const UPDATE = process.env.UPDATE_GOLDEN === '1';
+  const load = (readSampleData: boolean): Promise<DisplaySubjectArea> => loadDisplaySubjectArea({
+    domainPath: '.erd-studio/gold/diagrams/shop.dbml',
+    readFile: fsReadFile(path.join(FIXTURES, 'dbml', 'sample-rows')),
+    readOnly: false,
+    warn: () => {},
+    dbml: dbmlStorageReader,
+    ...(readSampleData ? { readSampleData } : {}),
+  });
+  const golden = (file: string, text: string): void => {
+    const full = path.join(GOLDEN_DIR, file);
+    if (UPDATE) fs.writeFileSync(full, text);
+    expect(text).toBe(fs.readFileSync(full, 'utf-8'));
+  };
+
+  it('without readSampleData: no table carries rows (sample-rows.shop.display.json)', async () => {
+    const display = await load(false);
+    expect(display.models.filter((m) => 'sampleData' in m)).toEqual([]);
+    golden('sample-rows.shop.display.json', JSON.stringify(display, null, 2) + '\n');
+  });
+
+  it('with readSampleData: each table with rows carries them, and nothing else changes (sample-rows.shop.rows.display.json)', async () => {
+    const display = await load(true);
+    expect(display.models.filter((m) => m.sampleData !== undefined).map((m) => m.name).sort()).toEqual(['dim_customer', 'dim_product', 'dim_region', 'fct_order_line']);
+    const without = JSON.parse(JSON.stringify(display)) as DisplaySubjectArea;
+    for (const m of without.models) delete m.sampleData;
+    expect(JSON.stringify(without, null, 2) + '\n').toBe(fs.readFileSync(path.join(GOLDEN_DIR, 'sample-rows.shop.display.json'), 'utf-8'));
+    golden('sample-rows.shop.rows.display.json', JSON.stringify(display, null, 2) + '\n');
+  });
+
+  it.each(['dbml', 'mermaid'] as const)('the %s export holds no row, with rows read or not', async (format) => {
+    const withRows = exportDiagram(await load(true), format);
+    expect(withRows).toBe(exportDiagram(await load(false), format));
+    golden(`sample-rows.shop.${DIAGRAM_EXPORT_FILE_EXTENSIONS[format]}`, withRows);
+    for (const value of ['Blue widget', 'Harbour Stores', 'North coast', 'order_status.shipped', '-0.25']) expect(withRows).not.toContain(value);
+  });
+
+  it('the DBML export reads alike in every pinned parser, old ones included', async () => {
+    const read = readDbmlEverywhere(exportDiagram(await load(true), 'dbml'));
+    expect(read.tables.map((t) => t.name)).toEqual(['dim_product', 'dim_customer', 'fct_order_line', 'dim_region', 'dim_channel']);
   });
 });

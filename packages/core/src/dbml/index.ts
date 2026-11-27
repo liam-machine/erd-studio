@@ -47,7 +47,7 @@ export { attachRelationships, dbmlTableLookup } from '../dbmlAttach.js';
 
 /** The readers `loadDisplaySubjectArea` takes as its `dbml` option, bound to the pinned parser. */
 export const dbmlStorageReader: DbmlStorageReader = Object.freeze({
-  parseTable: (text: string, fileStem: string, options?: { schemaFolder?: string }) => parseTableDbml(text, fileStem, options),
+  parseTable: (text: string, fileStem: string, options?: { schemaFolder?: string; sampleData?: boolean }) => parseTableDbml(text, fileStem, options),
   readRelationships: (text: string) => readRelationshipsDbml(text),
   parseSubjectArea: (text: string, filePath: string) => parseSubjectAreaDbml(text, filePath),
   subjectAreaMembers: (text: string, filePath: string) => subjectAreaMembersDbml(text, filePath),

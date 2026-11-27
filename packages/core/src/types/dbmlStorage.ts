@@ -20,7 +20,9 @@ export interface DbmlProblem {
    * `useInTableFile`, `refInTableFile`, `inlineRefInTableFile`,
    * `unquotedValue`, `metaJson`, `unreadableRef`, `declaredInDiagram`,
    * `repeatedNote`, `secondProject`, `usePathMismatch`, `unsafeUse`,
-   * `schemaFolderMismatch`, `unqualifiedTable`, `schemaProperty`, …
+   * `schemaFolderMismatch`, `unqualifiedTable`, `schemaProperty`,
+   * `recordsUnreadable` (a table file's sample rows do not read: the table
+   * loads without them and is not writable), …
    */
   code?: number | string;
   message: string;
@@ -43,7 +45,10 @@ export type DbmlTableReading =
       alias?: string;
       /** The Table names its schema in its name (`Table gold.x`). */
       schemaQualified: boolean;
-      /** False while a `use` line, a `Ref` or a column `[ref: …]` is in the file: writes are refused until it is moved (§2.2). */
+      /**
+       * False while a `use` line, a `Ref` or a column `[ref: …]` is in the file: writes are refused until it is moved (§2.2).
+       * Also false while the Table's sample rows do not read (`recordsUnreadable`, D37), until they are fixed or removed.
+       */
       writable: boolean;
       problems: DbmlProblem[];
       /**
@@ -272,8 +277,11 @@ export interface DbmlSubjectAreaReading {
 
 /** The DBML readers `loadDisplaySubjectArea` needs; `dbmlStorageReader` from `@erd-studio/core/dbml` is one. */
 export interface DbmlStorageReader {
-  /** `schemaFolder`: the table file's schema folder (`<layer>/tables/<schema>/`), its schema when the Table is unqualified. */
-  parseTable(text: string, fileStem: string, options?: { schemaFolder?: string }): DbmlTableReading;
+  /**
+   * `schemaFolder`: the table file's schema folder (`<layer>/tables/<schema>/`), its schema when the Table is unqualified.
+   * `sampleData`: attach the table's sample rows (`tableSampleDataOf`); off unless asked for.
+   */
+  parseTable(text: string, fileStem: string, options?: { schemaFolder?: string; sampleData?: boolean }): DbmlTableReading;
   readRelationships(text: string): DbmlRelationshipsReading;
   /** Throws `SubjectAreaFileError` / `SubjectAreaValidationError`. */
   parseSubjectArea(text: string, filePath: string): DbmlSubjectAreaReading;

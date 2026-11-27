@@ -206,7 +206,7 @@ describe('the writers never read the sidecar', () => {
     expect(out).not.toMatch(/records/i);
   });
 
-  it('a reading carries no sidecar yet, and the row cap is 100', () => {
+  it('a reading carries no sidecar unless asked for, and the row cap is 100', () => {
     const reading = parseTableDbml(`${HEAD}  records (id) {\n    1\n  }\n}\n`, 't');
     expect(reading.ok && tableSampleDataOf(reading.table)).toBe(undefined);
     expect(SAMPLE_ROWS_LIMIT).toBe(100);

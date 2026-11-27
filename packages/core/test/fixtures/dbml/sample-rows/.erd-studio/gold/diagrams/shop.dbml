@@ -1,0 +1,18 @@
+Project shop {
+  Note: 'Tables with sample rows in every form a table file may hold them'
+  erd_schema_version: '7'
+  erd_layout: '''
+    dim_product 40 40
+    dim_customer 400 40
+    fct_order_line 220 360
+    dim_region 580 360
+    dim_channel 760 40
+  '''
+}
+
+use { table gold.dim_product } from '../tables/gold/dim_product.dbml'
+use { table gold.dim_customer } from '../tables/gold/dim_customer.dbml'
+use { table gold.fct_order_line } from '../tables/gold/fct_order_line.dbml'
+use { table gold.dim_region } from '../tables/gold/dim_region.dbml'
+use { table gold.dim_channel } from '../tables/gold/dim_channel.dbml'
+use * from '../relationships/gold.dbml'

@@ -55,14 +55,34 @@
     },
     {
       "name": "dim_store",
-      "schema": "",
-      "description": "",
-      "columns": [],
-      "loadError": {
-        "kind": "dbmlStructure",
-        "line": 7,
-        "code": "4000"
-      },
+      "schema": "gold",
+      "description": "Stores",
+      "columns": [
+        {
+          "name": "store_key",
+          "dataType": "INT",
+          "description": "Surrogate key",
+          "isPrimaryKey": true,
+          "isForeignKey": false,
+          "isNaturalKey": false
+        },
+        {
+          "name": "store_name",
+          "dataType": "VARCHAR",
+          "description": "Display name",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNaturalKey": false
+        },
+        {
+          "name": "opened_on",
+          "dataType": "DATE",
+          "description": "",
+          "isPrimaryKey": false,
+          "isForeignKey": false,
+          "isNaturalKey": false
+        }
+      ],
       "layer": "gold"
     }
   ],
