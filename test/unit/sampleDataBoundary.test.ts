@@ -58,6 +58,8 @@ const SAMPLE_DATA_FILES: readonly string[] = [
   'packages/core/src/types/dbmlStorage.ts',
   'packages/core/src/types/display.ts',
   'packages/core/src/dbml/records.ts',
+  // The one writer of row text (a new table file's block, an export's), parser-free.
+  'packages/core/src/sampleRows.ts',
   'packages/core/src/dbml/readTable.ts',
   'packages/core/src/dbml/writeTable.ts',
   'packages/core/src/dbml/index.ts',
@@ -68,18 +70,26 @@ const SAMPLE_DATA_FILES: readonly string[] = [
   // The host: the one table read that asks for rows, and Convert's guard that drops them before a YAML text.
   'src/services/logicalModelService.ts',
   'src/services/dbmlConversion.ts',
-  // The draft's strip: a reused Table Library table reaches a draft without its rows.
+  // The draft's strip: a reused Table Library table reaches a draft without its rows; an import's new tables get theirs.
   'src/services/draftDisplay.ts',
+  // Import DBML: the file's rows read by token, planned for the tables it creates, shown in the draft and
+  // written to their new files (the report and the ledger name tables and counts only).
+  'src/services/dbmlImportParse.ts',
+  'src/services/dbmlImport.ts',
+  'src/services/draftModel.ts',
+  'src/commands/importDbml.ts',
+  'src/services/newSubjectAreaWriter.ts',
+  'src/services/dbmlLibraryWrites.ts',
   // The renderer: the Detail panel's read-only Sample data section, and the panel that places it.
   'packages/renderer/src/components/DetailPanel/SampleDataSection.tsx',
   'packages/renderer/src/components/DetailPanel/DetailPanel.tsx',
 ];
 
 /**
- * The sample-data type and field names. The "Not shown" note's code for rows that do not read
- * (`sampleDataNotRead`, and the helpers named after it) names no row: it is not one of them.
+ * The sample-data type and field names, and the cell type. The "Not shown" note's code for rows that
+ * do not read (`sampleDataNotRead`, and the helpers named after it) names no row: it is not one of them.
  */
-const SAMPLE_DATA_NAMES = /sampleData(?!NotRead)|SampleData/;
+const SAMPLE_DATA_NAMES = /sampleData(?!NotRead)|SampleData|SampleCell/;
 
 describe('sample rows stay where they are allowed (G5)', () => {
   it('no runtime code calls a parser API whose messages quote cell values', () => {
@@ -113,7 +123,7 @@ describe('sample rows stay where they are allowed (G5)', () => {
   });
 
   it('the names pattern finds the field and the type, and not the note code', () => {
-    for (const line of ['model.sampleData', 'type X = SampleData;', 'sampleData: true', 'tableSampleDataOf(t)']) expect(SAMPLE_DATA_NAMES.test(line), line).toBe(true);
+    for (const line of ['model.sampleData', 'type X = SampleData;', 'sampleData: true', 'tableSampleDataOf(t)', 'rows: SampleCell[][]']) expect(SAMPLE_DATA_NAMES.test(line), line).toBe(true);
     for (const line of ["code: 'sampleDataNotRead'", 'sampleDataNotReadMessage(file, line)']) expect(SAMPLE_DATA_NAMES.test(line), line).toBe(false);
   });
 

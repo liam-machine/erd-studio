@@ -28,6 +28,7 @@
  * | `Note name [color]` and its layout | an annotation; `linked_table` links it to a table (in ERD Studio's own export, even one not in the diagram, as the diagram had it) |
  * | the Project's `erd_layout` | table positions (by name: the DBML name, then the imported one, then ignoring case) and sticky-note boxes (by Note name) |
  * | the placeholder column (`erd_placeholder`) | dropped: the table has no columns |
+ * | `records` in a Table, or a top-level `Records` | a new table's sample rows (D37): a nested `records (…)` block in its file, at most `SAMPLE_ROWS_LIMIT` rows, columns renamed with the table's, an enum reference as text (core's `sampleCellAsText`); a DBML project only |
  *
  * What DBML can say and ERD Studio has no field for is kept under the
  * reserved `dbml` key of the table's or column's `meta` (see
@@ -45,7 +46,9 @@
  *   DBML alias, `Table users as U`), `name` (the original name, when it had
  *   to change and cannot be the warehouse `alias`), `properties`.
  *
- * Dropped, and listed in the report: Records (sample rows), a ref's
+ * Dropped, and listed in the report: sample rows (Records) of a table the
+ * library already has or of a project that stores YAML (and rows past the
+ * limit or that would start with a sign, counted), a ref's
  * `delete` / `update` / `color` / `inactive`, the project's `database_type`
  * and other settings, table groups other than the layer's, an enum no new
  * column has, dependency arrows, diagram views, and a sticky note's own
@@ -88,6 +91,8 @@ import {
   rationaleKeyOf,
   readMeta,
   sameLink,
+  sampleCellAsText,
+  sampleRowsWriteOrder,
   setMetaEntry,
   stickyColourOfHex,
 } from '@erd-studio/core';
@@ -109,7 +114,8 @@ import { normaliseName } from './nameUtils';
 import { isValidTableRole } from '../providers/payloadValidation';
 import { buildDraftSubjectAreaDocument, foldToAscii, freeSubjectAreaSlug, serializeDraftSubjectAreaDocument, toSubjectAreaSlug } from './dbtDraft';
 import { libraryRelationshipsOf, nextCompositeKey, routeToLibrary } from './libraryRelationships';
-import type { DbmlEnum, DbmlEnumValue, DbmlField, DbmlModel, DbmlProperties, DbmlRefEnd, DbmlTable } from './dbmlImportParse';
+import type { SampleCell, SampleData } from '@erd-studio/core';
+import type { DbmlEnum, DbmlEnumValue, DbmlField, DbmlModel, DbmlProperties, DbmlRecords, DbmlRefEnd, DbmlTable } from './dbmlImportParse';
 import { ledgerHasLosses, ledgerLeftOut, ledgerNotes, savedOptionalNote, type LedgerEntry } from './importLedger';
 
 /** The `meta` key that holds what DBML says and ERD Studio has no field for. */
@@ -207,6 +213,13 @@ export interface PlanDbmlImportInput {
   diagramHoldsNoRelationships?: boolean;
   /** A table whose name the Table Library already has (default `auto`, see {@link DbmlImportSameName}). */
   sameName?: DbmlImportSameName;
+  /**
+   * The project stores tables as DBML, whose table files keep sample rows
+   * (D37): the rows of each table the import creates are kept
+   * ({@link DbmlImportPlan.sampleData}). Absent or false (a project that
+   * stores YAML): every `Records` block is reported as not imported.
+   */
+  sampleRows?: boolean;
   /**
    * The new diagram is a DBML diagram, whose tables are their schema folders
    * and names: two tables of one name in different schemas (the file's, or
@@ -360,6 +373,16 @@ export interface DbmlImportPlan {
   /** The subject area file's content. */
   document: DbmlImportSubjectAreaDocument;
   report: DbmlImportReport;
+  /**
+   * The sample rows (D37) each of {@link newTables} gets in its file, by the
+   * table itself (a plan's name can differ from its file's): its columns
+   * renamed as the table's are, at most `SAMPLE_ROWS_LIMIT` rows, an enum
+   * reference as text, rows that would start with a sign left out. Only
+   * with `sampleRows`; absent when no table has any. Values may be real
+   * data: they go to the table files and the draft's diagram, never into a
+   * report line, note, log or telemetry.
+   */
+  sampleData?: ReadonlyMap<SemanticTable, SampleData>;
 }
 
 // ---------------------------------------------------------------------------
@@ -735,18 +758,106 @@ export function planDbmlImport(input: PlanDbmlImportInput): DbmlImportPlan {
   // its own schema folder: its relationships keep naming the tables they point at by reference.
   const ownNames = new Map(planned.filter((p) => p.table && p.ownName !== undefined).map((p) => [p.table!, p.ownName!]));
   const changedRefs = new Map(changedLibraryTables.flatMap((t) => (copyRefs.has(t) ? [[t, copyRefs.get(t)!] as const] : [])));
+  /** Each planned new table → the table the plan creates (under its own name). */
+  const created = new Map(newTables.map((t) => [t, ownNames.has(t) ? { ...t, name: ownNames.get(t)! } : t]));
+  const sampleData = planSampleRows(model, planned, created, input.sampleRows === true, report);
   return {
     subjectAreaName: input.subjectAreaName,
     layer: input.layer,
     modelNames: planned.map((p) => p.name),
-    newTables: ownNames.size === 0 ? newTables : newTables.map((t) => (ownNames.has(t) ? { ...t, name: ownNames.get(t)! } : t)),
+    newTables: newTables.map((t) => created.get(t)!),
     reusedTables: planned.filter((p) => p.reused).map((p) => p.name),
     relationships,
     changedLibraryTables,
     ...(changedRefs.size > 0 ? { changedLibraryRefs: changedRefs } : {}),
     document,
     report,
+    ...(sampleData.size > 0 ? { sampleData } : {}),
   };
+}
+
+/**
+ * The sample rows (D37) the import keeps, by the table it creates, and what
+ * the report says of every `Records` block: kept for a new table in a DBML
+ * project (its columns renamed as the table's, a column the import drops
+ * dropped with them, an enum reference as text, at most the first
+ * `SAMPLE_ROWS_LIMIT` rows, any row after the first that would start with a
+ * sign left out when no column can lead), else not imported, with why. The
+ * report names tables and counts only, never a value.
+ */
+function planSampleRows(
+  model: DbmlModel,
+  planned: readonly PlannedTable[],
+  created: ReadonlyMap<SemanticTable, SemanticTable>,
+  keep: boolean,
+  report: DbmlImportReport,
+): Map<SemanticTable, SampleData> {
+  const out = new Map<SemanticTable, SampleData>();
+  const kept: string[] = [];
+  let enumCells = 0;
+  const notImported: DbmlImportDropped[] = [];
+  for (const records of model.records) {
+    const p = planned.find((t) => t.dbml.schema === records.schema && t.dbml.name === records.table);
+    const label = dbmlTableLabel({ schema: records.schema, name: records.table });
+    const what = `Sample data for ${label} (${plural(records.totalRows, 'row')})`;
+    if (p?.reused) {
+      notImported.push({ kind: 'records', what, item: label, why: `your Table Library's ${p.name} is used as it is, so its file is not changed.` });
+      continue;
+    }
+    if (!keep) {
+      notImported.push({ kind: 'records', what, item: label, why: 'this project stores tables as YAML, which has no place for sample rows.' });
+      continue;
+    }
+    const table = p?.table ? created.get(p.table) : undefined;
+    if (!p || !table) continue;
+    const rows = keptSampleRows(records, p.columns);
+    if (!rows) continue;
+    out.set(table, rows.data);
+    kept.push(table.name);
+    enumCells += rows.enumCells;
+    if (records.totalRows > records.rows.length) {
+      notImported.push({ kind: 'records', what: `Sample data for ${table.name}`, item: table.name, why: `kept the first ${records.rows.length} of ${records.totalRows} rows.` });
+    }
+    if (rows.leftOut > 0) {
+      notImported.push({
+        kind: 'records',
+        what: `Sample data for ${table.name}`,
+        item: table.name,
+        why: `${plural(rows.leftOut, 'row')} left out, because DBML 9 and 10 tools reject a row that starts with a minus or plus sign.`,
+      });
+    }
+  }
+  if (kept.length > 0) report.notes.push(`Sample data kept for ${plural(kept.length, 'table')} (${someOf(kept)}).`);
+  if (enumCells > 0) report.notes.push(`${plural(enumCells, 'sample value that named an enum was', 'sample values that named an enum were')} written as text.`);
+  report.dropped.push(...notImported);
+  return out;
+}
+
+/**
+ * One block's rows as the new table keeps them: the columns the import kept
+ * (`columns`: the file's column name → the table's), the rows in the order
+ * `renderRecordsBlock` keeps them (rows that would start with a sign left
+ * out), an enum reference as text. Undefined when no column or no row is left.
+ */
+function keptSampleRows(records: DbmlRecords, columns: ReadonlyMap<string, string>): { data: SampleData; enumCells: number; leftOut: number } | undefined {
+  const at: number[] = [];
+  const names: string[] = [];
+  records.columns.forEach((name, i) => {
+    const to = columns.get(name);
+    if (to === undefined || names.includes(to)) return;
+    at.push(i);
+    names.push(to);
+  });
+  if (names.length === 0 || records.rows.length === 0) return undefined;
+  const projected = records.rows.map((row) => at.map((i) => row[i] ?? null));
+  const order = sampleRowsWriteOrder(names.length, projected);
+  let enumCells = 0;
+  const rows = order.rows.map((r) => projected[r].map((cell): SampleCell | null => {
+    if (cell?.kind !== 'enum') return cell;
+    enumCells++;
+    return sampleCellAsText(cell);
+  }));
+  return { data: { columns: names, rows, totalRows: rows.length }, enumCells, leftOut: order.leftOut };
 }
 
 /**
@@ -1728,15 +1839,7 @@ function findTableByLabel(planned: readonly PlannedTable[], value: string): Plan
 /** Report what the file holds beyond tables, refs and notes that is not kept. */
 function reportFileExtras(model: DbmlModel, layer: string, ctx: Context): void {
   const { dropped } = ctx.report;
-  for (const records of model.records) {
-    const table = records.schema ? `${records.schema}.${records.table}` : records.table;
-    dropped.push({
-      kind: 'records',
-      what: `Records for ${table} (${plural(records.rows, 'row')})`,
-      item: table,
-      why: 'ERD Studio does not keep sample data.',
-    });
-  }
+  // Sample rows (`Records`) are kept or reported by planSampleRows.
   for (const [key, value] of Object.entries(model.project?.properties ?? {})) {
     // The positions: read into the layout, not left out.
     if (key.toLowerCase() === DBML_DIAGRAM_PROPERTIES.layout) continue;
@@ -2303,7 +2406,7 @@ export function droppedGroupLabel(items: readonly DbmlImportDropped[]): string {
   const examples = someOf([...new Set(items.map((d) => d.item))], 3);
   switch (items[0].kind) {
     case 'reference-settings': return `Settings on ${n} references (${examples})`;
-    case 'records': return `Records for ${n} tables (${examples})`;
+    case 'records': return `Sample data for ${n} tables (${examples})`;
     case 'table-group': return `${plural(n, 'table group')} (${examples})`;
     case 'project-setting': return `${plural(n, 'project setting')} (${examples})`;
     case 'enum': return `${plural(n, 'enum')} (${examples})`;

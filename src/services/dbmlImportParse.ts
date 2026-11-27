@@ -26,7 +26,8 @@
 
 import { Compiler, DEFAULT_ENTRY, MemoryProjectLayout } from '@dbml/parse';
 import { ERD_STUDIO_DBML_HEADER_PREFIX } from '@erd-studio/core';
-import { dbmlMessageSanitiser, parserStoppedMessage, readErdLayoutDbml, type DbmlMessageSanitiser } from '@erd-studio/core/dbml';
+import type { SampleCell } from '@erd-studio/core';
+import { dbmlMessageSanitiser, parserStoppedMessage, readErdLayoutDbml, readRecordsBlocks, type DbmlMessageSanitiser } from '@erd-studio/core/dbml';
 import type { DbmlImportLayout } from './dbmlImport';
 
 // ---------------------------------------------------------------------------
@@ -170,11 +171,31 @@ export interface DbmlModel {
   enums: DbmlEnum[];
   tableGroups: DbmlTableGroup[];
   notes: DbmlStickyNote[];
-  /** `Records` blocks: sample rows, which ERD Studio does not keep. */
-  records: Array<{ schema: string | null; table: string; rows: number }>;
+  /**
+   * `Records` blocks, nested or top-level: each table's sample rows (D37),
+   * matched to the table the parser resolved (an alias, `public`, a
+   * top-level `Records t(…)`), its columns as the parser lists them (a
+   * `records {` block every column of the table, injected ones too). Each
+   * value is read from its own text (`1.50` stays `1.50`), at most
+   * `SAMPLE_ROWS_LIMIT` rows; `totalRows` counts them all. Values may be real
+   * data: they go only into the plan's sample rows, never a message.
+   */
+  records: DbmlRecords[];
   /** Dependency arrows (`Dep`, DBML 10+) and `DiagramView`s, which ERD Studio does not keep. */
   dependencies: number;
   diagramViews: number;
+}
+
+/** One table's `Records` block (see {@link DbmlModel.records}). */
+export interface DbmlRecords {
+  schema: string | null;
+  table: string;
+  /** The block's columns, as the parser resolved them. */
+  columns: string[];
+  /** At most `SAMPLE_ROWS_LIMIT` rows, one cell per column; null for `null` or an empty field. */
+  rows: Array<Array<SampleCell | null>>;
+  /** Rows in the block, counting any past the limit. */
+  totalRows: number;
 }
 
 export type ReadDbmlResult =
@@ -294,7 +315,8 @@ export { ERD_STUDIO_DBML_HEADER_PREFIX };
 /**
  * Parse `text`. Any error the parser reports makes the file unreadable — the
  * parser builds no model then — and comes back as diagnostics, 1-based.
- * Warnings (a Records row a ref does not match, …) are ignored. Never throws.
+ * Warnings (a Records row a ref does not match, …) are ignored: they quote
+ * values, and never leave the parser. Never throws.
  */
 export function readDbml(input: string, parser: DbmlParserModule = PINNED_PARSER): ReadDbmlResult {
   // A byte-order mark (Notepad, Visual Studio and other Windows editors write one) is not
@@ -818,14 +840,30 @@ export function normaliseRawDbml(raw: Loose, options: { erdStudioExport?: boolea
       ...(colorOf(n.color) ? { color: colorOf(n.color) } : {}),
       properties: dbmlProperties(n.metadata),
     })),
-    records: list(raw.records).map((r) => ({
-      schema: text(r.schemaName),
-      table: text(r.tableName) ?? '',
-      rows: Array.isArray(r.values) ? r.values.length : 0,
-    })),
+    records: recordsOf(list(raw.records), options.text),
     dependencies: Array.isArray(raw.deps) ? raw.deps.length : 0,
     diagramViews: Array.isArray(raw.diagramViews) ? raw.diagramViews.length : 0,
   };
+}
+
+/**
+ * The raw model's `records` with each value read from the source text
+ * (`readRecordsBlocks`, matched by the block's offset), never from the
+ * parser's coerced value (`1.50` → 1.5, `007` → 7, an enum reference → '').
+ * Without the text (or a block not found in it) a block keeps its count and
+ * no row.
+ */
+function recordsOf(raw: Loose[], source: string | undefined): DbmlRecords[] {
+  if (raw.length === 0) return [];
+  const blocks = source === undefined ? [] : readRecordsBlocks(source);
+  const byStart = new Map(blocks.map((b) => [b.start, b]));
+  return raw.map((r) => {
+    const columns = Array.isArray(r.columns) ? r.columns.filter((c): c is string => typeof c === 'string') : [];
+    const count = Array.isArray(r.values) ? r.values.length : 0;
+    const block = byStart.get(offsetOf(r));
+    const rows = block && block.totalRows === count && block.rows.every((row) => row.length === columns.length) ? block.rows : [];
+    return { schema: text(r.schemaName), table: text(r.tableName) ?? '', columns, rows, totalRows: count };
+  });
 }
 
 /** Keys of a raw `Project` that are its structure, not a setting. */

@@ -32,7 +32,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 import { assignTableRefs, dbmlTreePathOf, diagramPathOf, rekeySubjectArea, subjectAreaStorageOf, tableIdOfPath } from '@erd-studio/core';
-import type { Annotation, NodePosition, TableId } from '@erd-studio/core';
+import type { Annotation, NodePosition, SampleData, TableId } from '@erd-studio/core';
 import { DBML_CONVERT_FIRST_MESSAGE, DbmlEditRefused } from '@erd-studio/core/dbml';
 import { renderNewSubjectAreaDbml } from './dbmlWriters';
 
@@ -52,6 +52,12 @@ import type { DbmlLibraryWritePlan } from './dbmlLibraryWrites';
 import { semanticReadmeCreate } from './semanticReadme';
 import type { SemanticTable } from '../types/semantic';
 
+/** A new table's save: created, with its sample rows when the write gives it some. */
+function newTableSave(model: SemanticTable, sampleData: ReadonlyMap<SemanticTable, SampleData> | undefined): { model: SemanticTable; create: true; sampleData?: SampleData } {
+  const rows = sampleData?.get(model);
+  return rows ? { model, create: true, sampleData: rows } : { model, create: true };
+}
+
 export interface NewSubjectAreaWrite {
   workspaceRoot: string;
   semanticDir: string;
@@ -59,6 +65,12 @@ export interface NewSubjectAreaWrite {
   domainPath: string;
   /** Table files to create, each with `saveTable(table, folder)`. */
   newTables: readonly SemanticTable[];
+  /**
+   * Sample rows (D37) for some of {@link newTables}, by the table: written
+   * as each new DBML table file's `records` block (a YAML table has no place
+   * for them; Import reports that instead).
+   */
+  sampleData?: ReadonlyMap<SemanticTable, SampleData>;
   /** The library folder new tables go in (a layer folder), or undefined for the top level. */
   folder?: string;
   /**
@@ -179,7 +191,7 @@ export async function writeNewSubjectArea(
       const batch = tableLibraryService.applyDbmlBatch!({
         ops: {
           // New tables and changed ones are told apart (D-4): a new one is never an edit of a namesake.
-          save: [...dbmlNew.map((model) => ({ model, create: true })), ...dbmlChanged.map((model) => ({ model }))],
+          save: [...dbmlNew.map((model) => newTableSave(model, write.sampleData)), ...dbmlChanged.map((model) => ({ model }))],
           ...(tableLibraryService.dbmlHomeOf ? { newTableHome: tableLibraryService.dbmlHomeOf(write.folder) } : {}),
         },
         ...(services.dirtyFiles ? { dirtyFiles: services.dirtyFiles } : {}),
@@ -278,7 +290,7 @@ async function writeNewDbmlSubjectArea(
     // New tables go in the diagram's layer, its name as the schema (§2.4), unless they bring their own.
     const layer = diagramPathOf(rel)?.layer ?? write.folder;
     const saves = [
-      ...write.newTables.map((model) => ({ model, create: true })),
+      ...write.newTables.map((model) => newTableSave(model, write.sampleData)),
       ...write.changedTables.filter((t) => !write.newTables.includes(t)).map((model) => {
         const from = write.changedTableIds?.get(model);
         return from !== undefined ? { model, from } : { model };

@@ -21,6 +21,7 @@ import { dbmlStorageReader } from '@erd-studio/core/dbml';
 import type { DisplaySubjectArea } from '../types/display';
 import type { DraftSchemaCount } from '../types/draft';
 import type { LayerConfig } from '../types/layer';
+import type { SampleData } from '@erd-studio/core';
 import type { NodePosition, Relationship, SemanticTable, ViewConfig } from '../types/semantic';
 
 /** The schema version of the in-memory document (v5: model names, relationships beside them). */
@@ -55,6 +56,12 @@ export interface DisplayFromTablesInput {
   /** Stored positions and sticky notes, when the source has them. */
   viewConfig?: ViewConfig;
   layers: readonly LayerConfig[];
+  /**
+   * Sample rows (D37) to show, by the table of `tables` they belong to:
+   * an import's rows for the tables it creates (`DbmlImportPlan.sampleData`),
+   * given explicitly. Every other table is drawn without rows.
+   */
+  sampleData?: ReadonlyMap<SemanticTable, SampleData>;
 }
 
 /** No warning from a draft's own pipeline reaches anyone: the draft is never written. */
@@ -133,7 +140,32 @@ export function displayFromTables(input: DisplayFromTablesInput): DraftDisplay {
     layerConfig: input.layers.find((l) => l.id === unified.layer),
     readOnly: true,
   });
-  return { display, autoLayout };
+  return { display: withSampleData(display, input), autoLayout };
+}
+
+/**
+ * The display with the rows `input.sampleData` gives attached to each of
+ * their tables (by the name the draft draws it under, the last key of its
+ * display table, as core places it). A table given no rows is left as it is.
+ */
+function withSampleData(display: DisplaySubjectArea, input: DisplayFromTablesInput): DisplaySubjectArea {
+  const given = input.sampleData;
+  if (!given || given.size === 0) return display;
+  const byName = new Map<string, SampleData>();
+  for (const t of input.tables) {
+    const data = given.get(t);
+    if (data && data.rows.length > 0 && data.columns.length > 0 && !byName.has(t.name)) byName.set(t.name, data);
+  }
+  if (byName.size === 0) return display;
+  return {
+    ...display,
+    models: display.models.map((m) => {
+      const data = byName.get(m.name);
+      if (!data) return m;
+      const { sampleData: _old, ...rest } = m;
+      return { ...rest, sampleData: data };
+    }),
+  };
 }
 
 export interface DisplayFromFilesInput {

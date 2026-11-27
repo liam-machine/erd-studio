@@ -788,7 +788,8 @@ async function runImportDbml(
       diagramCopies,
       // A DBML diagram holds no relationships (D5): one the library cannot take is named, not dropped silently.
       // Its tables are their schema folders and names: same-named tables of two schemas keep their names.
-      ...(dbml ? { diagramHoldsNoRelationships: true, schemaScopedNames: true } : {}),
+      // Its table files keep sample rows (D37); a YAML project's report says it has no place for them.
+      ...(dbml ? { diagramHoldsNoRelationships: true, schemaScopedNames: true, sampleRows: true } : {}),
       sameName: policy,
     });
     plan = planWith(sameName ?? 'auto');
@@ -822,7 +823,7 @@ async function runImportDbml(
     // Each new table keeps the schema the file gives it (its qualifier), as the layer's folder spells it (§2.4).
     const planWrites = dbml && tableLibraryService.planTableWrites
       // New tables and changed library tables are told apart (D-4): a new one is never an edit of a namesake.
-      ? tableLibraryService.planTableWrites({ save: [...plan.newTables.map((model) => ({ model, create: true })), ...plan.changedLibraryTables.map((model) => changedSave(model))] }, folder, { dbml: true, schemaFromSource: true })
+      ? tableLibraryService.planTableWrites({ save: [...plan.newTables.map((model) => ({ model, create: true, ...(plan.sampleData?.has(model) ? { sampleData: plan.sampleData.get(model)! } : {}) })), ...plan.changedLibraryTables.map((model) => changedSave(model))] }, folder, { dbml: true, schemaFromSource: true })
       : undefined;
     planned = (planWrites?.writes ?? []).map((w) => w.path);
     if (planWrites?.plan) {
@@ -1056,6 +1057,8 @@ async function runImportDbml(
       semanticDir,
       domainPath,
       newTables: plan.newTables,
+      // The rows of the tables it creates (D37): their files' records blocks.
+      ...(plan.sampleData ? { sampleData: plan.sampleData } : {}),
       folder,
       ...(dbml ? { schemaFromSource: true } : {}),
       changedTables: plan.changedLibraryTables,

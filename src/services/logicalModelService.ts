@@ -29,7 +29,7 @@ import { DBML_CONVERT_FIRST_MESSAGE, DbmlEditRefused, attachRelationships, dbmlT
 import { projectNamingOf } from './projectNaming';
 import { projectStorageIn } from './projectStorage';
 import type {
-  DbmlAttachResult, DbmlAttachTable, DbmlProblem, DbmlMetadataTarget, DbmlRefEndHint, DbmlRelationshipsReading, DbmlTableReading, DbmlTableStructureRule, ProjectStorage, TableId, TableLoadErrorKind,
+  DbmlAttachResult, DbmlAttachTable, DbmlProblem, DbmlMetadataTarget, DbmlRefEndHint, DbmlRelationshipsReading, DbmlTableReading, DbmlTableStructureRule, ProjectStorage, SampleData, TableId, TableLoadErrorKind,
 } from '@erd-studio/core';
 import type { ColumnDef, TableRelationship, SemanticTable } from '../types/semantic';
 import type { YmlModelInfo } from '../types/ymlData';
@@ -59,9 +59,10 @@ export interface TableFileOps {
    * Tables whose file is written in full (created if missing); `fromName`
    * renames. A DBML table's `configuredSchema` (dbt) picks its schema folder
    * (§2.4). DBML only (D-4): `create` marks a new table, `from` names the
-   * existing one by identity (see `DbmlLibrarySave`).
+   * existing one by identity, and `sampleData` gives a new one's sample rows
+   * (see `DbmlLibrarySave`; a YAML table has no place for them).
    */
-  save?: Array<{ model: DbmlDraftTable; fromName?: string; from?: TableId; create?: boolean }>;
+  save?: Array<{ model: DbmlDraftTable; fromName?: string; from?: TableId; create?: boolean; sampleData?: SampleData }>;
   /** Tables whose file is deleted: by identity, or by a name only one table has. */
   delete?: Array<string | TableId>;
   /**

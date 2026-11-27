@@ -637,7 +637,7 @@ describe('foreign DBML (dbdiagram syntax)', () => {
     expect(p.report.optionalRefs).toBe(1);
   });
 
-  it('reports what is dropped: Records, ref settings, inactive, the database type', () => {
+  it('reports what is dropped: Records (in a YAML project), ref settings, inactive, the database type', () => {
     const why = 'ERD Studio does not record what a reference does on delete or update, its colour, or whether it is inactive. The relationships were imported.';
     expect(ecommerce().report.dropped).toEqual([
       {
@@ -647,8 +647,8 @@ describe('foreign DBML (dbdiagram syntax)', () => {
         why,
       },
       { kind: 'reference-settings', what: 'Reference order_items.product_id – ecommerce.products.id (inactive)', item: 'inactive', why },
-      { kind: 'records', what: 'Records for countries (2 rows)', item: 'countries', why: 'ERD Studio does not keep sample data.' },
       { kind: 'database-type', what: 'The database type (PostgreSQL)', item: 'PostgreSQL', why: 'ERD Studio does not record the database type.' },
+      { kind: 'records', what: 'Sample data for countries (2 rows)', item: 'countries', why: 'this project stores tables as YAML, which has no place for sample rows.' },
     ]);
   });
 
@@ -1208,7 +1208,7 @@ describe('describeDbmlImportPlan', () => {
     expect(text).toContain([
       'Left out:',
       '• The database type (PostgreSQL): ERD Studio does not record the database type.',
-      '• Records for countries (2 rows): ERD Studio does not keep sample data.',
+      '• Sample data for countries (2 rows): this project stores tables as YAML, which has no place for sample rows.',
       '• Settings on 2 references (delete: cascade, update: no action, color: #79AD51, inactive): ERD Studio does not record what a reference does on delete or update, its colour, or whether it is inactive. The relationships were imported.',
     ].join('\n'));
     // Six relationships, as the canvas draws them: the composite fk_merchant (two column pairs) once.
@@ -1254,8 +1254,8 @@ describe('describeDbmlImportPlan', () => {
   it('caps long lists', () => {
     const tables = Array.from({ length: 8 }, (_, i) => `Table t${i} {\n  id int\n}\nRecords t${i}(id) {\n  1\n}`).join('\n');
     const text = describeDbmlImportPlan(plan(tables));
-    expect(text).toContain('Left out:\n• Records for 8 tables (t0, t1, t2 and 5 more): ERD Studio does not keep sample data.');
-    expect(text.split('\n').filter((l) => l.startsWith('• Records')).length).toBe(1);
+    expect(text).toContain('Left out:\n• Sample data for 8 tables (t0, t1, t2 and 5 more): this project stores tables as YAML, which has no place for sample rows.');
+    expect(text.split('\n').filter((l) => l.startsWith('• Sample data')).length).toBe(1);
   });
 
   it('gives each kind of loss one line, so many references never hide the table groups or the database type', () => {

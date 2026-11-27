@@ -48,7 +48,8 @@ import { _resetImportReports, latestImportReport } from '../../src/services/impo
 import { main } from '../../src/cli/index';
 import { collectFilesNotShown } from '../../src/services/filesNotShown';
 import type { FeedbackDraft } from '../../src/types/feedback';
-import { fakeDraftPreview } from './helpers/draftDriver';
+import { fakeDraftPreview, type FakeDraftPreview } from './helpers/draftDriver';
+import type { Draft } from '../../src/types/draft';
 
 const SENTINEL = 'zqSENTX7';
 const LEAK = /SENTX7/;
@@ -349,7 +350,14 @@ describe('Import DBML', () => {
     expect(JSON.stringify([errors, report, buildImportReportView(report), recentLogLines()])).not.toMatch(LEAK);
   });
 
-  it('a file with a top-level Records block that reads: the draft, the ledger, the report and the log hold no value', async () => {
+  /** A draft as anything but its diagram's sample rows (D37: the one place a draft shows a value, by design). */
+  const withoutRows = (drafts: readonly Draft[]): unknown[] => drafts.map((draft) => ({
+    ...draft,
+    display: { ...draft.display, models: draft.display.models.map(({ sampleData: _rows, ...model }) => model) },
+  }));
+  const rowsIn = (drafts: readonly Draft[]): string => JSON.stringify(drafts.map((draft) => draft.display.models.map((m) => m.sampleData ?? null)));
+
+  it('a file with a top-level Records block that reads: the ledger, the report, the log and the draft (bar its rows) hold no value', async () => {
     const root = path.join(tmp, 'import');
     write(root, '.erd-studio/layers.json', '{"layers":[{"id":"gold","label":"Gold"}]}\n');
     const file = path.join(tmp, 'shop.dbml');
@@ -360,8 +368,47 @@ describe('Import DBML', () => {
     expect(errors).toEqual([]);
     const report = latestImportReport()!;
     expect(report).toMatchObject({ source: 'dbml' });
-    const drafts = (d.draft as { preview: { drafts: unknown[] } }).preview.drafts;
-    expect(JSON.stringify([report, buildImportReportView(report), recentLogLines(), drafts])).not.toMatch(LEAK);
+    const drafts = (d.draft as { preview: FakeDraftPreview }).preview.drafts;
+    expect(JSON.stringify([report, buildImportReportView(report), recentLogLines(), withoutRows(drafts)])).not.toMatch(LEAK);
+    // The positive control: the draft's diagram shows the rows the import keeps.
+    expect(rowsIn(drafts)).toMatch(LEAK);
+  });
+
+  it('kept: the new table file holds the rows, and the ledger, the report and the log still hold none', async () => {
+    const root = path.join(tmp, 'import');
+    write(root, '.erd-studio/layers.json', '{"layers":[{"id":"gold","label":"Gold"}]}\n');
+    const file = path.join(tmp, 'shop.dbml');
+    fs.writeFileSync(file, [
+      'Enum status {\n  active\n}\n',
+      `Table customer {\n  id int [pk]\n  email varchar\n  st status\n\n  records (id, email, st) {\n    1, '${SENTINEL}@example.com', status.active\n    2, '${SENTINEL}.doe', null\n  }\n}\n`,
+    ].join('\n'));
+    const errors: string[] = [];
+    const d = deps(root, ui(errors), false);
+    const preview = fakeDraftPreview(['keep']);
+    await importDbml({ ...d, draft: { preview, trigger: 'palette' } }, { filePath: file });
+    expect(errors).toEqual([]);
+    expect(preview.settled).toEqual([expect.objectContaining({ kept: true })]);
+    const written = fs.readFileSync(path.join(root, '.erd-studio/gold/tables/gold/customer.dbml'), 'utf-8');
+    expect(written).toContain(`  records (id, email, st) {\n    1, '${SENTINEL}@example.com', 'active'\n    2, '${SENTINEL}.doe', null\n  }`);
+    const reading = parseTableDbml(written, 'customer', { schemaFolder: 'gold', sampleData: true });
+    expect(reading.ok && reading.writable).toBe(true);
+    const report = latestImportReport()!;
+    expect(report).toMatchObject({ source: 'dbml' });
+    expect(JSON.stringify([report, buildImportReportView(report), recentLogLines(), hostErrorLog.recent(), withoutRows(preview.drafts)])).not.toMatch(LEAK);
+    expect(rowsIn(preview.drafts)).toMatch(LEAK);
+  });
+
+  it('a top-level Records block that does not read: the failure message, the ledger, the report and the log hold no value', async () => {
+    const root = path.join(tmp, 'import');
+    write(root, '.erd-studio/layers.json', '{"layers":[{"id":"gold","label":"Gold"}]}\n');
+    const file = path.join(tmp, 'shop.dbml');
+    fs.writeFileSync(file, `Table customer {\n  id int [pk]\n  email varchar\n}\n\nRecords customer(id, "${SENTINEL}") {\n  1, 'a'\n}\n`);
+    const errors: string[] = [];
+    await importDbml(deps(root, ui(errors), false), { filePath: file });
+    expect(errors).toHaveLength(1);
+    const report = latestImportReport()!;
+    expect(report).toMatchObject({ source: 'dbml', status: 'failed' });
+    expect(JSON.stringify([errors, report, buildImportReportView(report), recentLogLines()])).not.toMatch(LEAK);
   });
 });
 

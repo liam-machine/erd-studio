@@ -35,7 +35,7 @@ import {
   tableIdKey,
   tableIdOfPath,
 } from '@erd-studio/core';
-import type { DbmlAttachTable, DbmlRelationshipsReading, TableId } from '@erd-studio/core';
+import type { DbmlAttachTable, DbmlRelationshipsReading, SampleData, TableId } from '@erd-studio/core';
 import {
   DBML_CONVERT_FIRST_MESSAGE,
   DbmlEditRefused,
@@ -237,6 +237,11 @@ export interface DbmlLibrarySave {
   create?: boolean;
   asWritten?: boolean;
   home?: DbmlTableHome;
+  /**
+   * A new table only: its sample rows (D37, Import DBML keeps a file's),
+   * written as its file's nested `records` block. Never read from the model.
+   */
+  sampleData?: SampleData;
 }
 
 /** Where the New Relationship dialog asks a new relationship to be saved ({@link DbmlLibraryOps.newRefFile}). */
@@ -720,7 +725,7 @@ export function planDbmlLibraryWrites(snapshot: DbmlLibrarySnapshot, ops: DbmlLi
       path = dbmlTablePath(where.layer, schema, model.name);
       if (save.create) refuseTaken(model.name, schema, path, undefined, 'choose another name.');
       if (fileListed(path)) refuse(path, `${path} already exists; choose another name.`);
-      text = renderNewTableDbml(model);
+      text = renderNewTableDbml(model, save.sampleData ? { sampleData: save.sampleData } : {});
       writes.push({ kind: 'create', path, text });
     } else if (renamed) {
       path = `${dirOf(t.path)}/${model.name}.dbml`;

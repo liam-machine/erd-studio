@@ -494,6 +494,8 @@ export function draftFromImportPlan(input: ImportPlanDraftInput): Draft {
     relationships: plan.relationships,
     viewConfig: plan.document.viewConfig,
     layers: input.layers,
+    // The rows of the tables the import creates (D37), never a reused table's.
+    ...(plan.sampleData ? { sampleData: plan.sampleData } : {}),
   });
   const { report } = plan;
   const summary: DraftSummary = {
@@ -1009,9 +1011,10 @@ export async function exampleDbmlDraft(input: ExampleDbmlDraftInput): Promise<Dr
     subjectAreaName: suggestDbmlSubjectAreaName(read.model, input.fileName),
     fileName: input.fileName,
     library: { findTableName: () => null, getTable: () => null },
-    // A new project stores DBML: every relationship goes to the library.
+    // A new project stores DBML: every relationship goes to the library, and a table file keeps sample rows.
     libraryRelationships: true,
     diagramHoldsNoRelationships: true,
+    sampleRows: true,
   });
   const target: DraftTarget = {
     layer: layer.id,
