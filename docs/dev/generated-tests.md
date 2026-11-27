@@ -15,7 +15,8 @@ importer keeps on every input.
 | Import or report | a failed import names at least one problem; a SQL import's tables found = imported + reported (the ledger's `table` entries); a Power BI table is imported or named in the ledger (by table or file); a DBML file that reads imports every table it defines |
 | Nothing swallowed | every table the break did not touch is imported (by name when the names are plain), with all its columns; a column missing from the table the break hit is named in the ledger, or that table is reported as a whole (SQL, with plain names, for every break that does not rename or delete a column: `columnLossViolations` in `sqlRun.ts`); SQL: every `CREATE TABLE` still in the file is counted in `tablesFound` |
 | Located | every problem has its file and a line inside it (`lineCount` counts the empty line after a final line break, as an editor shows it); every `problem` ledger entry has a file and line, unless it is about a whole file |
-| No long echo | no string the user can read (problem messages, notes, Not imported, the log lines, the draft) holds more than 100 characters of the source verbatim; table and column names are allowed (a long one is cut by the importer) |
+| No long echo | no string the user can read (problem messages, notes, Not imported, the log lines, the draft) holds more than 100 characters of the source verbatim; table and column names are allowed (a long one is cut by the importer). One exception, coded in `invariants.ts` (`draftDisplayStrings`): Import DBML's draft shows the sample rows (D37) it keeps, so a display table's `sampleData` is skipped, and nothing else of the draft's diagram is |
+| No sample value | Import DBML: no message, note, Not imported line, log line or draft string (its rows aside) holds any part of a generated `records` value (each carries the marker `zqCELL`), whether the file reads or not; a valid file keeps the rows of every block |
 | Linear time | sizes n and 8·n (tables; one statement's columns): the big run's time ≤ 4 × 8 × the small one's (`timeRatio`: alternating runs, the fastest of each, measured again up to 3 times when over the limit, so a busy machine does not fail it but a quadratic step does); the three `*.property.test.ts` files that check it are in `test/timingTests.ts`, so CI runs them one at a time in `test-timing` |
 | Converted DBML reads | the DBML a SQL or Power BI import converts to always reads back through Import DBML |
 
@@ -32,7 +33,13 @@ Writers (`sqlWriter.ts`, `semanticModelWriter.ts`, `dbmlWriter.ts`) write
 it with the knobs that must not change the result: quoting, keyword case,
 CRLF, a BOM, inline or `ALTER TABLE` / `Ref:` foreign keys, a schema
 qualifier, comments between tokens and at line ends (holding `;`, `(` and
-quotes), TMDL tabs or spaces, TMSL indent.
+quotes), TMDL tabs or spaces, TMSL indent. The DBML writer also gives about
+half the tables sample rows (`records`, nested with a column list or none,
+or top-level), every value marked: strings with escapes (one longer than
+the echo limit), signed numbers, `null`, empty fields, booleans, backtick
+expressions, and, in the broken-DBML property, in about a quarter of the
+files, dotted bare words (`zqCELL7.doe`) that the parser refuses while
+quoting part of them, so Import's message sanitiser is fuzzed.
 
 The SQL writer covers all nine dialects the picker offers. `sqlCaseArb`
 draws the dialect first and then a schema that dialect can write (Oracle's
@@ -120,7 +127,7 @@ end, its cardinality, and whether its pairs are one composite link.
 |---|---|
 | `schemaArbitraries.ts` | the schema and name arbitraries, `FC_RUNS` / `FC_SEED` |
 | `breaks.ts` | the breaks, spans and each format's kit |
-| `invariants.ts` | the checks: echo, locations, ledger counts, `timeRatio` |
+| `invariants.ts` | the checks: echo (and the draft's sample-rows exception), sample values, locations, ledger counts, `timeRatio` |
 | `sqlWriter.ts`, `sqlRun.ts` | SQL in each dialect; the SQL import up to the draft |
 | `semanticModelWriter.ts` | TMDL and TMSL |
 | `dbmlWriter.ts`, `dbmlRoundTrip.ts` | DBML; the round trip |

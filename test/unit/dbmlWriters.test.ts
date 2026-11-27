@@ -9,7 +9,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
-import { formatDbml, parseTableDbml } from '@erd-studio/core/dbml';
+import { editTableDbml as spliceTable, formatDbml, parseTableDbml } from '@erd-studio/core/dbml';
 
 import {
   editDiagramLayoutDbml,
@@ -156,6 +156,23 @@ describe('the writers', () => {
       const out = editTableDbml(text, desired);
       expect(out).toBe('Table gold.fct_order {\n  id     INT [pk]\n  amount DECIMAL\n  customer_key INT\n}\n');
     });
+  });
+
+  it('a drop in a canonical file with sample rows is the pure splice, byte for byte: the rows already have the canonical layout (D37)', () => {
+    const text = "Table gold.fct_order {\n  id     INT [pk]\n  amount DECIMAL\n  status VARCHAR\n\n  records (id, amount, status) {\n    1, 1.5, 'new'\n    2, 2.5, 'paid'\n  }\n}\n";
+    expect(formatDbml(text)).toMatchObject({ changed: false });
+    const reading = parseTableDbml(text, 'fct_order');
+    if (!reading.ok) throw new Error('no read');
+    const desired = structuredClone(reading.table);
+    desired.columns!.splice(1, 1);
+    const out = editTableDbml(text, desired);
+    expect(out).toBe(spliceTable(text, desired));
+    expect(out).toBe("Table gold.fct_order {\n  id     INT [pk]\n  status VARCHAR\n\n  records (id, status) {\n    1, 'new'\n    2, 'paid'\n  }\n}\n");
+    // The last listed column's drop cuts the block, and no blank line is left before the brace.
+    const last = structuredClone(reading.table);
+    last.columns = [];
+    expect(editTableDbml(text, last)).toBe(spliceTable(text, last));
+    expect(editTableDbml(text, last)).not.toMatch(/\n\n\}/);
   });
 
   it('an edit of a hand-laid file re-aligns nothing it did not write (#275)', () => {

@@ -144,7 +144,10 @@ async function canvasOf(diagram: string): Promise<Record<string, unknown>> {
   return loaded!.payload;
 }
 
-/** Core: the same diagram read by `loadDisplaySubjectArea` over the project's files. */
+/**
+ * Core: the same diagram read by `loadDisplaySubjectArea` over the project's files, with the tables'
+ * sample rows (D37), as the extension reads them for its Detail panel.
+ */
 async function coreOf(diagram: string): Promise<Record<string, unknown>> {
   const display = await loadDisplaySubjectArea({
     domainPath: `${SEMANTIC_DIR}/${diagram}`,
@@ -158,6 +161,7 @@ async function coreOf(diagram: string): Promise<Record<string, unknown>> {
     readOnly: false,
     warn: () => {},
     dbml: dbmlStorageReader,
+    readSampleData: true,
   });
   return display as unknown as Record<string, unknown>;
 }
@@ -169,6 +173,28 @@ describe('the canvas draws what core draws, for every DBML diagram', () => {
     // The ready load saves auto-placed positions into erd_layout (core places them the same way, in memory).
     const canvas = drawn(await canvasOf(diagram));
     expect(canvas).toEqual(core);
+  });
+});
+
+describe('sample rows as 2.0.10 left them (twin sample-rows-2.0): the canvas draws core\'s golden', () => {
+  // The golden is core's (loadDisplayDomain.sampleRows20.test.ts). 2.0.10 drew its stale records list
+  // as a placeholder; the reader now loads such a table with its columns and without its rows (D37).
+  // The golden is core's read without rows (what every older core draws); the canvas reads them, so the
+  // valid table carries its three rows on top of exactly that, and the stale one none.
+  it('the valid table with its columns and its rows, the stale one with its columns and no rows', async () => {
+    fs.cpSync(path.join(TWINS, 'sample-rows-2.0'), root, { recursive: true });
+    const golden = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'packages', 'core', 'test', 'fixtures', 'golden', 'sample-rows-2.0.catalog.display.json'), 'utf-8')) as Record<string, unknown>;
+    const models = golden.models as Array<{ name: string; columns: Array<{ name: string }>; loadError?: unknown; sampleData?: unknown }>;
+    const store = models.find((m) => m.name === 'dim_store')!;
+    expect(store.loadError).toBeUndefined();
+    expect(store.columns.map((c) => c.name)).toEqual(['store_key', 'store_name', 'opened_on']);
+    expect(models.some((m) => 'sampleData' in m)).toBe(false);
+    const canvas = drawn(await canvasOf('gold/diagrams/catalog.dbml'));
+    const canvasModels = canvas.models as Array<{ name: string; sampleData?: { columns: string[]; totalRows: number } }>;
+    expect(canvasModels.find((m) => m.name === 'dim_product')?.sampleData).toMatchObject({ columns: ['product_name', 'list_price', 'is_active'], totalRows: 3 });
+    expect('sampleData' in canvasModels.find((m) => m.name === 'dim_store')!).toBe(false);
+    for (const m of canvasModels) delete m.sampleData;
+    expect(canvas).toEqual(drawn(golden));
   });
 });
 

@@ -22,6 +22,7 @@
 @import './components/DetailPanel/BulkColumnActions.css';
 @import './components/DetailPanel/FieldsSection.css';
 @import './components/DetailPanel/ColumnEditor.css';
+@import './components/DetailPanel/SampleDataSection.css';
 @import './components/DetailPanel/DetailPanel.css';
 @import './components/Legend/Legend.css';
 @import './components/StatusBar/StatusBar.css';

@@ -37,6 +37,12 @@ const IMPORT: FileNote = {
   action: 'addRelationshipsImports',
 };
 const REF: FileNote = { code: 'notDrawnInTableFile', message: 'Relationships live in a relationships file.', file: '.erd-studio/gold/tables/gold/fct_order.dbml', line: 12 };
+const ROWS: FileNote = {
+  code: 'sampleDataNotRead',
+  message: 'gold/tables/gold/dim_region.dbml line 9: the sample data (records) does not read as DBML, so it is not shown, and ERD Studio will not edit this table until it is fixed or removed.',
+  file: '.erd-studio/gold/tables/gold/dim_region.dbml',
+  line: 9,
+};
 const STRAY: FileNote = { code: 'fileNotRead', message: 'ERD Studio does not read this file.', file: '.erd-studio/gold/tables/x.dbml' };
 const STALE: FileNote = { code: 'diagramNotRead', message: 'sales.dbml has a syntax error.', file: '.erd-studio/gold/diagrams/sales.dbml', line: 3 };
 const FAILED: FileNote = { code: 'refreshFailed', message: 'ERD Studio could not redraw.', action: 'reloadFromDisk' };
@@ -76,6 +82,18 @@ describe('FilesNotShownBanner', () => {
     show([REF]);
     fireEvent.click(screen.getByText('Open at line 12'));
     expect(mockVsCode.postMessage).toHaveBeenCalledWith({ type: 'openNotedFile', payload: { file: REF.file, line: 12 } });
+  });
+
+  it('a table\'s sample rows that do not read: the note opens the file at the block\'s line, offers no button, and can be hidden', () => {
+    render(<FilesNotShownBanner />);
+    show([ROWS]);
+    expect(screen.getByText(ROWS.message)).toBeTruthy();
+    expect(screen.queryByText('Add the import')).toBeNull();
+    expect(screen.queryByText('Reload from disk')).toBeNull();
+    fireEvent.click(screen.getByText('Open at line 9'));
+    expect(mockVsCode.postMessage).toHaveBeenCalledWith({ type: 'openNotedFile', payload: { file: ROWS.file, line: 9 } });
+    fireEvent.click(screen.getByLabelText('Hide until this list changes'));
+    expect(screen.queryByRole('status')).toBeNull();
   });
 
   it('folds a longer list behind Show details, and counts it', () => {

@@ -1,0 +1,86 @@
+// erd-studio dbml-export v2 (DBML 9.1+)
+// A ? beside a Ref operator marks the end across from it as possibly null: ERD Studio does not record nullability, so only primary-key columns are NOT NULL.
+// Not exported: the canvas layout options.
+
+Project shop {
+  Note: 'Tables with sample rows in every form a table file may hold them'
+  erd_layout: '''
+    dim_channel 760 40
+    dim_customer 400 40
+    dim_product 40 40
+    dim_region 580 360
+    fct_order_line 220 360
+  '''
+}
+
+Table gold.dim_product {
+  product_key INT [pk, note: 'Surrogate key']
+  product_name VARCHAR [note: 'Display name']
+  list_price "DECIMAL(10,2)"
+  price_change "DECIMAL(10,2)"
+  is_active BOOLEAN
+  launched_on DATE
+  Note: 'Products, with every column named in the sample data'
+
+  records (product_key, product_name, list_price, price_change, is_active, launched_on) {
+    1, 'Blue widget', 4.50, -0.25, true, '2020-01-15'
+    2, 'Red gadget', 12.00, null, FALSE, '2021-06-01'
+    3, 'Green gizmo', 7.25, 1.5, null, null
+  }
+}
+
+Table gold.dim_customer {
+  customer_key INT [pk, note: 'Surrogate key']
+  customer_name VARCHAR
+  segment VARCHAR
+  Note: 'Customers, with sample data that names no columns (every column, in order)'
+
+  records (customer_key, customer_name, segment) {
+    10, 'Harbour Stores', 'retail'
+    11, 'Hilltop Traders', null
+    12, null, 'online'
+  }
+}
+
+Table gold.fct_order_line [grain: 'One row per order line'] {
+  order_line_id BIGINT [pk]
+  product_key INT [foreign_key: 'true']
+  customer_key INT [foreign_key: 'true']
+  quantity INT [note: 'Negative for a return']
+  status order_status
+  Note: 'Order lines, whose sample data names a status from the Enum below'
+
+  records (order_line_id, product_key, customer_key, quantity, status) {
+    100, 1, 10, 2, 'shipped'
+    101, 3, 12, -1, 'returned'
+    102, 2, 11, 5, null
+  }
+}
+
+Table gold.dim_region {
+  region_code VARCHAR [pk]
+  region_name VARCHAR
+  Note: 'Regions, with sample data for one column'
+
+  records (region_code) {
+    'R-NORTH'
+    'R-SOUTH'
+  }
+}
+
+Table gold.dim_channel {
+  channel_code VARCHAR [pk]
+  channel_name VARCHAR
+  Note: 'Sales channels, with an empty records list, which is never shown or touched'
+}
+
+TableGroup gold [color: #d4af37, note: 'Layer: Gold'] {
+  gold.dim_product
+  gold.dim_customer
+  gold.fct_order_line
+  gold.dim_region
+  gold.dim_channel
+}
+
+Ref: gold.fct_order_line.customer_key >? gold.dim_customer.customer_key
+Ref: gold.fct_order_line.product_key >? gold.dim_product.product_key

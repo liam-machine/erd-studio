@@ -1,0 +1,185 @@
+/*
+ * The Detail panel's "Sample data" section (SampleDataSection.tsx): a fold
+ * with the row count, then the rows transposed in a card that scrolls
+ * sideways, the column names fixed at its left edge. Theme tokens only.
+ */
+
+.sample-data {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-width: 0;
+}
+
+.sample-data--open {
+  gap: var(--space-4);
+}
+
+.sample-data__title {
+  margin: 0;
+}
+
+.sample-data__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  min-height: 24px;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: color var(--duration-fast) var(--ease-standard);
+}
+
+.sample-data__toggle:hover {
+  color: var(--text-primary);
+}
+
+.sample-data__toggle:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: var(--focus-offset);
+}
+
+.sample-data__chevron {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  color: var(--text-tertiary);
+  transition: transform var(--duration-base) var(--ease-spring);
+}
+
+.sample-data__toggle[aria-expanded='true'] .sample-data__chevron {
+  transform: rotate(90deg);
+}
+
+/* "(8 rows)", as the Columns and Relationships headings give their counts. */
+.sample-data__count {
+  color: var(--text-tertiary);
+  font-weight: var(--weight-regular);
+  font-variant-numeric: tabular-nums;
+}
+
+.sample-data__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.sample-data__body[hidden] {
+  display: none;
+}
+
+/* The card: it scrolls sideways itself (it is a keyboard-scrollable region), never the panel. */
+.sample-data__scroll {
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  border: 1px solid var(--glass-divider);
+  border-radius: var(--radius-lg);
+  background: var(--glass-well);
+  overscroll-behavior-x: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--glass-scrollbar) transparent;
+}
+
+.sample-data__scroll:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: var(--focus-offset);
+}
+
+.sample-data__table {
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+  color: var(--text-primary);
+}
+
+/* Said to a screen reader; the fold's heading already says it on screen. */
+.sample-data__caption {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.sample-data__table th,
+.sample-data__table td {
+  padding: var(--space-2) var(--space-4);
+  border-top: 1px solid var(--glass-divider);
+  text-align: left;
+  vertical-align: baseline;
+  white-space: nowrap;
+}
+
+.sample-data__table thead th {
+  border-top: none;
+  color: var(--text-tertiary);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-medium);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The column names stay at the left edge while the rows scroll under them. */
+.sample-data__corner,
+.sample-data__column {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  border-right: 1px solid var(--glass-divider);
+  background: linear-gradient(var(--glass-well), var(--glass-well)), var(--glass-surface-solid);
+}
+
+.sample-data__column {
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-weight: var(--weight-regular);
+}
+
+/* One line each, cut with an ellipsis; the tooltip has the rest. */
+.sample-data__cell {
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  user-select: text;
+}
+
+.sample-data__table .sample-data__cell--number {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.sample-data__cell--expression {
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+}
+
+.sample-data__cell--null {
+  color: var(--text-tertiary);
+  font-size: var(--text-2xs);
+  letter-spacing: var(--tracking-caps);
+}
+
+.sample-data__more {
+  margin: 0;
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+}

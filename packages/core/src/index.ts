@@ -47,6 +47,7 @@ export * from './exportDiagram.js';
 export * from './erdLayout.js';
 export * from './dbmlRichProperties.js';
 export * from './dbmlText.js';
+export * from './sampleRows.js';
 export * from './storage.js';
 // Named: the module's row-by-row helpers are internal (the twin-golden tests).
 export { normaliseForStorageEquivalence, storageNoteText, type StorageEquivalenceOptions } from './storageEquivalence.js';

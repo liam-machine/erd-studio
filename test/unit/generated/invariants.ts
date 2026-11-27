@@ -5,7 +5,13 @@
  *
  * - **No echo**: no string a user reads holds more than {@link MAX_ECHO}
  *   characters of the source verbatim (names aside: a table's own name is
- *   shown, cut by the importer where it is long).
+ *   shown, cut by the importer where it is long). The one exception is a
+ *   draft's sample rows (D37): an imported table's `records` values are
+ *   shown in its diagram on purpose, so {@link draftDisplayStrings} skips a
+ *   display table's `sampleData`, and nothing else.
+ * - **No sample value**: no message, note, log line or draft string (the
+ *   draft's rows aside) holds any part of a generated sample value
+ *   ({@link SAMPLE_VALUE_MARKER}).
  * - **Located**: every problem says its file and a line inside it.
  * - **Linear time**: {@link timeRatio} times sizes n and k·n.
  */
@@ -14,6 +20,39 @@ import { ledgerLeftOut, ledgerLogLines, ledgerNotes, type LedgerEntry } from '..
 
 /** The most characters of the source a shown string may hold verbatim: a short snippet. */
 export const MAX_ECHO = 100;
+
+/** Every generated sample value (a `records` cell) carries this; no name does. */
+export const SAMPLE_VALUE_MARKER = 'zqCELL';
+
+/**
+ * Every string a draft's diagram (`Draft.display`) holds, for the no-echo
+ * and no-sample-value rules, except a display table's `sampleData`: the
+ * rows an import keeps are shown in its draft by design (D37). Nothing else
+ * is skipped.
+ */
+export function draftDisplayStrings(display: unknown): string[] {
+  const out: string[] = [];
+  const walk = (value: unknown): void => {
+    if (typeof value === 'string') out.push(value);
+    else if (Array.isArray(value)) value.forEach(walk);
+    else if (value && typeof value === 'object') Object.values(value).forEach(walk);
+  };
+  if (!display || typeof display !== 'object') return out;
+  for (const [key, value] of Object.entries(display)) {
+    if (key !== 'models' || !Array.isArray(value)) { walk(value); continue; }
+    // The draft exception: a table's sample rows, and only those.
+    for (const table of value) {
+      if (table && typeof table === 'object') for (const [k, v] of Object.entries(table)) { if (k !== 'sampleData') walk(v); }
+      else walk(table);
+    }
+  }
+  return out;
+}
+
+/** Violations of the no-sample-value rule over `shown`: each string holding {@link SAMPLE_VALUE_MARKER}. */
+export function sampleValueViolations(shown: readonly string[]): string[] {
+  return [...new Set(shown)].filter((s) => s.includes(SAMPLE_VALUE_MARKER)).map((s) => `shows a sample value: ${JSON.stringify(s.slice(0, 160))}`);
+}
 
 /**
  * The longest run of `message` found verbatim in `source`, once every name in

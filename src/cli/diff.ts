@@ -136,7 +136,7 @@ const DBML_QUOTE_ADVICE = "quote the value, as in grain: 'One row per order line
 const DBML_STRUCTURE_HINTS: Readonly<Record<string, string>> = {
   'structure:notOneTable': 'a table file holds exactly one Table — move any other Table to its own file',
   'structure:nameMismatch': 'name the Table as its file (or rename the file to the Table\'s name)',
-  'structure:unsupportedElement': 'a table file holds one Table and nothing else — remove the Project, TableGroup, Note or other block',
+  'structure:unsupportedElement': 'a table file holds one Table and nothing else — remove the Project, TableGroup or Note block, or move a Records block into its Table',
   'structure:metadataTarget': 'a Metadata block names a table or column this file does not declare — rename or remove the block',
 };
 

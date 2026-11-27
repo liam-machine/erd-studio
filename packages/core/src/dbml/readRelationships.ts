@@ -18,6 +18,7 @@ import type { DbmlOneToOneDirection, DbmlProblem, DbmlRelationshipsReading, Dbml
 import { findConflictMarkers } from '../mergeConflict.js';
 import { DBML_PENDING_REF_PATTERN } from '../dbmlRichProperties.js';
 import { normaliseRelationshipRole } from '../relationships.js';
+import { messageSourceOf } from './diagnosticText.js';
 import type { DbmlParserModule } from './parserModule.js';
 import {
   PINNED_PARSER,
@@ -105,11 +106,6 @@ function orient(op: string, left: RefEnd, right: RefEnd): Oriented | null {
     default:
       return null;
   }
-}
-
-/** The source of a node, collapsed to one line, for a message. */
-function sourceOf(text: string, node: AstNode): string {
-  return text.slice(node.start, node.end).replace(/\s+/g, ' ').trim();
 }
 
 /**
@@ -223,7 +219,7 @@ function refsOf(text: string, compiled: CompiledFile, problems: DbmlProblem[], l
     if (elementType(node)?.toLowerCase() !== 'ref') continue;
     const line = lineAt(text, node.start) + lineOffset;
     const skip = (why: string): void => {
-      problems.push({ line, severity: 'warning', code: 'unreadableRef', message: `Line ${line}: ${what}\`${sourceOf(text, node)}\` ${why}; it is not drawn.` });
+      problems.push({ line, severity: 'warning', code: 'unreadableRef', message: `Line ${line}: ${what}\`${messageSourceOf(text, node)}\` ${why}; it is not drawn.` });
     };
     const application = refApplication(node);
     const callee = application?.callee;
@@ -323,7 +319,6 @@ export function readPendingRefs(text: string, parser: DbmlParserModule, problems
   }
   return out;
 }
-
 
 /**
  * The `/* … *\/` block comments of a DBML text, as offset spans (an

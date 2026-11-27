@@ -187,6 +187,31 @@ describe('exportSubjectAreaFile', () => {
   });
 });
 
+/**
+ * Sample rows (D37): the host reads every DBML table with its rows, so the export of the sample-rows
+ * twin (packages/core/test/fixtures/dbml/sample-rows) is core's golden in every format: the rich DBML
+ * writes the rows, plain DBML and Mermaid never do. Export Diagram and Export All Diagrams give the
+ * same bytes (the CLI's export, in cli.export.test.ts, too).
+ */
+describe('the sample-rows twin: what each export carries', () => {
+  const root = path.join(CORE_FIXTURES, 'dbml', 'sample-rows');
+  const diagram = path.join(root, '.erd-studio', 'gold', 'diagrams', 'shop.dbml');
+
+  it.each(['dbml', 'mermaid', 'dbml-rich'] as const)('%s: core\'s golden, byte for byte', async (format) => {
+    const result = await exportSubjectAreaFile(subjectAreaServiceFor(root), diagram, format, { layers: layersOf(root) });
+    expect(result.content).toBe(golden(goldenFileName('sample-rows.shop', format)));
+    expect(/^ *records \(/m.test(result.content)).toBe(format === 'dbml-rich');
+    for (const value of ['Blue widget', 'Harbour Stores', 'R-NORTH']) expect(result.content.includes(value), value).toBe(format === 'dbml-rich');
+  });
+
+  it.each(['dbml', 'mermaid', 'dbml-rich'] as const)('Export All Diagrams (%s): the same file as the single export', async (format) => {
+    const service = subjectAreaServiceFor(root);
+    const single = await exportSubjectAreaFile(service, diagram, format, { layers: layersOf(root) });
+    const all = await exportSubjectAreaFiles(service, [diagram], format, { layers: layersOf(root) });
+    expect(all).toEqual({ files: [{ domainPath: diagram, fileName: single.fileName, content: single.content }], skipped: [] });
+  });
+});
+
 describe('exportFileNames', () => {
   const sa = (domainName: string, layer = 'silver') => ({ domainName, layer });
 

@@ -237,6 +237,33 @@ describe('export', () => {
   });
 });
 
+/**
+ * Sample rows (D37): `erd-studio export` reads each DBML table with its rows (the same read as the
+ * canvas), so the sample-rows twin prints core's goldens: rows in dbml-rich, none in dbml or mermaid.
+ */
+describe('export — the sample-rows twin', () => {
+  const DIAGRAM = '.erd-studio/gold/diagrams/shop.dbml';
+
+  it.each(CLI_EXPORT_FORMATS)('--diagram prints the core %s golden byte for byte', async (format: CliExportFormat) => {
+    const root = projectFromCoreFixture('dbml/sample-rows');
+    const { code, out, err } = await run(['export', '--diagram', DIAGRAM, '--format', format], root);
+    expect(err).toBe('');
+    expect(code).toBe(0);
+    expect(out).toBe(fs.readFileSync(path.join(CORE_FIXTURES, 'golden', goldenOf('sample-rows.shop', format)), 'utf-8'));
+    expect(/^ *records \(/m.test(out)).toBe(format === 'dbml-rich');
+  });
+
+  it.each(CLI_EXPORT_FORMATS)('--all prints the same %s file', async (format: CliExportFormat) => {
+    const root = projectFromCoreFixture('dbml/sample-rows');
+    const { code, out } = await run(['export', '--all', '--format', format], root);
+    expect(code).toBe(0);
+    expect(JSON.parse(out)).toEqual([{
+      fileName: format === 'mermaid' ? 'shop.mmd' : 'shop.dbml',
+      content: fs.readFileSync(path.join(CORE_FIXTURES, 'golden', goldenOf('sample-rows.shop', format)), 'utf-8'),
+    }]);
+  });
+});
+
 describe('export — errors (the same codes as diff --domain)', () => {
   async function both(argv: string[], cwd?: string): Promise<{ exportJson: { code: number; json: { error: { code: string; message: string } } }; diffJson: { error: { code: string; message: string } } }> {
     const e = await run(['export', ...argv, '--format', 'dbml', '--json'], cwd);

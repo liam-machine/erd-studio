@@ -13,7 +13,7 @@ import * as v9 from 'dbml-parse-v9';
 import * as v10 from 'dbml-parse-v10';
 import { describe, expect, it } from 'vitest';
 
-import { DBML_RICH_EXPORT_HEADER } from '@erd-studio/core';
+import { DBML_RICH_EXPORT_HEADER, SAMPLE_ROWS_LIMIT, type SampleCell } from '@erd-studio/core';
 import {
   ERD_STUDIO_DBML_HEADER_PREFIX,
   dbmlProperties,
@@ -267,7 +267,15 @@ describe.each(PARSERS)('readDbml with %s', (_label, parser) => {
       schema: null,
       values: [{ name: 'created', note: 'Waiting to be processed' }, { name: 'running' }, { name: 'done' }, { name: 'failure' }],
     }]);
-    expect(model.records).toEqual([{ schema: null, table: 'countries', rows: 2 }]);
+    const str = (text: string): SampleCell => ({ text, kind: 'string' });
+    const num = (text: string): SampleCell => ({ text, kind: 'number' });
+    expect(model.records).toEqual([{
+      schema: null,
+      table: 'countries',
+      columns: ['code', 'name', 'continent_name'],
+      rows: [[num('61'), str('Australia'), str('Oceania')], [num('64'), str('New Zealand'), str('Oceania')]],
+      totalRows: 2,
+    }]);
     expect(model.project).toEqual({
       name: 'ecommerce',
       note: 'Online shop: users, merchants, products and orders',
@@ -309,6 +317,56 @@ describe.each(PARSERS)('readDbml with %s', (_label, parser) => {
     ]);
     expect(model.refs).toHaveLength(7);
     expect(model.tableGroups[0]).toMatchObject({ name: 'silver', color: '#a0a0a0', note: 'Silver layer' });
+  });
+});
+
+describe.each(PARSERS)('readDbml with %s: sample rows (Records)', (_label, parser) => {
+  const str = (text: string): SampleCell => ({ text, kind: 'string' });
+  const num = (text: string): SampleCell => ({ text, kind: 'number' });
+
+  it('reads every block, nested and top-level, each value as written, matched to the table the parser resolved', () => {
+    const model = read(fixture('foreign/sample-data.dbml'), parser);
+    expect(model.records).toEqual([
+      {
+        // Nested, with a list: decimals and signs as written, an escape, a triple-quoted line break,
+        // an enum reference, null and a backtick expression.
+        schema: 'sales',
+        table: 'orders',
+        columns: ['id', 'amount', 'status', 'note', 'customer_id'],
+        rows: [
+          [num('1'), num('1.50'), { text: 'sales.order_status.placed', kind: 'enum' }, str("it's a gift"), num('10')],
+          [num('2'), num('-0.0'), { text: 'sales.order_status.shipped', kind: 'enum' }, str('two\nlines'), num('11')],
+          [num('3'), num('12.00'), null, { text: '`now()`', kind: 'expression' }, num('10')],
+        ],
+        totalRows: 3,
+      },
+      {
+        // Nested, no list: every column, the partial's injected one too; a double-quoted string; an empty field.
+        schema: null,
+        table: 'customers',
+        columns: ['id', 'name', 'created_at'],
+        rows: [[num('10'), str('Harbour Stores'), str('2024-01-02 03:04:05')], [num('11'), str('Hilltop Traders'), null]],
+        totalRows: 2,
+      },
+      // Top-level, by a name the import renames; 007 stays 007.
+      { schema: null, table: 'Order Items', columns: ['line no', 'qty'], rows: [[num('1'), num('5')], [num('2'), num('007')]], totalRows: 2 },
+      // Top-level, by the table's alias, its list in its own order.
+      { schema: 'sales', table: 'products', columns: ['name', 'id'], rows: [[str('Blue widget'), num('1')], [str('Red gadget'), num('2')]], totalRows: 2 },
+    ]);
+  });
+
+  it('reads the same from a CRLF file with a byte-order mark', () => {
+    const lf = read(fixture('foreign/sample-data.dbml'), parser);
+    const crlf = read(`\uFEFF${fixture('foreign/sample-data.dbml').replace(/\n/g, '\r\n')}`, parser);
+    expect(crlf.records).toEqual(lf.records);
+  });
+
+  it('keeps the first SAMPLE_ROWS_LIMIT rows and counts the rest', () => {
+    const rows = Array.from({ length: SAMPLE_ROWS_LIMIT + 5 }, (_, i) => `    ${i + 1}`).join('\n');
+    const model = read(`Table t {\n  id int [pk]\n  records (id) {\n${rows}\n  }\n}\n`, parser);
+    expect(model.records[0].rows).toHaveLength(SAMPLE_ROWS_LIMIT);
+    expect(model.records[0].rows[SAMPLE_ROWS_LIMIT - 1]).toEqual([num(String(SAMPLE_ROWS_LIMIT))]);
+    expect(model.records[0].totalRows).toBe(SAMPLE_ROWS_LIMIT + 5);
   });
 });
 

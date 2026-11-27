@@ -112,6 +112,21 @@ describe('erd-studio changes --json', () => {
     expect(Object.values(result.summary).every((n) => n === 0)).toBe(true);
   });
 
+  it('a sample value the parser quotes (a dotted bare word in records) never reaches the output; the table reads without its rows, unchanged (D37)', async () => {
+    const project = repoWithBase();
+    write(project, '.erd-studio/gold/tables/gold/dim_customer.dbml', DIM_CUSTOMER.replace(
+      '}\n',
+      '\n  records (customer_key, customer_id) {\n    1, zqSENTX7.doe\n  }\n}\n',
+    ));
+    const { out } = await run(['changes', '--base', 'HEAD', '--json'], project);
+    expect(out).not.toMatch(/SENTX7/);
+    const result = JSON.parse(out) as ChangesResult;
+    // A block that does not read no longer makes the table unreadable: it loads without its rows,
+    // so its columns compare as before and nothing is reported against it.
+    expect(result.problems).toEqual([]);
+    expect(result.summary.tablesChanged).toBe(0);
+  });
+
   it('has the documented shape, with project-relative paths', async () => {
     const project = repoWithBase();
     changeModel(project);

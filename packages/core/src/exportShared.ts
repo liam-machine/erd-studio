@@ -16,7 +16,8 @@
  */
 
 import type { DisplaySubjectArea } from './types/display.js';
-import type { Rationale } from './types/semantic.js';
+import { tableSampleDataOf } from './types/semantic.js';
+import type { Rationale, SampleData, SemanticTable } from './types/semantic.js';
 import { backwardsRelationshipNote, compositeGroupProblem, foreignKeyAtTo, linkKey } from './relationships.js';
 import { RATIONALE_FIELD_KEYS } from './fields.js';
 
@@ -109,6 +110,13 @@ export interface ExportTable {
   columns: ExportColumn[];
   /** Columns left out of this model, one sentence each. */
   skippedColumns: string[];
+  /**
+   * The table's sample rows (D37, `DisplayTable.sampleData`) when it carries a
+   * well-formed set: only the rich DBML export writes them (plain DBML and
+   * Mermaid never do). They may hold real data, so no export puts them in a
+   * comment.
+   */
+  sampleData?: SampleData;
 }
 
 /** A model to export, or one left out (listed twice, or without a name). */
@@ -250,6 +258,8 @@ function readTable(raw: Record<string, unknown>, name: string): ExportTable {
     seen.add(lower(colName));
     model.columns.push(readColumn(col, colName));
   });
+  const sampleData = tableSampleDataOf(raw as unknown as SemanticTable);
+  if (sampleData) model.sampleData = sampleData;
   return model;
 }
 

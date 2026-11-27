@@ -722,7 +722,10 @@ function parseStageData(
     for (const entry of rawModels) {
       const candidate = entry as Record<string, unknown> | null;
       if (candidate && typeof candidate === 'object' && typeof candidate.name === 'string') {
-        models.push(candidate as unknown as SemanticTable);
+        // Sample rows come only from the table reader, for a caller that asks (D37): a
+        // `sampleData` key written into an inline table is an unknown key, ignored.
+        const { sampleData: _sampleData, ...table } = candidate;
+        models.push(table as unknown as SemanticTable);
       } else {
         warn(`Skipping inline model without a string "name" in ${filePath}`);
       }

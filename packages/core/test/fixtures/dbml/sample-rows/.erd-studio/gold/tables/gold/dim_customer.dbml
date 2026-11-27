@@ -1,0 +1,12 @@
+Table gold.dim_customer {
+  customer_key INT [pk, note: 'Surrogate key']
+  customer_name VARCHAR
+  segment VARCHAR
+  Note: 'Customers, with sample data that names no columns (every column, in order)'
+
+  records {
+    10, 'Harbour Stores', 'retail'
+    11, 'Hilltop Traders',
+    12, , 'online'
+  }
+}

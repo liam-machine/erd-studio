@@ -11,6 +11,7 @@ import * as path from 'path';
 
 import { DBML_RICH_EXPORT_HEADER, toDbmlRich } from '../../src/exportDbmlRich';
 import { toDbml } from '../../src/exportDbml';
+import { toMermaid } from '../../src/exportMermaid';
 import { readErdLayoutDbml } from '../../src/dbml/erdLayoutDbml';
 import {
   DBML_RICH_COLUMN_PROPERTIES,
@@ -26,7 +27,7 @@ import {
 import { RATIONALE_KEYS } from '../../src/logicalModel';
 import { RATIONALE_FIELD_KEYS } from '../../src/fields';
 import type { DisplayRelationship, DisplaySubjectArea } from '../../src/types/display';
-import type { AnnotationColor, Meta } from '../../src/types/semantic';
+import type { AnnotationColor, Meta, SampleCell, SampleData } from '../../src/types/semantic';
 import { oneLine } from '../../src/exportShared';
 import { exporter as dbmlCoreExporter } from 'dbml-core-v3';
 import { col, deepFreeze, parseDbmlRich, readDbmlRich, rel, subjectArea, tableDef } from '../exportParsers';
@@ -867,5 +868,132 @@ describe('toDbmlRich: every feature together', () => {
       ['sticky_1', '#f59e0b', { linked_table: 'fct_order' }],
       ['sticky_2', '#3b82f6', {}],
     ]);
+  });
+});
+
+/**
+ * Sample rows (D37): a table that carries rows (`DisplayTable.sampleData`, read only when the host
+ * asks) gets a `records (<columns>) { … }` block at the end of its Table, written by the shared
+ * `renderRecordsBlock`. Every case is read back by the three 9.1+ parsers with no diagnostic. Plain
+ * DBML and Mermaid never write a row. Values are invented.
+ */
+describe('toDbmlRich: sample rows', () => {
+  const str = (text: string): SampleCell => ({ text, kind: 'string' });
+  const num = (text: string): SampleCell => ({ text, kind: 'number' });
+  const COLUMNS = [col('id', 'int', { isPrimaryKey: true }), col('name', 'varchar'), col('price', 'decimal'), col('active', 'boolean'), col('status', 'varchar')];
+  const ROWS: SampleData = {
+    columns: ['id', 'name', 'price', 'active', 'status'],
+    rows: [
+      [num('1'), str('Blue widget'), num('4.50'), { text: 'true', kind: 'boolean' }, { text: 'sales.status.active', kind: 'enum' }],
+      [num('2'), null, num('-0.25'), { text: 'FALSE', kind: 'boolean' }, { text: 'sales.status."in progress"', kind: 'enum' }],
+    ],
+    totalRows: 2,
+  };
+  const areaWith = (sampleData: unknown, columns = COLUMNS) =>
+    subjectArea([tableDef('t', columns, { description: 'A table', ...(sampleData === undefined ? {} : { sampleData: sampleData as SampleData }) })]);
+  const recordsOf = (text: string) => readDbmlRich(text, { infos: 'none' }).records ?? [];
+
+  it('writes a records block as the Table\'s last block, after its Note: every cell as written, null for none, an enum reference as text', () => {
+    const text = toDbmlRich(areaWith(ROWS));
+    expect(text).toContain([
+      "  Note: 'A table'",
+      '',
+      '  records (id, name, price, active, status) {',
+      "    1, 'Blue widget', 4.50, true, 'active'",
+      "    2, null, -0.25, FALSE, 'in progress'",
+      '  }',
+      '}',
+    ].join('\n'));
+    expect(recordsOf(text)).toEqual([{
+      schema: 'public',
+      table: 't',
+      columns: ['id', 'name', 'price', 'active', 'status'],
+      rows: [
+        [[1, 'integer'], ['Blue widget', 'string'], [4.5, 'real'], [true, 'bool'], ['active', 'string']],
+        [[2, 'integer'], [null, 'string'], [-0.25, 'real'], [false, 'bool'], ['in progress', 'string']],
+      ],
+    }]);
+  });
+
+  it('a value with a line break is triple-quoted; quotes, backslashes and expressions read back exactly', () => {
+    const data: SampleData = {
+      columns: ['id', 'name'],
+      rows: [[num('1'), str("it's a\\b")], [num('2'), str('two\nlines')], [num('3'), { text: '`now()`', kind: 'expression' }]],
+      totalRows: 3,
+    };
+    const text = toDbmlRich(areaWith(data, [col('id', 'int', { isPrimaryKey: true }), col('name', 'text')]));
+    expect(text).toContain("    1, 'it\\'s a\\\\b'\n    2, '''two\nlines'''\n    3, `now()`\n");
+    expect(recordsOf(text)[0].rows.map((row) => row[1][0])).toEqual(["it's a\\b", 'two\nlines', 'now()']);
+  });
+
+  it('names only the columns the table exports, in the rows\' order: one it lacks, or one listed twice, goes with its values', () => {
+    const data: SampleData = {
+      columns: ['name', 'gone', 'id', 'name'],
+      rows: [[str('Blue widget'), str('x1'), num('1'), str('again')], [str('Red gadget'), str('x2'), num('2'), str('again')]],
+      totalRows: 2,
+    };
+    const text = toDbmlRich(areaWith(data));
+    expect(text).toContain("  records (name, id) {\n    'Blue widget', 1\n    'Red gadget', 2\n  }\n}");
+    expect(text).not.toContain('x1');
+    expect(text).not.toContain('again');
+    expect(recordsOf(text)[0].columns).toEqual(['name', 'id']);
+  });
+
+  it('writes no block for no row, for no column the table exports, or for a table exported without columns', () => {
+    const without = toDbmlRich(areaWith(undefined));
+    expect(toDbmlRich(areaWith({ columns: ['id'], rows: [], totalRows: 0 }))).toBe(without);
+    expect(toDbmlRich(areaWith({ columns: ['nothing_here'], rows: [[num('1')]], totalRows: 1 }))).toBe(without);
+    expect(toDbmlRich(areaWith({ columns: [], rows: [[]], totalRows: 1 }))).toBe(without);
+    const empty = toDbmlRich(areaWith({ columns: ['id'], rows: [[num('1')]], totalRows: 1 }, []));
+    expect(empty).toContain(DBML_RICH_PLACEHOLDER_COLUMN);
+    expect(empty).not.toMatch(/^ *records\b/m);
+    expect(() => readDbmlRich(empty, { infos: 'none' })).not.toThrow();
+  });
+
+  it('counts the rows past the reader\'s limit in a comment that holds no value', () => {
+    const many = toDbmlRich(areaWith({ ...ROWS, totalRows: 120 }));
+    expect(many).toContain("    2, null, -0.25, FALSE, 'in progress'\n    // 118 more rows are in the table file\n  }");
+    expect(toDbmlRich(areaWith({ ...ROWS, totalRows: 3 }))).toContain('    // 1 more row is in the table file\n  }');
+    expect(recordsOf(many)[0].rows).toHaveLength(2);
+  });
+
+  it('leads with a column no later row starts with a sign in; when none can, leaves those rows out and says how many', () => {
+    const led = toDbmlRich(areaWith({ columns: ['price', 'id'], rows: [[num('-1'), num('1')], [num('-2'), num('2')]], totalRows: 2 }));
+    expect(led).toContain('  records (id, price) {\n    1, -1\n    2, -2\n  }');
+    const signed = toDbmlRich(areaWith({
+      columns: ['id', 'price'],
+      rows: [[num('-1'), num('1')], [num('-2'), num('-2')], [num('3'), num('3')], [num('+4'), num('-4')]],
+      totalRows: 4,
+    }));
+    expect(signed).toContain('  records (id, price) {\n    -1, 1\n    3, 3\n    // 2 rows left out: DBML 9 and 10 read no row that starts with a sign\n  }');
+    expect(recordsOf(signed)[0].rows.map((row) => row[0][0])).toEqual([-1, 3]);
+  });
+
+  it('holds no value in any comment', () => {
+    const text = toDbmlRich(areaWith({ ...ROWS, totalRows: 7 }));
+    const comments = text.split('\n').filter((line) => line.trimStart().startsWith('//'));
+    for (const value of ['Blue widget', '4.50', '-0.25', 'active', 'in progress', 'FALSE']) {
+      for (const line of comments) expect(line, value).not.toContain(value);
+    }
+  });
+
+  it('ignores a sampleData that is not a table reader\'s (an older or a hand-made one): same text as without', () => {
+    const without = toDbmlRich(areaWith(undefined));
+    for (const odd of [
+      null, 'rows', [], { columns: 'id', rows: [], totalRows: 0 }, { columns: ['id'], rows: [['1']], totalRows: 1 },
+      { columns: ['id'], rows: [[{ text: '1', kind: 'money' }]], totalRows: 1 }, { columns: ['id'], rows: [[num('1')]], totalRows: '1' },
+    ]) {
+      expect(toDbmlRich(areaWith(odd))).toBe(without);
+    }
+  });
+
+  it('plain DBML and Mermaid never write a row: the same text with rows and without', () => {
+    expect(toDbml(areaWith(ROWS))).toBe(toDbml(areaWith(undefined)));
+    expect(toMermaid(areaWith(ROWS))).toBe(toMermaid(areaWith(undefined)));
+  });
+
+  it('is deterministic and leaves its input alone', () => {
+    const area = deepFreeze(areaWith(ROWS));
+    expect(toDbmlRich(area)).toBe(toDbmlRich(JSON.parse(JSON.stringify(area))));
   });
 });

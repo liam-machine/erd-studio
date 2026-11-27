@@ -45,7 +45,7 @@ import {
   renderNewSubjectAreaDbml as renderSubjectArea,
   renderNewTableDbml as renderTable,
 } from '@erd-studio/core/dbml';
-import type { DiagramLayoutEdit, EditTableDbmlOptions, NewSubjectAreaDbml, RelationshipsFileEdit, SubjectAreaDbmlEdit } from '@erd-studio/core/dbml';
+import type { DiagramLayoutEdit, EditTableDbmlOptions, NewSubjectAreaDbml, RelationshipsFileEdit, RenderNewTableDbmlOptions, SubjectAreaDbmlEdit } from '@erd-studio/core/dbml';
 import type { SemanticTable } from '@erd-studio/core';
 
 import { createLogger } from './logger';
@@ -137,9 +137,9 @@ function finish(oldText: string | null, out: string, file: string): string {
   return formatTouchedLines(oldText, out, file);
 }
 
-/** A new table file (core's `renderNewTableDbml`), formatted. */
-export function renderNewTableDbml(table: SemanticTable): string {
-  return formatWrittenDbml(renderTable(table), `${table.name}.dbml`);
+/** A new table file (core's `renderNewTableDbml`, with the rows `options` gives), formatted. */
+export function renderNewTableDbml(table: SemanticTable, options: RenderNewTableDbmlOptions = {}): string {
+  return formatWrittenDbml(renderTable(table, options), `${table.name}.dbml`);
 }
 
 /** An edit of a table file (core's `editTableDbml`): only the lines it touches change ({@link finish}). */

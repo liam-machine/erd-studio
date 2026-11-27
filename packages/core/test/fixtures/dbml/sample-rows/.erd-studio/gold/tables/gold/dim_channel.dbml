@@ -1,0 +1,8 @@
+Table gold.dim_channel {
+  channel_code VARCHAR [pk]
+  channel_name VARCHAR
+  Note: 'Sales channels, with an empty records list, which is never shown or touched'
+
+  records () {
+  }
+}

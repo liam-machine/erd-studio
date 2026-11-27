@@ -1,0 +1,10 @@
+Table gold.dim_region {
+  region_code VARCHAR [pk]
+  region_name VARCHAR
+  Note: 'Regions, with sample data for one column'
+
+  records (region_code) {
+    'R-NORTH'
+    'R-SOUTH'
+  }
+}

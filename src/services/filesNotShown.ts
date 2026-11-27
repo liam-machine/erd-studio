@@ -10,8 +10,9 @@
  * - a relationships file the diagram should import: the diagram reader's
  *   import drift (`SubjectAreaService.relationshipsImportDrift`, the one
  *   import rule; `doctor`'s `missingRelationshipsUse`);
- * - a `Ref`, inline `[ref: …]` or `use` line in a table file: core's table
- *   reader (`parseTableDbml`'s problems, the codes below);
+ * - a `Ref`, inline `[ref: …]` or `use` line in a table file, or a table
+ *   file's sample rows (records) that do not read: core's table reader
+ *   (`parseTableDbml`'s problems, the codes below);
  * - a relationships file that does not read: core's relationships reader
  *   (`readRelationshipsDbml`, `readable: false`);
  * - a `.dbml` where no file is read: core's classifier (`classifySemanticFile`)
@@ -35,6 +36,13 @@ import { outsideKnownFoldersNote } from './unreadDbmlFile';
 
 /** The table reader's codes for something written in a table file that is never drawn from there. */
 export const NOT_DRAWN_IN_TABLE_FILE_CODES: ReadonlySet<string> = new Set(['refInTableFile', 'inlineRefInTableFile', 'useInTableFile']);
+
+/**
+ * The table reader's codes for a table file's sample rows (D37: its records
+ * block) that do not read. The table itself is drawn, so this is not
+ * {@link NOT_DRAWN_IN_TABLE_FILE_CODES}: the note says the rows are not shown.
+ */
+export const UNREADABLE_SAMPLE_DATA_CODES: ReadonlySet<string> = new Set(['recordsUnreadable']);
 
 export interface FilesNotShownInput {
   /**
@@ -93,6 +101,15 @@ export function notDrawnInTableFileMessage(file: string, code: string): string {
 }
 
 /**
+ * The note for a table file's sample rows that do not read: the file and
+ * the block's line, never a value.
+ */
+export function sampleDataNotReadMessage(file: string, line: number | undefined): string {
+  return `${file}${line !== undefined ? ` line ${line}` : ''}: the sample data (records) does not read as DBML, so it is not shown, `
+    + 'and ERD Studio will not edit this table until it is fixed or removed.';
+}
+
+/**
  * Every note for one diagram, in the order the strip lists them: what stops
  * relationships being drawn first (the missing import, then a file that does
  * not read, then lines in a table file), then files that are not read at all.
@@ -131,6 +148,15 @@ export function collectFilesNotShown(input: FilesNotShownInput): FileNote[] {
 
   for (const { file, problems } of input.memberTables) {
     for (const problem of problems) {
+      if (typeof problem.code === 'string' && UNREADABLE_SAMPLE_DATA_CODES.has(problem.code)) {
+        push({
+          code: 'sampleDataNotRead',
+          message: sampleDataNotReadMessage(file, problem.line),
+          file: input.shown(file),
+          ...(problem.line !== undefined ? { line: problem.line } : {}),
+        });
+        continue;
+      }
       if (typeof problem.code !== 'string' || !NOT_DRAWN_IN_TABLE_FILE_CODES.has(problem.code)) continue;
       push({
         code: 'notDrawnInTableFile',

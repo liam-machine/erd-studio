@@ -24,7 +24,7 @@
  * home, and a field new to the file gets the new file's spelling.
  */
 
-import type { ColumnDef, Meta, Rationale, SemanticTable } from '../types/semantic.js';
+import type { ColumnDef, Meta, Rationale, SampleData, SemanticTable } from '../types/semantic.js';
 import {
   DBML_RICH_COLUMN_PROPERTIES,
   DBML_RICH_META_JSON_PROPERTY,
@@ -35,10 +35,12 @@ import {
   bareDbmlProperty,
 } from '../dbmlRichProperties.js';
 import { dbmlColumnType, dbmlName, dbmlNoteText, dbmlString } from '../dbmlText.js';
+import { renderRecordsBlock } from '../sampleRows.js';
 import { DBML_IMPORT_META_KEY, RATIONALE_FIELD_KEYS, rationaleKeyToFieldKey, type FieldScope } from '../fields.js';
 import { readMeta } from '../meta.js';
 import { isLibraryFolderName } from '../storage.js';
 import { DbmlEditRefused } from './errors.js';
+import { parserStoppedMessage } from './diagnosticText.js';
 import type { DbmlParserModule } from './parserModule.js';
 import {
   PINNED_PARSER,
@@ -61,6 +63,16 @@ import {
   withoutDbmlKeys,
 } from './nativeColumnSettings.js';
 import { readTableFile, type TableFieldSettings } from './readTable.js';
+import {
+  expectedSampleRows,
+  planRecordsSplices,
+  recordsBlocksOf,
+  recordsCellsOf,
+  recordsOutOfStepMessage,
+  recordsUnreadableRefusal,
+  type RecordsCells,
+  type RecordsPlan,
+} from './records.js';
 import {
   columnNodesOf,
   effectiveSetter,
@@ -215,8 +227,16 @@ const PLACEHOLDER_LINE = `${DBML_RICH_PLACEHOLDER_COLUMN} unknown [${DBML_RICH_P
  * placeholder column DBML needs. Relationships are not written: they live
  * in relationships files. The host runs the result through `formatDbml`,
  * which aligns the columns and wraps long settings lists.
+ *
+ * Sample rows (D37) are written only when `options.sampleData` gives them,
+ * never from a sidecar the table carries: a nested `records` block after
+ * the columns and any `indexes`, after a blank line, with an explicit list
+ * of the columns the table has (a value for any other column is dropped),
+ * written by `renderRecordsBlock` (an enum reference as text, the lead
+ * column chosen so no later row starts with a sign). No block for no row
+ * or no listed column.
  */
-export function renderNewTableDbml(table: SemanticTable): string {
+export function renderNewTableDbml(table: SemanticTable, options: RenderNewTableDbmlOptions = {}): string {
   const schema = table.schema;
   if (typeof schema !== 'string' || !isLibraryFolderName(schema)) {
     throw new Error('renderNewTableDbml: a DBML table needs a schema');
@@ -236,8 +256,24 @@ export function renderNewTableDbml(table: SemanticTable): string {
   const pks = columns.filter((c) => c.isPrimaryKey);
   for (const column of columns) lines.push(`  ${columnLine(column, pks.length === 1 && column.isPrimaryKey === true)}`);
   if (pks.length > 1) lines.push('  indexes {', `    (${pks.map((c) => dbmlName(c.name)).join(', ')}) [pk]`, '  }');
+  const block = options.sampleData ? newTableRecordsBlock(columns.map((c) => c.name), options.sampleData) : '';
+  if (block) lines.push('', block);
   lines.push('}');
   return `${lines.join('\n')}\n`;
+}
+
+/** Options for {@link renderNewTableDbml}. */
+export interface RenderNewTableDbmlOptions {
+  /** The new table's sample rows (Import DBML keeps a file's): written as its nested `records` block. */
+  sampleData?: SampleData;
+}
+
+/** The `records` block of a new table: the rows' values for the columns the table has, in the rows' column order. */
+function newTableRecordsBlock(tableColumns: readonly string[], data: SampleData): string {
+  const has = new Set(tableColumns);
+  const keep = data.columns.map((name, i) => (has.has(name) && data.columns.indexOf(name) === i ? i : -1)).filter((i) => i >= 0);
+  if (keep.length === 0) return '';
+  return renderRecordsBlock(keep.map((i) => data.columns[i]), data.rows.map((row) => keep.map((i) => row[i] ?? null)), '  ', '\n').text;
 }
 
 // ---------------------------------------------------------------------------
@@ -417,6 +453,14 @@ function schemaOptions(options: EditTableDbmlOptions): { schemaFolder?: string }
  * first), a schema change without `options.requalify` (a DBML table's
  * schema is its folder: moving the table changes it), and a change to a
  * property another file's Metadata block sets.
+ *
+ * A nested `records` block (sample rows, D37) follows its columns
+ * (`records.ts`): a rename re-spells its list name, a drop cuts the name
+ * and that value from every row, and the block goes with its last listed
+ * column. A drop that would start a later row with a sign is refused, and
+ * every write to such a file is read back and refused unless its rows are
+ * the old rows projected through the edit. The table's `sampleData` sidecar
+ * is never read: the rows written are always the file's own.
  */
 export function editTableDbml(oldText: string, desired: SemanticTable, options: EditTableDbmlOptions = {}): string {
   return refuseOverlaps(options.file ?? `${options.fileStem ?? desired.name}.dbml`, () => editTable(oldText, desired, options));
@@ -427,6 +471,63 @@ function metaOwnerId(column: string | undefined): string {
   return column === undefined ? '' : `c:${column.toLowerCase()}`;
 }
 
+/** The edit, kept in meta key order, then held to the sample-rows safety net. */
+function editTable(oldText: string, desired: SemanticTable, options: EditTableDbmlOptions): string {
+  const net: SampleRowsNet = {};
+  return keepsSampleRows(oldText, editTableKeepingMetaOrder(oldText, desired, options, net), net, options.parser ?? PINNED_PARSER);
+}
+
+/**
+ * What the safety net needs to know about the input's sample rows (D37):
+ * set by {@link editTableOnce} when the table holds a nested `records` block.
+ */
+interface SampleRowsNet {
+  value?: {
+    file: string;
+    /** The block's cells as the input holds them. */
+    before: RecordsCells;
+    plan: RecordsPlan;
+    /** The problem codes the input was read with. */
+    problems: ReadonlySet<string>;
+    /** The output's stem and schema folder, as the reader is to read it. */
+    stem: string;
+    schemaFolder?: string;
+  };
+}
+
+/**
+ * The safety net on every write to a table with sample rows (D37): the
+ * output must read (a real compile) as a writable table with no error, and
+ * no problem inside a block, that the input did not have (a new warning
+ * elsewhere is the edit's own, as in a file without rows), and its block
+ * must hold exactly the old rows projected
+ * through the edit ({@link expectedSampleRows}). Otherwise the edit is
+ * refused, naming only the file and the block's line.
+ */
+function keepsSampleRows(oldText: string, out: string, net: SampleRowsNet, parser: DbmlParserModule): string {
+  const at = net.value;
+  if (!at || out === oldText) return out;
+  const refuseNet = (): never => refuse(at.file, recordsOutOfStepMessage(at.file, at.plan.line), at.plan.line);
+  const text = stripBom(out);
+  let held: string;
+  try {
+    const reading = readTableFile(text, at.stem, at.schemaFolder !== undefined ? { schemaFolder: at.schemaFolder } : {}, parser).reading;
+    if (!reading.ok || !reading.writable) return refuseNet();
+    const blocks = recordsBlocksOf(compileOne(text, parser).ast).filter((b) => b.nested);
+    // A new problem is the rows' only when it is an error or sits in a block: a warning the edit itself
+    // brings elsewhere (a Move that keeps an old `schema:` property) is the writer's own answer, as without rows.
+    const inBlock = (line: number | undefined): boolean => line !== undefined
+      && blocks.some((b) => line >= lineAt(text, b.node.start) && line <= lineAt(text, b.node.end));
+    if (reading.problems.some((p) => !at.problems.has(String(p.code)) && (p.severity === 'error' || inBlock(p.line)))) return refuseNet();
+    held = JSON.stringify(blocks.length === 0 ? null : blocks.length === 1 ? recordsCellsOf(text, blocks[0]) : blocks.length);
+  } catch (err) {
+    if (err instanceof DbmlEditRefused) throw err;
+    return refuseNet();
+  }
+  if (held !== JSON.stringify(expectedSampleRows(at.before, at.plan))) refuseNet();
+  return out;
+}
+
 /**
  * Edit, then read the result back: a meta map the splice left in another key
  * order (a new non-text entry joining `meta_json` before later text entries, a
@@ -434,9 +535,9 @@ function metaOwnerId(column: string | undefined): string {
  * meta properties rewritten whole, the way a new file writes them. The order
  * is what the canvas and the exports show, so an edit keeps it as YAML does.
  */
-function editTable(oldText: string, desired: SemanticTable, options: EditTableDbmlOptions): string {
+function editTableKeepingMetaOrder(oldText: string, desired: SemanticTable, options: EditTableDbmlOptions, net: SampleRowsNet): string {
   const touched = new Set<string>();
-  const out = editTableOnce(oldText, desired, options, new Set(), touched);
+  const out = editTableOnce(oldText, desired, options, new Set(), touched, net);
   if (touched.size === 0) return out;
   const stem = options.fileStem ?? desired.name;
   const readBack = readTableFile(stripBom(out), stem, schemaOptions(options), options.parser ?? PINNED_PARSER).reading;
@@ -452,7 +553,7 @@ function editTable(oldText: string, desired: SemanticTable, options: EditTableDb
     const got = (readBack.table.columns ?? []).find((c) => metaOwnerId(c.name) === id);
     if (want && got && keysOf(got.meta) !== keysOf(want.meta)) reordered.add(id);
   }
-  return reordered.size === 0 ? out : editTableOnce(oldText, desired, options, reordered, new Set());
+  return reordered.size === 0 ? out : editTableOnce(oldText, desired, options, reordered, new Set(), net);
 }
 
 function editTableOnce(
@@ -461,6 +562,7 @@ function editTableOnce(
   options: EditTableDbmlOptions,
   rewriteMeta: ReadonlySet<string>,
   touchedMeta: Set<string>,
+  net: SampleRowsNet = {},
 ): string {
   const parser = options.parser ?? PINNED_PARSER;
   const hadBom = oldText.charCodeAt(0) === 0xfeff;
@@ -471,7 +573,8 @@ function editTableOnce(
   } catch (err) {
     // The reader reports a parser that throws as "The DBML parser stopped"; the writer refuses the same way.
     const file = options.file ?? `${options.fileStem ?? desired.name}.dbml`;
-    refuse(file, `Fix the DBML in ${file} first (the DBML parser stopped: ${err instanceof Error ? err.message : String(err)}). ERD Studio never rewrites a file it cannot read.`);
+    const stopped = parserStoppedMessage(err, text).replace(/\.$/, '');
+    refuse(file, `Fix the DBML in ${file} first (${stopped.charAt(0).toLowerCase()}${stopped.slice(1)}). ERD Studio never rewrites a file it cannot read.`);
   }
   const tableNodes = topLevel(compiled.ast).filter((n) => elementType(n)?.toLowerCase() === 'table');
   const declared = tableNodes.length > 0 ? plainNames(tableNodes[0].name) : null;
@@ -487,6 +590,9 @@ function editTableOnce(
   }
   if (!reading.writable) {
     const problem = reading.problems.find((p) => p.code === 'useInTableFile' || p.code === 'refInTableFile' || p.code === 'inlineRefInTableFile');
+    // R1 (D37): sample rows that do not read. The writer never splices a block it could not parse.
+    const records = problem ? undefined : reading.problems.find((p) => p.code === 'recordsUnreadable');
+    if (records) refuse(file, recordsUnreadableRefusal(file, records.line), records.line);
     refuse(file, `${file}: ${problem?.message ?? 'move the use, Ref or ref: lines out of the table file first.'}`, problem?.line);
   }
   const tableNode = tableNodes[0];
@@ -641,6 +747,23 @@ function editTableOnce(
     const brace = tableNode.body.blockOpenBrace as AstNode;
     const end = nextLineStart(text, brace.end);
     return /^[ \t]*(\/\/[^\n]*)?\r?\n?$/.test(text.slice(brace.end, end)) ? end : brace.end;
+  };
+
+  /**
+   * A whole-block cut that leaves no blank line before the Table's `}` (D35):
+   * when only the closing brace follows the block, the blank lines above it
+   * go with it.
+   */
+  const blockCutBeforeBrace = (cut: TextEdit): TextEdit => {
+    const close = tableNode.body.blockCloseBrace as AstNode | undefined;
+    if (!close || !startsItsLine(text, close.start) || cut.end !== lineStartOf(text, close.start) || cut.start !== lineStartOf(text, cut.start)) return cut;
+    let start = cut.start;
+    while (start > 0) {
+      const previous = lineStartOf(text, start - 1);
+      if (!/^[ \t\r]*\n$/.test(text.slice(previous, start))) break;
+      start = previous;
+    }
+    return { ...cut, start };
   };
 
   const tableOwner = {
@@ -883,6 +1006,33 @@ function editTableOnce(
     if (!inCutBlock) edits.push(e);
   }
 
+  // Sample rows (D37): the nested records block follows its columns, as index lines do. Its splices go in
+  // before the reorder rebuild, so a block among the columns carries them into its moved copy.
+  const recordsBlock = recordsBlocksOf(compiled.ast).find((b) => b.nested);
+  if (recordsBlock) {
+    const { edits: recordsEdits, plan } = planRecordsSplices({
+      text,
+      block: recordsBlock,
+      current: currentColumns.map((c) => c.name),
+      desired: desiredColumns.map((c) => c.name),
+      matchOf,
+      file,
+    });
+    if (plan.cutBlock) {
+      edits.push(blockCutBeforeBrace(recordsEdits[0]));
+    } else {
+      edits.push(...recordsEdits);
+    }
+    net.value = {
+      file,
+      before: recordsCellsOf(text, recordsBlock),
+      plan,
+      problems: new Set(reading.problems.map((p) => String(p.code))),
+      stem: renaming ? desired.name : stem,
+      ...(requalifyTo !== undefined ? { schemaFolder: requalifyTo } : options.schemaFolder !== undefined ? { schemaFolder: options.schemaFolder } : {}),
+    };
+  }
+
   // --- Render the column changes -------------------------------------------
   // Settings lists first, so a column's block holds all of its own edits.
   const listEditsByOwner = new Map<AstNode | string, TextEdit[]>();
@@ -975,10 +1125,13 @@ function editTableOnce(
       const span = blockOf(stray);
       while (pending.length > 0 && pending[0].start <= stray.start) pieces.push(withEol(pending.shift()!.text));
       pieces.push(withEol(text.slice(span.start, span.end)));
-      // Edits inside a stray (an indexes line, the Note) are applied to it here.
+      // Edits inside a stray (an indexes line, the Note, a records block's splices) are applied to it here.
       const inside = edits.filter((e) => e.start >= span.start && e.end <= span.end);
       if (inside.length > 0) {
-        pieces[pieces.length - 1] = withEol(sliceWithEdits(text, inside, span.start, span.end));
+        const moved = sliceWithEdits(text, inside, span.start, span.end);
+        // A stray cut whole (a records block whose last listed column went) leaves no blank line behind (D35).
+        if (moved.trim() === '') pieces.pop();
+        else pieces[pieces.length - 1] = withEol(moved);
         for (const e of inside) edits.splice(edits.indexOf(e), 1);
       }
     }

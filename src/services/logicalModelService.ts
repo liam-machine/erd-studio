@@ -29,7 +29,7 @@ import { DBML_CONVERT_FIRST_MESSAGE, DbmlEditRefused, attachRelationships, dbmlT
 import { projectNamingOf } from './projectNaming';
 import { projectStorageIn } from './projectStorage';
 import type {
-  DbmlAttachResult, DbmlAttachTable, DbmlProblem, DbmlMetadataTarget, DbmlRefEndHint, DbmlRelationshipsReading, DbmlTableReading, DbmlTableStructureRule, ProjectStorage, TableId, TableLoadErrorKind,
+  DbmlAttachResult, DbmlAttachTable, DbmlProblem, DbmlMetadataTarget, DbmlRefEndHint, DbmlRelationshipsReading, DbmlTableReading, DbmlTableStructureRule, ProjectStorage, SampleData, TableId, TableLoadErrorKind,
 } from '@erd-studio/core';
 import type { ColumnDef, TableRelationship, SemanticTable } from '../types/semantic';
 import type { YmlModelInfo } from '../types/ymlData';
@@ -59,9 +59,10 @@ export interface TableFileOps {
    * Tables whose file is written in full (created if missing); `fromName`
    * renames. A DBML table's `configuredSchema` (dbt) picks its schema folder
    * (§2.4). DBML only (D-4): `create` marks a new table, `from` names the
-   * existing one by identity (see `DbmlLibrarySave`).
+   * existing one by identity, and `sampleData` gives a new one's sample rows
+   * (see `DbmlLibrarySave`; a YAML table has no place for them).
    */
-  save?: Array<{ model: DbmlDraftTable; fromName?: string; from?: TableId; create?: boolean }>;
+  save?: Array<{ model: DbmlDraftTable; fromName?: string; from?: TableId; create?: boolean; sampleData?: SampleData }>;
   /** Tables whose file is deleted: by identity, or by a name only one table has. */
   delete?: Array<string | TableId>;
   /**
@@ -1166,7 +1167,16 @@ export class TableLibraryService {
     try {
       // Its schema folder is the schema of an unqualified Table (§1.2), as core's loader reads it.
       const schemaFolder = dbmlTreePathOf(this.semanticRelative(filePath))?.schema;
-      reading = parseTableDbml(fs.readFileSync(filePath, 'utf-8'), dbmlStem(path.basename(filePath)), schemaFolder !== undefined ? { schemaFolder } : {});
+      // The one place the extension asks for a table's sample rows (D37): the Detail panel shows them
+      // read-only. They ride on the table as a sidecar that no writer reads and no log line, message or
+      // telemetry field carries. Every read through this service carries them, the CLI's (doctor,
+      // inventory, diff, changes) and the MCP server's included, and those outputs list their fields
+      // one by one; a draft drops them from a reused table (`displayFromTables`). Readers that do not
+      // come through here (Convert and its self-check, Import's own parse) go without.
+      reading = parseTableDbml(fs.readFileSync(filePath, 'utf-8'), dbmlStem(path.basename(filePath)), {
+        ...(schemaFolder !== undefined ? { schemaFolder } : {}),
+        sampleData: true,
+      });
     } catch (err) {
       reading = { ok: false, error: { kind: 'read', message: err instanceof Error ? err.message : String(err) } };
     }

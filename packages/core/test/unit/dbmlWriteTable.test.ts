@@ -10,7 +10,7 @@ import { editTableDbml, renderNewTableDbml } from '../../src/dbml/writeTable';
 import { DbmlEditRefused } from '../../src/dbml/errors';
 import { applyTextEdits, refuseOverlaps } from '../../src/dbml/splice';
 import * as DbmlParse from '@dbml/parse';
-import { FIELD_CASES, METADATA_TABLE, NEW_TABLE_CASES, TABLE_CASES } from '../dbmlWriterCases/tableCases';
+import { FIELD_CASES, METADATA_TABLE, NEW_TABLE_CASES, RECORDS_CASES, TABLE_CASES } from '../dbmlWriterCases/tableCases';
 import { clone, projectDiagnostics, readTable } from '../dbmlWriterSupport';
 import { parseTableDbml } from '../../src/dbml/readTable';
 import { STORAGE_PARSERS } from '../dbmlParsers';
@@ -21,6 +21,10 @@ describe('editTableDbml', () => {
 
 describe('editTableDbml: context fields in every spelling', () => {
   for (const c of FIELD_CASES) it(c.name, () => c.check(c.run()));
+});
+
+describe('editTableDbml: sample rows (D37) follow their columns', () => {
+  for (const c of RECORDS_CASES) it(c.name, () => c.check(c.run()));
 });
 
 const BARE_TABLE = 'Table fct_order {\n  id int [pk]\n}\n';

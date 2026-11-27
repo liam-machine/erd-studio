@@ -1,0 +1,11 @@
+Project catalog {
+  Note: 'Two tables with sample rows, as ERD Studio 2.0.10 left them'
+  erd_schema_version: '7'
+  erd_layout: '''
+    dim_product 40 40
+    dim_store 400 40
+  '''
+}
+
+use { table gold.dim_product } from '../tables/gold/dim_product.dbml'
+use { table gold.dim_store } from '../tables/gold/dim_store.dbml'

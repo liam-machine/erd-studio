@@ -1,0 +1,20 @@
+Table gold.fct_order_line [grain: 'One row per order line'] {
+  order_line_id BIGINT [pk]
+  product_key INT [foreign_key: 'true']
+  customer_key INT [foreign_key: 'true']
+  quantity INT [note: 'Negative for a return']
+  status order_status
+  Note: 'Order lines, whose sample data names a status from the Enum below'
+
+  records (order_line_id, product_key, customer_key, quantity, status) {
+    100, 1, 10, 2, order_status.shipped
+    101, 3, 12, -1, order_status.returned
+    102, 2, 11, 5,
+  }
+}
+
+Enum order_status {
+  placed
+  shipped
+  returned
+}

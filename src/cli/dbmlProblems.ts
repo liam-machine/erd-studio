@@ -33,7 +33,8 @@ import {
 } from '@erd-studio/core';
 import { FIELDS_FILE_NAME, tableIdKey, tableIdOfPath } from '@erd-studio/core';
 import type { DbmlFileOutline, DbmlTableReading, ProjectStorage, Relationship, SemanticFileClass } from '@erd-studio/core';
-import { erdLayoutEntrySpan, outlineDbmlFile, parseSubjectAreaDbml, parseTableDbml, readErdLayoutDbml, usePathBetween } from '@erd-studio/core/dbml';
+import { erdLayoutEntrySpan, outlineDbmlFile, parseSubjectAreaDbml, parseTableDbml, readErdLayoutDbml, recordsSpansOf, usePathBetween } from '@erd-studio/core/dbml';
+import type { RecordsSpan } from '@erd-studio/core/dbml';
 import { listMisnamedTableFiles } from '../services/dbmlConversionFiles';
 import { sameName } from '../types/naming';
 import { compileDbmlFilesSeparately } from '../services/dbmlFileCompile';
@@ -82,6 +83,9 @@ const SEVERITY: Readonly<Record<string, 'error' | 'warning'>> = {
   inlineRefInTableFile: 'error',
   useInTableFile: 'error',
   refInTableFile: 'error',
+  // D37: a table file's sample rows (records) do not read: the editor loads the table without them and will not
+  // edit it, and other DBML tools reject the file, so doctor is never Ready on it.
+  recordsUnreadable: 'error',
   duplicateEnum: 'warning',
   duplicateRef: 'error',
   missingUse: 'warning',
@@ -350,6 +354,8 @@ export function collectDbmlProblems(ctx: CliContext, storage: ProjectStorage, si
   /** Each table file that reads (relative to the semantic dir) → its table's name and declared reference. */
   const declaredAt = new Map<string, { name: string; reference: string }>();
   const metadataTargetFiles = new Set<string>();
+  /** D37: each table file whose sample rows (records) the reader reported as not reading, with those blocks' spans. */
+  const unreadableRecords = new Map<string, { text: string; spans: RecordsSpan[] }>();
   const enumHomes = new Map<string, Array<{ rel: string; line: number; name: string }>>();
   const outlines = new Map<string, DbmlFileOutline>();
   const outline = (f: ProjectFile): DbmlFileOutline => {
@@ -382,6 +388,12 @@ export function collectDbmlProblems(ctx: CliContext, storage: ProjectStorage, si
         if (isFieldProblemCode(p.code)) continue;
         const code = p.code ?? 'tableWarning';
         push({ file: projectRel(f.rel), ...(p.line !== undefined ? { line: p.line } : {}), ...(p.column !== undefined ? { column: p.column } : {}), code, message: p.message });
+      }
+      // A block the reader reported (its keyword's line) is said once: the compile's diagnostics inside it are dropped below.
+      const unreadableAt = new Set(reading.problems.filter((p) => p.code === 'recordsUnreadable' && p.line !== undefined).map((p) => p.line));
+      if (unreadableAt.size > 0) {
+        const spans = recordsSpansOf(f.text).filter((s) => s.nested && unreadableAt.has(s.line));
+        if (spans.length > 0) unreadableRecords.set(projectRel(f.rel), { text: f.text, spans });
       }
       if (reading.declaredName !== stem && reading.declaredName.toLowerCase() === stem.toLowerCase()) {
         push({
@@ -1073,8 +1085,11 @@ export function collectDbmlProblems(ctx: CliContext, storage: ProjectStorage, si
   // a Metadata block's missing target (D25's warning), a use line that misses its file (usePathMismatch) and
   // a Ref naming a table the file does not import (missingUse). Each is a warning (§7.1): ERD Studio reads the
   // file anyway and rewrites the line on its next write, so it is reported once, at that severity.
+  // D37: a table file's sample rows that do not read are one problem per block (recordsUnreadable, an error),
+  // never that and the parser's own diagnostic inside the block as well.
   return problems.filter((p) => {
     if (typeof p.code !== 'number') return true;
+    if (p.line !== undefined && insideUnreadableRecords(unreadableRecords.get(p.file), p.line, p.column)) return false;
     if (p.code === 4000 && metadataTargetFiles.has(p.file) && /metadata target/i.test(p.message)) return false;
     if ((p.code === 4000 || p.code === 4001) && p.line !== undefined && usePathLines.has(`${p.file}\u0000${p.line}`)) return false;
     const missingHere = missingUseTables.get(p.file);
@@ -1086,6 +1101,22 @@ export function collectDbmlProblems(ctx: CliContext, storage: ProjectStorage, si
     }
     return true;
   });
+}
+
+/**
+ * Whether a parser diagnostic (1-based line and column) sits inside one of a
+ * table file's sample-rows blocks that the reader reported as not reading.
+ */
+function insideUnreadableRecords(blocks: { text: string; spans: RecordsSpan[] } | undefined, line: number, column: number | undefined): boolean {
+  if (!blocks) return false;
+  let start = 0;
+  for (let l = 1; l < line; l++) {
+    const next = blocks.text.indexOf('\n', start);
+    if (next === -1) return false;
+    start = next + 1;
+  }
+  const offset = start + Math.max(0, (column ?? 1) - 1);
+  return blocks.spans.some((s) => offset >= s.start && offset < s.end);
 }
 
 /**

@@ -22,6 +22,8 @@ export type FileNoteCode =
   | 'relationshipsNotImported'
   /** A `Ref`, an inline `[ref: …]` or a `use` line written in a table file: read past, never drawn. */
   | 'notDrawnInTableFile'
+  /** A table file's sample rows (records) do not read: the table is drawn without them and is not edited until they are fixed. */
+  | 'sampleDataNotRead'
   /** A relationships file that does not read (a syntax error, conflict markers): none of its relationships are drawn. */
   | 'relationshipsFileNotRead'
   /** A `.dbml` file saved where ERD Studio reads no file. */
@@ -59,7 +61,7 @@ export const FILE_NOTE_ACTION_LABELS: Readonly<Record<FileNoteAction, string>> =
 
 const CODES: ReadonlySet<string> = new Set<FileNoteCode>([
   'diagramNotRead', 'diagramUnsaved', 'refreshFailed', 'relationshipsNotImported',
-  'notDrawnInTableFile', 'relationshipsFileNotRead', 'fileNotRead',
+  'notDrawnInTableFile', 'sampleDataNotRead', 'relationshipsFileNotRead', 'fileNotRead',
 ]);
 
 const ACTIONS: ReadonlySet<string> = new Set<FileNoteAction>(['addRelationshipsImports', 'reloadFromDisk']);
