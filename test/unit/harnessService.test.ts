@@ -914,8 +914,28 @@ describe('HarnessService', () => {
   });
 
   describe('HARNESS_VERSION', () => {
-    it('is 49 (a DBML table is its schema folder and name: two schema folders may each hold a table of one name, "Two tables of one name" in DBML.md, qualified `<schema>.<name>` lines and erd_schema_version \'8\' on a diagram that shows both; 48 DBML.md Layout: ERD Studio keeps a file in the layout only when it is already in it, edits a hand-laid file in place, and adds the blank line between foreign-key tables only next to a Ref it adds; 47 DBML.md: an imported column\'s not null, unique, increment and default are DBML\'s own settings in a .dbml table; 46 context fields: one "Fields" section in place of the metadata list and the design rationale, fields.yml and bare `<key>: \'<value>\'` settings, the setting-name table, YAML rationale keys; 45 the pre-edit hook for GitHub Copilot, Codex and Gemini CLI; 44 and 43 SYNC.md: a plan table with no file yet gets one from add-column-to-logical, and its new Ref the layer\'s file; an empty resolvedDataType is skipped; the cardinality to write is the ground truth\'s; 42 logical first: a root without dbt_project.yml gets no dbt instructions and no dbt-only file; 41 a table with no Refs yet goes to an existing <layer>/relationships/<schema>.dbml before the layer\'s file; 40 "diagram" wording, where a new table\'s schema folder goes, `erd-studio changes`, "on N diagrams" in the Table Library; 39 the layer-first tree: <layer>/tables|relationships|diagrams, Table <schema>.<name>, Ref placement, exact relationships imports, erd_layout; 38 the DBML Layout section and the Note-first examples; 37 shipped native DBML storage, 36 in pre-release 1.9.2 naming the old "Install AI Coding Harness" title, 35 in 1.9.0)', () => {
-      expect(HARNESS_VERSION).toBe('49');
+    it('is 50 (sample rows: a records block inside the Table, kept in step with column edits, "Sample rows" in DBML.md, the dbdiagram push warning and SYNC.md\'s records steps; 49 a DBML table is its schema folder and name: two schema folders may each hold a table of one name, "Two tables of one name" in DBML.md, qualified `<schema>.<name>` lines and erd_schema_version \'8\' on a diagram that shows both; 48 DBML.md Layout: ERD Studio keeps a file in the layout only when it is already in it, edits a hand-laid file in place, and adds the blank line between foreign-key tables only next to a Ref it adds; 47 DBML.md: an imported column\'s not null, unique, increment and default are DBML\'s own settings in a .dbml table; 46 context fields: one "Fields" section in place of the metadata list and the design rationale, fields.yml and bare `<key>: \'<value>\'` settings, the setting-name table, YAML rationale keys; 45 the pre-edit hook for GitHub Copilot, Codex and Gemini CLI; 44 and 43 SYNC.md: a plan table with no file yet gets one from add-column-to-logical, and its new Ref the layer\'s file; an empty resolvedDataType is skipped; the cardinality to write is the ground truth\'s; 42 logical first: a root without dbt_project.yml gets no dbt instructions and no dbt-only file; 41 a table with no Refs yet goes to an existing <layer>/relationships/<schema>.dbml before the layer\'s file; 40 "diagram" wording, where a new table\'s schema folder goes, `erd-studio changes`, "on N diagrams" in the Table Library; 39 the layer-first tree: <layer>/tables|relationships|diagrams, Table <schema>.<name>, Ref placement, exact relationships imports, erd_layout; 38 the DBML Layout section and the Note-first examples; 37 shipped native DBML storage, 36 in pre-release 1.9.2 naming the old "Install AI Coding Harness" title, 35 in 1.9.0)', () => {
+      expect(HARNESS_VERSION).toBe('50');
+    });
+
+    it('50: tells every assistant how sample rows (records) are written and kept in step, and to keep them out of what it shares', () => {
+      for (const target of ['claude', 'agents', 'copilot', 'gemini', 'codex'] as const) {
+        const content = guideOf(service, target);
+        expect(content, target).toContain('or a top-level `Records` (sample rows go inside the Table)');
+        expect(content, target).toContain('- **Sample rows** (optional): one `records (order_id, status) {` block inside the Table');
+        expect(content, target).toContain("text in single quotes with `\\'` (never `''`)");
+        expect(content, target).toContain('never start a row after the first with `-` or `+`');
+        expect(content, target).toContain('When you rename a column, rename it in the list (exact case)');
+        expect(content, target).toContain('Write rows only when the user asks, invented unless they supply real ones; never query a warehouse for them');
+        expect(content, target).toContain('never copy them into issues, pull requests, commits, feedback or summaries — give a row count');
+        expect(content, target).toContain("A Rich DBML export may also carry the tables' sample rows, which can be real data: say so to the user before pushing it.");
+        expect(content, target).toContain("  records (order_id, status, amount) {\n    1, 'shipped', 25.00\n    2, 'returned', null\n  }");
+      }
+      // Codex's region is the skill part alone (the 26 KB cap): the rows rules live in DBML.md beside it.
+      expect(service.generateContent('codex')).not.toContain('**Sample rows**');
+      const sync = service.schemaSkillFiles().find(([name]) => name === 'SYNC.md')![1];
+      expect(sync).toContain('If the Table has a `records {` block with no column list, write its current columns as the list first');
+      expect(sync).toContain("and remove it from the Table's `records` list and its value from every row (no list: the value at its position); a block with no column left goes");
     });
 
     it('tells every assistant a folder without dbt_project.yml is logical-only, and never to ask for dbt', () => {

@@ -33,7 +33,7 @@ Table sales.fct_order [
 
 Here `owner` and `pii` are fields of the team's own, from its `fields.yml` (below); `tags`, a list, is metadata in `meta_json`.
 
-- **Exactly one `Table` per file**, declared `Table <schema>.<name>`: the schema spelled exactly as the schema folder and the name exactly as the file (`gold/tables/sales/fct_order.dbml` holds `Table sales.fct_order`). Double-quote a part that is not a plain identifier (`Table "SAP FI".afih`). Any number of `Enum`s and comments may sit beside it. No `Project`, `TableGroup`, top-level `Note`, `TablePartial` or `Records`.
+- **Exactly one `Table` per file**, declared `Table <schema>.<name>`: the schema spelled exactly as the schema folder and the name exactly as the file (`gold/tables/sales/fct_order.dbml` holds `Table sales.fct_order`). Double-quote a part that is not a plain identifier (`Table "SAP FI".afih`). Any number of `Enum`s and comments may sit beside it. No `Project`, `TableGroup`, top-level `Note`, `TablePartial` or a top-level `Records` (sample rows go inside the Table).
 - **The schema is the qualifier, never a setting.** Doctor warns about an unqualified `Table fct_order` (`unqualifiedTable`: other DBML tools read it as `public.fct_order`), a qualifier that differs from the folder (`schemaFolderMismatch`) and an old `[schema: '…']` setting (`schemaProperty`: remove it). To change a table's schema, move its file to the other schema folder and change the qualifier, every Ref end and every `use` line that names it, in one change.
 - **No `use`, no `Ref`, and no inline `[ref: …]` in a table file**: relationships go in a relationships file (below). ERD Studio reads such a file but refuses to change it until the line is moved, and doctor gives the exact Ref line to write instead.
 - **Spell names exactly**: the table and column names as they are, in their case (DBML is case-sensitive). A name that is not a plain identifier, or is a DBML keyword, is double-quoted (`"order"`); a type that is not a plain identifier is too (`"DECIMAL(18,2)"`).
@@ -42,6 +42,22 @@ Here `owner` and `pii` are fields of the team's own, from its `fields.yml` (belo
 - The table's description is the `Note: '…'` line, first in the block and followed by a blank line. A text with a line break is triple-quoted (`'''…'''`); escape `'` as `\'` and `\` as `\\`.
 - A flag is written only when it is set (`natural_key: 'true'`); to unset it, delete the setting. DBML's own settings ERD Studio does not model (`not null`, `unique`, `default`, `increment`, `note` on an index, `headercolor`, other indexes, Enums) are kept exactly as written; every other setting is a field ("Setting names" below), kept too.
 - **Never write a `Metadata` block** (`Metadata Table x { … }`): put every property inline, on the Table or the column. A Metadata block silently overrides the inline value.
+- **Sample rows** (optional): one `records (order_id, status) {` block inside the Table, after the columns and any `indexes`; one row per line like `    1, 'shipped'`, values comma-separated, text in single quotes with `\'` (never `''`), `null` for no value, never a bare word (`jane.doe` reads as an enum), and never start a row after the first with `-` or `+`. Always name the columns. When you rename a column, rename it in the list (exact case); when you remove one, remove it from the list and its value from every row; a block without a list needs its list written first. A broken block makes other DBML tools reject the file and stops ERD Studio editing the table. Write rows only when the user asks, invented unless they supply real ones; never query a warehouse for them; rows may be real data, so never copy them into issues, pull requests, commits, feedback or summaries — give a row count.
+
+```dbml
+Table sales.fct_order {
+  Note: 'Orders'
+
+  order_id INT [pk]
+  status   VARCHAR
+  amount   "DECIMAL(18,2)"
+
+  records (order_id, status, amount) {
+    1, 'shipped', 25.00
+    2, 'returned', null
+  }
+}
+```
 
 ## Field names
 
@@ -261,7 +277,7 @@ The project's own files are DBML; these commands bring other DBML in and send di
 - **A DBML file in** — from dbdiagram.io, dbdocs, another tool, or an ERD Studio export: point the user at **ERD Studio: Import DBML…** (Command Palette, or the **ERD Studio** view's **…** menu). It needs no dbt and no AI. It reads one self-contained file (no `use` lines), creates a **new** diagram, splits the tables into the library (a `Table s.x` goes into schema folder `s`, under its own name even when another schema has one of that name; a table the library already has in that schema folder is used as it is, never overwritten), places them from the file's own `erd_layout` when it has one, and shows what it will create before writing anything. Prefer it to converting the file yourself; if the user asks you to do it by hand anyway, follow "Building Models from External Sources" in `SKILL.md`.
 - **Diagrams out** — **ERD Studio: Export Diagram…** (one diagram) or **ERD Studio: Export All Diagrams…** (every one, into a folder outside `.erd-studio`), with the choice **Rich DBML**: one self-contained `<name>.dbml` with ERD Studio's fields as DBML custom properties (`role`, `grain`, `scd_type`, `natural_key`, `meta_*`, …) and the positions in its Project's `erd_layout`. That single file is the route to dbdiagram.io. The plain **DBML** choice is the portable, notes-only form any DBML tool opens.
 - **From the CLI** (stdout only; it never writes a file): `erd-studio export --domain <path> --format dbml-rich` prints the single-file `.dbml`, and `--all` in place of `--domain` prints every diagram as a JSON list of `{ fileName, content }`. When the user asks you to save them, write each `content` to its `fileName` (outside `.erd-studio`) with your own file tools, so the writes stay visible.
-- **dbdiagram.io** — `dbdiagram push <name>.dbml --name "<Name>"` (dbdiagram's own CLI: `npm install -g dbdiagram`, then `dbdiagram auth login`) uploads an exported diagram's tables and Refs; dbdiagram.io lays them out itself and ignores `erd_layout`. It sends the data model to dbdiagram.io under the user's account: run it only when the user asks, and show the command first. ERD Studio itself never contacts dbdiagram.io.
+- **dbdiagram.io** — `dbdiagram push <name>.dbml --name "<Name>"` (dbdiagram's own CLI: `npm install -g dbdiagram`, then `dbdiagram auth login`) uploads an exported diagram's tables and Refs; dbdiagram.io lays them out itself and ignores `erd_layout`. It sends the data model to dbdiagram.io under the user's account: run it only when the user asks, and show the command first. A Rich DBML export may also carry the tables' sample rows, which can be real data: say so to the user before pushing it. ERD Studio itself never contacts dbdiagram.io.
 - **`meta.dbml`** — an imported table or column may carry a `dbml` entry in its metadata (`meta_json` in DBML, `meta.dbml` in YAML): what the DBML file said that ERD Studio has no field for (`not_null`, `unique`, `default`, `increment`, `checks`, `enum`, `indexes`, `header_color`, the original `name` when it had to change, another tool's own `properties`). In a `.dbml` table a column's `not null`, `unique`, `increment` and `default` are written as DBML's own settings and read back into `meta.dbml` (an older import kept them in `meta_json`: leave that as it is). Keep it exactly as it is — the next DBML export carries it back out — and write or change it only when the user asks.
 
-<!-- erd-studio-harness: 49 -->
+<!-- erd-studio-harness: 50 -->
