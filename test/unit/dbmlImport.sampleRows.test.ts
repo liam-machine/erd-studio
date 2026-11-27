@@ -24,6 +24,7 @@ import {
   type DbmlImportPlan,
   type PlanDbmlImportInput,
 } from '../../src/services/dbmlImport';
+import { DEFAULT_ENTRY, MemoryProjectLayout } from '@dbml/parse';
 import { readDbml } from '../../src/services/dbmlImportParse';
 import { draftFromImportPlan } from '../../src/services/draftModel';
 import type { SemanticTable } from '../../src/types/semantic';
@@ -251,5 +252,20 @@ describe('a value with escaped line-break characters', () => {
   it('is kept as the parser reads it: a carriage return and line feed written as escapes stay both', () => {
     const p = plan("Table t {\n  id int [pk]\n  v varchar\n  records (id, v) {\n    1, 'x\\r\\ny'\n  }\n}\n");
     expect(rowsOf(p, 't')?.rows).toEqual([[num('1'), str('x\r\ny')]]);
+  });
+});
+
+describe('a parser that throws on a file with sample rows', () => {
+  it("Import says only that it stopped, never the parser's message", () => {
+    const sentinel = 'zqSENTX7';
+    class Throwing {
+      constructor() {
+        throw new Error(`stopped at ${sentinel}`);
+      }
+    }
+    const parser = { Compiler: Throwing, MemoryProjectLayout, DEFAULT_ENTRY };
+    const read = readDbml(`Table t {\n  id int [pk]\n  v varchar\n  records (id, v) {\n    1, '${sentinel}'\n  }\n}\n`, parser);
+    expect(read.ok).toBe(false);
+    expect(read.ok ? [] : read.diagnostics.map((d) => d.message)).toEqual(['The DBML parser stopped.']);
   });
 });

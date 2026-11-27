@@ -244,6 +244,13 @@ describe('the value backstop: a diagnostic outside every block', () => {
     expect(sanitise('Invalid newline encountered while parsing', 0)).toBe('Invalid newline encountered while parsing');
   });
 
+  it('an unquoted value segment outside every block is scrubbed too', () => {
+    const sanitise = dbmlMessageSanitiser(TEXT);
+    expect(sanitise(`Unexpected ${SENTINEL} here`, 0)).toBe('this line does not read as DBML');
+    // A message with no value segment keeps its words.
+    expect(sanitise('Unexpected token here', 0)).toBe('Unexpected token here');
+  });
+
   it('in a file without a records token, every message is the parser\'s own', () => {
     const sanitise = dbmlMessageSanitiser('Table gold.t {\n  id int\n}\n');
     expect(sanitise(`Enum '${SENTINEL}' does not exist in Schema 'public'`, 0)).toBe(`Enum '${SENTINEL}' does not exist in Schema 'public'`);
@@ -272,6 +279,25 @@ describe('a parser that throws', () => {
     expect(reading.ok ? '' : reading.error.message).toBe('The DBML parser stopped.');
     const err = thrown(() => editTableDbml(text, KEEP_ID, { fileStem: 't', file: 't.dbml', schemaFolder: 'gold', parser }));
     expect(err!.message).toBe('Fix the DBML in t.dbml first (the DBML parser stopped). ERD Studio never rewrites a file it cannot read.');
+  });
+
+  it('the reader says only that it stopped when its second compile throws (a file with a Ref line and records)', () => {
+    const pinned = DbmlParse as unknown as DbmlParserModule;
+    const Real = pinned.Compiler as unknown as new (layout: unknown) => object;
+    let made = 0;
+    class ThrowsOnSecond {
+      constructor(layout: unknown) {
+        made++;
+        if (made > 1) throw new Error(`stopped at ${SENTINEL}`);
+        return new Real(layout);
+      }
+    }
+    const parser = { ...pinned, Compiler: ThrowsOnSecond as unknown as DbmlParserModule['Compiler'] };
+    // The Ref line is blanked before a second compile, which is the one that throws.
+    const text = `${head('t')}\n  records (id, name) {\n    1, '${SENTINEL}'\n  }\n}\n\nRef: gold.t.id > gold.t.id\n`;
+    const reading = parseTableDbml(text, 't', { schemaFolder: 'gold' }, parser);
+    expect(made).toBeGreaterThan(1);
+    expect(reading.ok ? '' : reading.error.message).toBe('The DBML parser stopped.');
   });
 });
 

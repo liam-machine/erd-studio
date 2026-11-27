@@ -92,7 +92,7 @@ const SAMPLE_DATA_FILES: readonly string[] = [
  * The sample-data type and field names, and the cell type. The "Not shown" note's code for rows that
  * do not read (`sampleDataNotRead`, and the helpers named after it) names no row: it is not one of them.
  */
-const SAMPLE_DATA_NAMES = /sampleData(?!NotRead)|SampleData|SampleCell/;
+const SAMPLE_DATA_NAMES = /sampleData(?!NotRead)|SampleData|SampleCell|sampleCell|readRecordsBlocks|RecordsBlockReading|DbmlRecords/;
 
 describe('sample rows stay where they are allowed (G5)', () => {
   it('no runtime code calls a parser API whose messages quote cell values', () => {
@@ -125,8 +125,10 @@ describe('sample rows stay where they are allowed (G5)', () => {
     expect(named).toEqual([...SAMPLE_DATA_FILES].sort());
   });
 
-  it('the names pattern finds the field and the type, and not the note code', () => {
+  it('the names pattern finds the field, the type and every other carrier of rows, and not the note code', () => {
     for (const line of ['model.sampleData', 'type X = SampleData;', 'sampleData: true', 'tableSampleDataOf(t)', 'rows: SampleCell[][]']) expect(SAMPLE_DATA_NAMES.test(line), line).toBe(true);
+    // Rows travel under other names too: the core block reader, the cell helpers and Import's model.
+    for (const line of ['const b = readRecordsBlocks(text);', 'blocks: RecordsBlockReading[]', 'sampleCellAsText(cell)', 'sampleCellOf(text, node)', 'records: DbmlRecords[]']) expect(SAMPLE_DATA_NAMES.test(line), line).toBe(true);
     for (const line of ["code: 'sampleDataNotRead'", 'sampleDataNotReadMessage(file, line)']) expect(SAMPLE_DATA_NAMES.test(line), line).toBe(false);
   });
 
