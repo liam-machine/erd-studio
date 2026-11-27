@@ -432,12 +432,22 @@ describe('the laws over every DBML fixture', () => {
     expect(PROJECTS.length).toBeGreaterThanOrEqual(7);
   });
 
+  it('skips sample-rows-2.0\'s stale table, which does not read, and holds the laws for its valid one', () => {
+    const files = PROJECTS.find((p) => p.name.endsWith('dbml/sample-rows-2.0/.erd-studio'))!.files;
+    const read = (file: string) => parseTableDbml(files[file], stemOf(file), { schemaFolder: 'gold' });
+    expect(read('gold/tables/gold/dim_store.dbml').ok).toBe(false);
+    const product = read('gold/tables/gold/dim_product.dbml');
+    expect(product.ok && product.writable).toBe(true);
+  });
+
   for (const project of PROJECTS) {
     const library = libraryOf(project.files);
 
     for (const [file, text] of tableFilesOf(project.files)) {
       const stem = stemOf(file);
       const reading = parseTableDbml(text, stem, { schemaFolder: classifySemanticFile(file, { tablesDirIsLayer: false }).schema });
+      // A table file that is unreadable on purpose has no laws to hold: missing-model's `broken`,
+      // and sample-rows-2.0's `dim_store` (a records list still naming a dropped column, [4000]).
       if (!reading.ok || !reading.writable) continue;
       it(`${project.name}/${file}: Laws 1–5 for its table`, () => {
         // Law 1.

@@ -153,6 +153,10 @@ const EXPECTED_FILES = [
   // packages/core/test/unit/loadDisplayDomain.sharedUseSpelling.test.ts.
   'same-name-unqualified.bqs-only.display.json',
   'same-name-unqualified.sap.display.json',
+  // Table files with sample rows (DBML records) as 2.0.10 left them: a valid nested block and a stale
+  // list, drawn as a placeholder (packages/core/test/fixtures/dbml/sample-rows-2.0); owned by
+  // packages/core/test/unit/loadDisplayDomain.sampleRows20.test.ts.
+  'sample-rows-2.0.catalog.display.json',
 ].sort();
 
 /**

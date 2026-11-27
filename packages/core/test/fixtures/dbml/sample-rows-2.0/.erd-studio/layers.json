@@ -1,0 +1,6 @@
+{
+  "schemaVersion": 1,
+  "layers": [
+    { "id": "gold", "label": "Gold", "abbreviation": "GLD", "color": "#d4af37", "creatable": true, "order": 0 }
+  ]
+}

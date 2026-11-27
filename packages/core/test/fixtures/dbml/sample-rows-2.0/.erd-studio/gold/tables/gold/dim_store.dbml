@@ -1,0 +1,11 @@
+Table gold.dim_store {
+  store_key INT [pk, note: 'Surrogate key']
+  store_name VARCHAR [note: 'Display name']
+  opened_on DATE
+  Note: 'Stores'
+
+  records (store_key, store_name, region_code, opened_on) {
+    1, 'North yard', 'N1', '2020-01-15'
+    2, 'South yard', 'S2', '2021-06-01'
+  }
+}

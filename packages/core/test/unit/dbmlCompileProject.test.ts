@@ -92,7 +92,9 @@ const TWINS_DIR = path.resolve(__dirname, '../fixtures/dbml');
 // for tables with no file, on purpose: it is the tolerance case.
 // same-name-unqualified is the reporter's photo-2 as 2.0.4 wrote it: two unqualified
 // `Table adresse` files imported under one spelling, which every parser refuses ([3003]).
-const UNCLEAN_TWINS = new Set(['missing-model', 'same-name-unqualified']);
+// sample-rows-2.0 is a table file with sample rows as 2.0.10 left it after a column drop:
+// its records list still names the dropped column, which every parser refuses ([4000]).
+const UNCLEAN_TWINS = new Set(['missing-model', 'same-name-unqualified', 'sample-rows-2.0']);
 const CLEAN_TWINS = fs.readdirSync(TWINS_DIR).filter((name) => !UNCLEAN_TWINS.has(name));
 
 describe('the DBML twins compile clean as multi-file projects, the way other DBML tools read them', () => {
@@ -108,6 +110,14 @@ describe('the DBML twins compile clean as multi-file projects, the way other DBM
       const files = twinFiles(path.join(TWINS_DIR, 'same-name-unqualified', '.erd-studio'));
       const result = compileDbmlProject(files, ['bronze/diagrams/sap.dbml'], parser);
       expect((result['bronze/diagrams/sap.dbml'] ?? []).map((d) => `${d.line} [${d.code}]`)).toContain('13 [3003]');
+    });
+
+    it('sample-rows-2.0: the stale records list is refused ([4000]) in its own table file, and the valid nested block compiles clean', () => {
+      const files = twinFiles(path.join(TWINS_DIR, 'sample-rows-2.0', '.erd-studio'));
+      const result = compileDbmlProject(files, Object.keys(files), parser);
+      const located = Object.fromEntries(Object.entries(result).map(([file, diagnostics]) => [file, diagnostics.map((d) => `${d.line} [${d.code}]`)]));
+      expect(located['gold/tables/gold/dim_product.dbml'] ?? []).toEqual([]);
+      expect(located['gold/tables/gold/dim_store.dbml']).toContain('7 [4000]');
     });
 
     it.each(CLEAN_TWINS)('%s', (name) => {

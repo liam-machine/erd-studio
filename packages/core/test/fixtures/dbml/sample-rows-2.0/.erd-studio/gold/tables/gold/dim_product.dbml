@@ -1,0 +1,14 @@
+Table gold.dim_product {
+  product_key INT [pk, note: 'Surrogate key']
+  product_name VARCHAR [note: 'Display name']
+  list_price DECIMAL(10,2)
+  is_active BOOLEAN
+  updated_at TIMESTAMP
+  Note: 'Products'
+
+  records (product_name, list_price, is_active) {
+    'Blue widget', 4.50, true
+    'Red gadget', 12.00, false
+    'Green gizmo', null, true
+  }
+}
