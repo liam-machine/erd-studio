@@ -24,7 +24,7 @@
  * home, and a field new to the file gets the new file's spelling.
  */
 
-import type { ColumnDef, Meta, Rationale, SemanticTable } from '../types/semantic.js';
+import type { ColumnDef, Meta, Rationale, SampleData, SemanticTable } from '../types/semantic.js';
 import {
   DBML_RICH_COLUMN_PROPERTIES,
   DBML_RICH_META_JSON_PROPERTY,
@@ -35,6 +35,7 @@ import {
   bareDbmlProperty,
 } from '../dbmlRichProperties.js';
 import { dbmlColumnType, dbmlName, dbmlNoteText, dbmlString } from '../dbmlText.js';
+import { renderRecordsBlock } from '../sampleRows.js';
 import { DBML_IMPORT_META_KEY, RATIONALE_FIELD_KEYS, rationaleKeyToFieldKey, type FieldScope } from '../fields.js';
 import { readMeta } from '../meta.js';
 import { isLibraryFolderName } from '../storage.js';
@@ -226,8 +227,16 @@ const PLACEHOLDER_LINE = `${DBML_RICH_PLACEHOLDER_COLUMN} unknown [${DBML_RICH_P
  * placeholder column DBML needs. Relationships are not written: they live
  * in relationships files. The host runs the result through `formatDbml`,
  * which aligns the columns and wraps long settings lists.
+ *
+ * Sample rows (D37) are written only when `options.sampleData` gives them,
+ * never from a sidecar the table carries: a nested `records` block after
+ * the columns and any `indexes`, after a blank line, with an explicit list
+ * of the columns the table has (a value for any other column is dropped),
+ * written by `renderRecordsBlock` (an enum reference as text, the lead
+ * column chosen so no later row starts with a sign). No block for no row
+ * or no listed column.
  */
-export function renderNewTableDbml(table: SemanticTable): string {
+export function renderNewTableDbml(table: SemanticTable, options: RenderNewTableDbmlOptions = {}): string {
   const schema = table.schema;
   if (typeof schema !== 'string' || !isLibraryFolderName(schema)) {
     throw new Error('renderNewTableDbml: a DBML table needs a schema');
@@ -247,8 +256,24 @@ export function renderNewTableDbml(table: SemanticTable): string {
   const pks = columns.filter((c) => c.isPrimaryKey);
   for (const column of columns) lines.push(`  ${columnLine(column, pks.length === 1 && column.isPrimaryKey === true)}`);
   if (pks.length > 1) lines.push('  indexes {', `    (${pks.map((c) => dbmlName(c.name)).join(', ')}) [pk]`, '  }');
+  const block = options.sampleData ? newTableRecordsBlock(columns.map((c) => c.name), options.sampleData) : '';
+  if (block) lines.push('', block);
   lines.push('}');
   return `${lines.join('\n')}\n`;
+}
+
+/** Options for {@link renderNewTableDbml}. */
+export interface RenderNewTableDbmlOptions {
+  /** The new table's sample rows (Import DBML keeps a file's): written as its nested `records` block. */
+  sampleData?: SampleData;
+}
+
+/** The `records` block of a new table: the rows' values for the columns the table has, in the rows' column order. */
+function newTableRecordsBlock(tableColumns: readonly string[], data: SampleData): string {
+  const has = new Set(tableColumns);
+  const keep = data.columns.map((name, i) => (has.has(name) && data.columns.indexOf(name) === i ? i : -1)).filter((i) => i >= 0);
+  if (keep.length === 0) return '';
+  return renderRecordsBlock(keep.map((i) => data.columns[i]), data.rows.map((row) => keep.map((i) => row[i] ?? null)), '  ', '\n').text;
 }
 
 // ---------------------------------------------------------------------------

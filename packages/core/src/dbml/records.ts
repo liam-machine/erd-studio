@@ -250,6 +250,47 @@ export function sampleDataOf(text: string, block: RecordsBlock, tableColumns: re
   return { columns, rows, totalRows: block.rows.length };
 }
 
+/** A `records` block as Import reads it: where it is and its rows, never its column list (the caller has the parser's). */
+export interface RecordsBlockReading {
+  /** Offset of the `records` keyword in the text given (a leading byte-order mark counted). */
+  start: number;
+  /** 1-based line of the keyword. */
+  line: number;
+  /** Nested in a Table, not a top-level `Records`. */
+  nested: boolean;
+  /** At most `limit` rows, in file order, one cell per value ({@link sampleCellOf}). */
+  rows: Array<Array<SampleCell | null>>;
+  /** Rows in the block, counting any past the limit. */
+  totalRows: number;
+}
+
+/**
+ * Every `records` block of a DBML text, nested or top-level, with each
+ * value read from its token as {@link sampleCellOf} reads it, at most
+ * `limit` rows per block. The column list is not read here: a top-level
+ * block names its table and columns in its header, and `records {` names
+ * none, so a caller matches each block (by {@link RecordsBlockReading.start})
+ * to the parser's own reading of it. A text the parser cannot lex gives [].
+ */
+export function readRecordsBlocks(text: string, limit = SAMPLE_ROWS_LIMIT, parser: DbmlParserModule = PINNED_PARSER): RecordsBlockReading[] {
+  if (!/records/i.test(text)) return [];
+  const stripped = stripBom(text);
+  const shift = text.length - stripped.length;
+  let ast: AstNode | undefined;
+  try {
+    ast = parseSyntax(stripped, parser).ast;
+  } catch {
+    return [];
+  }
+  return recordsBlocksOf(ast).map((block) => ({
+    start: block.node.start + shift,
+    line: lineAt(stripped, block.node.start),
+    nested: block.nested,
+    rows: block.rows.slice(0, Math.max(0, limit)).map((row) => row.elements.map((e) => sampleCellOf(stripped, e))),
+    totalRows: block.rows.length,
+  }));
+}
+
 /**
  * The reader's problem for a nested block that does not read
  * (`recordsUnreadable`): the line of its keyword, no value.
