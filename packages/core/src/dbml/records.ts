@@ -205,10 +205,11 @@ const BOOLEAN_WORDS: ReadonlySet<string> = new Set(['true', 'false']);
  * rounds a 20-digit integer and empties an enum reference). The kind comes
  * from the token: a string literal or a double-quoted name is a `string`
  * (its text as the parser reads it, a line break inside a `'''` string read
- * as `\n` in a CRLF file too); `null` (any case) and an empty field are
- * null; `true` / `false` (any case) are a `boolean`; a number, signed or
- * not, is a `number`; a backtick expression an `expression` (backticks
- * kept); a dotted name an `enum` reference. Every kind but `string` keeps
+ * as `\n` in a CRLF file too, a `\r\n` written with escapes kept as read);
+ * `null` (any case) and an empty field are null; `true` / `false` (any
+ * case) are a `boolean`; a number, signed or not, is a `number`; a backtick
+ * expression an `expression` (backticks kept); a dotted name an `enum`
+ * reference. Every kind but `string` keeps
  * its source text exactly as written.
  */
 export function sampleCellOf(text: string, node: AstNode): SampleCell | null {
@@ -218,7 +219,9 @@ export function sampleCellOf(text: string, node: AstNode): SampleCell | null {
     const expression = node.expression as AstNode | undefined;
     const token = (expression?.literal ?? expression?.variable) as AstNode | undefined;
     if (token?.kind === '<string>' || token?.kind === '<variable>') {
-      return { text: typeof token.value === 'string' ? token.value.replace(/\r\n/g, '\n') : source, kind: 'string' };
+      if (typeof token.value !== 'string') return { text: source, kind: 'string' };
+      // Only a line ending the file itself holds is read as `\n`: a `\r\n` written with escapes is kept.
+      return { text: source.includes('\r\n') ? token.value.replace(/\r\n/g, '\n') : token.value, kind: 'string' };
     }
     if (token?.kind === '<number>') return { text: source, kind: 'number' };
     if (token?.kind === '<identifier>' && typeof token.value === 'string') {

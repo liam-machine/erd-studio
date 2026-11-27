@@ -188,6 +188,7 @@ export function readDbmlEverywhere(text: string): DbmlReading {
 /** One parser's diagnostic: `error`, `warning` or a lint `info`. */
 export interface DbmlDiagnostic {
   type: 'error' | 'warning' | 'info';
+  /** 1-based, as the parsers' diagnostics provider gives it (`startRow`). */
   line: number;
   text: string;
 }
@@ -300,14 +301,15 @@ function recordsOf(db: Loose): Pick<RichDbmlReading, 'records'> {
 }
 
 /**
- * The 0-based lines of `text` that a `records` block spans, keyword to
- * closing brace: where `{ dataLints: 'records' }` lets a diagnostic sit. The
+ * The 1-based lines of `text` (as {@link DbmlDiagnostic.line} counts them)
+ * that a `records` block spans, keyword to closing brace: where
+ * `{ dataLints: 'records' }` lets a diagnostic sit. The
  * rich export writes each block's keyword and closing brace on lines of
  * their own, so a line is in a block or out of it.
  */
 function recordsLines(text: string): Set<number> {
   const lines = new Set<number>();
-  const lineOf = (offset: number): number => text.slice(0, offset).split('\n').length - 1;
+  const lineOf = (offset: number): number => text.slice(0, offset).split('\n').length;
   for (const span of recordsSpansOf(text)) {
     for (let line = lineOf(span.start); line <= lineOf(Math.max(span.start, span.end - 1)); line++) lines.add(line);
   }
@@ -354,7 +356,7 @@ export function readDbmlRich(text: string, options: ReadDbmlRichOptions = {}): R
         && (d.type !== 'info' || options.infos === 'none' || !MODEL_LINT_INFOS.some((pattern) => pattern.test(d.text))),
     );
     if (refused.length > 0 || !db) {
-      throw new Error(`${parser}: ${refused.map((d) => `${d.type} ${d.line + 1}: ${d.text}`).join('; ') || 'no database'}`);
+      throw new Error(`${parser}: ${refused.map((d) => `${d.type} ${d.line}: ${d.text}`).join('; ') || 'no database'}`);
     }
     const reading = readRich(db);
     const json = JSON.stringify(reading);

@@ -1154,6 +1154,17 @@ describe('DBML round trip: sample rows, through a DBML project and the rich expo
     expect(status(planDbmlProjectImport(rich, tempWorkspace(), 'shop.dbml'))).toEqual(status(first));
   });
 
+  it('a carriage return and line feed written as escapes: the table file, the canvas and the export keep both characters', async () => {
+    const original = "Table orders {\n  id int [pk]\n  note varchar\n\n  records (id, note) {\n    1, 'x\\r\\ny'\n  }\n}\n";
+    const { plan, area } = await importIntoDbmlProject(original, 'orders.dbml');
+    const cell = { text: 'x\r\ny', kind: 'string' };
+    expect(plannedRows(plan).orders).toEqual([{ id: { text: '1', kind: 'number' }, note: cell }]);
+    expect(drawnRows(area).orders).toEqual(plannedRows(plan).orders);
+    const rich = toDbmlRich(area);
+    readDbmlRich(rich, { infos: 'none' });
+    expect(plannedRows(planDbmlProjectImport(rich, tempWorkspace(), 'shop.dbml')).orders).toEqual(plannedRows(plan).orders);
+  });
+
   it('dataLints: \'records\' allows a lint inside a records block, and nothing else', async () => {
     const { area } = await importIntoDbmlProject(fs.readFileSync(path.join(FOREIGN, 'ecommerce.dbml'), 'utf-8'), 'ecommerce.dbml');
     const rich = toDbmlRich(area);
@@ -1163,6 +1174,13 @@ describe('DBML round trip: sample rows, through a DBML project and the rich expo
     // A lint outside every block is still refused (a Ref to a column that is not a key, a model lint).
     const outside = `${rich}\nTable extra {\n  id int [pk]\n  code int\n}\nTable other {\n  code int\n}\nRef: other.code > extra.code\n`;
     expect(() => readDbmlRich(outside, { infos: 'none', dataLints: 'records' })).toThrow(/should be unique or primary key/);
+    // Nor is a model lint on the line right above a block's keyword (no blank line between): the
+    // parsers count lines from 1, and the allowance must too.
+    const above = [
+      'Table extra {', '  id int [pk]', '  code int', '  records (id) {', '    1', '  }', '}',
+      'Table r {', '  id int [pk]', '  code int [ref: > extra.code]', '  records (id) {', '    1', '  }', '}', '',
+    ].join('\n');
+    expect(() => readDbmlRich(above, { infos: 'none', dataLints: 'records' })).toThrow(/info (3|10): .*should be unique or primary key/);
     // An error is never allowed, even inside a block.
     expect(() => readDbmlRich(rich.replace(/^( {2}records \([^)]*\) \{\n {4})/m, '$1zz zz '), { infos: 'model', dataLints: 'records' })).toThrow(/error/);
   });

@@ -86,6 +86,13 @@ describe.each(STORAGE_PARSERS)('the rows a reading carries (%s)', (_label, parse
     expect(tableSampleDataOf(reading.table)).toEqual({ columns: ['a', 'b', 'c'], rows: KIND_ROWS, totalRows: 6 });
   });
 
+  it('a carriage return and line feed written with escapes stay as the parser reads them, in an LF and a CRLF file', () => {
+    const text = `${HEAD}  records (id, name) {\n    1, 'x\\r\\ny'\n    2, '''p\\r\\nq'''\n  }\n}\n`;
+    const rows = [[n('1'), s('x\r\ny')], [n('2'), s('p\r\nq')]];
+    expect(tableSampleDataOf(readOk(text, { sampleData: true }, parser).table)).toEqual({ columns: ['id', 'name'], rows, totalRows: 2 });
+    expect(tableSampleDataOf(readOk(text.replace(/\n/g, '\r\n'), { sampleData: true }, parser).table)).toEqual({ columns: ['id', 'name'], rows, totalRows: 2 });
+  });
+
   it('a block with no list holds every column in file order; a one-name list holds that column', () => {
     const none = readOk(`${HEAD}  records {\n    1, 'a', 1.5\n    2, , -2.5\n  }\n}\n`, { sampleData: true }, parser);
     expect(tableSampleDataOf(none.table)).toEqual({ columns: ['id', 'name', 'amount'], rows: [[n('1'), s('a'), n('1.5')], [n('2'), null, n('-2.5')]], totalRows: 2 });
