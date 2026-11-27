@@ -54,7 +54,11 @@ const LEAK = /SENTX7/;
 const head = (name: string): string => `Table gold.${name} {\n  id int [pk]\n  name varchar\n}\n`;
 const nested = (name: string, list: string, rows: string): string => `Table gold.${name} {\n  id int [pk]\n  name varchar\n\n  records ${list} {\n${rows}  }\n}\n`;
 
-/** Table files (stem → text): four that do not read, one that does. */
+/**
+ * Table files (stem → text): four whose block does not read, one whose block does. Two of the four
+ * (a dotted value, a value in the header) load without their rows, read-only (D37); the other two (a
+ * block open to the end of the file, a top-level block) still make the file unreadable.
+ */
 const TABLES: Record<string, string> = {
   dim_dotted: nested('dim_dotted', '(id, name)', `    1, ${SENTINEL}.doe\n`),
   dim_header: nested('dim_header', `(id, "${SENTINEL}")`, "    1, 'a'\n"),
@@ -63,6 +67,10 @@ const TABLES: Record<string, string> = {
   dim_good: nested('dim_good', '(id, name)', `    1, '${SENTINEL}'\n    2, '${SENTINEL}.doe'\n`),
 };
 const BROKEN = ['dim_dotted', 'dim_header', 'dim_unclosed', 'dim_top'];
+/** The broken tables that load without their rows. */
+const WITHOUT_ROWS = ['dim_dotted', 'dim_header'];
+/** The broken tables that still do not read. */
+const UNREADABLE = ['dim_unclosed', 'dim_top'];
 
 const DIAGRAM = `${Object.keys(TABLES).map((t) => `use { table gold.${t} } from '../tables/gold/${t}.dbml'`).join('\n')}\n\nProject catalog {\n  erd_schema_version: '7'\n}\n`;
 
@@ -120,13 +128,18 @@ describe('the log, the host error log and Send Feedback', () => {
   it('a broken block is reported, and the report holds no value', () => {
     const root = project();
     const library = readAll(root);
-    for (const name of BROKEN) {
+    for (const name of UNREADABLE) {
       const err = library.getTableFileError(name);
       expect(err, name).not.toBeNull();
       expect(err!.message).not.toMatch(LEAK);
     }
+    // A block that does not read leaves its table readable, without its rows (D37).
+    for (const name of WITHOUT_ROWS) {
+      expect(library.getTableFileError(name), name).toBeNull();
+      expect(JSON.stringify(library.getTable(name))).not.toMatch(LEAK);
+    }
     // The table is reported at its line, with its code: the log has the failures.
-    expect(recentLogLines().some((l) => /dim_dotted/.test(l) && /a value in the sample data \(records\) does not read as DBML \[4000\]/.test(l))).toBe(true);
+    expect(recentLogLines().some((l) => /dim_unclosed/.test(l) && /a value in the sample data \(records\) does not read as DBML \[1002\]/.test(l))).toBe(true);
     expect(recentLogLines().join('\n')).not.toMatch(LEAK);
 
     const refusals = BROKEN.map(refusalOf);
@@ -153,7 +166,7 @@ describe('the log, the host error log and Send Feedback', () => {
     }
   });
 
-  it('the diagram loads with the broken tables as placeholders, and its warnings hold no value', () => {
+  it('the diagram loads (two broken tables without their rows, two as placeholders), and its warnings hold no value', () => {
     const root = project();
     const layers = new LayerService(root, '.erd-studio');
     const service = new SubjectAreaService(layers);
@@ -241,8 +254,8 @@ describe('telemetry', () => {
     service.start();
     telemetry.activation('project_found', true, 1);
     const library = readAll(root);
-    // What the canvas records for a table file that does not read.
-    for (const name of BROKEN) {
+    // What the canvas records for a table file that does not read (a block that does not read no longer counts).
+    for (const name of UNREADABLE) {
       const err = library.getTableFileError(name)!;
       telemetry.error('modelFileParse');
       const detail = tableFileDetailCode(err.kind, err.code);
@@ -253,8 +266,7 @@ describe('telemetry', () => {
     expect(fetchMock).toHaveBeenCalled();
     const bodies = fetchMock.mock.calls.map((c) => String((c[1] as RequestInit).body));
     const text = bodies.join('\n');
-    // The error kinds stay as they were: a binding error in a block is still counted as one.
-    expect(text).toMatch(/modelFileDbmlBinding/);
+    expect(text).toMatch(/modelFileParse/);
     expect(text).toMatch(/"trail"/);
     expect(text).not.toMatch(LEAK);
   });
@@ -370,8 +382,12 @@ describe('the CLI with --json', () => {
   });
 });
 
-// The core reader's message, for the record: the same fixed words as the host shows.
-it('the reader keeps the code, line and column of a value error', () => {
+// The core reader, for the record: a value error in a block loads the table without its rows, read-only,
+// with the block's line; the multi-file compile keeps the error's code, line and column in fixed words.
+it('the reader names the block by its line, and the compile keeps the code, line and column of a value error', () => {
   const reading = parseTableDbml(TABLES.dim_dotted, 'dim_dotted', { schemaFolder: 'gold' });
-  expect(reading.ok ? undefined : reading.error).toMatchObject({ code: '4000', line: 6 });
+  expect(reading.ok && !reading.writable && reading.problems.map((p) => [p.code, p.line])).toEqual([['recordsUnreadable', 5]]);
+  expect(compileDbmlProject({ 't.dbml': TABLES.dim_dotted }, ['t.dbml'])['t.dbml']).toEqual([
+    { code: 4000, line: 6, column: 8, message: 'a value in the sample data (records) does not read as DBML' },
+  ]);
 });

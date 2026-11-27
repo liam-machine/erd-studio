@@ -173,15 +173,15 @@ describe('the canvas draws what core draws, for every DBML diagram', () => {
 });
 
 describe('sample rows as 2.0.10 left them (twin sample-rows-2.0): the canvas draws core\'s golden', () => {
-  // The golden is core's (loadDisplayDomain.sampleRows20.test.ts). Its stale records list is a
-  // placeholder there; a reader that loads such a table without its rows changes this golden on purpose.
-  it('the valid table with its columns and no rows, the stale one as a placeholder', async () => {
+  // The golden is core's (loadDisplayDomain.sampleRows20.test.ts). 2.0.10 drew its stale records list
+  // as a placeholder; the reader now loads such a table with its columns and without its rows (D37).
+  it('the valid table with its columns and no rows, the stale one with its columns and no rows', async () => {
     fs.cpSync(path.join(TWINS, 'sample-rows-2.0'), root, { recursive: true });
     const golden = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'packages', 'core', 'test', 'fixtures', 'golden', 'sample-rows-2.0.catalog.display.json'), 'utf-8')) as Record<string, unknown>;
-    const models = golden.models as Array<{ name: string; columns: unknown[]; loadError?: { kind: string; line: number; code: string }; sampleData?: unknown }>;
+    const models = golden.models as Array<{ name: string; columns: Array<{ name: string }>; loadError?: unknown; sampleData?: unknown }>;
     const store = models.find((m) => m.name === 'dim_store')!;
-    expect(store.loadError).toEqual({ kind: 'dbmlStructure', line: 7, code: '4000' });
-    expect(store.columns).toEqual([]);
+    expect(store.loadError).toBeUndefined();
+    expect(store.columns.map((c) => c.name)).toEqual(['store_key', 'store_name', 'opened_on']);
     expect(models.some((m) => 'sampleData' in m)).toBe(false);
     expect(drawn(await canvasOf('gold/diagrams/catalog.dbml'))).toEqual(drawn(golden));
   });

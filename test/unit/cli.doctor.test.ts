@@ -600,7 +600,7 @@ describe('doctor via main', () => {
 });
 
 describe('doctor on native DBML storage (§7.1, S4)', () => {
-  it('a sample value the parser quotes (a dotted bare word in records) never reaches the JSON; the table is reported in fixed words with its code (D37)', async () => {
+  it('a sample value the parser quotes (a dotted bare word in records) never reaches the JSON; the table reads without its rows and is reported in fixed words (D37)', async () => {
     const root = copyFixture('dbml-native');
     fs.writeFileSync(path.join(root, '.erd-studio', DIM_REGION), [
       'Table gold.dim_region {',
@@ -622,9 +622,12 @@ describe('doctor on native DBML storage (§7.1, S4)', () => {
     });
     expect(out).not.toMatch(/SENTX7/);
     const r = JSON.parse(out) as DoctorResult;
-    const unreadable = r.erd.unreadableModelFiles.find((u) => u.file.endsWith('dim_region.dbml'));
-    expect(unreadable).toMatchObject({ code: '4000', line: 6 });
-    expect(unreadable!.message).toContain('a value in the sample data (records) does not read as DBML [4000]');
+    // The table is no longer unreadable: it loads without its rows, read-only, with the reader's
+    // recordsUnreadable problem (the block's line), beside the compile's own diagnostic in fixed words.
+    expect(r.erd.unreadableModelFiles.find((u) => u.file.endsWith('dim_region.dbml'))).toBeUndefined();
+    const problems = r.erd.dbmlProblems.filter((p) => p.file?.endsWith('dim_region.dbml'));
+    expect(problems).toContainEqual(expect.objectContaining({ code: 'recordsUnreadable', line: 5 }));
+    expect(problems).toContainEqual(expect.objectContaining({ code: 4000, line: 6, message: 'a value in the sample data (records) does not read as DBML' }));
   });
 
   it('lists every DBML diagram, reports storage dbml and reads no .dbml as JSON', async () => {
