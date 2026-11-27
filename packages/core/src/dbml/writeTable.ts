@@ -471,8 +471,10 @@ interface SampleRowsNet {
 
 /**
  * The safety net on every write to a table with sample rows (D37): the
- * output must read (a real compile) as a writable table with no problem the
- * input did not have, and its block must hold exactly the old rows projected
+ * output must read (a real compile) as a writable table with no error, and
+ * no problem inside a block, that the input did not have (a new warning
+ * elsewhere is the edit's own, as in a file without rows), and its block
+ * must hold exactly the old rows projected
  * through the edit ({@link expectedSampleRows}). Otherwise the edit is
  * refused, naming only the file and the block's line.
  */
@@ -484,8 +486,13 @@ function keepsSampleRows(oldText: string, out: string, net: SampleRowsNet, parse
   let held: string;
   try {
     const reading = readTableFile(text, at.stem, at.schemaFolder !== undefined ? { schemaFolder: at.schemaFolder } : {}, parser).reading;
-    if (!reading.ok || !reading.writable || reading.problems.some((p) => !at.problems.has(String(p.code)))) return refuseNet();
+    if (!reading.ok || !reading.writable) return refuseNet();
     const blocks = recordsBlocksOf(compileOne(text, parser).ast).filter((b) => b.nested);
+    // A new problem is the rows' only when it is an error or sits in a block: a warning the edit itself
+    // brings elsewhere (a Move that keeps an old `schema:` property) is the writer's own answer, as without rows.
+    const inBlock = (line: number | undefined): boolean => line !== undefined
+      && blocks.some((b) => line >= lineAt(text, b.node.start) && line <= lineAt(text, b.node.end));
+    if (reading.problems.some((p) => !at.problems.has(String(p.code)) && (p.severity === 'error' || inBlock(p.line)))) return refuseNet();
     held = JSON.stringify(blocks.length === 0 ? null : blocks.length === 1 ? recordsCellsOf(text, blocks[0]) : blocks.length);
   } catch (err) {
     if (err instanceof DbmlEditRefused) throw err;

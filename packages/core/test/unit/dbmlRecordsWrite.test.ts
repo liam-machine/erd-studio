@@ -124,16 +124,23 @@ describe('refusals', () => {
   });
 
   it('a cut that would cross a line break throws the fixed internal message (file and line only), and nothing is written', () => {
-    const text = `${HEAD}  records (id, name) {\n    1, /* a note\n    over two lines */ '${SENTINEL}'\n  }\n}\n`;
+    // A row the parser reads on, over a line break, from a comma that leads the next line.
+    const text = `${HEAD}  records (id, name) {\n    1\n    , '${SENTINEL}'\n  }\n}\n`;
     const err = thrown(() => write(text, keep('name')));
     expect(err).not.toBeInstanceOf(DbmlEditRefused);
     expect(err.message).toBe('ERD Studio stopped this edit: a sample data (records) cut in gold/tables/gold/t.dbml at line 7 crossed a line break. Nothing was changed.');
   });
 
+  it('a block comment over two lines in a cut slot is one row, not a line break the cut crosses', () => {
+    const text = `${HEAD}  records (id, name) {\n    1, /* a note\n    over two lines */ '${SENTINEL}'\n  }\n}\n`;
+    expect(write(text, keep('name'))).toBe(`Table gold.t {\n  name varchar\n\n  records (name) {\n    '${SENTINEL}'\n  }\n}\n`);
+    expect(write(text, keep('id'))).toBe('Table gold.t {\n  id int\n\n  records (id) {\n    1\n  }\n}\n');
+  });
+
   it('every refusal message is free of the cell values', () => {
     const messages = [
       thrown(() => write(NEGATIVE, keep('amount', 'name'))).message,
-      thrown(() => write(`${HEAD}  records (id, name) {\n    1, /* x\n */ '${SENTINEL}'\n  }\n}\n`, keep('name'))).message,
+      thrown(() => write(`${HEAD}  records (id, name) {\n    1\n    , '${SENTINEL}'\n  }\n}\n`, keep('name'))).message,
     ];
     for (const m of messages) expect(m).not.toContain(SENTINEL);
   });

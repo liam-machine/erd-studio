@@ -389,9 +389,32 @@ export function planRecordsSplices(input: RecordsSpliceInput): { edits: TextEdit
 }
 
 /**
+ * Whether trivia (commas, spaces and comments: no string, which is always a
+ * value's own text) holds a line break outside its block comments. A `//`
+ * comment runs to its line break, which counts.
+ */
+function breaksLine(trivia: string): boolean {
+  for (let i = 0; i < trivia.length; i++) {
+    if (trivia[i] === '\n') return true;
+    if (trivia[i] !== '/') continue;
+    if (trivia[i + 1] === '/') {
+      const eol = trivia.indexOf('\n', i);
+      if (eol < 0) return false;
+      i = eol - 1;
+    } else if (trivia[i + 1] === '*') {
+      const close = trivia.indexOf('*/', i + 2);
+      if (close < 0) return trivia.includes('\n', i);
+      i = close + 1;
+    }
+  }
+  return false;
+}
+
+/**
  * Refuse (as a writer bug, with a fixed message) a row cut that holds a
- * line break outside the text of the values it removes: it would join two
- * rows, or cut a row away.
+ * line break outside the text of the values it removes and of the block
+ * comments in its slots (a `/* … *\/` over two lines between values is still
+ * one row to the parser): it would join two rows, or cut a row away.
  */
 function guard(text: string, file: string, span: { start: number; end: number }, own: readonly AstNode[]): void {
   let at = span.start;
@@ -402,7 +425,7 @@ function guard(text: string, file: string, span: { start: number; end: number },
     at = Math.max(at, node.end);
   }
   rest += text.slice(at, span.end);
-  if (rest.includes('\n')) throw new Error(recordsCutCrossedLineMessage(file, lineAt(text, span.start)));
+  if (breaksLine(rest)) throw new Error(recordsCutCrossedLineMessage(file, lineAt(text, span.start)));
 }
 
 /**

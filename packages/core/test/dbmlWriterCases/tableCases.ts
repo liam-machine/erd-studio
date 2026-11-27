@@ -835,6 +835,20 @@ export const RECORDS_CASES: WriterCase[] = [
   rowsCase('sample rows: a block before an indexes block and a Note is cut alone',
     "Table gold.t {\n  id int\n  name varchar\n\n  records (name) {\n    'a'\n  }\n\n  indexes {\n    id [unique]\n  }\n  Note: 'n'\n}\n", keepColumns('id'),
     "Table gold.t {\n  id int\n\n  indexes {\n    id [unique]\n  }\n  Note: 'n'\n}\n"),
+  // --- A block comment over two lines inside a cut slot: one row, so the cut may take its line break -----
+  rowsCase('sample rows: a block comment over two lines in a cut slot goes with the value',
+    `${ROWS_SHAPES_HEAD}  records (id, name, amount) {\n    1, /* a\n b */ 'a', 1.5\n    2, 'b', 2.5\n  }\n}\n`, keepColumns('id', 'amount'),
+    'Table gold.t {\n  id int\n  amount decimal\n\n  records (id, amount) {\n    1, 1.5\n    2, 2.5\n  }\n}\n'),
+  rowsCase('sample rows: …before the first value, which goes',
+    `${ROWS_SHAPES_HEAD}  records (id, name, amount) {\n    1 /* a\n b */, 'a', 1.5\n    2, 'b', 2.5\n  }\n}\n`, keepColumns('name', 'amount'),
+    "Table gold.t {\n  name varchar\n  amount decimal\n\n  records (name, amount) {\n    'a', 1.5\n    'b', 2.5\n  }\n}\n"),
+  // --- An edit the rows play no part in keeps a problem the edit itself brings (not the rows' to answer) ---
+  rowsCase('sample rows: a Move that keeps an old schema property leaves the rows and is not refused',
+    "Table gold.t [schema: 'gold'] {\n  id int\n\n  records (id) {\n    1\n  }\n}\n", (t) => { t.schema = 'silver'; },
+    "Table silver.t [schema: 'gold'] {\n  id int\n\n  records (id) {\n    1\n  }\n}\n", { requalify: true, schemaFolder: 'gold' }),
+  rowsCase('sample rows: …with no column list',
+    "Table gold.t [schema: 'gold'] {\n  id int\n  records {\n    1\n  }\n}\n", (t) => { t.schema = 'silver'; },
+    "Table silver.t [schema: 'gold'] {\n  id int\n  records {\n    1\n  }\n}\n", { requalify: true, schemaFolder: 'gold' }),
 ];
 
 /** A table file with `Metadata` blocks before and after the Table (D25). */
