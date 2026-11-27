@@ -58,6 +58,14 @@
  * - **Positions** and sticky-note boxes are written to two decimals.
  * - A **zero-column table** travels with a placeholder column, which the
  *   import drops: it comes back with no columns, as it was (its own test).
+ *
+ * Sample rows (D37, `records`) have their own round trip at the end: a DBML
+ * file imported into a DBML project (whose new table files keep the rows),
+ * read back with them, exported as rich DBML and imported again gives the
+ * same rows, an enum reference as Import writes it (text, its last segment).
+ * Only that round trip reads the export with `{ dataLints: 'records' }`:
+ * other tools' rows may not join (a lint inside a records block, which says
+ * what the user's rows hold); every golden stays strict.
  */
 
 import * as fs from 'fs';
@@ -73,10 +81,13 @@ import {
   loadDisplaySubjectArea,
   toDbmlRich,
 } from '@erd-studio/core';
-import type { DisplayRelationship, DisplaySubjectArea, DisplayTable } from '@erd-studio/core';
+import type { DisplayRelationship, DisplaySubjectArea, DisplayTable, SampleCell, SampleData } from '@erd-studio/core';
+import { dbmlStorageReader } from '@erd-studio/core/dbml';
 import { planDbmlImport, serializeDbmlImportDocument, type DbmlImportPlan } from '../../src/services/dbmlImport';
 import { readDbml, readDbmlImportLayout, type DbmlParserModule } from '../../src/services/dbmlImportParse';
+import { LayerService } from '../../src/services/layerService';
 import { TableLibraryService } from '../../src/services/logicalModelService';
+import { writeNewSubjectArea } from '../../src/services/newSubjectAreaWriter';
 import { MODEL_LINT_INFOS, parseDbmlRich, readDbmlRich } from '../../packages/core/test/exportParsers';
 
 const CORE_FIXTURES = path.resolve(__dirname, '../../packages/core/test/fixtures');
@@ -1013,5 +1024,163 @@ describe('DBML round trip: back into its own project', () => {
       // And the subject area it came from still draws as it did.
       expect(canonical(await loadArea(ws, domainPath)), label).toEqual(canonical(area));
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Sample rows (D37): a DBML project keeps them, the rich export writes them
+// ---------------------------------------------------------------------------
+
+/** Rows by column (the order a writer picks for signs aside), each row's cells under their column's name. */
+function rowsByColumn(data: SampleData | undefined): Array<Record<string, SampleCell | null>> | undefined {
+  return data?.rows.map((row) => Object.fromEntries(data.columns.map((c, i) => [c, row[i] ?? null] as const).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))));
+}
+
+/** Import DBML's plan for `text` in the DBML project at `workspace` (as the command plans a DBML project's import). */
+function planDbmlProjectImport(text: string, workspace: string, fileName: string): DbmlImportPlan {
+  const read = readDbml(text);
+  if (!read.ok) throw new Error(`does not read: ${JSON.stringify(read.diagnostics)}`);
+  const library = new TableLibraryService(workspace);
+  const layout = readDbmlImportLayout(text);
+  return planDbmlImport({
+    model: read.model,
+    ...(layout ? { layout } : {}),
+    layer: 'gold',
+    subjectAreaName: 'shop',
+    fileName,
+    library: { findTableName: (n) => library.findTableNameIgnoringCase(n), getTable: (n) => library.getTable(n) },
+    libraryRelationships: true,
+    diagramCopies: [],
+    diagramHoldsNoRelationships: true,
+    schemaScopedNames: true,
+    sampleRows: true,
+  });
+}
+
+/** Each new table's rows, by the table's name. */
+function plannedRows(plan: DbmlImportPlan): Record<string, Array<Record<string, SampleCell | null>> | undefined> {
+  return Object.fromEntries(plan.newTables.map((t) => [t.name, rowsByColumn(plan.sampleData?.get(t))]));
+}
+
+/** Each table's rows as a diagram draws them, by the table's name. */
+function drawnRows(area: DisplaySubjectArea): Record<string, Array<Record<string, SampleCell | null>> | undefined> {
+  return Object.fromEntries(area.models.map((m) => [m.name, rowsByColumn(m.sampleData)]));
+}
+
+/**
+ * Import `text` into a fresh DBML project as Import DBML… keeps it (new table files with their
+ * records blocks, the diagram in gold/diagrams/), and load the diagram back with its rows.
+ */
+async function importIntoDbmlProject(text: string, fileName: string): Promise<{ plan: DbmlImportPlan; area: DisplaySubjectArea; workspace: string }> {
+  const workspace = tempWorkspace();
+  const plan = planDbmlProjectImport(text, workspace, fileName);
+  const tableLibraryService = new TableLibraryService(workspace);
+  const outcome = await writeNewSubjectArea({
+    workspaceRoot: workspace,
+    semanticDir: '.erd-studio',
+    domainPath: path.join(workspace, '.erd-studio', 'gold', 'diagrams', 'shop.dbml'),
+    newTables: plan.newTables,
+    ...(plan.sampleData ? { sampleData: plan.sampleData } : {}),
+    folder: 'gold',
+    schemaFromSource: true,
+    changedTables: plan.changedLibraryTables,
+    documentText: (tableNaming) => serializeDbmlImportDocument(plan.document, tableNaming),
+    document: () => ({ ...plan.document, logical: { ...plan.document.logical, relationships: [] } }) as unknown as Record<string, unknown>,
+  }, { layerService: new LayerService(workspace, '.erd-studio'), tableLibraryService });
+  if (!outcome.ok) throw new Error(`the import was not written: ${String(outcome.error)}`);
+  const area = await loadDisplaySubjectArea({
+    domainPath: '.erd-studio/gold/diagrams/shop.dbml',
+    readFile: fsReadFile(workspace),
+    readOnly: false,
+    warn: () => {},
+    dbml: dbmlStorageReader,
+    readSampleData: true,
+  });
+  return { plan, area, workspace };
+}
+
+describe('DBML round trip: sample rows, through a DBML project and the rich export', () => {
+  /** Every DBML file under test/fixtures/dbml that holds rows. */
+  const files = (fs.readdirSync(path.resolve(FOREIGN, '..'), { recursive: true }) as string[])
+    .filter((f) => f.endsWith('.dbml') && /^\s*records\b/im.test(fs.readFileSync(path.resolve(FOREIGN, '..', f), 'utf-8')))
+    .sort();
+
+  it('has files with rows to read', () => {
+    expect(files).toEqual(expect.arrayContaining(['foreign/ecommerce.dbml', 'foreign/sample-data.dbml']));
+  });
+
+  it.each(files)('%s: the rows Import keeps load, export as rich DBML and import again unchanged', async (file) => {
+    const text = fs.readFileSync(path.resolve(FOREIGN, '..', file), 'utf-8');
+    const { plan, area } = await importIntoDbmlProject(text, path.basename(file));
+    const kept = plannedRows(plan);
+    expect(Object.values(kept).some((rows) => rows !== undefined)).toBe(true);
+    // The new table files hold exactly the rows Import planned.
+    expect(drawnRows(area)).toEqual(kept);
+
+    // The rich export writes them: no error, and no warning or lint info but a model one the source
+    // draws too, or a data lint inside a records block (the source's own rows, which may not join).
+    const rich = toDbmlRich(area);
+    expect(rich).toMatch(/^ {2}records \(/m);
+    const source = parseDbmlRich(text);
+    const read = readDbmlRich(rich, { infos: 'model', dataLints: 'records' });
+    // (readDbmlRich refuses any other diagnostic: outside a block, only a model lint info passes.)
+    parseDbmlRich(rich).forEach((parse, i) => {
+      expect(parse.diagnostics.filter((d) => d.type === 'error'), parse.parser).toEqual([]);
+      // A model lint info is one the source draws in the same parser.
+      const infos = parse.diagnostics.filter((d) => d.type === 'info' && MODEL_LINT_INFOS.some((pattern) => pattern.test(d.text)));
+      for (const info of infos) expect(source[i].diagnostics.some((d) => d.type === 'info' && d.text === info.text), `${parse.parser}: ${info.text}`).toBe(true);
+    });
+    expect(read.records?.length).toBe(Object.values(kept).filter((rows) => rows !== undefined).length);
+
+    // Imported again, the export gives back the same rows, table by table.
+    const again = planDbmlProjectImport(rich, tempWorkspace(), 'shop.dbml');
+    expect(plannedRows(again)).toEqual(kept);
+  });
+
+  it('an enum reference: the cell the export imports back is the cell Import gives for the original file', async () => {
+    const original = [
+      'Enum sales.order_status {', '  placed', '  "in progress"', '}', '',
+      'Table sales.orders {', '  id int [pk]', '  status sales.order_status', '',
+      '  records (id, status) {', '    1, sales.order_status.placed', '    2, sales.order_status."in progress"', '    3, null', '  }', '}', '',
+    ].join('\n');
+    const first = planDbmlProjectImport(original, tempWorkspace(), 'orders.dbml');
+    const status = (plan: DbmlImportPlan) => plannedRows(plan).orders?.map((row) => row.status);
+    expect(status(first)).toEqual([{ text: 'placed', kind: 'string' }, { text: 'in progress', kind: 'string' }, null]);
+
+    const { area } = await importIntoDbmlProject(original, 'orders.dbml');
+    const rich = toDbmlRich(area);
+    expect(rich).toContain("  records (id, status) {\n    1, 'placed'\n    2, 'in progress'\n    3, null\n  }");
+    readDbmlRich(rich, { infos: 'none' }); // Strict: these rows join and fit their types.
+    expect(status(planDbmlProjectImport(rich, tempWorkspace(), 'shop.dbml'))).toEqual(status(first));
+  });
+
+  it('dataLints: \'records\' allows a lint inside a records block, and nothing else', async () => {
+    const { area } = await importIntoDbmlProject(fs.readFileSync(path.join(FOREIGN, 'ecommerce.dbml'), 'utf-8'), 'ecommerce.dbml');
+    const rich = toDbmlRich(area);
+    // The source's own rows raise a data lint in at least one parser: refused by default.
+    expect(() => readDbmlRich(rich, { infos: 'model' })).toThrow();
+    expect(() => readDbmlRich(rich, { infos: 'model', dataLints: 'records' })).not.toThrow();
+    // A lint outside every block is still refused (a Ref to a column that is not a key, a model lint).
+    const outside = `${rich}\nTable extra {\n  id int [pk]\n  code int\n}\nTable other {\n  code int\n}\nRef: other.code > extra.code\n`;
+    expect(() => readDbmlRich(outside, { infos: 'none', dataLints: 'records' })).toThrow(/should be unique or primary key/);
+    // An error is never allowed, even inside a block.
+    expect(() => readDbmlRich(rich.replace(/^( {2}records \([^)]*\) \{\n {4})/m, '$1zz zz '), { infos: 'model', dataLints: 'records' })).toThrow(/error/);
+  });
+
+  it('no other test reads a rich export with data lints allowed', () => {
+    const roots = [path.resolve(__dirname, '..'), path.resolve(__dirname, '../../packages')];
+    // The helper that defines the option, and this file.
+    const DEFINES = 'packages/core/test/exportParsers.ts';
+    const hits: string[] = [];
+    const walk = (dir: string): void => {
+      for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+        if (e.name === 'node_modules' || e.name === 'dist' || e.name === 'fixtures') continue;
+        const full = path.join(dir, e.name);
+        if (e.isDirectory()) walk(full);
+        else if (/\.tsx?$/.test(e.name) && /dataLints:\s*'records'/.test(fs.readFileSync(full, 'utf-8'))) hits.push(path.relative(path.resolve(__dirname, '../..'), full));
+      }
+    };
+    roots.forEach(walk);
+    expect(hits.filter((f) => f !== DEFINES).sort()).toEqual(['test/unit/dbmlRoundTrip.test.ts']);
   });
 });
