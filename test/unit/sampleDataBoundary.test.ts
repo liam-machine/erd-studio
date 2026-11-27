@@ -63,6 +63,8 @@ const SAMPLE_DATA_FILES: readonly string[] = [
   'packages/core/src/dbml/index.ts',
   'packages/core/src/displayDomain.ts',
   'packages/core/src/loadDisplayDomain.ts',
+  // A v4 inline table's hand-written key is dropped here, so rows come only from the table reader.
+  'packages/core/src/domain.ts',
   // The host: the one table read that asks for rows, and Convert's guard that drops them before a YAML text.
   'src/services/logicalModelService.ts',
   'src/services/dbmlConversion.ts',

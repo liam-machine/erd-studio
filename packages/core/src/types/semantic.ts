@@ -316,10 +316,30 @@ export interface TableWithSampleData extends SemanticTable {
   sampleData: SampleData;
 }
 
-/** The sample rows carried by a table that was read with them, if any. */
+const SAMPLE_CELL_KINDS: ReadonlySet<string> = new Set<SampleCell['kind']>(['string', 'number', 'boolean', 'expression', 'enum']);
+
+/** Whether `value` is a {@link SampleCell} or null, as the table reader builds them. */
+function isSampleCellOrNull(value: unknown): boolean {
+  if (value === null) return true;
+  if (!value || typeof value !== 'object') return false;
+  const cell = value as Partial<SampleCell>;
+  return typeof cell.text === 'string' && typeof cell.kind === 'string' && SAMPLE_CELL_KINDS.has(cell.kind);
+}
+
+/**
+ * The sample rows carried by a table that was read with them, if any. Only
+ * a well-formed {@link SampleData} counts (a list of names, rows of cells or
+ * nulls, a row count): anything else under the key is ignored, so a value
+ * that did not come from the table reader never reaches a display.
+ */
 export function tableSampleDataOf(t: SemanticTable): SampleData | undefined {
-  const candidate = (t as Partial<TableWithSampleData>).sampleData;
-  return candidate && typeof candidate === 'object' && Array.isArray(candidate.rows) ? candidate : undefined;
+  const candidate = (t as Partial<TableWithSampleData>).sampleData as unknown;
+  if (!candidate || typeof candidate !== 'object') return undefined;
+  const { columns, rows, totalRows } = candidate as Partial<SampleData>;
+  if (!Array.isArray(columns) || !columns.every((c) => typeof c === 'string')) return undefined;
+  if (!Array.isArray(rows) || !rows.every((row) => Array.isArray(row) && row.every(isSampleCellOrNull))) return undefined;
+  if (typeof totalRows !== 'number' || !Number.isFinite(totalRows)) return undefined;
+  return candidate as SampleData;
 }
 
 /**

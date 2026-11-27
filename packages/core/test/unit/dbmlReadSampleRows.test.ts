@@ -14,6 +14,8 @@
  *   block, still makes the file unreadable, as before.
  * - The table writer refuses such a table (R1), naming the file and line.
  */
+import * as fs from 'fs';
+import * as path from 'path';
 import { describe, expect, it } from 'vitest';
 
 import { parseTableDbml } from '../../src/dbml/readTable';
@@ -21,6 +23,7 @@ import { editTableDbml } from '../../src/dbml/writeTable';
 import { DbmlEditRefused } from '../../src/dbml/errors';
 import { dbmlStorageReader } from '../../src/dbml/index';
 import { toDisplaySubjectArea } from '../../src/displayDomain';
+import { loadDisplaySubjectArea } from '../../src/loadDisplayDomain';
 import { SAMPLE_ROWS_LIMIT, tableSampleDataOf, type SampleCell, type SampleData, type SemanticTable } from '../../src/types/semantic';
 import type { DbmlTableReading } from '../../src/types/dbmlStorage';
 import { STORAGE_PARSERS } from '../dbmlParsers';
@@ -247,5 +250,69 @@ describe('the display copies the rows, and only the rows a reading carried', () 
     expect(Object.keys(display.models[0]).pop()).toBe('sampleData');
     expect(Object.keys(display.models[1])).not.toContain('sampleData');
     expect(Object.keys(display.models[2])).not.toContain('sampleData');
+  });
+});
+
+describe('rows come only from the table reader: a sampleData key written anywhere else is ignored', () => {
+  const V4 = path.resolve(__dirname, '../fixtures/v4-inline');
+  const DOMAIN = '.erd-studio/bronze/orders.json';
+  /** The v4-inline fixture with `value` written as a `sampleData` key into each inline table. */
+  const withKey = (value: unknown): Record<string, string> => {
+    const doc = JSON.parse(fs.readFileSync(path.join(V4, DOMAIN), 'utf-8')) as { logical: { models: Array<Record<string, unknown>> } };
+    for (const model of doc.logical.models) model.sampleData = value;
+    return {
+      [DOMAIN]: JSON.stringify(doc, null, 2),
+      '.erd-studio/layers.json': fs.readFileSync(path.join(V4, '.erd-studio/layers.json'), 'utf-8'),
+    };
+  };
+  const load = (files: Record<string, string>, readSampleData: boolean) => loadDisplaySubjectArea({
+    domainPath: DOMAIN,
+    readFile: async (p) => files[p] ?? null,
+    readOnly: false,
+    warn: () => {},
+    readSampleData,
+  });
+
+  it.each([
+    ['well formed', { columns: ['order_line_id'], rows: [[{ text: '1', kind: 'number' }]], totalRows: 1 }],
+    ['malformed', { columns: 'not-a-list', rows: [[42, 'x']] }],
+  ])('a v4 inline table holding a %s key draws as it did before rows were read, with readSampleData off or on', async (_shape, value) => {
+    const before = JSON.stringify(await load(withKey(undefined), false));
+    for (const readSampleData of [false, true]) {
+      const display = await load(withKey(value), readSampleData);
+      expect(display.models.length).toBeGreaterThan(0);
+      for (const model of display.models) expect(Object.keys(model), model.name).not.toContain('sampleData');
+      expect(JSON.stringify(display)).toBe(before);
+    }
+  });
+
+  it('tableSampleDataOf accepts only what the reader builds: names, rows of cells or nulls, a row count', () => {
+    const good: SampleData = { columns: ['id', 'name'], rows: [[n('1'), null], [{ text: '`now()`', kind: 'expression' }, { text: 'st.active', kind: 'enum' }]], totalRows: 2 };
+    const table = (sampleData: unknown): SemanticTable => ({ name: 't', columns: [], sampleData } as SemanticTable);
+    expect(tableSampleDataOf(table(good))).toBe(good);
+    expect(tableSampleDataOf(table({ columns: [], rows: [], totalRows: 0 }))).toEqual({ columns: [], rows: [], totalRows: 0 });
+    for (const bad of [
+      undefined, null, 'rows', [], {},
+      { columns: 'not-a-list', rows: [], totalRows: 0 },
+      { columns: ['id', 7], rows: [], totalRows: 0 },
+      { columns: ['id'], rows: 'x', totalRows: 0 },
+      { columns: ['id'], rows: ['not-a-row'], totalRows: 1 },
+      { columns: ['id'], rows: [[42]], totalRows: 1 },
+      { columns: ['id'], rows: [['x']], totalRows: 1 },
+      { columns: ['id'], rows: [[{ text: 1, kind: 'number' }]], totalRows: 1 },
+      { columns: ['id'], rows: [[{ text: '1', kind: 'date' }]], totalRows: 1 },
+      { columns: ['id'], rows: [[{ text: '1' }]], totalRows: 1 },
+      { columns: ['id'], rows: [[n('1')]] },
+      { columns: ['id'], rows: [[n('1')]], totalRows: '1' },
+      { columns: ['id'], rows: [[n('1')]], totalRows: Number.NaN },
+    ]) expect(tableSampleDataOf(table(bad)), JSON.stringify(bad) ?? String(bad)).toBeUndefined();
+  });
+
+  it('the display drops a malformed key on a table handed to it in memory', () => {
+    const display = toDisplaySubjectArea(
+      { schemaVersion: 7, domain: 'd', layer: 'gold', stage: 'logical', description: '', models: [{ name: 'm', columns: [], sampleData: { columns: 'x', rows: [[42]] } } as SemanticTable], relationships: [] },
+      { viewConfig: {}, layerConfig: undefined, readOnly: false },
+    );
+    expect(Object.keys(display.models[0])).not.toContain('sampleData');
   });
 });
