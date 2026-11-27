@@ -614,6 +614,229 @@ export const FIELD_CASES: WriterCase[] = [
     }),
 ];
 
+// ---------------------------------------------------------------------------
+// Sample rows (D37): a nested `records` block follows its columns
+// ---------------------------------------------------------------------------
+
+/** The table the §3.3 matrix edits; each block form goes before its closing brace, after a blank line. */
+export const ROWS_COLUMNS = 'Table gold.t {\n  id int\n  name varchar\n  amount decimal\n  status varchar\n}\n';
+
+/** `table` (ending `}\n`) with `block` before its closing brace, after a blank line; `table` itself for no block. */
+export function withRows(table: string, block: string): string {
+  return block === '' ? table : table.replace(/\}(\r?\n)?$/, `\n${block}}\n`);
+}
+
+/** Each column-list form (§3.3), with rows that fit the columns' types. */
+export const ROWS_BLOCKS = {
+  tuple: "  records (id, name, amount) {\n    1, 'a', 1.5\n    2, 'b', 2.5\n  }\n",
+  group: "  records (name) {\n    'a'\n    'b'\n  }\n",
+  none: "  records {\n    1, 'a', 1.5, 'x'\n    2, 'b', 2.5, 'y'\n  }\n",
+  empty: "  records () {\n    1, 'a'\n  }\n",
+} as const;
+
+type RowsForm = keyof typeof ROWS_BLOCKS;
+/** The text in a variant: LF as written, every line break CRLF, or LF after a byte-order mark. */
+type RowsVariant = 'LF' | 'CRLF' | 'BOM';
+const inVariant = (variant: RowsVariant, lf: string): string =>
+  variant === 'CRLF' ? lf.replace(/\n/g, '\r\n') : variant === 'BOM' ? `﻿${lf}` : lf;
+
+const UNTOUCHED = Symbol('untouched');
+/** One row of the §3.3 table: the edit, and what each form's block becomes (its text, '' when it is cut whole). */
+interface RowsEdit {
+  name: string;
+  change: (t: SemanticTable) => void;
+  options?: Parameters<typeof editTableDbml>[2];
+  blocks: Record<RowsForm, string | typeof UNTOUCHED>;
+}
+
+const ALL_UNTOUCHED: Record<RowsForm, typeof UNTOUCHED> = { tuple: UNTOUCHED, group: UNTOUCHED, none: UNTOUCHED, empty: UNTOUCHED };
+const renameColumn = (from: string, to: string) => (t: SemanticTable): void => { t.columns!.find((c) => c.name === from)!.name = to; };
+const keepColumns = (...names: string[]) => (t: SemanticTable): void => { t.columns = t.columns!.filter((c) => names.includes(c.name)); };
+
+const ROWS_EDITS: RowsEdit[] = [
+  { name: 'a retype leaves the block', change: (t) => { t.columns![3].dataType = 'text'; }, blocks: ALL_UNTOUCHED },
+  { name: 'key flags leave the block', change: (t) => { t.columns![0].isNaturalKey = true; t.columns![1].isForeignKey = true; }, blocks: ALL_UNTOUCHED },
+  {
+    name: 'notes, fields and the description leave the block',
+    change: (t) => { t.columns![1].description = 'The name'; t.columns![2].meta = { unit: 'AUD' }; t.description = 'Sample'; t.rationale = { purpose: 'p' }; },
+    blocks: ALL_UNTOUCHED,
+  },
+  { name: 'a table rename leaves the block', change: (t) => { t.name = 't2'; }, options: { rename: true }, blocks: ALL_UNTOUCHED },
+  { name: 'a move to another schema leaves the block', change: (t) => { t.schema = 'silver'; }, options: { requalify: true }, blocks: ALL_UNTOUCHED },
+  {
+    name: 'a rename re-spells the list name (quoted when it needs to be)',
+    change: renameColumn('name', 'full name'),
+    blocks: {
+      tuple: "  records (id, \"full name\", amount) {\n    1, 'a', 1.5\n    2, 'b', 2.5\n  }\n",
+      group: "  records (\"full name\") {\n    'a'\n    'b'\n  }\n",
+      none: UNTOUCHED,
+      empty: UNTOUCHED,
+    },
+  },
+  {
+    name: 'a case-only rename re-spells the list name',
+    change: renameColumn('name', 'Name'),
+    blocks: {
+      tuple: "  records (id, Name, amount) {\n    1, 'a', 1.5\n    2, 'b', 2.5\n  }\n",
+      group: "  records (Name) {\n    'a'\n    'b'\n  }\n",
+      none: UNTOUCHED,
+      empty: UNTOUCHED,
+    },
+  },
+  {
+    name: 'a drop cuts the name and that value from every row',
+    change: keepColumns('id', 'amount', 'status'),
+    blocks: {
+      tuple: '  records (id, amount) {\n    1, 1.5\n    2, 2.5\n  }\n',
+      group: '',
+      none: "  records {\n    1, 1.5, 'x'\n    2, 2.5, 'y'\n  }\n",
+      empty: UNTOUCHED,
+    },
+  },
+  {
+    name: 'a drop of a column the list does not name leaves the block',
+    change: keepColumns('id', 'name', 'amount'),
+    blocks: { tuple: UNTOUCHED, group: UNTOUCHED, none: "  records {\n    1, 'a', 1.5\n    2, 'b', 2.5\n  }\n", empty: UNTOUCHED },
+  },
+  {
+    name: 'a batch drop merges its cuts per row',
+    change: keepColumns('name', 'status'),
+    blocks: {
+      tuple: "  records (name) {\n    'a'\n    'b'\n  }\n",
+      group: UNTOUCHED,
+      none: "  records {\n    'a', 'x'\n    'b', 'y'\n  }\n",
+      empty: UNTOUCHED,
+    },
+  },
+  {
+    // matchColumns reads a rename beside a drop as a drop plus an add, as Refs do.
+    name: 'a rename and a drop in one edit cut both values',
+    change: (t) => { keepColumns('id', 'name', 'status')(t); renameColumn('name', 'label')(t); },
+    blocks: {
+      tuple: '  records (id) {\n    1\n    2\n  }\n',
+      group: '',
+      none: "  records (id, status) {\n    1, 'x'\n    2, 'y'\n  }\n",
+      empty: UNTOUCHED,
+    },
+  },
+  {
+    name: 'dropping the last listed column cuts the whole block',
+    change: keepColumns('status'),
+    blocks: { tuple: '', group: '', none: "  records {\n    'x'\n    'y'\n  }\n", empty: UNTOUCHED },
+  },
+  {
+    name: 'emptying the table to the placeholder cuts the whole block',
+    change: (t) => { t.columns = []; },
+    blocks: { tuple: '', group: '', none: '', empty: UNTOUCHED },
+  },
+  {
+    name: 'an add writes the old column list into a block that has none, and touches no row',
+    change: (t) => { t.columns!.push({ name: 'extra', dataType: 'int', description: '' }); },
+    blocks: { tuple: UNTOUCHED, group: UNTOUCHED, none: "  records (id, name, amount, status) {\n    1, 'a', 1.5, 'x'\n    2, 'b', 2.5, 'y'\n  }\n", empty: UNTOUCHED },
+  },
+  {
+    name: 'a reorder writes the old column list (in the old order) into a block that has none',
+    change: (t) => { t.columns = [t.columns![3], t.columns![0], t.columns![1], t.columns![2]]; },
+    blocks: { tuple: UNTOUCHED, group: UNTOUCHED, none: "  records (id, name, amount, status) {\n    1, 'a', 1.5, 'x'\n    2, 'b', 2.5, 'y'\n  }\n", empty: UNTOUCHED },
+  },
+];
+
+/** A sample-rows case on table `t`, its output checked byte for byte. */
+function rowsCase(name: string, input: string, change: (t: SemanticTable) => void, expected: string, options: Parameters<typeof editTableDbml>[2] = {}): WriterCase {
+  return tableCase(name, 't', input, change, (out) => { expect(out).toBe(expected); }, undefined, options);
+}
+
+/** The §3.3 table: every edit on every list form, in LF, CRLF and after a byte-order mark. */
+function rowsMatrix(): WriterCase[] {
+  const cases: WriterCase[] = [];
+  for (const variant of ['LF', 'CRLF', 'BOM'] as const) {
+    for (const edit of ROWS_EDITS) {
+      // The same edit of the table with no block: the lines outside the block, byte for byte.
+      const twin = edited(ROWS_COLUMNS, edit.change, 't', edit.options ?? {});
+      for (const form of Object.keys(ROWS_BLOCKS) as RowsForm[]) {
+        const block = edit.blocks[form];
+        const expected = withRows(twin, block === UNTOUCHED ? ROWS_BLOCKS[form] : block);
+        cases.push(rowsCase(
+          `sample rows (${form} list, ${variant}): ${edit.name}`,
+          inVariant(variant, withRows(ROWS_COLUMNS, ROWS_BLOCKS[form])),
+          edit.change,
+          inVariant(variant, expected),
+          edit.options,
+        ));
+      }
+    }
+  }
+  return cases;
+}
+
+/** Rows written by hand or by a script: empty fields, inline rows, `'''` values, comments, a block among the columns. */
+const ROWS_SHAPES = 'Table gold.t {\n  id int\n  name varchar\n  amount decimal\n\n  records (id, name, amount) {\n    1, \'a\', 1.5\n    , \'b\', 2.5\n    3, , 3.5\n    4, \'d\',\n    , , 5.5\n  }\n}\n';
+const ROWS_SHAPES_HEAD = 'Table gold.t {\n  id int\n  name varchar\n  amount decimal\n\n';
+
+/** Sample-row shapes (D37), each edit spliced at comma tokens, never at an empty field's offset. */
+export const RECORDS_CASES: WriterCase[] = [
+  ...rowsMatrix(),
+  // --- Empty fields: the one leading a row sits (to the parser) at the end of the row before ----------
+  rowsCase('sample rows: dropping the first column keeps rows 2+ that start with an empty field apart', ROWS_SHAPES, keepColumns('name', 'amount'),
+    "Table gold.t {\n  name varchar\n  amount decimal\n\n  records (name, amount) {\n    'a', 1.5\n    'b', 2.5\n    , 3.5\n    'd',\n    , 5.5\n  }\n}\n"),
+  rowsCase('sample rows: dropping the middle column keeps leading, middle and trailing empty fields', ROWS_SHAPES, keepColumns('id', 'amount'),
+    'Table gold.t {\n  id int\n  amount decimal\n\n  records (id, amount) {\n    1, 1.5\n    , 2.5\n    3, 3.5\n    4,\n    , 5.5\n  }\n}\n'),
+  rowsCase('sample rows: dropping the last column leaves no row ending in a space', ROWS_SHAPES, keepColumns('id', 'name'),
+    "Table gold.t {\n  id int\n  name varchar\n\n  records (id, name) {\n    1, 'a'\n    , 'b'\n    3,\n    4, 'd'\n    ,\n  }\n}\n"),
+  rowsCase('sample rows: a one-value row left with an empty field reads null, never a blank line', ROWS_SHAPES, keepColumns('id'),
+    'Table gold.t {\n  id int\n\n  records (id) {\n    1\n    null\n    3\n    4\n    null\n  }\n}\n'),
+  rowsCase('sample rows: …in every column that is kept alone', ROWS_SHAPES, keepColumns('name'),
+    "Table gold.t {\n  name varchar\n\n  records (name) {\n    'a'\n    'b'\n    null\n    'd'\n    null\n  }\n}\n"),
+  rowsCase('sample rows: …the last column too', ROWS_SHAPES, keepColumns('amount'),
+    'Table gold.t {\n  amount decimal\n\n  records (amount) {\n    1.5\n    2.5\n    3.5\n    null\n    5.5\n  }\n}\n'),
+  rowsCase('sample rows: …in a CRLF file', ROWS_SHAPES.replace(/\n/g, '\r\n'), keepColumns('id'),
+    'Table gold.t {\r\n  id int\r\n\r\n  records (id) {\r\n    1\r\n    null\r\n    3\r\n    4\r\n    null\r\n  }\r\n}\r\n'),
+  rowsCase('sample rows: an empty-field row kept with two values stays a row of two empty fields',
+    `${ROWS_SHAPES_HEAD}  records (id, name, amount) {\n    1, 'a', 1.5\n    , , 2.5\n  }\n}\n`, keepColumns('id', 'name'),
+    `Table gold.t {\n  id int\n  name varchar\n\n  records (id, name) {\n    1, 'a'\n    ,\n  }\n}\n`),
+  // --- Inline rows, ''' values, comments, a list over several lines, a list naming a column twice ---------
+  rowsCase('sample rows: a row on the brace line loses its first value',
+    "Table gold.t {\n  id int\n  name varchar\n  records (id, name) { 1, 'a'\n    2, 'b' }\n}\n", keepColumns('name'),
+    "Table gold.t {\n  name varchar\n  records (name) { 'a'\n    'b' }\n}\n"),
+  rowsCase('sample rows: a row on the brace line loses its last value',
+    "Table gold.t {\n  id int\n  name varchar\n  records (id, name) { 1, 'a'\n    2, 'b' }\n}\n", keepColumns('id'),
+    'Table gold.t {\n  id int\n  records (id) { 1\n    2 }\n}\n'),
+  rowsCase("sample rows: a ''' value over two lines is kept whole",
+    `${ROWS_SHAPES_HEAD}  records (id, name, amount) {\n    1, '''two\n    lines''', 1.5\n    2, 'b', 2.5\n  }\n}\n`, keepColumns('name', 'amount'),
+    "Table gold.t {\n  name varchar\n  amount decimal\n\n  records (name, amount) {\n    '''two\n    lines''', 1.5\n    'b', 2.5\n  }\n}\n"),
+  rowsCase('sample rows: comments outside a cut value stay; one inside its slot goes with it',
+    `${ROWS_SHAPES_HEAD}  // rows from a script\n  records (id, name, amount) { // header\n    // the first row\n    1, /* one */ 'a', 1.5 // tail\n    2, 'b' /* two */, 2.5\n  }\n}\n`, keepColumns('id', 'amount'),
+    'Table gold.t {\n  id int\n  amount decimal\n\n  // rows from a script\n  records (id, amount) { // header\n    // the first row\n    1, 1.5 // tail\n    2, 2.5\n  }\n}\n'),
+  rowsCase('sample rows: a list over several lines loses a name and keeps its layout',
+    "Table gold.t {\n  id int\n  name varchar\n  records (\n    id,\n    name\n  ) {\n    1, 'a'\n  }\n}\n", keepColumns('name'),
+    "Table gold.t {\n  name varchar\n  records (\n    name\n  ) {\n    'a'\n  }\n}\n"),
+  rowsCase('sample rows: a list naming a column twice loses both, with both values',
+    "Table gold.t {\n  id int\n  name varchar\n  records (id, name, id) {\n    1, 'a', 1\n  }\n}\n", keepColumns('name'),
+    "Table gold.t {\n  name varchar\n  records (name) {\n    'a'\n  }\n}\n"),
+  rowsCase('sample rows: a negative second column stays when another column goes',
+    `${ROWS_SHAPES_HEAD}  records (id, amount, name) {\n    1, -1.5, 'a'\n    2, -2.5, 'b'\n  }\n}\n`, keepColumns('id', 'amount'),
+    'Table gold.t {\n  id int\n  amount decimal\n\n  records (id, amount) {\n    1, -1.5\n    2, -2.5\n  }\n}\n'),
+  rowsCase('sample rows: an uppercase RECORDS keyword is the same block',
+    `${ROWS_SHAPES_HEAD}  RECORDS (id, name) {\n    1, 'a'\n  }\n}\n`, keepColumns('id', 'amount'),
+    'Table gold.t {\n  id int\n  amount decimal\n\n  RECORDS (id) {\n    1\n  }\n}\n'),
+  // --- A block among the columns, on a reorder (the rebuild carries its splices) -------------------------
+  rowsCase('sample rows: a block among the columns moves after them on a reorder, with its cuts',
+    "Table gold.t {\n  id int\n  records (name, id) {\n    'a', 1\n  }\n  name varchar\n  amount decimal\n}\n", (t) => { t.columns = [t.columns![2], t.columns![0]]; },
+    'Table gold.t {\n  amount decimal\n  id int\n  records (id) {\n    1\n  }\n}\n'),
+  rowsCase('sample rows: a reorder that drops the last listed column cuts the block and leaves no blank line where it was',
+    "Table gold.t {\n  id int\n\n  records (name) {\n    'a'\n  }\n\n  name varchar\n  amount decimal\n}\n", (t) => { t.columns = [t.columns![2], t.columns![0]]; },
+    'Table gold.t {\n  amount decimal\n  id int\n}\n'),
+  rowsCase('sample rows: …and with no blank lines around it',
+    "Table gold.t {\n  id int\n  records (name) {\n    'a'\n  }\n  name varchar\n  amount decimal\n}\n", (t) => { t.columns = [t.columns![2], t.columns![0]]; },
+    'Table gold.t {\n  amount decimal\n  id int\n}\n'),
+  rowsCase('sample rows: a block among the columns with no list gets its old list on a reorder',
+    "Table gold.t {\n  id int\n  records {\n    1, 'a', 1.5\n  }\n  name varchar\n  amount decimal\n}\n", (t) => { t.columns = [t.columns![2], t.columns![0], t.columns![1]]; },
+    "Table gold.t {\n  amount decimal\n  id int\n  name varchar\n  records (id, name, amount) {\n    1, 'a', 1.5\n  }\n}\n"),
+  rowsCase('sample rows: a block before an indexes block and a Note is cut alone',
+    "Table gold.t {\n  id int\n  name varchar\n\n  records (name) {\n    'a'\n  }\n\n  indexes {\n    id [unique]\n  }\n  Note: 'n'\n}\n", keepColumns('id'),
+    "Table gold.t {\n  id int\n\n  indexes {\n    id [unique]\n  }\n  Note: 'n'\n}\n"),
+];
+
 /** A table file with `Metadata` blocks before and after the Table (D25). */
 export function METADATA_TABLE(): string {
   return `Metadata Table fct_order {

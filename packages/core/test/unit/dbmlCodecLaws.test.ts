@@ -212,7 +212,125 @@ function tableRemovedSpans(text: string, current: SemanticTable, desired: Semant
     const names = (plainNames(node.name) ?? []).map((n) => n.toLowerCase());
     if (String(node.targetKind?.value ?? '').toLowerCase() === 'column' && gone.includes(names[names.length - 1])) out.push(cutSpan(text, node));
   }
+  out.push(...recordsRemovedSpans(text, current, gone));
   return out;
+}
+
+// ---------------------------------------------------------------------------
+// Sample rows (D37): what a column edit cuts from a records block, and the rows law
+// ---------------------------------------------------------------------------
+
+/** A comma-separated run of a records block (a row or the column list), read loosely here, apart from the writer's own reader. */
+interface RowsRun {
+  elements: AstNode[];
+  commas: AstNode[];
+}
+
+/** A Table's nested records block in `text` (no byte-order mark): its node, its list names (null: no list) and its rows. */
+function rowsBlockOf(text: string): { node: AstNode; names: string[] | null; list?: RowsRun; rows: RowsRun[] } | undefined {
+  const table = topLevel(compileOne(text).ast).find((n) => elementType(n)?.toLowerCase() === 'table');
+  const node = (Array.isArray(table?.body?.body) ? (table!.body.body as AstNode[]) : []).find((n) => elementType(n)?.toLowerCase() === 'records');
+  if (!node) return undefined;
+  const run = (n: AstNode): RowsRun => (['<comma-expression>', '<tuple-expression>', '<group-expression>'].includes(n?.kind)
+    ? { elements: n.elementList ?? [], commas: n.commaList ?? [] } : { elements: [n], commas: [] });
+  const list = node.name ? run(node.name) : undefined;
+  return {
+    node,
+    names: list ? list.elements.map((e) => plainNames(e)?.[0] ?? '') : null,
+    ...(list ? { list } : {}),
+    rows: (node.body?.body ?? []).filter((n: AstNode) => n?.kind === '<function-application>').map((n: AstNode) => run(n.callee)),
+  };
+}
+
+/** A cell's text: the value as written, `''` for an empty field (the parser's zero-width `<dummy>`). */
+const cellOf = (text: string, node: AstNode): string => (node.kind === '<dummy>' ? '' : text.slice(node.start, node.end));
+
+/** Which positions of a block a column edit removes (`gone`: the lower-case names it drops), or null for `records ()`. */
+function removedPositions(block: NonNullable<ReturnType<typeof rowsBlockOf>>, current: SemanticTable, gone: readonly string[]): number[] | null {
+  const names = block.names ?? (current.columns ?? []).map((c) => c.name);
+  if (block.names !== null && names.length === 0) return null;
+  return names.map((n, i) => (gone.includes(n.toLowerCase()) ? i : -1)).filter((i) => i >= 0);
+}
+
+/**
+ * What a column edit cuts from a Table's records block (Law 4): the whole
+ * block when no position is left; else, in the list and every row, each
+ * removed value with the commas on either side and anything up to the next
+ * value (a slot's comments go with its value), and a whole row that is
+ * left with one empty field (it becomes `null`).
+ */
+function recordsRemovedSpans(rawText: string, current: SemanticTable, gone: readonly string[]): Span[] {
+  const text = rawText.replace(/^﻿/, '');
+  const shift = rawText.length - text.length;
+  const block = rowsBlockOf(text);
+  if (!block) return [];
+  const removed = removedPositions(block, current, gone);
+  if (removed === null || removed.length === 0) return [];
+  const at = (spans: Span[]): Span[] => spans.map((s) => ({ start: s.start + shift, end: s.end + shift }));
+  const width = block.names?.length ?? (current.columns ?? []).length;
+  if (removed.length === width) return at([cutSpan(text, block.node)]);
+  const spans: Span[] = [];
+  for (const { elements: e, commas: c } of [...(block.list ? [block.list] : []), ...block.rows]) {
+    const n = e.length;
+    const first = e[0].kind === '<dummy>' ? c[0].start : e[0].start;
+    const last = e[n - 1].kind === '<dummy>' ? c[n - 2].end : e[n - 1].end;
+    const kept = e.filter((_, i) => !removed.includes(i));
+    if (kept.length === 1 && kept[0].kind === '<dummy>') {
+      spans.push({ start: first, end: last });
+      continue;
+    }
+    for (const i of removed) {
+      const start = i > 0 ? c[i - 1].start : first;
+      const end = i < n - 1 ? (e[i + 1].kind === '<dummy>' ? c[i].end : e[i + 1].start) : last;
+      spans.push({ start, end });
+    }
+  }
+  return at(spans);
+}
+
+/**
+ * The rows law (D37): a column edit keeps a records block's row count and
+ * each kept value's text (a row left with one empty field reads `null`);
+ * the list loses the removed names; the block goes only when no listed
+ * column is left; `records ()` never changes.
+ */
+function expectRowsKept(rawBefore: string, rawAfter: string, current: SemanticTable, desired: SemanticTable): void {
+  const before = rawBefore.replace(/^﻿/, '');
+  const after = rawAfter.replace(/^﻿/, '');
+  const block = rowsBlockOf(before);
+  if (!block) return;
+  const want = new Set((desired.columns ?? []).map((c) => c.name.toLowerCase()));
+  const have = (current.columns ?? []).map((c) => c.name.toLowerCase());
+  let gone = have.filter((n) => !want.has(n));
+  const added = (desired.columns ?? []).map((c) => c.name.toLowerCase()).filter((n) => !have.includes(n));
+  // A rename: the one column gone and the one added at its place (the old name, lower-case → the new spelling).
+  const renamed = new Map<string, string>();
+  if (gone.length === 1 && added.length === 1 && have.indexOf(gone[0]) === (desired.columns ?? []).findIndex((c) => c.name.toLowerCase() === added[0])) {
+    renamed.set(gone[0], (desired.columns ?? []).find((c) => c.name.toLowerCase() === added[0])!.name);
+    gone = [];
+  }
+  // A case-only rename keeps its lower-case name.
+  for (const c of desired.columns ?? []) {
+    const old = (current.columns ?? []).find((o) => o.name.toLowerCase() === c.name.toLowerCase());
+    if (old && old.name !== c.name) renamed.set(old.name.toLowerCase(), c.name);
+  }
+  const removed = removedPositions(block, current, gone) ?? [];
+  const next = rowsBlockOf(after);
+  const width = block.names?.length ?? have.length;
+  if (width > 0 && removed.length === width) {
+    expect(next, 'the records block outlived its last column').toBeUndefined();
+    return;
+  }
+  expect(next, 'the records block was lost').toBeDefined();
+  const cells = (text: string, b: NonNullable<ReturnType<typeof rowsBlockOf>>): string[][] => b.rows.map((r) => r.elements.map((e) => cellOf(text, e)));
+  const expected = cells(before, block).map((row) => {
+    const kept = row.filter((_, i) => !removed.includes(i));
+    return removed.length > 0 && kept.length === 1 && kept[0] === '' ? ['null'] : kept;
+  });
+  expect(cells(after, next!), `rows not kept\n--- before:\n${before}\n--- after:\n${after}`).toEqual(expected);
+  if (block.names !== null) {
+    expect(next!.names).toEqual(block.names.filter((_, i) => !removed.includes(i)).map((n) => renamed.get(n.toLowerCase()) ?? n));
+  }
 }
 
 /** The two column sets a Ref joins, either way round (lower-case). */
@@ -481,6 +599,7 @@ describe('the laws over every DBML fixture', () => {
           expect(editTableDbml(out, desired, { schemaFolder: reading.table.schema })).toBe(out); // Law 2
           expectPreserved(text, out, tableRemovedSpans(text, reading.table, desired)); // Law 4
           expect(projectDiagnostics({ [file]: out }, [file], baseline)).toEqual([]); // Law 5
+          expectRowsKept(text, out, reading.table, desired); // the rows law (D37)
         }
       });
     }
@@ -911,6 +1030,97 @@ function mutateTable(rng: Rng, t: SemanticTable): SemanticTable {
   return d;
 }
 
+/** The columns a table with sample rows draws, each with the kind of value it holds (so DBML 9's data lints stay quiet). */
+const ROWS_COLUMNS: ReadonlyArray<readonly [string, 'int' | 'decimal' | 'text']> = [
+  ['id', 'int'], ['label', 'text'], ['qty', 'int'], ['price', 'decimal'], ['code', 'text'], ['Note Text', 'text'], ['Ref', 'text'],
+];
+const ROWS_TABLE_NAMES = ['fct_sample', 'dim_sample', 'Sample Rows'];
+
+/** One sample value for a column of `kind` in row `r` (never a sign at position 0: rows 2+ may not start with one). */
+function randomCell(rng: Rng, kind: 'int' | 'decimal' | 'text', r: number, lead: boolean, width: number): string {
+  if (width > 1 && chance(rng, 0.2)) return '';
+  if (chance(rng, 0.08)) return pick(rng, ['null', 'NULL']);
+  const sign = !lead && chance(rng, 0.15) ? '-' : '';
+  switch (kind) {
+    case 'int': return `${sign}${r + 1}`;
+    case 'decimal': return `${sign}${r}.5`;
+    default: return pick(rng, [`'v${r}'`, `'''two\nlines ${r}'''`, `"dq ${r}"`, "''", `'it\\'s ${r}'`]);
+  }
+}
+
+/**
+ * A new table file with a nested records block written as a script might:
+ * a column list (several names, one, none or `()`), empty fields, `null`,
+ * `'''` values, comments in and between rows, a row on the brace line,
+ * the block after, among or before the columns, CRLF, a byte-order mark.
+ */
+function randomRowsTable(rng: Rng): { text: string; table: SemanticTable } {
+  const picked = [...ROWS_COLUMNS].sort(() => rng() - 0.5).slice(0, 1 + Math.floor(rng() * 5));
+  const table: SemanticTable = {
+    name: pick(rng, ROWS_TABLE_NAMES),
+    schema: 'gold',
+    columns: picked.map(([name, kind]) => ({ name, dataType: kind === 'text' ? pick(rng, ['varchar', 'text']) : kind, description: '' })),
+  };
+  if (chance(rng, 0.3)) table.description = 'Sample rows';
+  const kinds = new Map(picked);
+  const r = rng();
+  const listed = r < 0.55 ? [...picked].sort(() => rng() - 0.5).slice(0, 1 + Math.floor(rng() * picked.length)).map(([n]) => n) : null;
+  const empty = listed === null && r > 0.92;
+  const header = listed ? ` (${listed.map(dbmlName).join(', ')})` : empty ? ' ()' : '';
+  const columns = empty ? ['id'] : listed ?? picked.map(([n]) => n);
+  const lines: string[] = [];
+  const rowCount = Math.floor(rng() * 5);
+  for (let row = 0; row < rowCount; row++) {
+    if (chance(rng, 0.12)) lines.push(`    // before row ${row}`);
+    const cells = columns.map((c, k) => randomCell(rng, empty ? 'int' : kinds.get(c)!, row, k === 0, columns.length));
+    const decorated = cells.map((cell) => (cell !== '' && chance(rng, 0.08) ? `/* c */ ${cell}` : cell));
+    lines.push(`    ${decorated.join(pick(rng, [', ', ', ', ',', ' , ']))}${chance(rng, 0.2) ? ` // row ${row}` : ''}`);
+  }
+  const inline = lines.length > 0 && !lines[0].includes('//') && chance(rng, 0.15);
+  const open = `  records${header} {${chance(rng, 0.1) ? ' // rows from a script' : ''}`;
+  const block = inline
+    ? [`${open.replace(/ \/\/.*$/, '')} ${lines[0].trim()}`, ...lines.slice(1), '  }']
+    : [open, ...lines, '  }'];
+  const fileLines = renderNewTableDbml(table).replace(/\n$/, '').split('\n');
+  const where = rng();
+  const columnLines = fileLines.map((_, k) => k).filter((k) => /^ {2}[^ N}]/.test(fileLines[k]) || /^ {2}"/.test(fileLines[k]));
+  if (where < 0.2 && columnLines.length >= 2) fileLines.splice(columnLines[Math.floor(rng() * (columnLines.length - 1))] + 1, 0, ...block);
+  else if (where < 0.3 && columnLines.length >= 1) fileLines.splice(columnLines[0], 0, ...block);
+  else fileLines.splice(fileLines.length - 1, 0, ...(chance(rng, 0.5) ? [''] : []), ...block);
+  let text = `${fileLines.join('\n')}\n`;
+  if (chance(rng, 0.2)) text = text.replace(/\n/g, '\r\n');
+  if (chance(rng, 0.1)) text = `﻿${text}`;
+  return { text, table };
+}
+
+/**
+ * Column edits on a table with sample rows: drops, adds, reorders, renames
+ * (case-only too), a rename beside a drop, a table rename. A new column is a
+ * varchar, which every value fits: an add at a dropped column's place is a
+ * rename (`matchColumns`), and its values stay.
+ */
+function mutateRowsTable(rng: Rng, t: SemanticTable): SemanticTable {
+  const d = clone(t);
+  const cols = d.columns ?? [];
+  // New names never name a column the table had (that would be the old column, retyped, to matchColumns).
+  const unused = (): string[] => ['extra', 'Other Name', 'renamed', 'Order'].filter((n) => !cols.some((c) => c.name.toLowerCase() === n.toLowerCase()));
+  for (let i = 0; i < 1 + Math.floor(rng() * 3); i++) {
+    switch (Math.floor(rng() * 10)) {
+      case 0: case 1: if (cols.length) cols.splice(Math.floor(rng() * cols.length), 1); break;
+      case 2: { const n = unused(); if (n.length) cols.splice(Math.floor(rng() * (cols.length + 1)), 0, { name: pick(rng, n), dataType: 'varchar', description: '' }); break; }
+      case 3: if (cols.length > 1) cols.sort(() => rng() - 0.5); break;
+      case 4: { const n = unused(); if (cols.length && n.length) pick(rng, cols).name = pick(rng, n); break; }
+      case 5: if (cols.length) { const c = pick(rng, cols); c.name = c.name === c.name.toUpperCase() ? c.name.toLowerCase() : c.name.toUpperCase(); } break;
+      case 6: d.name = pick(rng, ROWS_TABLE_NAMES.filter((n) => n.toLowerCase() !== d.name.toLowerCase())); break;
+      case 7: if (cols.length) { const c = pick(rng, cols); c.isNaturalKey = !c.isNaturalKey; c.description = 'Changed'; } break;
+      case 8: d.description = chance(rng, 0.5) ? undefined : 'Edited'; break;
+      default: if (chance(rng, 0.3)) cols.splice(0, cols.length); break;
+    }
+  }
+  d.columns = cols;
+  return d;
+}
+
 /** Where the generator's library keeps each table: three in `gold/tables/gold/`, `dim_date` in silver's `shared` schema. */
 const LIBRARY_HOMES: Record<string, { layer: string; schema: string }> = {
   fct_order: { layer: 'gold', schema: 'gold' },
@@ -1059,6 +1269,57 @@ describe(`the laws over a seeded generator (DBML_LAW_SEED=${SEED})`, () => {
     expect(seen.reservedMeta, JSON.stringify(seen)).toBeGreaterThanOrEqual(15);
     expect(seen.unsafe, JSON.stringify(seen)).toBeGreaterThanOrEqual(5);
     expect(seen.rewrite, JSON.stringify(seen)).toBeGreaterThanOrEqual(3);
+  });
+
+  it('tables with sample rows: create, add a records block, edit (Laws 1–5 and the rows law)', () => {
+    // Its own stream, so the cases above keep their draws.
+    const rng = mulberry32(SEED * 7919 + 17);
+    const seen = { blockCut: 0, valuesCut: 0, nullFill: 0, listWritten: 0, renamed: 0, untouched: 0, signRefused: 0 };
+    for (let i = 0; i < 200; i++) {
+      try {
+        trail = [];
+        const { text, table } = randomRowsTable(rng);
+        note('input', text);
+        const file = `gold/tables/gold/${table.name}.dbml`;
+        expect(projectDiagnostics({ [file]: text }, [file])).toEqual([]);
+        const read = readOk(text, table.name);
+        expect(editTableDbml(text, read)).toBe(text); // Law 1
+        const desired = mutateRowsTable(rng, read);
+        note('desired', desired);
+        let out: string;
+        try {
+          out = editTableDbml(text, desired, { rename: true });
+        } catch (err) {
+          // R2: a drop that would start a later row with a sign is refused, as it should be.
+          if (err instanceof DbmlEditRefused && / with a minus or plus sign, /.test(err.message)) { seen.signRefused++; continue; }
+          throw err;
+        }
+        note('output', out);
+        expect(normTable(readOk(out, desired.name))).toEqual(normTable(desired)); // Law 3
+        expect(editTableDbml(out, desired, { rename: true })).toBe(out); // Law 2
+        expect(editTableDbml(out, readOk(out, desired.name))).toBe(out); // Law 1 on the output
+        expectPreserved(text, out, tableRemovedSpans(text, read, desired)); // Law 4
+        expect(projectDiagnostics({ [file]: out }, [file])).toEqual([]); // Law 5
+        expectRowsKept(text, out, read, desired); // the rows law
+        const before = rowsBlockOf(text.replace(/^﻿/, ''))!;
+        const after = rowsBlockOf(out.replace(/^﻿/, ''));
+        const strip = (s: string): string => s.replace(/^﻿/, '');
+        if (!after) seen.blockCut++;
+        else if (strip(text).slice(before.node.start, before.node.end) === strip(out).slice(after.node.start, after.node.end)) seen.untouched++;
+        else {
+          if (before.names === null && after.names !== null) seen.listWritten++;
+          if ((after.rows[0]?.elements.length ?? 0) < (before.rows[0]?.elements.length ?? 0)) seen.valuesCut++;
+          if (after.rows.some((r, k) => r.elements.length === 1 && (before.rows[k]?.elements.length ?? 0) > 1
+            && strip(out).slice(r.elements[0].start, r.elements[0].end) === 'null')) seen.nullFill++;
+          if (before.names && after.names && before.names.length === after.names.length && before.names.join() !== after.names.join()) seen.renamed++;
+        }
+      } catch (err) {
+        fail('rows table', i, err);
+      }
+    }
+    for (const [what, atLeast] of Object.entries({ blockCut: 5, valuesCut: 10, nullFill: 1, listWritten: 5, renamed: 3, untouched: 15 })) {
+      expect(seen[what as keyof typeof seen], JSON.stringify(seen)).toBeGreaterThanOrEqual(atLeast);
+    }
   });
 
   it('relationships: create, decorate, edit (Laws 1–5)', () => {
