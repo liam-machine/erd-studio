@@ -10,6 +10,10 @@ heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that
 
 ## Unreleased
 
+### Added
+
+- **Add a table's related tables from its right-click menu.** Right-click a table on the diagram and choose **Add Related Tables (n)** to bring every table it has a relationship with, either way, onto the diagram in one step (one undo takes them all back off). The number counts tables, not relationships, and the item only appears when there is something to add: on an editable diagram, on the Logical tab. It adds what the detail panel's **Add all related** button adds. (#365)
+
 ### Changed
 
 - **One Columns menu replaces Names / Keys / All.** The toolbar now has a single **Columns** button that says what the tables show and opens a checklist: **All columns**, primary keys, foreign keys, natural (business) keys, and a "Name matches" box. A column is shown when it matches any rule that is ticked, so you can show foreign keys only, keys plus your audit columns (`*_at, etl_*`), or every column with `customer` in its name, and see how many columns in how many tables match. Names are separated by commas; `*` stands for any text and `?` for one character. All three key kinds ticked is the old Keys, "All columns" is the old All, and nothing ticked is the old Names. The choice is a view preference kept per diagram: nothing is written to your files. (#359)
