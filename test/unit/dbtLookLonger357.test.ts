@@ -89,6 +89,19 @@ describe('#357 how far a look\'s search for dbt projects has got', () => {
     expect(run.dbtSearchStats()).toMatchObject({ complete: false, stopped: 'time', msLeft: 0, maxMs: 40 });
   });
 
+  it('a look its time limit ended says time even when the clock reads a moment short of the limit', async () => {
+    // A timer can fire a millisecond before the clock agrees it is due. The
+    // reason is the limit that ended the walk, not what the clock reads after.
+    const root = tmpDir();
+    write(root, 'stuck/deeper/dbt_project.yml', "name: 'p'\n");
+    const { reader } = holdingReader();
+    let clock = 1_000_000;
+    const run = looksOf({ maxMs: 40, io: { reader, now: () => clock } }).run(root);
+    expect(await run.dbtProjects()).toEqual([]);
+    clock += 39;
+    expect(run.dbtSearchStats()).toMatchObject({ complete: false, stopped: 'time', msLeft: 0, maxMs: 40 });
+  });
+
   it('while activation waits, nothing has stopped yet and the time left counts down by the look\'s clock', async () => {
     const root = tmpDir();
     write(root, 'stuck/dbt_project.yml', "name: 'p'\n");
