@@ -2314,7 +2314,9 @@ describe('selectors.yml at activation: checked, never written', () => {
       return regenerate.apply(this, args);
     });
     await vscode.commands.executeCommand('erdStudio.syncDomainTags');
-    expect(order).toEqual(['load', 'write']);
+    // Loaded before the write. (After it, the command reads dbt's files again to compare model names: cached.)
+    expect(order.slice(0, 2)).toEqual(['load', 'write']);
+    expect(order.filter((step) => step === 'write')).toHaveLength(1);
   });
 
   it('Regenerate dbt selectors.yml creates the file and says edits now keep it up to date; not again once it exists', async () => {

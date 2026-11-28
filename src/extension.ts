@@ -34,7 +34,7 @@ import {
 } from './services/modelShareTelemetry';
 import { askGitExtension } from './services/gitExtensionApi';
 import { HarnessService, HARNESS_TARGETS, HARNESS_VERSION, extractHarnessVersion, recommendedHookAssistants, type HarnessInstallResult, type HarnessTarget } from './services/harnessService';
-import { SelectorsService } from './services/selectorsService';
+import { SelectorsService, type WrittenSelector } from './services/selectorsService';
 import { LegacyTagCleanupService } from './services/legacyTagCleanupService';
 import { TABLES_DIR, TableLibraryService } from './services/logicalModelService';
 import { detectLegacyDbmlTree, legacyDbmlTreeMessage } from './services/legacyDbmlTree';
@@ -265,7 +265,8 @@ import { dirtyFiles, openOrDiskText } from './providers/dirtyDocuments';
 import { log, elapsedMs, setLogSink } from './services/logger';
 import { registerDbmlFormatting } from './providers/dbmlFormattingProvider';
 import { dbmlFileIcon } from './providers/dbmlFileKinds';
-import { LOG_CHANNEL_NAME, SHOW_LOGS_COMMAND } from './services/showLogs';
+import { LOG_CHANNEL_NAME, SHOW_LOGS_BUTTON, SHOW_LOGS_COMMAND } from './services/showLogs';
+import { selectorNameGaps, selectorNameGapsNote, type SelectorNameGap } from './services/dbtCommand';
 import { pickActivationPrompt, SessionPromptGate, type SessionPromptKind } from './services/activationPrompts';
 import {
   MAJOR_NOTICE_NOT_NOW,
@@ -908,6 +909,13 @@ const NOT_DBT_SELECTORS_MESSAGE = 'This folder is not a dbt project, so there is
 
 /** Added to Regenerate dbt selectors.yml's message when it created the file: from now on edits keep it up to date. */
 export const SELECTORS_CREATED_SENTENCE = 'ERD Studio now updates it whenever you edit a diagram.';
+
+/**
+ * The longest Regenerate dbt selectors.yml waits, after it wrote the file,
+ * for dbt's files to be read so it can name the tables dbt names otherwise.
+ * Past it the command says what it wrote and nothing about names.
+ */
+export const SELECTOR_NAMES_CHECK_MS = 8000;
 
 /**
  * Who is told that a guarded refresh failed ({@link guardRefresh}): the
@@ -2325,6 +2333,61 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
       },
     },
   );
+  /**
+   * The tables the selectors just written do not select because dbt names
+   * their model otherwise (`selectorNameGaps`), for Regenerate dbt
+   * selectors.yml's note. Advisory only, and only ever run by that command:
+   * it reads dbt's files as the canvas's dbt command does, never writes, and
+   * nothing the read-only check or the file's content depends on comes from
+   * it. Answers none (so the command says what it wrote and no more) when
+   * dbt's files cannot be read in `SELECTOR_NAMES_CHECK_MS`, the read fails,
+   * or the manifest in hand is an older one kept after a failed parse. The
+   * file is already written by then: this never fails the command.
+   */
+  const selectorNameGapsOf = async (selectors: readonly WrittenSelector[]): Promise<SelectorNameGap[]> => {
+    let giveUp: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const read = (async () => {
+        const ymlData = await ymlParserService.loadYmlData(workspaceRoot);
+        const manifest = await manifestService.loadManifest(workspaceRoot);
+        const catalog = await catalogService.loadCatalog(workspaceRoot);
+        return { ymlData, manifest, catalog };
+      })();
+      // A read that outlives the wait may still fail: nobody is listening by then.
+      read.catch(() => undefined);
+      const dbt = await Promise.race([
+        read,
+        new Promise<undefined>((resolve) => { giveUp = setTimeout(() => resolve(undefined), SELECTOR_NAMES_CHECK_MS); }),
+      ]);
+      if (!dbt) {
+        log.info('[Selectors] dbt\'s files were not read in time to compare model names; none reported.');
+        return [];
+      }
+      if (manifestService.isStale) {
+        log.info('[Selectors] The manifest could not be read just now, so model names were not compared.');
+        return [];
+      }
+      const gaps: SelectorNameGap[] = [];
+      for (const selector of selectors) {
+        try {
+          const unified = subjectAreaService.getSubjectArea(selector.diagramPath);
+          const dbtNodes = subjectAreaService.dbtNodeNamesOf(unified, dbt.ymlData, dbt.manifest, dbt.catalog);
+          const tables = unified.logical.models.map((model) => ({ name: model.name, dbtModel: dbtNodes.get(model.name.toLowerCase()) ?? null }));
+          const found = selectorNameGaps(tables, selector.members);
+          for (const gap of found) log.warn(`[Selectors] ${selector.name} lists ${gap.table}; dbt names that model ${gap.dbtModel}.`);
+          gaps.push(...found);
+        } catch (err) {
+          log.warn(`[Selectors] Could not compare model names for ${selector.name}: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+      return gaps;
+    } catch (err) {
+      log.warn(`[Selectors] Could not read dbt's files to compare model names: ${err instanceof Error ? err.message : String(err)}`);
+      return [];
+    } finally {
+      if (giveUp) clearTimeout(giveUp);
+    }
+  };
   const legacyTagCleanupService = new LegacyTagCleanupService(workspaceRoot);
 
   // Activation never writes selectors.yml: it checks the file against the
@@ -5162,10 +5225,18 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
             const result = await selectorsService.regenerateWhenReady();
             if (result.status === 'written') {
               const relPath = path.relative(workspaceRoot, result.filePath);
-              void vscode.window.showInformationMessage(
-                `Wrote ${result.selectorsWritten} selector(s) covering ${result.modelsReferenced} dbt model reference(s) to ${relPath}.` +
-                  (result.created ? ` ${SELECTORS_CREATED_SENTENCE}` : ''),
-              );
+              const wrote = `Wrote ${result.selectorsWritten} selector(s) covering ${result.modelsReferenced} dbt model reference(s) to ${relPath}.` +
+                (result.created ? ` ${SELECTORS_CREATED_SENTENCE}` : '');
+              // The file lists each table by its name on the diagram. Where dbt
+              // names the model otherwise, say so: its selector does not select it.
+              const note = selectorNameGapsNote(await selectorNameGapsOf(result.selectors));
+              if (note) {
+                void vscode.window.showWarningMessage(`${wrote} ${note}`, SHOW_LOGS_BUTTON).then((choice) => {
+                  if (choice === SHOW_LOGS_BUTTON) void vscode.commands.executeCommand(SHOW_LOGS_COMMAND);
+                });
+              } else {
+                void vscode.window.showInformationMessage(wrote);
+              }
             } else if (result.status === 'noop') {
               void vscode.window.showInformationMessage(
                 'No diagrams with tables found — selectors.yml was not created.',

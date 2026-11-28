@@ -1081,10 +1081,20 @@ describe('SelectorsService: who may write, and the read-only check', () => {
     // No file: no selector to copy.
     expect(svc.currentSelectorFor('/dummy/silver/customer-360.json')).toBeUndefined();
     expect(fs.existsSync(file())).toBe(false);
-    svc.regenerate();
+    // A write says which selectors it wrote and what each lists (for the command's note on dbt's names).
+    expect(svc.regenerate()).toMatchObject({
+      status: 'written',
+      selectors: [
+        { name: 'domain_gold_reporting', diagramPath: '/dummy/gold/reporting.json', members: ['fct_revenue'] },
+        { name: 'domain_silver_customer_360', diagramPath: '/dummy/silver/customer-360.json', members: ['dim_customer', 'fct_orders'] },
+      ],
+    });
     expect(svc.currentSelectorFor('/dummy/silver/customer-360.json')).toBe('domain_silver_customer_360');
     expect(svc.currentSelectorFor('/dummy/gold/reporting.json')).toBe('domain_gold_reporting');
     expect(svc.currentSelectorFor('/dummy/gold/elsewhere.json')).toBeUndefined();
+    // With what it lists, so a caller can tell whether it selects the models it means.
+    expect(svc.currentSelectorMembersFor('/dummy/silver/customer-360.json')).toEqual({ name: 'domain_silver_customer_360', members: ['dim_customer', 'fct_orders'] });
+    expect(svc.currentSelectorMembersFor('/dummy/gold/elsewhere.json')).toBeUndefined();
     // Stale: the diagrams moved on, so the file's selector is not what the diagram holds.
     const before = fs.readFileSync(file(), 'utf-8');
     fs.writeFileSync(file(), before.replace('value: fct_orders', 'value: fct_order_lines'), 'utf-8');
