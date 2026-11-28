@@ -185,7 +185,7 @@ describe('#371 the open keeps its order (no bounded wait)', () => {
     expect(read).toHaveBeenCalled();
     expect(posted(panel).filter((m) => m.type === 'domainLoaded')).toHaveLength(1);
     // No extra post: the sequence is the one every loading test pins.
-    expect(posted(panel).map((m) => m.type).slice(0, 4)).toEqual(['loading', 'loading', 'lineStyle', 'domainLoaded']);
+    expect(posted(panel).map((m) => m.type).slice(0, 5)).toEqual(['loading', 'loading', 'lineStyle', 'tableSubtitle', 'domainLoaded']);
   });
 });
 

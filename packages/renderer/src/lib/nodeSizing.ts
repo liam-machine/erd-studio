@@ -13,6 +13,7 @@
 import type { TableFlowNode, TableNodeData } from '../types/graph';
 import { resolveVisibleColumns } from './tableDetail';
 import { headerName } from './modelLabels';
+import { nodeSubtitle } from './tableSubtitle';
 
 // ---------------------------------------------------------------------------
 // Node size estimation (matches TableNode CSS)
@@ -41,12 +42,14 @@ const NODE_FOOTER_HEIGHT = 25;
 /** Card border width (top + bottom). */
 const NODE_BORDER = 4;
 
-/** Height of the grain subtitle row (padding: 1px 10px 4px + 10px font ≈ 15px). */
+/** Height of the line under the name (padding: 1px 10px 4px + 10px font ≈ 15px). */
 const NODE_GRAIN_HEIGHT = 15;
 
 /**
  * Estimate a node's rendered height from the number of column rows actually
- * drawn (see `countVisibleColumnRows`) and whether a grain subtitle is shown.
+ * drawn (see `countVisibleColumnRows`) and whether the line under the name
+ * is shown (`hasGrain`: named for the grain, which was once the only thing
+ * that line could be; pass whether `nodeSubtitle()` gives the node one).
  *
  * `bare` is a card with no body at all (see `isBareTableBody`): header and
  * footer only. Without it, zero rows means the "No columns" line.
@@ -104,7 +107,7 @@ export function resolveNodeDimensions(
   return {
     width: node.measured?.width ?? estimateNodeWidth(node.data),
     height: node.measured?.height
-      ?? estimateNodeHeight(countVisibleColumnRows(node.data), !!node.data.grain, isBareTableBody(node.data)),
+      ?? estimateNodeHeight(countVisibleColumnRows(node.data), nodeSubtitle(node.data) !== undefined, isBareTableBody(node.data)),
   };
 }
 

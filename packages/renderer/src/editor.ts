@@ -57,6 +57,17 @@ export { usePrefersReducedMotion } from './hooks/usePrefersReducedMotion';
 // Helpers
 export { applyNodeOverlays, type GraphNode, type GraphEdge } from './lib/nodeOverlays';
 export { computeCanvasFocus, sameFocus, type CanvasFocus } from './lib/canvasFocus';
+export {
+  TABLE_SUBTITLE_DESCRIPTION_LABEL,
+  TABLE_SUBTITLE_NONE_LABEL,
+  fieldValueText,
+  nodeSubtitle,
+  nodeSubtitleIsChosen,
+  tableSubtitleLabel,
+  tableSubtitleOptions,
+  tableSubtitleText,
+  type TableSubtitleOption,
+} from './lib/tableSubtitle';
 export * from './lib/stageColors';
 export * from './lib/dataTypeColors';
 export * from './lib/badgeLabels';
