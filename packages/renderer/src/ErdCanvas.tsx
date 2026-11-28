@@ -30,7 +30,8 @@
  * Relationship lines are routed around the tables in one of two styles,
  * `lineStyle` `curved` (the default) or `hops`; the reader cannot change it.
  * `tableDetail` (`name`, `keys` or `all`) sets how much of every table is
- * drawn; without it tables draw as they always have.
+ * drawn; without it tables draw as they always have. `tableSubtitle` sets
+ * what the one line under each table's name shows; without it, the grain.
  *
  * Derived from the extension webview's `EditorCanvas` (`webview/App.tsx`),
  * keeping its React Flow configuration.
@@ -76,6 +77,7 @@ import { Legend } from './components/Legend/Legend';
 import { StatusBar } from './components/StatusBar/StatusBar';
 import { DEFAULT_LINE_STYLE, isLineStyle, type LineStyle } from './lib/edgeRouting/lineStyle';
 import { isTableDetail, type TableDetail } from './lib/tableDetail';
+import { normaliseTableSubtitle } from '@erd-studio/core';
 import { applyClickAway } from './lib/clickAway';
 
 /**
@@ -125,6 +127,14 @@ export interface ErdCanvasProps {
    * a diagram under 30 tables, the first five columns on a larger one.
    */
   tableDetail?: TableDetail;
+  /**
+   * What the one line under each table's name shows: `field:<key>` for a
+   * table field (`field:grain`, `field:purpose`, a team's own
+   * `field:owner`), `description` for the table's description, or `none` for
+   * no line. A table with no value for it draws no line. Unset, or any other
+   * value: the grain, as before this prop existed.
+   */
+  tableSubtitle?: string;
   /**
    * The URL of the host's copy of `@erd-studio/renderer/edge-routing-worker.js`,
    * served from the page's own origin. Diagrams over 100 lines route in that
@@ -241,6 +251,7 @@ function ErdCanvasInner({
   logicalOnly = false,
   lineStyle: lineStyleProp,
   tableDetail: tableDetailProp,
+  tableSubtitle: tableSubtitleProp,
   className,
   style,
   handleRef,
@@ -273,6 +284,12 @@ function ErdCanvasInner({
   useEffect(() => {
     storeApi.getState().setLineStyle(lineStyle);
   }, [lineStyle, storeApi]);
+
+  // The line under each name follows the prop; unset (or not a choice) is the grain.
+  const tableSubtitle = normaliseTableSubtitle(tableSubtitleProp);
+  useEffect(() => {
+    storeApi.getState().setTableSubtitle(tableSubtitle);
+  }, [tableSubtitle, storeApi]);
 
   // The table detail level follows the prop; unset leaves the store without one.
   const tableDetail = isTableDetail(tableDetailProp) ? tableDetailProp : null;
@@ -497,6 +514,7 @@ export const ErdCanvas = forwardRef<ErdCanvasHandle, ErdCanvasProps>(function Er
       logicalOnly: props.logicalOnly === true,
       lineStyle: isLineStyle(props.lineStyle) ? props.lineStyle : DEFAULT_LINE_STYLE,
       tableDetail: isTableDetail(props.tableDetail) ? props.tableDetail : null,
+      tableSubtitle: normaliseTableSubtitle(props.tableSubtitle),
       routingWorkerUrl: typeof props.routingWorkerUrl === 'string' && props.routingWorkerUrl !== '' ? props.routingWorkerUrl : null,
     }),
   );

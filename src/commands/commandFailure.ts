@@ -105,6 +105,7 @@ export function showCommandFailure(
   );
   showErrorWithActions((m, ...items) => vscode.window.showErrorMessage(m, ...items), failure.message, actions, (choice, actionErr) => {
     log.error(`[ERD Studio] ${failure.title}: "${choice}" failed:`, actionErr);
+    telemetry.error('loggedErrorAtFailureAction');
     const doing = `while running ${choice}`;
     showCommandFailure(
       { title: failure.title, message: oursMessage(failure.title, doing, 'nothing more was changed'), buttons: [SEND_FEEDBACK_BUTTON], doing },

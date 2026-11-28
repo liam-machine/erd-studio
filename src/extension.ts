@@ -1408,6 +1408,7 @@ async function sendFeedbackWithoutCanvas(
       await tracking?.recordPending(title, kind);
     } catch (err) {
       log.error('[ERD Studio] Send Feedback: recording the report failed:', err);
+      telemetry.error('loggedErrorAtFeedbackSend');
     }
   }
   // A failure of ours would otherwise end silently, with what the user typed
@@ -1420,6 +1421,7 @@ async function sendFeedbackWithoutCanvas(
       copied = true;
     } catch (err) {
       log.error('[ERD Studio] Send Feedback: copying the text failed:', err);
+      telemetry.error('loggedErrorAtFeedbackSend');
     }
     showErrorWithActions(
       (message, ...items) => vscode.window.showErrorMessage(message, ...items),
@@ -1428,7 +1430,10 @@ async function sendFeedbackWithoutCanvas(
         [OPEN_GITHUB_ISSUES_BUTTON]: () => openFixedLink(GITHUB_NEW_ISSUE_URL),
         [TRY_AGAIN_BUTTON]: () => sendFeedbackWithoutCanvas(context, { kind, title, description }, tracking),
       },
-      (choice, err) => log.error(`[ERD Studio] Send Feedback: "${choice}" failed:`, err),
+      (choice, err) => {
+        log.error(`[ERD Studio] Send Feedback: "${choice}" failed:`, err);
+        telemetry.error('loggedErrorAtFailureAction');
+      },
     );
   }
 }
@@ -1998,6 +2003,7 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     // Never let a filesystem oddity (permissions, dangling symlink, …) in a
     // legacy folder abort activation — the rest of the extension still works.
     log.error('[ERD Studio] Legacy erd-studio/ migration failed:', err);
+    telemetry.error('loggedErrorAtLegacyRename');
   }
 
   // Read target-path / model-paths / seed-paths / snapshot-paths from
@@ -2798,6 +2804,7 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     // failed save, or never synced) is redrawn from the file. Never writes.
     void editorProvider.syncSubjectAreaWithDisk(uri.fsPath).catch((err) => {
       log.error('[ERD Studio] Redraw of a diagram from its file failed:', err);
+      telemetry.error('loggedErrorAtRedraw');
     });
     treeProvider.invalidateSubjectArea(uri.fsPath);
     treeProvider.refresh();
@@ -2950,6 +2957,7 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
   };
   context.subscriptions.push(vscode.workspace.onDidRenameFiles((event) => onDbmlFilesRenamed(explorerMoveDeps, event.files).catch((err) => {
     log.error('[ERD Studio] Following an Explorer move failed:', err);
+    telemetry.error('loggedErrorAtExplorerMove');
   })));
 
   // The editor wrote a domain (and possibly model files) itself. Those writes
@@ -3039,6 +3047,7 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
   const fieldsConfigChangedSubscription = fileWatcherService.onFieldsConfigChanged(guardRefresh('Layers', () => {
     void editorProvider.onFieldsFileChanged().catch((err) => {
       log.error('[ERD Studio] Redraw after a fields.yml change failed:', err);
+      telemetry.error('loggedErrorAtRedraw');
     });
   }));
 
@@ -3173,6 +3182,7 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
       : vscode.window.showInformationMessage(m, ...items));
     showErrorWithActions(show, report.message, actions, (choice, err) => {
       log.error(`[ERD Studio] ${MIGRATE_V5_TITLE}: "${choice}" failed:`, err);
+      telemetry.error('loggedErrorAtFailureAction');
     });
 
     treeProvider.refresh();
@@ -3201,7 +3211,10 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
           [SEND_FEEDBACK_BUTTON]: () => vscode.commands.executeCommand('erdStudio.reportBug', feedbackPrefill(MIGRATE_V5_TITLE, 'while migrating', cause)),
           [TRY_AGAIN_BUTTON]: () => runMigrateToV5Command({ confirmed: true }),
         },
-        (choice, actionErr) => log.error(`[ERD Studio] ${MIGRATE_V5_TITLE}: "${choice}" failed:`, actionErr),
+        (choice, actionErr) => {
+          log.error(`[ERD Studio] ${MIGRATE_V5_TITLE}: "${choice}" failed:`, actionErr);
+          telemetry.error('loggedErrorAtFailureAction');
+        },
       );
       return false;
     }
@@ -3660,7 +3673,12 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     };
     void showMaintenanceNotice(notice).then((pick) => {
       const action = pick ? actions[pick] : undefined;
-      if (action) void Promise.resolve().then(action).catch((err: unknown) => log.error(`[ERD Studio] ${REFRESH_MANIFEST_TITLE}: "${pick}" failed:`, err));
+      if (action) {
+        void Promise.resolve().then(action).catch((err: unknown) => {
+          log.error(`[ERD Studio] ${REFRESH_MANIFEST_TITLE}: "${pick}" failed:`, err);
+          telemetry.error('loggedErrorAtFailureAction');
+        });
+      }
     });
   };
 

@@ -88,7 +88,9 @@ import {
   type Token,
 } from './sqlDdlLexer';
 import {
+  columnsOf,
   readerState,
+  sameColumns,
   sameIdent,
   sameSchema,
   tableLabel,
@@ -98,6 +100,7 @@ import {
   DEFAULT_SCHEMA,
   type ModelTable,
   type ResolvedRef,
+  type TableColumns,
   type Origin,
   type PendingComment,
   type PendingKey,
@@ -138,6 +141,7 @@ export type {
   SqlDdlProblem,
   SqlDdlToDbmlInput,
   SqlDialect,
+  SqlDuplicateClass,
   SqlParseEngine,
   SqlParseFormat,
   SqlPartitionMode,
@@ -1064,6 +1068,8 @@ class Converter implements ConverterContext {
   readonly readWith: SqlReadWith = { grammar: 0, repaired: 0, salvaged: 0 };
   /** How each table counted in {@link readWith} was read: one the DBML read-back leaves out is taken off again. */
   readonly readHow = new Map<ModelTable, keyof SqlReadWith>();
+  /** Each table's columns as its CREATE TABLE left it, before any ALTER TABLE: what a second definition is compared to (#358). */
+  private readonly asCreated = new WeakMap<ModelTable, TableColumns>();
   /** The statement being read (a skipped one is named in the log from it). */
   private currentStatement: Statement | undefined;
   /** Tables that went through the repair ladder, and when the first did (its budget). */
@@ -1473,6 +1479,12 @@ class Converter implements ConverterContext {
           kind: 'duplicateTable',
           cause: 'duplicate',
           table: label,
+          // Both definitions are in hand only here: whether this one was a copy of the kept one, and whether
+          // both sit in the default schema (where a second database's table of the same name lands too).
+          duplicate: {
+            same: sameColumns(this.asCreated.get(first) ?? first, table),
+            defaultSchema: sameSchema(first.schema, null, this.dialect) && sameSchema(schema, null, this.dialect),
+          },
         });
         return;
       }
@@ -1492,6 +1504,7 @@ class Converter implements ConverterContext {
       }
     }
     this.tables.push(table);
+    this.asCreated.set(table, columnsOf(table));
 
     for (const ref of raw.refs ?? []) {
       // The grammars hand a quoted name back with its doubled quotes (`"a""b"` as a""b): read as the file means it.

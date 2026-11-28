@@ -682,7 +682,8 @@ describe('allowlists agree with the Worker', () => {
     // It closes the 2.0.0 list: what follows was appended later (the Fabric card's keys, then the
     // major update notice's, the layout fallbacks', then the start suggestion's repeat and the canvas's Convert button, #305,
     // ... then where outside changes came from, #329, then whether models are shared, #332, then how long
-    // a diagram took to open, #333, then the one look at the open folder, #347), never put before it.
+    // a diagram took to open, #333, then the one look at the open folder, #347, then what a panel that never said ready met, #364,
+    // then what a SQL import's tables defined twice were, #358), never put before it.
     expect(FEATURES.slice(FEATURES.indexOf('draftDropTimeLimit') + 1)).toEqual([
       'importGuideActionFabricCatalog', 'importGuideCopiedFabricCatalog',
       'importFabricOutcomeClean', 'importFabricOutcomeRepaired', 'importFabricOutcomePartial',
@@ -708,9 +709,14 @@ describe('allowlists agree with the Worker', () => {
       'startLookFromIndex', 'startLookIndexFallback',
       'startLookFoldersUnder200', 'startLookFolders200to2000', 'startLookFoldersOver2000',
       'startLookFoundAfterDeadline', 'dbtSearchFromIndex',
+      // #364: what a panel that never said ready met.
+      'noReadyHostHeld', 'noReadyClosed30to60s', 'noReadyClosedOver60s',
+      // #358: what a SQL import's tables defined twice were.
+      'importDuplicateSame', 'importDuplicateDiffers', 'importDuplicateDiffersDefaultSchema', 'importPartialDuplicateOnly',
     ]);
     // #262's per-step load codes follow the logged-error ones and close the 2.0.0 error list;
-    // what a failed layout was like (after 2.0.4) is appended after them.
+    // what a failed layout was like (after 2.0.4) is appended after them, then #304's, #319's
+    // and which site a logged error came from (#354).
     expect(ERROR_CODES.slice(ERROR_CODES.indexOf('loggedErrorOther') + 1)).toEqual([
       'domainLoadInternalManifest', 'domainLoadInternalYml', 'domainLoadInternalCatalog', 'domainLoadInternalRead',
       'domainLoadInternalPositions', 'domainLoadInternalPhysical', 'domainLoadInternalDisplay', 'domainLoadInternalOther',
@@ -722,6 +728,9 @@ describe('allowlists agree with the Worker', () => {
       'dbtSearchFailedRejected', 'dbtSearchFailedSort', 'dbtSearchFailedThrew',
       'handlerFailedAtRead', 'handlerFailedAtMutate', 'handlerFailedAtLayoutWrite', 'handlerFailedAtStorageWrite',
       'handlerFailedAtJsonWrite', 'handlerFailedAtSave', 'handlerFailedAtOther', 'handlerFailedDbml', 'handlerFailedJson',
+      'loggedErrorAtWatcher', 'loggedErrorAtLegacyRename', 'loggedErrorAtRedraw', 'loggedErrorAtExplorerMove',
+      'loggedErrorAtFeedbackSend', 'loggedErrorAtFailureAction', 'loggedErrorAtTrackingSession', 'loggedErrorAtTrackingRefresh',
+      'loggedErrorUnlistedTag',
       'projectPathInvalidUser', 'projectPathInvalidWorkspace', 'projectPathInvalidRelative', 'projectPathInvalidAbsolute',
     ]);
     // Liam's decision for B6: no table-count bucket is ever a key of a draft. A canvas open's
@@ -783,13 +792,18 @@ describe('allowlists agree with the Worker', () => {
       'startLookFromIndex', 'startLookIndexFallback',
       'startLookFoldersUnder200', 'startLookFolders200to2000', 'startLookFoldersOver2000',
       'startLookFoundAfterDeadline', 'dbtSearchFromIndex',
+      // #364: what a panel that never said ready met.
+      'noReadyHostHeld', 'noReadyClosed30to60s', 'noReadyClosedOver60s',
+      // #358: what a SQL import's tables defined twice were.
+      'importDuplicateSame', 'importDuplicateDiffers', 'importDuplicateDiffersDefaultSchema', 'importPartialDuplicateOnly',
     ]);
     for (const key of added) expect(section, key).toMatch(new RegExp(`^- \`${key}\` `, 'm'));
     // The error codes appended after the 2.0.0 list (a failed layout's class, size, duration and fallbacks;
     // then why the host's dbt search failed, #304; then where a canvas handler failure came from, #319;
-    // then the scope and form of a projectPath that is not a folder, #370), marked as errors.
+    // then which site a logged error came from, #354; then the scope and form of a projectPath that is
+    // not a folder, #370), marked as errors.
     const addedErrors = ERROR_CODES.slice(ERROR_CODES.indexOf('domainLoadInternalOther') + 1);
-    expect(addedErrors).toHaveLength(37);
+    expect(addedErrors).toHaveLength(46);
     for (const code of addedErrors) expect(section, code).toMatch(new RegExp(`^- \`${code}\` \\(error\\) `, 'm'));
     // Import outcomes: a failure inside ERD Studio is an outcome key; one inside Fabric is a copy with no outcome.
     const outcomes = readme.slice(readme.indexOf('### Import outcomes (2.0)'), readme.indexOf('### Onboarding funnel'));

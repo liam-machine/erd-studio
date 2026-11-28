@@ -28,6 +28,7 @@ import type {
 import { TRACKING_PENDING_TTL_MS, TRACKING_REFRESH_MS } from '../types/feedback';
 import { getErdStudioSetting } from './configService';
 import { GITHUB_REPO, hostErrorLog } from './feedbackService';
+import { telemetry } from './telemetryService';
 
 // ---------------------------------------------------------------------------
 // Keys & constants
@@ -320,6 +321,7 @@ export class ReportTrackingService {
       return session?.account?.label ?? null;
     } catch (err) {
       hostErrorLog.record('ReportTrackingService.getHandle', err);
+      telemetry.error('loggedErrorAtTrackingSession');
       return null;
     }
   }
@@ -397,6 +399,7 @@ export class ReportTrackingService {
       found = await this.search(handle);
     } catch (err) {
       hostErrorLog.record('ReportTrackingService.refresh', err);
+      telemetry.error('loggedErrorAtTrackingRefresh');
       return;
     }
 

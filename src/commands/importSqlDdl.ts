@@ -104,6 +104,7 @@ import {
   type SqlConvertStop,
   type SqlDialect,
   type SqlDialectReading,
+  type SqlDuplicateClass,
   type SqlStopReason,
   type SqlPartitionMode,
 } from '../services/sqlDdlImport';
@@ -488,6 +489,7 @@ function sqlRun(ui: ImportSqlDdlUi, quiet = false, draft?: ImportSqlDdlDeps['dra
   const showError = (message: string, actions: ErrorActions = {}): void => {
     showErrorWithActions((m, ...items) => ui.showErrorMessage(m, ...items), message, actions, (choice, err) => {
       log.error(`[ERD Studio] ${TITLE}: "${choice}" failed:`, err);
+      telemetry.error('loggedErrorAtFailureAction');
       const doing = `while running ${choice}`;
       showError(oursMessage(TITLE, doing, 'nothing was changed'), { [SEND_FEEDBACK_BUTTON]: () => ui.sendFeedback(feedbackPrefill(TITLE, doing, err)) });
     });
@@ -584,7 +586,10 @@ function sqlRun(ui: ImportSqlDdlUi, quiet = false, draft?: ImportSqlDdlDeps['dra
           (m, ...items) => Promise.resolve(ui.showInformationMessage(m, ...items)).then((c) => (typeof c === 'string' ? c : undefined)),
           lostText ? `${TITLE} was cancelled${lostText}` : `${TITLE} was cancelled before it read a table, so nothing was imported.`,
           report,
-          (choice, err) => log.error(`[ERD Studio] ${TITLE}: "${choice}" failed:`, err),
+          (choice, err) => {
+            log.error(`[ERD Studio] ${TITLE}: "${choice}" failed:`, err);
+            telemetry.error('loggedErrorAtFailureAction');
+          },
         );
       }
       return undefined;
@@ -1034,6 +1039,7 @@ function importConvertedSql(
   const ledger = result.ledger ?? [];
   for (const line of ledgerLogLinesWithoutProblems(ledger)) log.info(`[ERD Studio] ${line}`);
   const dialectLabel = SQL_DIALECT_LABELS[dialect];
+  const duplicates = sqlDuplicateClasses(result.problems);
   // The name Import DBML suggests for the diagram: not `database` for a database/ folder.
   // The quick path names it after the tables' common schema first, else the folder.
   const stem = resume.quick ? 'import.dbml' : read.fileName;
@@ -1044,6 +1050,7 @@ function importConvertedSql(
     ui: suppliedDbmlUi(importUi ?? vscodeImportDbmlUi(), filePath, result.dbml),
     source: 'sql',
     sqlDialect: dialect,
+    ...(duplicates.length ? { sqlDuplicates: duplicates } : {}),
     ...(guideSource ? { guideSource } : {}),
     origin: {
       from: sqlOriginPhrase(read.files.length, dialectLabel),
@@ -1057,6 +1064,17 @@ function importConvertedSql(
     },
     ...(changeOptions ? { changeOptions } : {}),
   }, { filePath, ...resume });
+}
+
+/**
+ * What each table defined twice was (#358): the fixed flags the converter put
+ * on its `duplicateTable` problems, for the import's outcome keys. A stopped
+ * reading (`stoppedBeforeATable`) has no problems, so it has none. Telemetry
+ * only: a result without a list of problems gives none, and never throws.
+ */
+function sqlDuplicateClasses(problems: readonly SqlDdlProblem[] | undefined): SqlDuplicateClass[] {
+  if (!Array.isArray(problems)) return [];
+  return problems.flatMap((p) => (p?.kind === 'duplicateTable' && p.duplicate ? [{ same: p.duplicate.same === true, defaultSchema: p.duplicate.defaultSchema === true }] : []));
 }
 
 /** Whether the files picked are catalog exports (`.csv` / `.tsv`): every one is, or none (`gatherSqlFiles` refuses a mix). */

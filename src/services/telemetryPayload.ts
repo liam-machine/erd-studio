@@ -857,6 +857,22 @@ export const FEATURES = [
   'startLookFoldersOver2000',
   'startLookFoundAfterDeadline',
   'dbtSearchFromIndex',
+  // #364: beside a webviewNoReady* code (src/services/readyWatch.ts), what the
+  // 30 s no-ready timeout met: its timer ran 5 s or more late, on a monotonic
+  // clock (the extension host was busy at 30 s); and the tab went away still
+  // blank, with no ready or reload since, as a fixed range from the show that
+  // ran out (never a time). Shared by the canvas, the draft page and Welcome.
+  'noReadyHostHeld',
+  'noReadyClosed30to60s',
+  'noReadyClosedOver60s',
+  // #358: beside importCauseDuplicate (src/services/importOutcomeTelemetry.ts), what a SQL
+  // import's tables defined twice were: a copy of the kept definition or not, one that
+  // differed with both in the dialect's default schema, and a partial import whose only
+  // problems were tables defined twice. Presence flags per import, never a name or a count.
+  'importDuplicateSame',
+  'importDuplicateDiffers',
+  'importDuplicateDiffersDefaultSchema',
+  'importPartialDuplicateOnly',
 ] as const;
 export type TelemetryFeature = (typeof FEATURES)[number];
 
@@ -1174,6 +1190,22 @@ export const ERROR_CODES = [
   'handlerFailedAtOther',
   'handlerFailedDbml',
   'handlerFailedJson',
+  // #354: which site a loggedErrorOther line came from, recorded at the site
+  // beside its log line: a throwing file-change listener, the legacy folder
+  // rename, a redraw from a diagram's file or fields.yml, following an
+  // Explorer move, Send Feedback without a canvas recording or copying, a
+  // failure's own button, and My Reports' silent session or its poll. Then a
+  // tag LOGGED_ERROR_AREAS does not list. All start with loggedError, so none
+  // triggers the known-fixes check or an interim heartbeat.
+  'loggedErrorAtWatcher',
+  'loggedErrorAtLegacyRename',
+  'loggedErrorAtRedraw',
+  'loggedErrorAtExplorerMove',
+  'loggedErrorAtFeedbackSend',
+  'loggedErrorAtFailureAction',
+  'loggedErrorAtTrackingSession',
+  'loggedErrorAtTrackingRefresh',
+  'loggedErrorUnlistedTag',
   // #370: what an erdStudio.projectPath that is not a folder was like, beside
   // projectPathInvalid (the total): one scope (a folder's own settings count
   // as Workspace; none when the setting changed while the window started) and
@@ -2353,9 +2385,18 @@ export const MODEL_SHARE_FEATURES = [
  * so the trim would take them first, and an oversized day is most likely a
  * large project's.
  */
+/**
+ * #364: what a `webviewNoReady*` met. Kept by the trim: an oversized day is most
+ * likely a large project's, which is the held-host case these keys tell apart,
+ * and the `webviewNoReady*` code they are read beside is an error code, trimmed
+ * last, so without them a trimmed day would read as an idle host (H2).
+ */
+export const NO_READY_FEATURES = ['noReadyHostHeld', 'noReadyClosed30to60s', 'noReadyClosedOver60s'] as const;
+
 const UNTRIMMED_FEATURES: ReadonlySet<string> = new Set<string>([
   'heartbeatProvisional',
   'heartbeatTrimmed',
+  ...NO_READY_FEATURES,
   ...LIBRARY_TABLE_FEATURES,
   ...LARGE_DIAGRAM_FEATURES,
   ...OUTSIDE_CHANGE_SOURCE_FEATURES,

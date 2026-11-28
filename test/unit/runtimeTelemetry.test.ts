@@ -269,8 +269,44 @@ describe('B19: the logger error hook', () => {
     expect(loggedErrorCodes('Table Library')).toEqual(['loggedError', 'loggedErrorSidebar']);
     expect(loggedErrorCodes('ManifestService')).toEqual(['loggedError', 'loggedErrorDbt']);
     expect(loggedErrorCodes('')).toEqual(['loggedError', 'loggedErrorOther']);
-    expect(loggedErrorCodes('/home/someone/secret')).toEqual(['loggedError', 'loggedErrorOther']);
-    expect(loggedErrorCodes('toString')).toEqual(['loggedError', 'loggedErrorOther']);
+    // #354: a tag nobody listed also says so (a fixed key, never the tag).
+    expect(loggedErrorCodes('/home/someone/secret')).toEqual(['loggedError', 'loggedErrorOther', 'loggedErrorUnlistedTag']);
+    expect(loggedErrorCodes('toString')).toEqual(['loggedError', 'loggedErrorOther', 'loggedErrorUnlistedTag']);
+  });
+
+  it('#354: a template source is found by its part before the first dot; only an unlisted, non-empty one is flagged', () => {
+    expect(loggedErrorCodes('submitFeedback.Open GitHub Issues')).toEqual(['loggedError', 'loggedErrorOther']);
+    expect(loggedErrorCodes('feedbackApiKey.Anthropic')).toEqual(['loggedError', 'loggedErrorOther']);
+    expect(loggedErrorCodes('ReportTrackingService.refresh')).toEqual(['loggedError', 'loggedErrorOther']);
+    expect(loggedErrorCodes('sendDomainData')).toEqual(['loggedError', 'loggedErrorOther']);
+    expect(loggedErrorCodes('Brand New')).toEqual(['loggedError', 'loggedErrorOther', 'loggedErrorUnlistedTag']);
+    expect(loggedErrorCodes('toString.x')).toEqual(['loggedError', 'loggedErrorOther', 'loggedErrorUnlistedTag']);
+    expect(loggedErrorCodes('.hidden')).toEqual(['loggedError', 'loggedErrorOther', 'loggedErrorUnlistedTag']);
+    // A listed scope found by its prefix keeps that scope's area.
+    expect(loggedErrorCodes('Canvas.something')).toEqual(['loggedError', 'loggedErrorCanvas']);
+  });
+
+  it('#354: listing the feedback sources changed no area a released version counted', () => {
+    // Every entry the table had before #354, with its area: a source that moved would
+    // change what loggedErrorCanvas or loggedErrorOther meant across versions.
+    const before: Record<string, string> = {
+      Canvas: 'Canvas', 'Drop timing': 'Canvas', 'Convert to DBML': 'Other', dbml: 'Other', Draft: 'Draft',
+      DraftPreviewPanel: 'Draft', Relationships: 'Sidebar', 'Subject Areas': 'Sidebar', 'Table Library': 'Sidebar',
+      'ERD Studio': 'Other', SemanticEditorProvider: 'Canvas', saveDocument: 'Canvas', saveDocumentByUri: 'Canvas',
+      RefreshGate: 'Canvas', ConvertToDbmlPanel: 'Other', DomainTreeProvider: 'Sidebar', FileWatcherService: 'Other',
+      GettingStarted: 'Other', LayerService: 'Other', LogicalModelService: 'Other', ManifestService: 'Dbt',
+      MigrationService: 'Other', migrateNaming: 'Other', moveRelationshipsToLibrary: 'Other', SelectorsService: 'Dbt',
+      CliLauncher: 'Harness',
+    };
+    for (const [source, area] of Object.entries(before)) expect(LOGGED_ERROR_AREAS[source], source).toBe(area);
+    // Tags #355 introduced with their own area: no released version logged under them,
+    // so there was nothing for them to count as before.
+    const newTags: Record<string, string> = { MissedCanvasDrop: 'Sidebar', ApplyFileWrites: 'Canvas' };
+    for (const [source, area] of Object.entries(newTags)) expect(LOGGED_ERROR_AREAS[source], source).toBe(area);
+    // Everything else added since is Other, so it counts exactly as it did while unlisted.
+    for (const [source, area] of Object.entries(LOGGED_ERROR_AREAS)) {
+      if (!(source in before) && !(source in newTags)) expect(area, source).toBe('Other');
+    }
   });
 
   it('a hook that logs an error itself does not recurse, and a hook that throws never reaches the caller', () => {
@@ -321,6 +357,22 @@ describe('loggedErrorAreas: every error source in src/ is in the table', () => {
     for (const text of sources) for (const m of text.matchAll(/createLogger\('([^']*)'\)/g)) if (m[1]) scopes.add(m[1]);
     expect(scopes.size).toBeGreaterThan(5);
     for (const scope of scopes) expect(Object.keys(LOGGED_ERROR_AREAS), scope).toContain(scope);
+  });
+
+  it('#354: each literal hostErrorLog.record source, and each template source by its part before the first dot', () => {
+    const literal = new Set<string>();
+    const prefixes = new Set<string>();
+    for (const text of sources) {
+      for (const m of text.matchAll(/hostErrorLog\.record\(\s*(['`])([^'`]*)\1?/g)) {
+        const raw = m[2];
+        const at = raw.indexOf('${');
+        if (m[1] === '`' && at >= 0) prefixes.add(raw.slice(0, at).replace(/\.$/, ''));
+        else literal.add(raw);
+      }
+    }
+    expect(literal.size).toBeGreaterThan(20);
+    expect([...prefixes].sort()).toEqual(['feedbackApiKey', 'submitFeedback']);
+    for (const source of [...literal, ...prefixes]) expect(Object.keys(LOGGED_ERROR_AREAS), source).toContain(source);
   });
 
   it('each literal [Tag] an unscoped log.error line starts with', () => {

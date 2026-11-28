@@ -578,6 +578,13 @@ export interface DraftPreviewEvents {
    * `range` is how long after it was shown.
    */
   lateReady?(source: DraftSource, range: LateReadyRange): void;
+  /** Right after `noReady`, when its 30 s timer ran 5 s or more late: the host was busy (optional, #364). */
+  noReadyHostHeld?(source: DraftSource): void;
+  /**
+   * The tab went away after `noReady` with no ready and no reload since
+   * (optional, #364): it closed still blank, `range` after it was shown.
+   */
+  closedBlank?(source: DraftSource, range: LateReadyRange): void;
   /** ELK laid the draft out (optional, 2.0 B17). */
   layoutFinished?(source: DraftSource, layout: { ms: number; fitZoom: FitZoomBucket; fallback?: true; rung?: LayoutFallbackRung }): void;
   /** The page closed while the draft on show was still being laid out (optional, 2.0 B17). */

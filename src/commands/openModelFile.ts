@@ -12,6 +12,7 @@ import type { TableFileError, TableFileErrorKind } from '../services/logicalMode
 import { OPEN_FILE_BUTTON, projectRelative, showErrorWithActions } from '../services/commandErrors';
 import { refusalLocation, type RefusedWrite } from '../services/newSubjectAreaWriter';
 import { log } from '../services/logger';
+import { telemetry } from '../services/telemetryService';
 
 /** Open `filePath`, placing the cursor at the 1-based `line` / `column` when given (in `viewColumn`, else the active one). */
 export async function openTableFileAt(filePath: string, line?: number, column?: number, viewColumn?: vscode.ViewColumn): Promise<void> {
@@ -47,6 +48,7 @@ export function showRefusedWrite(
     location ? { [OPEN_FILE_BUTTON]: () => openTableFileAt(location.filePath, location.line) } : {},
     (choice, failure) => {
       log.error(`[ERD Studio] ${title}: "${choice}" failed:`, failure);
+      telemetry.error('loggedErrorAtFailureAction');
       void vscode.window.showErrorMessage(`${title}: could not open ${file ?? 'the file'}. It may have been moved or deleted.`);
     },
   );

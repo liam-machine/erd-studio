@@ -40,6 +40,7 @@ import {
 import { EdgeFlowGlyphs } from '../Graph/EdgeFlow';
 import { isSingleLayerProject, layerAbbreviation } from '../../lib/layerCues';
 import { offDiagramRows } from '../../lib/canvasContext';
+import { nodeSubtitle, nodeSubtitleIsChosen, tableSubtitleLabel } from '../../lib/tableSubtitle';
 import type { FlowMode } from '../../lib/edgeFlow';
 import type { RoutedEdge } from '../../lib/edgeRouting/types';
 import type { GraphNode, GraphEdge } from '../../lib/nodeOverlays';
@@ -140,6 +141,12 @@ export interface LegendFacts {
   alias: boolean;
   /** A grain line under some table's name. */
   grain: boolean;
+  /**
+   * What the line under some table's name shows when the reader chose
+   * something other than the grain: that choice's label ("Owner",
+   * "Description"). Absent when no table draws such a line.
+   */
+  subtitle?: string;
   /** The editor's "+n" chip: relationships to tables not on this diagram. */
   offDiagram: boolean;
   /** Key badges its columns carry. */
@@ -174,7 +181,9 @@ export interface LegendFacts {
 export interface LegendFactsInput {
   viewer: boolean;
   logicalOnly: boolean;
-  domain: Pick<DisplaySubjectArea, 'stage' | 'layer' | 'layerConfig' | 'layerConfigs' | 'models'> | null;
+  domain: Pick<DisplaySubjectArea, 'stage' | 'layer' | 'layerConfig' | 'layerConfigs' | 'models' | 'fields'> | null;
+  /** What the line under a table's name shows (the store's `tableSubtitle`); absent is the grain. */
+  tableSubtitle?: string;
   nodes: readonly GraphNode[];
   edges: readonly GraphEdge[];
   /** The editing host's context (never in the viewer): the "+n" chips. */
@@ -238,7 +247,10 @@ export function legendFacts(input: LegendFactsInput): LegendFacts {
     layerBadge,
     schemaPrefix: data.some((d) => !!d.shownSchema),
     alias: data.some((d) => !!d.alias),
-    grain: data.some((d) => !!d.grain),
+    grain: data.some((d) => !nodeSubtitleIsChosen(d) && nodeSubtitle(d) !== undefined),
+    ...(data.some((d) => nodeSubtitleIsChosen(d) && nodeSubtitle(d) !== undefined)
+      ? { subtitle: tableSubtitleLabel(input.tableSubtitle, domain?.fields) }
+      : {}),
     offDiagram: !viewer && !!input.canvasContext && !!domain &&
       data.some((d) => offDiagramRows(input.canvasContext ?? null, domain as DisplaySubjectArea, d.modelName).length > 0),
     keys: {
@@ -287,6 +299,7 @@ export function Legend() {
   const edges = useEditorStore((s) => (s.legendOpen ? s.edges : NO_EDGES));
   const canvasContext = useEditorStore((s) => (s.legendOpen && !viewer ? s.canvasContext : null));
   const xray = useEditorStore((s) => s.legendOpen && hasXray(s.edgeRoutes));
+  const tableSubtitle = useEditorStore((s) => s.tableSubtitle);
   const { legendMaxHeight } = useCanvasChrome();
 
   const facts = useMemo(
@@ -298,8 +311,9 @@ export function Legend() {
       edges,
       canvasContext,
       xray,
+      ...(tableSubtitle !== undefined ? { tableSubtitle } : {}),
     }),
-    [viewer, logicalOnly, domain, nodes, edges, canvasContext, xray],
+    [viewer, logicalOnly, domain, nodes, edges, canvasContext, xray, tableSubtitle],
   );
   const sourceLabel = viewer ? SOURCE_LABEL_NEUTRAL : SOURCE_LABEL;
   const sourceDesc = viewer ? SOURCE_LEGEND_DESC_NEUTRAL : SOURCE_LEGEND_DESC;
@@ -332,7 +346,7 @@ export function Legend() {
   const flowModes = new Set(facts.cardinalities.map((c) => FLOW_OF[c]));
   const flowSamples = FLOW_SAMPLES.filter((f) => flowModes.has(f.mode));
   const anyKeys = facts.keys.pk || facts.keys.fk || facts.keys.nk;
-  const header = facts.layerBadge || facts.schemaPrefix || facts.alias || facts.grain || facts.offDiagram || facts.sources.length > 0;
+  const header = facts.layerBadge || facts.schemaPrefix || facts.alias || facts.grain || !!facts.subtitle || facts.offDiagram || facts.sources.length > 0;
   const linesShown = facts.cardinalities.length > 0;
   const stageCard = facts.stage !== null;
   const empty = !stageCard && !header && !anyKeys && !facts.scd && !facts.additive && !linesShown && !facts.notes && !facts.comparing;
@@ -455,6 +469,12 @@ export function Legend() {
                 <div className="legend__item">
                   <span className="legend__sample"><span className="legend__grain-sample">grain</span></span>
                   <span className="legend__item-desc">The line under the name: what one row is</span>
+                </div>
+              )}
+              {facts.subtitle && (
+                <div className="legend__item">
+                  <span className="legend__sample"><span className="legend__grain-sample">{facts.subtitle}</span></span>
+                  <span className="legend__item-desc">The line under the name</span>
                 </div>
               )}
               {facts.offDiagram && (

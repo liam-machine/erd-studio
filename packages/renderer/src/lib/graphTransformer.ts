@@ -27,9 +27,10 @@ import type {
   AnnotationFlowEdge,
   ColumnDisplay,
 } from '../types/graph';
-import { RATIONALE_FIELD_KEYS } from '@erd-studio/core';
+import { DEFAULT_TABLE_SUBTITLE, RATIONALE_FIELD_KEYS, normaliseTableSubtitle } from '@erd-studio/core';
 import { resolveNodeDimensions } from './nodeSizing';
 import type { ColumnFilter, TableDetail } from './tableDetail';
+import { tableSubtitleText } from './tableSubtitle';
 import { columnPairs, foldComposites, relationshipDisplayKey, relationshipEdgeId } from './relationshipDisplayKey';
 import { computeTableLabels, headerName } from './modelLabels';
 import { isSingleLayerProject } from './layerCues';
@@ -64,6 +65,12 @@ export interface TransformOptions {
   tableDetail?: TableDetail;
   /** Which columns the `keys` level shows, for the size estimate; absent is the three key kinds. */
   columnFilter?: ColumnFilter;
+  /**
+   * What the line under each table's name shows: `field:<key>`,
+   * `description` or `none` (core's `tableSubtitle.ts`). Absent, or anything
+   * else: the grain, as before the choice existed.
+   */
+  tableSubtitle?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -225,6 +232,12 @@ export function transformSubjectArea(
   }
   const headerOwnName = (model: DisplayTable): string | undefined =>
     ownNameOf(model) && headerCounts.get(headerKey(model)) === 1 ? ownNameOf(model) : undefined;
+  // The line under each name, when the reader chose something other than the
+  // grain: resolved once here, so the node, its height estimate and the
+  // legend all read the same text. For the grain nothing is added, and every
+  // node is what it was before the choice existed.
+  const tableSubtitle = normaliseTableSubtitle(options?.tableSubtitle);
+  const subtitleChosen = tableSubtitle !== DEFAULT_TABLE_SUBTITLE;
   const nodes: (TableFlowNode | AnnotationFlowNode)[] = models.map((model) => {
     const columns = mapColumns(model);
     const position = positionMap.get(model.name) ?? DEFAULT_POSITION;
@@ -257,6 +270,7 @@ export function transformSubjectArea(
         isStub: domain.stubColumns?.includes(model.name) ?? false,
         ...(hasRationaleText(model.rationale) ? { hasRationale: true } : {}),
         ...(model.grain ? { grain: model.grain } : {}),
+        ...(subtitleChosen ? { subtitle: tableSubtitleText(model, tableSubtitle, domain.fields) ?? null } : {}),
         ...(model.modelRole ? { modelRole: model.modelRole } : {}),
         ...(hasMeta(model.meta) ? { meta: model.meta } : {}),
         ...(readOnly ? { readOnly: true } : {}),
