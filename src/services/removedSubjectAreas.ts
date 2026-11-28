@@ -8,8 +8,9 @@
  * its format changed. That is what Edit > Undo of **Convert Project to DBML**
  * does (the `.dbml` diagrams are deleted and their `.json` comes back), and
  * what Convert itself does the other way round. Only a diagram whose name is
- * gone in both formats was removed, so only those are worth the "Regenerate
- * dbt selectors.yml" prompt.
+ * gone in both formats was removed, so only those are reported as removed:
+ * an outside change, and a reason to check selectors.yml (read-only; nothing
+ * is written or offered).
  *
  * Pure apart from `exists`, and free of `vscode`.
  */

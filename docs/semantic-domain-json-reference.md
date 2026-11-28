@@ -26,7 +26,7 @@ Every DBML file lives under a **layer folder** (one per id in `layers.json`), at
 │   ├── relationships/
 │   │   └── calendar.dbml              Refs, split out by hand
 │   └── diagrams/
-│       └── staging.dbml               a diagram (no erd_layout yet: the first open lays it out and saves it)
+│       └── staging.dbml               a diagram (no erd_layout yet: opening lays it out; the first move, add or remove of a table saves it)
 └── gold/
     ├── tables/
     │   └── gold/
