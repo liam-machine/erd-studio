@@ -309,6 +309,57 @@ describe.each([
     }
   });
 
+  // ---- A branch switch or a pull: every watcher fires, nothing is written ---
+
+  it('a branch switch that changes diagrams, tables, layers.json, the manifest, a schema yml and selectors.yml writes nothing, and flags selectors.yml', async () => {
+    await start();
+    await settle();
+    await openShowcase();
+    await settle();
+    const before = snapshot(ws);
+    const semantic = path.join(ws, '.erd-studio');
+    const handChanged: string[] = [];
+    const edit = (rel: string, change: (text: string) => string): void => {
+      const abs = path.join(ws, rel);
+      const text = fs.readFileSync(abs, 'utf-8');
+      const next = change(text);
+      expect(next).not.toBe(text);
+      fs.writeFileSync(abs, next);
+      handChanged.push(rel);
+    };
+    // The other branch has fct_sale on showcase: the selector for it no longer matches.
+    edit(path.join('.erd-studio', ...SHOWCASE[storage].split('/')), (text) => {
+      if (storage === 'dbml') return `use { table silver.fct_sale } from '../tables/silver/fct_sale.dbml'\n${text}`;
+      const json = JSON.parse(text);
+      json.logical.models.push('fct_sale');
+      return JSON.stringify(json, null, 2) + '\n';
+    });
+    edit(storage === 'yaml' ? path.join('.erd-studio', 'logical-models', 'dim_customer.yml') : path.join('.erd-studio', 'silver', 'tables', 'silver', 'dim_customer.dbml'),
+      (text) => `${text}${storage === 'yaml' ? '#' : '//'} changed on another branch\n`);
+    edit(path.join('.erd-studio', 'layers.json'), (text) => JSON.stringify(JSON.parse(text), null, 4) + '\n');
+    edit(path.join('target', 'manifest.json'), (text) => `${text}\n`);
+    edit(path.join('models', 'silver', 'fct_order.yml'), (text) => `${text}# changed on another branch\n`);
+    edit('selectors.yml', (text) => `${text}# a teammate's note\n`);
+    const gone = storage === 'yaml' ? path.join('.erd-studio', 'silver', 'ttt.json') : path.join('.erd-studio', 'silver', 'diagrams', 'ttt.dbml');
+    fs.rmSync(path.join(ws, gone));
+    handChanged.push(gone);
+    expect(fs.existsSync(semantic)).toBe(true);
+
+    // Each file's events reach every watcher, as a checkout's may.
+    for (const rel of handChanged) {
+      const uri = vscode.Uri.file(path.join(ws, rel));
+      for (const w of [...vscode._mockFileWatchers]) {
+        if (rel === gone) w._simulateDelete(uri);
+        else w._simulateChange(uri);
+      }
+    }
+    await settle();
+    await settle();
+    expect(changed(before, snapshot(ws))).toEqual([...handChanged].sort());
+    const item = statusItems.find((i) => i.text.includes('selectors.yml out of sync'));
+    expect(item?.shown).toBe(true);
+  });
+
   // ---- The whole picture ----------------------------------------------------
 
   it('guard: on the clean fixture, activation plus opening showcase changes no file', async () => {
