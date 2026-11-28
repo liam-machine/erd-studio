@@ -865,6 +865,14 @@ export const FEATURES = [
   'noReadyHostHeld',
   'noReadyClosed30to60s',
   'noReadyClosedOver60s',
+  // #358: beside importCauseDuplicate (src/services/importOutcomeTelemetry.ts), what a SQL
+  // import's tables defined twice were: a copy of the kept definition or not, one that
+  // differed with both in the dialect's default schema, and a partial import whose only
+  // problems were tables defined twice. Presence flags per import, never a name or a count.
+  'importDuplicateSame',
+  'importDuplicateDiffers',
+  'importDuplicateDiffersDefaultSchema',
+  'importPartialDuplicateOnly',
 ] as const;
 export type TelemetryFeature = (typeof FEATURES)[number];
 

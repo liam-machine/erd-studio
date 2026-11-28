@@ -66,6 +66,20 @@ export interface SqlDdlProblem {
   cause?: LedgerCause;
   /** The table it is about, when it is about one (its name as written, schema-qualified when the SQL was). */
   table?: string;
+  /** A `duplicateTable` problem: what the second definition was beside the kept one (telemetry only, never shown). */
+  duplicate?: SqlDuplicateClass;
+}
+
+/**
+ * A table defined twice, as two fixed flags (telemetry only): `same` when
+ * the second definition has the kept one's columns (names, type text, primary
+ * key and NOT NULL, in any order; notes and defaults are not compared), and
+ * `defaultSchema` when both resolve to the dialect's default schema (no schema,
+ * `public`, `dbo`…), so a second database's table of the same name can land here.
+ */
+export interface SqlDuplicateClass {
+  same: boolean;
+  defaultSchema: boolean;
 }
 
 /** The grammar each dialect is read with (Databricks: rewritten for Postgres first). */
@@ -403,6 +417,30 @@ export function sameSchema(a: string | null, b: string | null, dialect: SqlDiale
   const fallback = DEFAULT_SCHEMA[dialect];
   const norm = (s: string | null): string => (s ?? fallback ?? '').toLowerCase();
   return norm(a) === norm(b);
+}
+
+/** A type as written, for comparing two definitions: case and whitespace do not matter (`VARCHAR (50)` is `varchar(50)`). */
+const typeText = (type: string): string => type.toLowerCase().replace(/\s+/g, '');
+
+/**
+ * Whether two definitions of a table have the same columns (a table defined
+ * twice, telemetry only): as many, each matched by name in any case and in
+ * any order, with the same type text and NOT NULL, and the same primary key
+ * (inline or as a table constraint, its columns in any order). Notes, defaults
+ * and the rest are not compared, so `int` and `integer` differ.
+ */
+export function sameColumns(a: ModelTable, b: ModelTable): boolean {
+  if (a.fields.length !== b.fields.length) return false;
+  const columnsMatch = a.fields.every((fa) => {
+    const matches = b.fields.filter((fb) => sameIdent(fa.name, fb.name));
+    if (matches.length !== 1) return false;
+    const fb = matches[0];
+    return typeText(fa.type) === typeText(fb.type) && fa.notNull === fb.notNull;
+  });
+  if (!columnsMatch) return false;
+  const keyA = primaryKeyOf(a);
+  const keyB = primaryKeyOf(b);
+  return keyA.length === keyB.length && keyA.every((ca) => keyB.some((cb) => sameIdent(ca, cb)));
 }
 
 export function tableKey(table: ModelTable, dialect: SqlDialect): string {

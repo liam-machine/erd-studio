@@ -514,6 +514,8 @@ describe('problems', () => {
     expect(result.problems).toEqual([{
       file: 'b.sql', line: 2, message: 'Table SALES.Customer is defined twice (also in a.sql, line 1); the first definition is kept.',
       kind: 'duplicateTable', cause: 'duplicate', table: 'SALES.Customer',
+      // Telemetry only (#358): a second column, and a schema that is not public.
+      duplicate: { same: false, defaultSchema: false },
     }]);
     expect(result.tableCount).toBe(1);
     expect(result.dbml).not.toMatch(/"name"/);

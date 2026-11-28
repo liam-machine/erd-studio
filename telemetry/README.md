@@ -1974,6 +1974,47 @@ npx wrangler d1 execute erd-studio-telemetry --remote --command \
 after midnight UTC is missed: for the ledger, count each key per install over
 the window without that filter.
 
+**Reading `importCauseDuplicate`** (added after 2.0.12, #358). A SQL import
+that meets a second plain `CREATE TABLE` of a table it already read keeps the
+first definition and reports the second (a `problem`, so the import counts
+`Partial`). On its own, `importCauseDuplicate` could not say whether that was a
+harmless copy, a different version of the table, or a second database's table
+of the same name. The converter decides it where both definitions are in hand
+(`sqlDdlImport.ts`, `sameColumns` in `sqlDdlModel.ts`), and the import's
+outcome keys (`importOutcomeTelemetry.ts`) record beside `importCauseDuplicate`,
+each at most once per import, with `featureQuiet` (off the trail), including
+the automatic draft:
+
+- `importDuplicateSame` — a second definition had the kept one's columns: the same names, type text (case and spaces aside), primary key and NOT NULL, in any order.
+- `importDuplicateDiffers` — a second definition did not have the kept one's columns.
+- `importDuplicateDiffersDefaultSchema` — one that differed, with both definitions in the dialect's default schema (no schema, or `public`, `dbo`, `main`…), where a second database's table of the same name lands too.
+- `importPartialDuplicateOnly` — the import was `Partial` and every `problem` it had was a table defined twice: every table read, and the only loss is the second definitions.
+
+How to read them:
+
+- **Presence flags per import.** No name, file, path, column or count of duplicates is sent: an import with five copies and one with one both count `importDuplicateSame` once.
+- **They do not add up to `importCauseDuplicate`.** That cause also comes from `CREATE OR REPLACE` (a `changed` entry), a catalog CSV's repeated column and Power BI, none of which counts these keys.
+- **`Same` means the kept table already held the dropped definition**, as read at that point: an earlier `ALTER TABLE … ADD COLUMN` on the kept table counts, and a note or default that differs does not.
+- **`Differs` is an upper bound.** Type text is compared, not types: `int4` and `integer`, or `int` and `integer`, read as different.
+- **`DiffersDefaultSchema` is the one key for "two different tables merged"** (H3 in #358), so it cannot be paired with the wrong duplicate over a day. For SQL Server and Snowflake, a `USE <database>` picks a database, not a schema, so two dumps of two databases (`USE db1` / `USE db2`, each with `[dbo].[orders]`) land here; for MySQL a `USE db` is the schema, and both tables are kept with no duplicate at all. A three-part name drops its database part the same way. pg_dump's `public.orders` in two dumps is the default schema too.
+- **Not counted:** a `CREATE TABLE IF NOT EXISTS` of a table already read is skipped silently (no problem, no key), and a stopped reading (`Cancelled`, `TimedOut`) carries no problems, so its `importCauseDuplicate` has no class key beside it.
+- **`importPartialDuplicateOnly` sets duplicate-only `Partial` imports apart** from ones that left something unread. What `Partial` means does not change.
+
+```bash
+# What the tables defined twice were, on releases that carry the keys (installs and imports, finished final days)
+npx wrangler d1 execute erd-studio-telemetry --remote --command \
+  "SELECT f.key, COUNT(DISTINCT h.install_id) AS installs, SUM(f.value) AS imports FROM heartbeats h, json_each(h.features) f WHERE COALESCE(h.dev, 0) = 0 AND h.day < date('now','-1 day') AND json_extract(h.features,'$.heartbeatProvisional') IS NULL AND json_extract(h.features,'$.versionMixed') IS NULL AND f.key IN ('importCauseDuplicate', 'importDuplicateSame', 'importDuplicateDiffers', 'importDuplicateDiffersDefaultSchema', 'importPartialDuplicateOnly', 'importOutcomeSqlDdlPartial', 'draftSourceSqlDdl') GROUP BY 1 ORDER BY 1"
+```
+
+Filter `h.ext_version` to the first release that carries the keys (compare it
+numerically). Mostly `importDuplicateSame`: copies (H1), so a copy could be a
+note rather than a `problem`. `importDuplicateDiffers` without
+`importDuplicateDiffersDefaultSchema` on 2 or more installs: versions (H2),
+a product question about which definition to keep.
+`importDuplicateDiffersDefaultSchema` on 2 or more installs: two different
+tables merged into one (H3), a bug, already confirmed for SQL Server's
+`USE db1` / `USE db2`.
+
 ## The local archive
 
 Because D1 keeps raw rows for only 90 days, the operator's machine keeps

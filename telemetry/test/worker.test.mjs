@@ -656,6 +656,8 @@ describe('validation — acceptance and normalisation', () => {
         'startLookFoundAfterDeadline', 'dbtSearchFromIndex',
         // #364: what a panel that never said ready met.
         'noReadyHostHeld', 'noReadyClosed30to60s', 'noReadyClosedOver60s',
+        // #358: what a SQL import's tables defined twice were.
+        'importDuplicateSame', 'importDuplicateDiffers', 'importDuplicateDiffersDefaultSchema', 'importPartialDuplicateOnly',
       ],
     );
     // The keys whose meaning shifted with #347 keep their places from 2.0.0 and after 2.0.4.
@@ -675,8 +677,25 @@ describe('validation — acceptance and normalisation', () => {
     assert.deepEqual(JSON.parse(params[17]), features);
     assert.deepEqual(JSON.parse(params[18]), { webviewNoReadyCanvas: 2 });
     assert.deepEqual(
-      WORKER_FEATURES.slice(WORKER_FEATURES.indexOf('dbtSearchFromIndex') + 1),
+      WORKER_FEATURES.slice(WORKER_FEATURES.indexOf('dbtSearchFromIndex') + 1, WORKER_FEATURES.indexOf('noReadyClosedOver60s') + 1),
       ['noReadyHostHeld', 'noReadyClosed30to60s', 'noReadyClosedOver60s'],
+    );
+  });
+
+  it('keeps what a SQL import\'s tables defined twice were (#358), after #364\'s keys, and drops a count, a look-alike or an error-side copy', async () => {
+    const features = { importCauseDuplicate: 2, importDuplicateSame: 1, importDuplicateDiffers: 1, importDuplicateDiffersDefaultSchema: 1, importPartialDuplicateOnly: 2 };
+    const params = await storedParams(
+      heartbeat({
+        features: { ...features, importDuplicateNoSchema: 1, importDuplicateSameCount: 3, importDuplicateDiffersNoSchema: 1, importDuplicates: 4 },
+        errors: { importDuplicateSame: 1, importPartialDuplicateOnly: 1 },
+      }),
+    );
+    assert.deepEqual(JSON.parse(params[17]), features);
+    assert.equal(params[18], '{}');
+    // The newest keys close the list.
+    assert.deepEqual(
+      WORKER_FEATURES.slice(WORKER_FEATURES.indexOf('noReadyClosedOver60s') + 1),
+      ['importDuplicateSame', 'importDuplicateDiffers', 'importDuplicateDiffersDefaultSchema', 'importPartialDuplicateOnly'],
     );
   });
 

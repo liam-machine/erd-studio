@@ -12,6 +12,7 @@ import {
   IMPORT_OUTCOME_FEATURES,
   LEDGER_CAUSE_FEATURES,
   SQL_DIALECT_OUTCOME_FEATURES,
+  SQL_DUPLICATE_FEATURES,
   importGuideSourceOfImportArg,
   importOutcomeFeatures,
   ledgerImportOutcome,
@@ -231,5 +232,97 @@ describe('recordImportOutcome', () => {
     expect(got).toEqual(['importOutcomeSemanticModelFail']);
     expect(() => recordImportOutcome(() => { throw new Error('boom'); }, { importer: 'dbt' })).not.toThrow();
     expect(() => recordImportOutcome(() => {}, { importer: 'sql', ledger: null as never })).not.toThrow();
+  });
+});
+
+describe('what a SQL import\'s tables defined twice were (#358)', () => {
+  const DUP_KEYS: readonly string[] = Object.values(SQL_DUPLICATE_FEATURES);
+  /** A ledger holding one duplicate problem per entry of `dups`, plus `more`. */
+  const withDuplicates = (n: number, more?: (l: ReturnType<typeof createLedger>) => void): LedgerEntry[] => ledgerOf((l) => {
+    for (let i = 0; i < n; i++) l.problem('table', 'duplicate', 'table defined twice', { ...WHERE, line: i + 1 }, 'not read again: the first definition is kept');
+    more?.(l);
+  });
+  const dupKeys = (report: Parameters<typeof importOutcomeFeatures>[0]): string[] => importOutcomeFeatures(report).filter((k) => DUP_KEYS.includes(k));
+  const SAME = { same: true, defaultSchema: true };
+  const DIFFERS = { same: false, defaultSchema: false };
+  const DIFFERS_DEFAULT = { same: false, defaultSchema: true };
+
+  it('are the four keys, in FEATURES, after #364\'s', () => {
+    expect(DUP_KEYS).toEqual(['importDuplicateSame', 'importDuplicateDiffers', 'importDuplicateDiffersDefaultSchema', 'importPartialDuplicateOnly']);
+    expect(FEATURES.slice(FEATURES.indexOf('noReadyClosedOver60s') + 1, FEATURES.indexOf('noReadyClosedOver60s') + 5)).toEqual(DUP_KEYS);
+  });
+
+  it('importDuplicateSame: a copy, after the cause keys', () => {
+    expect(importOutcomeFeatures({ importer: 'sql', dialect: 'postgres', ledger: withDuplicates(1), duplicates: [SAME] }))
+      .toEqual(['importOutcomeSqlDdlPartial', 'importSqlOutcomePostgresPartial', 'importCauseDuplicate', 'importDuplicateSame', 'importPartialDuplicateOnly']);
+  });
+
+  it('importDuplicateDiffers: one that differs, in a schema of its own', () => {
+    expect(dupKeys({ importer: 'sql', ledger: withDuplicates(1), duplicates: [DIFFERS] })).toEqual(['importDuplicateDiffers', 'importPartialDuplicateOnly']);
+  });
+
+  it('importDuplicateDiffersDefaultSchema: only beside Differs; a copy in the default schema is Same alone', () => {
+    expect(dupKeys({ importer: 'sql', ledger: withDuplicates(1), duplicates: [DIFFERS_DEFAULT] }))
+      .toEqual(['importDuplicateDiffers', 'importDuplicateDiffersDefaultSchema', 'importPartialDuplicateOnly']);
+    expect(dupKeys({ importer: 'sql', ledger: withDuplicates(1), duplicates: [SAME] })).toEqual(['importDuplicateSame', 'importPartialDuplicateOnly']);
+    // A copy in the default schema beside a difference in another: never paired.
+    expect(dupKeys({ importer: 'sql', ledger: withDuplicates(2), duplicates: [SAME, DIFFERS] }))
+      .toEqual(['importDuplicateSame', 'importDuplicateDiffers', 'importPartialDuplicateOnly']);
+  });
+
+  it('importPartialDuplicateOnly: only when every problem was a duplicate; fidelity notes do not count against it', () => {
+    const unread = withDuplicates(1, (l) => l.problem('statement', 'parseError', 'statement', WHERE));
+    expect(dupKeys({ importer: 'sql', ledger: unread, duplicates: [SAME] })).toEqual(['importDuplicateSame']);
+    const noted = withDuplicates(1, (l) => { l.lost('column', 'unsupportedModifier', 'ON UPDATE', WHERE); l.repaired('table', 'parseError', 'missing comma', WHERE); });
+    expect(dupKeys({ importer: 'sql', ledger: noted, duplicates: [SAME] })).toEqual(['importDuplicateSame', 'importPartialDuplicateOnly']);
+    // A cancelled or timed-out reading is not partial.
+    const stopped = withDuplicates(1, (l) => l.problem('statement', 'cancelled', 'not read', WHERE));
+    expect(importOutcomeFeatures({ importer: 'sql', ledger: stopped, duplicates: [SAME] })).not.toContain('importPartialDuplicateOnly');
+  });
+
+  it('each key at most once, however many tables were defined twice', () => {
+    const keys = importOutcomeFeatures({ importer: 'sql', ledger: withDuplicates(6), duplicates: [SAME, SAME, DIFFERS, DIFFERS_DEFAULT, DIFFERS_DEFAULT, SAME] });
+    expect(keys.filter((k) => DUP_KEYS.includes(k))).toEqual(DUP_KEYS);
+    expect(new Set(keys).size).toBe(keys.length);
+  });
+
+  it('SQL only: another importer\'s report never carries them', () => {
+    for (const importer of ['powerbi', 'dbml', 'dbt'] as const) {
+      expect(dupKeys({ importer, ledger: withDuplicates(1), duplicates: [SAME, DIFFERS_DEFAULT] }), importer).toEqual([]);
+    }
+  });
+
+  it('a class key is present if and only if there are duplicates beside importCauseDuplicate, and never without it', () => {
+    const classes = [SAME, DIFFERS, DIFFERS_DEFAULT, { same: true, defaultSchema: false }];
+    const ledgers: Array<[string, LedgerEntry[]]> = [
+      ['none', []],
+      ['duplicate', withDuplicates(1)],
+      ['replaced', ledgerOf((l) => l.changed('table', 'duplicate', 'CREATE OR REPLACE', WHERE))],
+      ['parse', ledgerOf((l) => l.problem('statement', 'parseError', 'statement', WHERE))],
+      ['both', withDuplicates(2, (l) => l.problem('statement', 'parseError', 'statement', WHERE))],
+    ];
+    for (const [name, ledger] of ledgers) {
+      for (let mask = 0; mask < 1 << classes.length; mask++) {
+        const duplicates = classes.filter((_, i) => mask & (1 << i));
+        for (const outcome of [undefined, 'clean', 'partial', 'failed'] as const) {
+          const keys = importOutcomeFeatures({ importer: 'sql', dialect: 'mysql', ledger, duplicates, ...(outcome ? { outcome } : {}) });
+          const classKeys = keys.filter((k) => DUP_KEYS.includes(k));
+          const cause = keys.includes('importCauseDuplicate');
+          expect(classKeys.length > 0, `${name} ${mask} ${outcome}`).toBe(duplicates.length > 0 && cause);
+          if (classKeys.length > 0) expect(cause).toBe(true);
+          if (classKeys.includes('importPartialDuplicateOnly')) expect(keys[0]).toBe('importOutcomeSqlDdlPartial');
+        }
+      }
+    }
+  });
+
+  it('a malformed list counts nothing and never throws', () => {
+    for (const duplicates of [[null], [undefined], ['same'], [1], {} as never, 'x' as never]) {
+      expect(() => importOutcomeFeatures({ importer: 'sql', ledger: withDuplicates(1), duplicates: duplicates as never })).not.toThrow();
+    }
+    expect(dupKeys({ importer: 'sql', ledger: withDuplicates(1), duplicates: [null, 'same'] as never })).toEqual([]);
+    // A class with non-boolean flags is read as a difference, never as a copy or the default schema.
+    expect(dupKeys({ importer: 'sql', ledger: withDuplicates(1), duplicates: [{ same: 'yes', defaultSchema: 1 }] as never }))
+      .toEqual(['importDuplicateDiffers', 'importPartialDuplicateOnly']);
   });
 });

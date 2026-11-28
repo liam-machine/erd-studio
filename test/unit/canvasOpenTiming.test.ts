@@ -113,6 +113,8 @@ describe('the ranges (#333)', () => {
       'startLookFoundAfterDeadline', 'dbtSearchFromIndex',
       // #364: what a panel that never said ready met.
       'noReadyHostHeld', 'noReadyClosed30to60s', 'noReadyClosedOver60s',
+      // #358: what a SQL import's tables defined twice were.
+      'importDuplicateSame', 'importDuplicateDiffers', 'importDuplicateDiffersDefaultSchema', 'importPartialDuplicateOnly',
     ]);
     // canvasLoadOver20s stays where 2.0.0 put it.
     expect(FEATURES.indexOf('canvasLoadOver20s')).toBeLessThan(FEATURES.indexOf('draftDropTimeLimit'));

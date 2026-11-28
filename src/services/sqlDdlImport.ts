@@ -89,6 +89,7 @@ import {
 } from './sqlDdlLexer';
 import {
   readerState,
+  sameColumns,
   sameIdent,
   sameSchema,
   tableLabel,
@@ -138,6 +139,7 @@ export type {
   SqlDdlProblem,
   SqlDdlToDbmlInput,
   SqlDialect,
+  SqlDuplicateClass,
   SqlParseEngine,
   SqlParseFormat,
   SqlPartitionMode,
@@ -1473,6 +1475,12 @@ class Converter implements ConverterContext {
           kind: 'duplicateTable',
           cause: 'duplicate',
           table: label,
+          // Both definitions are in hand only here: whether this one was a copy of the kept one, and whether
+          // both sit in the default schema (where a second database's table of the same name lands too).
+          duplicate: {
+            same: sameColumns(first, table),
+            defaultSchema: sameSchema(first.schema, null, this.dialect) && sameSchema(schema, null, this.dialect),
+          },
         });
         return;
       }
