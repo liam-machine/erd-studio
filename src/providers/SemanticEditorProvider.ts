@@ -545,6 +545,11 @@ function pruneViewConfigForRemovedTables(
 }
 
 /** A diagram's tables as a key that ignores order and case: what an unstored layout was drawn for. */
+/** Whether two member lists name the same tables, spelled the same (selectors.yml writes the names as they are); unknown is never the same. */
+function sameMemberNames(a: readonly string[] | undefined, b: readonly string[] | undefined): boolean {
+  return a !== undefined && b !== undefined && a.length === b.length && [...a].sort().join('\n') === [...b].sort().join('\n');
+}
+
 function membersKeyOf(names: readonly string[]): string {
   return names.map((n) => n.toLowerCase()).sort().join('\n');
 }
@@ -5323,7 +5328,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     const unsaved: string[] = [];
     const expected = [document.uri.fsPath, ...(this.editedTablePaths.get(panelKey) ?? [])];
     const isDbml = this.isDbmlDocument(document);
-    const diskText = isDbml ? this.diskTextOf(document.uri.fsPath) : undefined;
+    // What the diagram held before this step: its members decide whether selectors.yml is updated.
+    const membersFrom = this.diskTextOf(document.uri.fsPath);
+    const diskText = isDbml ? membersFrom : undefined;
     // The undo of a drag rewinds the diagram's erd_layout and nothing else
     // (a minimal-range edit of the diagram alone): nothing the library or
     // the trees show changed.
@@ -5374,8 +5381,22 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     this.tableLibraryService.invalidateIndex();
     await this.sendSubjectAreaData(document, webview, panelKey);
     this._onDidWriteSubjectArea.fire({ uri: document.uri, modelLibraryChanged: true });
-    // The step can add or remove a table, as the edit it rewinds did: update an existing selectors.yml (never creates one).
-    this.selectorsService.scheduleRegenerate();
+    // selectors.yml lists the diagram's tables by name: only a step that adds,
+    // removes or renames one (as the edit it rewinds did) updates an existing
+    // file (never creates one). A drag, a colour or a column changes nothing there.
+    if (deletedHere.length > 0 || !sameMemberNames(this.memberNamesOfText(document, membersFrom), this.memberNamesOfText(document, document.getText()))) {
+      this.selectorsService.scheduleRegenerate();
+    }
+  }
+
+  /** The diagram's member names as `text` has them, or undefined when it does not read. */
+  private memberNamesOfText(document: vscode.TextDocument, text: string | undefined): string[] | undefined {
+    if (text === undefined) return undefined;
+    try {
+      return parsedMemberNames(this.parseSubjectAreaFile(document, text).parsed);
+    } catch {
+      return undefined;
+    }
   }
 
   /** What `filePath` holds on disk, or undefined when it cannot be read. */
