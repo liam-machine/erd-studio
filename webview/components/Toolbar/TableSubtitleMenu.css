@@ -1,6 +1,7 @@
-/* TableSubtitleMenu — the toolbar's "Under name" button and the list it
+/* TableSubtitleMenu — the toolbar's "Under name" glyph button and the list it
    opens: what the line under every table's name shows. Tokens only
-   (theme.css); the button matches the Columns button beside it. */
+   (theme.css). The button is the size of the line-style glyphs beside it; in
+   the View popover of a narrow editor it is a labelled button like Columns. */
 
 .table-subtitle {
   position: relative;
@@ -10,10 +11,11 @@
 .table-subtitle__button {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: var(--space-3);
-  max-width: 220px;
+  width: var(--control-height);
   height: var(--control-height);
-  padding: 0 var(--space-5);
+  padding: 0;
   border: 1px solid var(--control-border);
   border-radius: var(--radius-md);
   background: var(--control-fill);
@@ -24,6 +26,7 @@
   line-height: 1;
   white-space: nowrap;
   cursor: pointer;
+  box-sizing: border-box;
   transition:
     color var(--duration-fast) var(--ease-standard),
     border-color var(--duration-fast) var(--ease-standard),
@@ -32,6 +35,7 @@
 
 .table-subtitle__button:hover {
   border-color: var(--control-border-hover);
+  color: var(--text-primary);
 }
 
 .table-subtitle__button:focus-visible {
@@ -42,6 +46,43 @@
 .table-subtitle__button--open {
   border-color: var(--control-border-selected);
   background: var(--control-fill-selected);
+}
+
+/* The line shows something other than the grain: the glyph says a choice is on. */
+.table-subtitle__button--set {
+  color: var(--accent);
+}
+
+.table-subtitle__icon {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.table-subtitle__icon-card {
+  stroke-width: 1.2;
+}
+
+/* The name is faint; the line under it is the one this control is about. */
+.table-subtitle__icon-name {
+  stroke-width: 1.4;
+  opacity: 0.45;
+}
+
+.table-subtitle__icon-line {
+  stroke-width: 1.6;
+}
+
+/* The words: only where there is room for them (the View popover, below). */
+.table-subtitle__button-text {
+  display: none;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
 }
 
 /* What is shown now: the part of the button that changes. */
@@ -78,6 +119,13 @@
   color: var(--text-primary);
   font-size: var(--text-sm);
   box-sizing: border-box;
+}
+
+.table-subtitle__title {
+  padding: var(--space-2) var(--space-3) var(--space-3);
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
 }
 
 .table-subtitle__group {
@@ -149,15 +197,21 @@
   line-height: 1.4;
 }
 
-/* Folded into the View popover (a narrow editor): as the Columns button, the
-   list opens leftwards from its button and is opaque rather than frosting
-   the popover behind it. */
+/* Folded into the View popover (a narrow editor): a full-width labelled
+   button, as Columns is there. The list opens leftwards from it and is opaque
+   rather than frosting the popover behind it. */
 @media (max-width: 1140px) {
   .toolbar__view-group .table-subtitle,
   .toolbar__view-group .table-subtitle__button {
     width: 100%;
-    max-width: none;
-    justify-content: center;
+  }
+
+  .toolbar__view-group .table-subtitle__button {
+    padding: 0 var(--space-5);
+  }
+
+  .toolbar__view-group .table-subtitle__button-text {
+    display: inline-flex;
   }
 
   .toolbar__view-group .table-subtitle__panel {

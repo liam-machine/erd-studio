@@ -455,8 +455,9 @@ export interface FilesNotShownMessage {
  * saved in this window (`SemanticEditorProvider.settleImportsAfterSave`,
  * `importsAddedMessage`), and an add of tables (a drop, Add to Diagram…, Add
  * Existing Tables) that found some or all of them on the diagram already
- * (`alreadyOnDiagramMessage`, `addedWithAlreadyMessage`). Plain words, never
- * an error.
+ * (`alreadyOnDiagramMessage`, `addedWithAlreadyMessage`), and a pick in the
+ * toolbar's Under name menu that a workspace setting outranks
+ * (`TABLE_SUBTITLE_WORKSPACE_NOTE`). Plain words, never an error.
  */
 export interface CanvasNoticeMessage {
   type: 'canvasNotice';
@@ -1466,11 +1467,12 @@ export interface SetLineStyleMessage {
 
 /**
  * The toolbar's menu for the line under each table's name: write
- * `erdStudio.canvas.tableSubtitle` (in the workspace when the workspace sets
- * it, else at user scope). The webview has already switched; the host's
- * `tableSubtitle` broadcast that follows the setting change keeps every open
- * canvas in step. A view preference that writes no project file, so it is on
- * the physical-stage allowlist (`NON_MUTATION_TYPES`).
+ * `erdStudio.canvas.tableSubtitle` at user (Global) scope. The webview has
+ * already switched; the host's `tableSubtitle` broadcast that follows the
+ * setting change keeps every open canvas in step, and when a workspace value
+ * outranks the write the canvas is put back with a `canvasNotice` saying so.
+ * A view preference that writes no project file, so it is on the
+ * physical-stage allowlist (`NON_MUTATION_TYPES`).
  */
 export interface SetTableSubtitleMessage {
   type: 'setTableSubtitle';

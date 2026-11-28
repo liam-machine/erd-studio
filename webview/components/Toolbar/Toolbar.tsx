@@ -5,7 +5,8 @@
  * - Domain info (name + layer badge)
  * - Zoom controls (in/out/level/fit)
  * - Auto Layout button
- * - Line style (Curved / Hops), on every stage
+ * - View preferences, on every stage: which columns tables show, what the
+ *   line under each table's name shows (Under name), line style (Curved / Hops)
  * - New Model button (Phase 2)
  *
  * Stage tabs sit above the controls in a stacked two-row layout, all within

@@ -21,7 +21,7 @@ import { ManifestService } from '../../src/services/manifestService';
 import { YmlParserService } from '../../src/services/ymlParserService';
 import { TemplateService } from '../../src/services/templateService';
 import { SelectorsService } from '../../src/services/selectorsService';
-import { TABLE_SUBTITLE_SETTING, readTableSubtitle, writeTableSubtitle } from '../../src/providers/tableSubtitleSetting';
+import { TABLE_SUBTITLE_SETTING, TABLE_SUBTITLE_WORKSPACE_NOTE, readTableSubtitle, writeTableSubtitle } from '../../src/providers/tableSubtitleSetting';
 import { validateSetTableSubtitlePayload } from '../../src/providers/payloadValidation';
 import { USER_SCOPED_SETTINGS } from '../../src/services/configService';
 
@@ -35,6 +35,7 @@ type MockPanel = ReturnType<typeof vscode.createMockWebviewPanel>;
 type Posted = { type: string; payload?: any };
 const posted = (panel: MockPanel) => panel._postedMessages as Posted[];
 const subtitles = (panel: MockPanel) => posted(panel).filter((m) => m.type === 'tableSubtitle').map((m) => m.payload.tableSubtitle);
+const notices = (panel: MockPanel) => posted(panel).filter((m) => m.type === 'canvasNotice').map((m) => m.payload.message as string);
 const errors = (panel: MockPanel) => posted(panel).filter((m) => m.type === 'error').map((m) => m.payload.message as string);
 
 let configListeners: Array<(e: vscode.ConfigurationChangeEvent) => void>;
@@ -153,18 +154,18 @@ describe('the setting', () => {
     }
   });
 
-  it('is written at user (Global) scope when the workspace sets nothing', async () => {
+  it('is written at user (Global) scope, never to the workspace', async () => {
     await writeTableSubtitle('field:owner');
     expect(inspect()?.globalValue).toBe('field:owner');
     expect(inspect()?.workspaceValue).toBeUndefined();
   });
 
-  it('is written to the workspace when the workspace sets it, so the menu is never dead', async () => {
+  it('never edits a value the workspace checked in: the write is the user\'s, and the workspace still wins', async () => {
     vscode._setMockConfiguration('erdStudio', TABLE_SUBTITLE_SETTING, { globalValue: 'none', workspaceValue: 'field:owner' });
     await writeTableSubtitle('description');
-    expect(inspect()?.workspaceValue).toBe('description');
-    expect(inspect()?.globalValue).toBe('none');
-    expect(readTableSubtitle()).toBe('description');
+    expect(inspect()?.workspaceValue).toBe('field:owner');
+    expect(inspect()?.globalValue).toBe('description');
+    expect(readTableSubtitle()).toBe('field:owner');
   });
 });
 
@@ -216,6 +217,22 @@ describe('the canvas messages', () => {
     const before = subtitles(b).length;
     fireConfigChange('erdStudio.canvas.lineStyle');
     expect(subtitles(b)).toHaveLength(before);
+  });
+
+  it('a pick a workspace value outranks is saved for the user, and the canvas is put back and told why', async () => {
+    vscode._setMockConfiguration('erdStudio', TABLE_SUBTITLE_SETTING, { workspaceValue: 'field:purpose' });
+    const panel = await open(makeProvider(root), root, 'silver/showcase.json');
+    await panel._simulateMessage({ type: 'setTableSubtitle', payload: { tableSubtitle: 'none' } });
+    await vi.waitFor(() => expect(globalValue()).toBe('none'));
+    await vi.waitFor(() => expect(notices(panel)).toEqual([TABLE_SUBTITLE_WORKSPACE_NOTE]));
+    expect(inspect()?.workspaceValue).toBe('field:purpose');
+    expect(subtitles(panel).at(-1)).toBe('field:purpose');
+    expect(errors(panel)).toEqual([]);
+    // A pick the setting takes says nothing.
+    vscode._setMockConfiguration('erdStudio', TABLE_SUBTITLE_SETTING, { globalValue: 'none' });
+    await panel._simulateMessage({ type: 'setTableSubtitle', payload: { tableSubtitle: 'description' } });
+    await vi.waitFor(() => expect(globalValue()).toBe('description'));
+    expect(notices(panel)).toHaveLength(1);
   });
 
   it('writes no project file: the diagram and its tables are byte for byte the same', async () => {

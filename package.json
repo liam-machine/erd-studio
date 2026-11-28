@@ -1683,7 +1683,7 @@
           "default": "field:grain",
           "pattern": "^(none|description|field:\\S(.{0,126}\\S)?)$",
           "patternErrorMessage": "Use field:<key> (for example field:grain or field:owner), description or none.",
-          "markdownDescription": "What the one line under each table's name shows on every diagram. `field:<key>` shows a table field: a built-in such as `field:grain` or `field:purpose`, or one of your own such as `field:owner`. `description` shows the table's description, and `none` hides the line. A table with nothing written for it shows no line. **Under name**, in the diagram's toolbar, sets it."
+          "markdownDescription": "What the one line under each table's name shows on every diagram. `field:<key>` shows a table field: a built-in such as `field:grain` or `field:purpose`, or one of your own such as `field:owner`. `description` shows the table's description, and `none` hides the line. A table with nothing written for it shows no line. **Under name**, the table icon beside **Columns** in the diagram's toolbar, sets it."
         },
         "dbtSemantic.projectPath": {
           "type": "string",

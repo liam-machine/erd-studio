@@ -703,7 +703,7 @@ import {
 } from './payloadValidation';
 import { sameName } from '../types/naming';
 import { affectsLineStyle, readLineStyle, writeLineStyle } from './lineStyleSetting';
-import { affectsTableSubtitle, readTableSubtitle, writeTableSubtitle } from './tableSubtitleSetting';
+import { TABLE_SUBTITLE_WORKSPACE_NOTE, affectsTableSubtitle, readTableSubtitle, writeTableSubtitle } from './tableSubtitleSetting';
 import { dropGridPositions, tableFilesOfDroppedUris, tablesOfDroppedUris } from '../services/tableDrop';
 
 /** A parsed domain file's `logical.relationships`, as a list the rename helpers can rewrite in place. */
@@ -3322,6 +3322,11 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             // force once the write lands, and a failed write puts it back.
             try {
               await writeTableSubtitle(payload.tableSubtitle);
+              // A workspace value outranks the user's: the canvas goes back to it, and says why.
+              if (readTableSubtitle() !== payload.tableSubtitle) {
+                this.postTableSubtitle(webviewPanel.webview);
+                this.post(webviewPanel.webview, { type: 'canvasNotice', payload: { message: TABLE_SUBTITLE_WORKSPACE_NOTE } });
+              }
             } catch (err) {
               hostErrorLog.record('setTableSubtitle', err);
               this.postTableSubtitle(webviewPanel.webview);

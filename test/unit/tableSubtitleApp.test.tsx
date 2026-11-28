@@ -99,7 +99,11 @@ describe('the toolbar "Under name" menu', () => {
     render(<App />);
     postFromHost({ type: 'domainLoaded', payload: subjectArea() });
     expect(button().getAttribute('aria-label')).toBe('Under name: Grain');
+    // A glyph in the toolbar: its name and hover text say what it is and what is on.
+    expect(button().getAttribute('title')).toBe("Under name: Grain. Choose what the line under every table's name shows.");
+    expect(button().className).toBe('table-subtitle__button');
     const menu = openMenu();
+    expect(menu.querySelector('.table-subtitle__title')?.textContent).toBe("Under each table's name, show");
     expect(within(menu).getAllByRole('menuitemradio').map((el) => el.textContent)).toEqual([
       '✓Grain', 'Purpose', 'Owner', 'steward', 'Description', 'Nothing',
     ]);
@@ -122,6 +126,8 @@ describe('the toolbar "Under name" menu', () => {
     expect(sent()).toEqual([{ type: 'setTableSubtitle', payload: { tableSubtitle: 'field:owner' } }]);
     expect(screen.queryByRole('menu')).toBeNull();
     expect(button().getAttribute('aria-label')).toBe('Under name: Owner');
+    // Anything but the grain tints the glyph, so a choice made long ago is not invisible.
+    expect(button().className).toBe('table-subtitle__button table-subtitle__button--set');
 
     openMenu();
     fireEvent.click(item('Owner'));
@@ -155,13 +161,40 @@ describe('the toolbar "Under name" menu', () => {
     expect(sent().at(-1)).toEqual({ type: 'setTableSubtitle', payload: { tableSubtitle: 'field:purpose' } });
   });
 
-  it('Escape closes it without choosing', () => {
+  it('Escape closes it without choosing, from the list and from the button, and the button takes the focus back', () => {
     render(<App />);
     postFromHost({ type: 'domainLoaded', payload: subjectArea() });
     mockVsCode.postMessage.mockClear();
     fireEvent.keyDown(openMenu(), { key: 'Escape' });
     expect(screen.queryByRole('menu')).toBeNull();
+    expect(document.activeElement).toBe(button());
+    openMenu();
+    fireEvent.keyDown(button(), { key: 'Escape' });
+    expect(screen.queryByRole('menu')).toBeNull();
     expect(sent()).toEqual([]);
+  });
+
+  it('opens with the keyboard on the choice in force; the arrow keys, Home and End move through the list', () => {
+    render(<App />);
+    postFromHost({ type: 'tableSubtitle', payload: { tableSubtitle: 'field:owner' } });
+    postFromHost({ type: 'domainLoaded', payload: subjectArea() });
+    const menu = openMenu();
+    const focused = () => document.activeElement?.textContent?.replace('✓', '');
+    expect(focused()).toBe('Owner');
+    fireEvent.keyDown(menu, { key: 'ArrowDown' });
+    expect(focused()).toBe('steward');
+    fireEvent.keyDown(menu, { key: 'ArrowUp' });
+    fireEvent.keyDown(menu, { key: 'ArrowUp' });
+    expect(focused()).toBe('Purpose');
+    fireEvent.keyDown(menu, { key: 'End' });
+    expect(focused()).toBe('Nothing');
+    // Past the end wraps to the start.
+    fireEvent.keyDown(menu, { key: 'ArrowDown' });
+    expect(focused()).toBe('Grain');
+    fireEvent.keyDown(menu, { key: 'Home' });
+    expect(focused()).toBe('Grain');
+    // Nothing is chosen until a pick.
+    expect(useEditorStore.getState().tableSubtitle).toBe('field:owner');
   });
 });
 
