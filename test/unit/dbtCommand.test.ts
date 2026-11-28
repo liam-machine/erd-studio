@@ -6,7 +6,7 @@
  */
 import { describe, it, expect, vi } from 'vitest';
 
-import { DBT_COMMAND_MAX_LENGTH, buildDbtCommand, isShellSafeDbtName, type DbtCommandTable } from '../../src/services/dbtCommand';
+import { DBT_COMMAND_MAX_LENGTH, SELECTOR_NAME_GAPS_SHOWN, buildDbtCommand, isShellSafeDbtName, selectorNameGaps, selectorNameGapsNote, type DbtCommandTable } from '../../src/services/dbtCommand';
 import { dbtModelNameOf } from '../../src/services/dbtModelName';
 import { validateCopyDbtCommandPayload } from '../../src/providers/payloadValidation';
 import { DBT_COMMAND_TABLES_LIMIT } from '../../src/types/dbtCommand';
@@ -157,5 +157,71 @@ describe('validateCopyDbtCommandPayload', () => {
     expect(validateCopyDbtCommandPayload({ verb: 'build', tables: ['../x'] })).toBe('Table name cannot contain path separators.');
     expect(validateCopyDbtCommandPayload({ verb: 'build', tables: Array.from({ length: DBT_COMMAND_TABLES_LIMIT + 1 }, () => 'a') }))
       .toBe(`At most ${DBT_COMMAND_TABLES_LIMIT} tables can be in one dbt command.`);
+  });
+});
+
+describe('selectorNameGaps: the tables a diagram\'s selector does not select', () => {
+  const tables: DbtCommandTable[] = [
+    { name: 'fct_order', dbtModel: 'orders_fact' },
+    { name: 'dim_customer', dbtModel: 'DIM_Customer' },
+    { name: 'dim_date', dbtModel: 'dim_date' },
+    { name: 'dim_planned', dbtModel: null },
+  ];
+  // selectors.yml lists every table by its name on the diagram.
+  const members = ['fct_order', 'dim_customer', 'dim_date', 'dim_planned'];
+
+  it('a table dbt names otherwise, or in another case, is one; a table with the same name, or not in dbt yet, is not', () => {
+    expect(selectorNameGaps(tables, members)).toEqual([
+      { table: 'fct_order', dbtModel: 'orders_fact' },
+      { table: 'dim_customer', dbtModel: 'DIM_Customer' },
+    ]);
+  });
+
+  it('a model another table already put in the selector is selected: no gap', () => {
+    const both: DbtCommandTable[] = [{ name: 'fct_order', dbtModel: 'orders_fact' }, { name: 'orders_fact', dbtModel: 'orders_fact' }];
+    expect(selectorNameGaps(both, ['fct_order', 'orders_fact'])).toEqual([]);
+  });
+
+  it('a table the selector leaves out although dbt has its model is one', () => {
+    expect(selectorNameGaps([{ name: 'bqs.kunde', dbtModel: 'stg_kunde' }], [])).toEqual([{ table: 'bqs.kunde', dbtModel: 'stg_kunde' }]);
+  });
+
+  it('none when every model in dbt is a member', () => {
+    expect(selectorNameGaps(tables, ['orders_fact', 'DIM_Customer', 'dim_date'])).toEqual([]);
+    expect(selectorNameGaps([], [])).toEqual([]);
+  });
+});
+
+describe('selectorNameGapsNote: what Regenerate dbt selectors.yml adds to its message', () => {
+  const POINTER = 'The dbt command button on a diagram\'s toolbar copies a command with dbt\'s names.';
+
+  it('says nothing when there are none', () => {
+    expect(selectorNameGapsNote([])).toBe('');
+  });
+
+  it('one table: what it means, where to go, then the table', () => {
+    expect(selectorNameGapsNote([{ table: 'fct_order', dbtModel: 'orders_fact' }])).toBe(
+      `In dbt's files, 1 table has another name, so its selector may leave it out of a build. ${POINTER} fct_order is orders_fact in dbt.`,
+    );
+  });
+
+  it('a table on several diagrams is counted and named once', () => {
+    const gap = { table: 'fct_order', dbtModel: 'orders_fact' };
+    expect(selectorNameGapsNote([gap, { ...gap }, { table: 'dim_customer', dbtModel: 'DIM_Customer' }])).toBe(
+      `In dbt's files, 2 tables have another name, so their selectors may leave them out of a build. ${POINTER} `
+        + 'fct_order is orders_fact in dbt; dim_customer is DIM_Customer in dbt.',
+    );
+  });
+
+  it('many: names the first few, counts the rest, and keeps the pointer ahead of the names', () => {
+    const many = Array.from({ length: 30 }, (_, i) => ({ table: `t_${i}`, dbtModel: `model_${i}` }));
+    const note = selectorNameGapsNote(many);
+    expect(SELECTOR_NAME_GAPS_SHOWN).toBe(3);
+    expect(note).toBe(
+      `In dbt's files, 30 tables have another name, so their selectors may leave them out of a build. ${POINTER} `
+        + 't_0 is model_0 in dbt; t_1 is model_1 in dbt; t_2 is model_2 in dbt; and 27 more (Show Logs lists them all).',
+    );
+    expect(note.indexOf(POINTER)).toBeLessThan(note.indexOf('t_0'));
+    expect(note.length).toBeLessThan(400);
   });
 });

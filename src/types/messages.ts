@@ -1673,8 +1673,9 @@ export interface RevealTableInLibraryMessage {
  * The toolbar's **dbt command** menu (a dbt project only; GitHub #378): put
  * `dbt <verb> --select …` for the diagram's tables on the clipboard — the
  * `tables` named when some are selected, else every table on the diagram —
- * and say what was copied in a `canvasNotice`. The host names each table's
- * dbt model as selectors.yml does and leaves out tables not in dbt yet. It
+ * and say what was copied in a `canvasNotice`. The host names each table as
+ * dbt names its model (selectors.yml lists it by its name on the diagram,
+ * which can differ) and leaves out tables not in dbt yet. It
  * runs nothing and writes no file (physical allowlist). Validated by
  * `validateCopyDbtCommandPayload`.
  */

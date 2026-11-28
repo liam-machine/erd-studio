@@ -75,8 +75,7 @@ import {
   subjectAreaTableNames,
 } from '../services/domainService';
 import { computeSubjectAreaDiff } from '../services/stageDiff';
-import { buildDbtCommand, type DbtCommandTable } from '../services/dbtCommand';
-import { dbtModelNameOf } from '../services/dbtModelName';
+import { buildDbtCommand, selectorNameGaps, type DbtCommandTable } from '../services/dbtCommand';
 import { buildSyncPlan, countSyncPlanActions, syncPlanLibraryLookups } from '../services/syncPlanBuilder';
 import { findVenvDir } from '../services/dbtEnv';
 import { claudeTerminalLaunch } from './GettingStartedPanel';
@@ -4124,7 +4123,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * `buildPhysicalSubjectArea` uses), in dbt's own spelling: `--select`
    * compares names exactly. Past `DBT_COMMAND_MAX_LENGTH`, with nothing
    * selected, the diagram's selector is copied while selectors.yml is current
-   * and names every table the same way. Runs
+   * and selects every model the list names (`selectorNameGaps`). Runs
    * nothing and writes no file, on either stage; in a folder without dbt it
    * says so and copies nothing.
    */
@@ -4150,17 +4149,17 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         name: model.name,
         dbtModel: dbtNodes.get(model.name.toLowerCase()) ?? null,
       }));
-      // selectors.yml names a table as `dbtModelNameOf` does, which is its own
-      // name unless two schema folders share it: its selector stands in for the
-      // list only when it names every table as dbt does.
-      const dbtModels = this.subjectAreaService.dbtModelNamesOf(unified, ymlData, manifest);
-      const selectorNamesTheSame = unified.logical.models.every((model, i) =>
-        tables[i].dbtModel === null || dbtModelNameOf(model, dbtModels) === tables[i].dbtModel);
       const result = buildDbtCommand({
         verb: payload.verb,
         tables,
         selected: payload.tables?.map((name) => name.trim()),
-        currentSelector: () => selectorNamesTheSame ? this.selectorsService.currentSelectorFor(document.uri.fsPath) : undefined,
+        // selectors.yml lists a table by its name on the diagram: its selector
+        // stands in for the list only when it selects every model the list
+        // names (the rule Regenerate dbt selectors.yml reports by).
+        currentSelector: () => {
+          const selector = this.selectorsService.currentSelectorMembersFor(document.uri.fsPath);
+          return selector && selectorNameGaps(tables, selector.members).length === 0 ? selector.name : undefined;
+        },
       });
       if (result.kind === 'copy') await vscode.env.clipboard.writeText(result.text);
       notice(result.message);

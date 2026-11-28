@@ -93,9 +93,22 @@ export interface SkipInfo {
   detail: string;
 }
 
+/** One ERD Studio selector as a regenerate wrote it. */
+export interface WrittenSelector {
+  /** Its name in the file (after any `_2` suffix). */
+  name: string;
+  /** The diagram file it was generated from. */
+  diagramPath: string;
+  /** The `fqn` values it lists, in the file's order. */
+  members: string[];
+}
+
 export type RegenerateResult =
-  /** `created`: there was no selectors.yml before this write. */
-  | { status: 'written'; selectorsWritten: number; modelsReferenced: number; filePath: string; created: boolean }
+  /**
+   * `created`: there was no selectors.yml before this write. `selectors`:
+   * the ERD Studio selectors now in the file, with what each lists.
+   */
+  | { status: 'written'; selectorsWritten: number; modelsReferenced: number; filePath: string; created: boolean; selectors: WrittenSelector[] }
   | { status: 'skipped'; reason: SkipReason; filePath: string; detail: string }
   /** Nothing to write and no file on disk — the workspace was left untouched. */
   | { status: 'noop'; filePath: string }
@@ -394,11 +407,22 @@ export class SelectorsService {
    * of a command too long to paste.
    */
   currentSelectorFor(diagramPath: string): string | undefined {
+    return this.currentSelectorMembersFor(diagramPath)?.name;
+  }
+
+  /**
+   * `currentSelectorFor` with the `fqn` values the selector lists, so the
+   * caller can tell whether it selects what its own list would
+   * (`selectorNameGaps`): the file lists a table by its name on the diagram,
+   * which is not always what dbt names its model.
+   */
+  currentSelectorMembersFor(diagramPath: string): { name: string; members: string[] } | undefined {
     if (this.check().status !== 'current') return undefined;
     const plan = this.plan(this.filePath);
     if (plan.status !== 'ok') return undefined;
     const key = pathKey(diagramPath);
-    return plan.generated.find((g) => pathKey(g.diagramPath) === key)?.name;
+    const selector = plan.generated.find((g) => pathKey(g.diagramPath) === key);
+    return selector && { name: selector.name, members: selector.definition.union.map((member) => member.value) };
   }
 
   /**
@@ -544,6 +568,7 @@ export class SelectorsService {
       modelsReferenced,
       filePath,
       created: raw === null,
+      selectors: generated.map((gen) => ({ name: gen.name, diagramPath: gen.diagramPath, members: gen.definition.union.map((member) => member.value) })),
     };
   }
 

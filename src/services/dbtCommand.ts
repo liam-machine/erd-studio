@@ -52,11 +52,70 @@ export interface DbtCommandRequest {
   /** The tables selected on the canvas; none or empty means the whole diagram. */
   selected?: readonly string[];
   /**
-   * The diagram's selector in selectors.yml while that file is current
-   * (`SelectorsService.currentSelectorFor`). Asked only when the command
-   * would be too long and nothing is selected.
+   * The diagram's selector in selectors.yml while that file is current and
+   * selects every model the list names (no `selectorNameGaps`). Asked only
+   * when the command would be too long and nothing is selected.
    */
   currentSelector?: () => string | undefined;
+}
+
+/** A table on a diagram that dbt has a model for, under a name its diagram's selector does not list. */
+export interface SelectorNameGap {
+  /** The table's name on the diagram, which is what selectors.yml lists it by. */
+  table: string;
+  /** What dbt names its model. */
+  dbtModel: string;
+}
+
+/**
+ * The tables of one diagram its selector in selectors.yml does not select:
+ * each table dbt has a model for (`dbtModel`, as `dbtNodeNamesOf` finds it)
+ * whose model is not among the selector's `members`, compared exactly, as
+ * dbt compares a name. selectors.yml lists a table by its name on the
+ * diagram, so this is a table dbt names otherwise (`orders_fact` for
+ * `fct_order`, `DIM_Customer` for `dim_customer`). A table not in dbt yet is
+ * never one, and neither is a table whose model another table already put in
+ * the selector.
+ *
+ * The one rule, for **Regenerate dbt selectors.yml**'s note and for whether
+ * the dbt command may copy `--selector` in place of a long list (it may only
+ * when there is none).
+ */
+export function selectorNameGaps(tables: readonly DbtCommandTable[], members: readonly string[]): SelectorNameGap[] {
+  const selected = new Set(members);
+  const gaps: SelectorNameGap[] = [];
+  for (const table of tables) {
+    if (table.dbtModel === null || selected.has(table.dbtModel)) continue;
+    gaps.push({ table: table.name, dbtModel: table.dbtModel });
+  }
+  return gaps;
+}
+
+/** How many tables `selectorNameGapsNote` names before "and N more". */
+export const SELECTOR_NAME_GAPS_SHOWN = 3;
+
+/**
+ * What **Regenerate dbt selectors.yml** adds to its message when dbt names
+ * some tables otherwise: how many, what that means for their selectors,
+ * where to get a command with dbt's names, then up to
+ * `SELECTOR_NAME_GAPS_SHOWN` of them (the pointer comes before the names, so
+ * a notification cut short still has it). '' when there are none. A table on
+ * several diagrams is counted and named once. "dbt's files" because the
+ * names come from what dbt last wrote and what the project holds, not from a
+ * dbt run made now.
+ */
+export function selectorNameGapsNote(gaps: readonly SelectorNameGap[]): string {
+  const unique = new Map<string, SelectorNameGap>();
+  for (const gap of gaps) unique.set(`${gap.table}\u0000${gap.dbtModel}`, gap);
+  const all = [...unique.values()];
+  if (all.length === 0) return '';
+  const one = all.length === 1;
+  const named = all.slice(0, SELECTOR_NAME_GAPS_SHOWN).map((gap) => `${gap.table} is ${gap.dbtModel} in dbt`);
+  const more = all.length - named.length;
+  return `In dbt's files, ${one ? '1 table has' : `${all.length} tables have`} another name, `
+    + `so ${one ? 'its selector' : 'their selectors'} may leave ${one ? 'it' : 'them'} out of a build. `
+    + 'The dbt command button on a diagram\'s toolbar copies a command with dbt\'s names. '
+    + `${named.join('; ')}${more > 0 ? `; and ${more} more (Show Logs lists them all)` : ''}.`;
 }
 
 export type DbtCommandResult =

@@ -1,9 +1,11 @@
 /**
  * The dbt model selectors.yml (`SelectorsService`'s planner) names a
  * diagram's table as. The canvas's dbt command names each table as the dbt
- * node the physical stage finds (`SubjectAreaService.dbtNodeNamesOf`), and
- * offers the diagram's selector in place of a long list only while this
- * resolver names every table the same way.
+ * node the physical stage finds (`SubjectAreaService.dbtNodeNamesOf`); where
+ * that is not the name written here, the selector does not select the model
+ * (`selectorNameGaps`, `src/services/dbtCommand.ts`): Regenerate dbt
+ * selectors.yml says so, and the dbt command does not offer the selector in
+ * place of a long list.
  *
  * Pure: no `vscode`, no `fs`, so the CLI may bundle it.
  */
