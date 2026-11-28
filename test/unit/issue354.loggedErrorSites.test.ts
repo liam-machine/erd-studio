@@ -204,11 +204,6 @@ describe('#354: every site records its code beside its log line', () => {
     ['src/extension.ts', "'[ERD Studio] Following an Explorer move failed:'", 'loggedErrorAtExplorerMove'],
     ['src/extension.ts', "'[ERD Studio] Send Feedback: recording the report failed:'", 'loggedErrorAtFeedbackSend'],
     ['src/extension.ts', "'[ERD Studio] Send Feedback: copying the text failed:'", 'loggedErrorAtFeedbackSend'],
-    ['src/extension.ts', '`[ERD Studio] Send Feedback: "${choice}" failed:`', 'loggedErrorAtFailureAction'],
-    ['src/extension.ts', '`[ERD Studio] ${MIGRATE_V5_TITLE}: "${choice}" failed:`, err', 'loggedErrorAtFailureAction'],
-    ['src/extension.ts', '`[ERD Studio] ${MIGRATE_V5_TITLE}: "${choice}" failed:`, actionErr', 'loggedErrorAtFailureAction'],
-    ['src/extension.ts', '`[ERD Studio] ${REFRESH_MANIFEST_TITLE}: "${pick}" failed:`', 'loggedErrorAtFailureAction'],
-    ['src/commands/commandFailure.ts', '`[ERD Studio] ${failure.title}: "${choice}" failed:`', 'loggedErrorAtFailureAction'],
     ['src/services/reportTrackingService.ts', "hostErrorLog.record('ReportTrackingService.getHandle'", 'loggedErrorAtTrackingSession'],
     ['src/services/reportTrackingService.ts', "hostErrorLog.record('ReportTrackingService.refresh'", 'loggedErrorAtTrackingRefresh'],
   ];
@@ -223,10 +218,47 @@ describe('#354: every site records its code beside its log line', () => {
 
   it('each site code is recorded only at its listed sites', () => {
     const files = [...new Set(SITES.map(([file]) => file))];
-    for (const code of SITE_CODES.filter((c) => c !== 'loggedErrorUnlistedTag')) {
+    for (const code of SITE_CODES.filter((c) => c !== 'loggedErrorUnlistedTag' && c !== 'loggedErrorAtFailureAction')) {
       const uses = files.reduce((n, file) => n + read(file).split(`telemetry.error('${code}')`).length - 1, 0);
       expect(uses, code).toBe(SITES.filter(([, , c]) => c === code).length);
     }
+  });
+});
+
+describe('#354: every failure-button line records loggedErrorAtFailureAction', () => {
+  // A button on a message of ours (Try Again, Send Feedback, Open It, Show
+  // Import Report, …) that throws logs `[ERD Studio] <title>: "<button>" failed:`.
+  // Found by scanning, so a new site cannot be missed.
+  const FAILURE_LINE = /\[ERD Studio\][^`]*: "\$\{[^}]+\}" failed:/;
+  const CODE = "telemetry.error('loggedErrorAtFailureAction')";
+
+  function tsUnder(dir: string): string[] {
+    const out: string[] = [];
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) out.push(...tsUnder(full));
+      else if (entry.name.endsWith('.ts')) out.push(full);
+    }
+    return out;
+  }
+
+  it('each such line has the code within the next two lines, and the code is used nowhere else', () => {
+    let lineCount = 0;
+    let codeCount = 0;
+    const missing: string[] = [];
+    for (const file of tsUnder(path.join(ROOT, 'src'))) {
+      const lines = fs.readFileSync(file, 'utf-8').split('\n');
+      codeCount += lines.filter((l) => l.includes(CODE)).length;
+      lines.forEach((l, i) => {
+        if (!FAILURE_LINE.test(l)) return;
+        lineCount++;
+        if (!lines.slice(i + 1, i + 3).join('\n').includes(CODE)) missing.push(`${path.relative(ROOT, file)}:${i + 1}`);
+      });
+    }
+    console.log(`${lineCount} failure-button lines, ${codeCount} codes, missing: ${missing.join(', ') || 'none'}`);
+    expect(missing).toEqual([]);
+    expect(lineCount).toBeGreaterThanOrEqual(22);
+    expect(codeCount).toBe(lineCount);
   });
 });
 

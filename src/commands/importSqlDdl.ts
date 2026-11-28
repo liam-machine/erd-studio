@@ -485,6 +485,7 @@ function sqlRun(ui: ImportSqlDdlUi, quiet = false, draft?: ImportSqlDdlDeps['dra
   const showError = (message: string, actions: ErrorActions = {}): void => {
     showErrorWithActions((m, ...items) => ui.showErrorMessage(m, ...items), message, actions, (choice, err) => {
       log.error(`[ERD Studio] ${TITLE}: "${choice}" failed:`, err);
+      telemetry.error('loggedErrorAtFailureAction');
       const doing = `while running ${choice}`;
       showError(oursMessage(TITLE, doing, 'nothing was changed'), { [SEND_FEEDBACK_BUTTON]: () => ui.sendFeedback(feedbackPrefill(TITLE, doing, err)) });
     });
@@ -570,7 +571,10 @@ function sqlRun(ui: ImportSqlDdlUi, quiet = false, draft?: ImportSqlDdlDeps['dra
           (m, ...items) => Promise.resolve(ui.showInformationMessage(m, ...items)).then((c) => (typeof c === 'string' ? c : undefined)),
           lostText ? `${TITLE} was cancelled${lostText}` : `${TITLE} was cancelled before it read a table, so nothing was imported.`,
           report,
-          (choice, err) => log.error(`[ERD Studio] ${TITLE}: "${choice}" failed:`, err),
+          (choice, err) => {
+            log.error(`[ERD Studio] ${TITLE}: "${choice}" failed:`, err);
+            telemetry.error('loggedErrorAtFailureAction');
+          },
         );
       }
       return undefined;

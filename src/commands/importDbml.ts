@@ -470,7 +470,10 @@ function reportUnexpectedImportFailure(ui: ImportDbmlUi, source: ImportDbmlSourc
     (m, ...items) => ui.showErrorMessage(m, ...items),
     message,
     actions,
-    (choice, actionErr) => log.error(`[ERD Studio] ${title}: "${choice}" failed:`, actionErr),
+    (choice, actionErr) => {
+      log.error(`[ERD Studio] ${title}: "${choice}" failed:`, actionErr);
+      telemetry.error('loggedErrorAtFailureAction');
+    },
   );
   const written = progress.written;
   if (written) {
@@ -561,6 +564,7 @@ async function runImportDbml(
     // A button that fails (a re-run whose read throws) still says so, rather than seeming to do nothing.
     showErrorWithActions((m, ...items) => ui.showErrorMessage(m, ...items), message, actions, (choice, err) => {
       log.error(`[ERD Studio] ${title}: "${choice}" failed:`, err);
+      telemetry.error('loggedErrorAtFailureAction');
       const doing = `while running ${choice}`;
       showError(oursMessage(title, doing, 'nothing was changed'), { [SEND_FEEDBACK_BUTTON]: sendFeedback(doing, err) });
     });
@@ -1100,7 +1104,10 @@ async function runImportDbml(
     if (partial) {
       void Promise.resolve(ui.showInformationMessage(partial, SHOW_IMPORT_REPORT_LABEL))
         .then((choice) => (choice === SHOW_IMPORT_REPORT_LABEL ? ui.showImportReport?.(reportId) : undefined))
-        .catch((err: unknown) => log.error(`[ERD Studio] ${title}: "${SHOW_IMPORT_REPORT_LABEL}" failed:`, err));
+        .catch((err: unknown) => {
+          log.error(`[ERD Studio] ${title}: "${SHOW_IMPORT_REPORT_LABEL}" failed:`, err);
+          telemetry.error('loggedErrorAtFailureAction');
+        });
     }
     return { domainPath, plan };
   }
