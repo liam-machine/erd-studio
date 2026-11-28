@@ -12,7 +12,16 @@
  *  - `lateReady(range)`: the page said ready after `noReady()` had already
  *    been reported (#320): it was slow, not broken. Not reported for the
  *    ready of a page the user reloaded from the no-ready notification
- *    ({@link ReadyWatch.reloaded}): that page was replaced, it did not come up.
+ *    ({@link ReadyWatch.reloaded}): that page was replaced, it did not come up;
+ *  - `noReadyHostHeld()`: right after `noReady()`, when its timer ran
+ *    {@link NO_READY_HOST_HELD_MS} or more late (#364): the extension host was
+ *    too busy to run timers, so it was busy at 30 s. It does not say the page
+ *    had mounted: a ready that reached the host would have cleared the timer
+ *    or followed as `lateReady`. Timed on a monotonic clock, so a machine that
+ *    slept through the 30 s is not counted;
+ *  - `closedBlank(range)`: the panel was disposed after `noReady()` with no
+ *    ready and no reload since (#364): the tab went away still blank, `range`
+ *    after it was shown. Once, from {@link ReadyWatch.dispose}.
  *
  * It never throws into its caller (a hook that throws is swallowed), holds
  * no `vscode` and keeps no process alive (the timer is unref'd). Dispose it
@@ -35,6 +44,13 @@ export const READY_SLOW_MS = 10_000;
 export const READY_LATE_LONG_MS = 60_000;
 
 /**
+ * A `noReady()` whose timer ran this long or more after its 30 s were up
+ * counts as on a held host (`noReadyHostHeld`, #364): a timer that late means
+ * the host's one thread was not running timers.
+ */
+export const NO_READY_HOST_HELD_MS = 5_000;
+
+/**
  * How long after the panel was shown a late `ready` came, timed by the clock
  * from the show that ran out (hidden or not since): `visibleSince` starts
  * again each time the panel is shown, and a busy host runs the timer late, so
@@ -47,6 +63,15 @@ export interface ReadyWatchHooks {
   noReady(): void;
   /** After `ready`, when `noReady()` had already been reported for this page. */
   lateReady?(range: LateReadyRange): void;
+  /** Right after `noReady()`, when its timer ran 5 s or more late (#364). */
+  noReadyHostHeld?(): void;
+  /** On dispose, when `noReady()` was reported and no ready or reload came since (#364). */
+  closedBlank?(range: LateReadyRange): void;
+}
+
+/** The feature key a tab closed while still blank counts (#364): how long after it was shown. */
+export function closedBlankFeature(range: LateReadyRange): 'noReadyClosed30to60s' | 'noReadyClosedOver60s' {
+  return range === 'over60s' ? 'noReadyClosedOver60s' : 'noReadyClosed30to60s';
 }
 
 /** The feature keys one late ready counts: the total, and its range beside it. */
@@ -69,6 +94,12 @@ export class ReadyWatch {
     visible: boolean,
     private readonly hooks: ReadyWatchHooks,
     private readonly now: () => number = () => Date.now(),
+    /**
+     * A monotonic clock, used only to tell how late the timer ran (#364): it
+     * does not jump with the wall clock, and on macOS and Linux it does not
+     * run while the machine sleeps, so a sleep is not a held host.
+     */
+    private readonly elapsed: () => number = () => performance.now(),
   ) {
     if (visible) this.shown();
   }
@@ -112,7 +143,17 @@ export class ReadyWatch {
     return this.readySeen;
   }
 
+  /**
+   * The panel closed. A page that was reported as not ready, never said ready
+   * and was not replaced went away blank (#364): `closedBlank` is told once,
+   * with how long after the show that ran out.
+   */
   dispose(): void {
+    if (!this.disposed && this.timedOut && !this.readySeen && !this.replaced) {
+      const sinceShown = this.now() - this.noReadyShownAt!;
+      const range: LateReadyRange = sinceShown >= READY_LATE_LONG_MS ? 'over60s' : '30to60s';
+      safely(() => this.hooks.closedBlank?.(range));
+    }
     this.disposed = true;
     this.clear();
   }
@@ -127,11 +168,15 @@ export class ReadyWatch {
     this.visibleSince = shownAt;
     this.clear();
     if (this.timedOut) return;
+    const armedAt = this.elapsed();
     const timer = setTimeout(() => {
       this.timer = undefined;
       if (this.disposed || this.readySeen || this.timedOut) return;
       this.noReadyShownAt = shownAt;
       safely(() => this.hooks.noReady());
+      if (this.elapsed() - armedAt >= READY_TIMEOUT_MS + NO_READY_HOST_HELD_MS) {
+        safely(() => this.hooks.noReadyHostHeld?.());
+      }
     }, READY_TIMEOUT_MS);
     (timer as { unref?: () => void }).unref?.();
     this.timer = timer;

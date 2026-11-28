@@ -654,12 +654,30 @@ describe('validation — acceptance and normalisation', () => {
         'startLookFromIndex', 'startLookIndexFallback',
         'startLookFoldersUnder200', 'startLookFolders200to2000', 'startLookFoldersOver2000',
         'startLookFoundAfterDeadline', 'dbtSearchFromIndex',
+        // #364: what a panel that never said ready met.
+        'noReadyHostHeld', 'noReadyClosed30to60s', 'noReadyClosedOver60s',
       ],
     );
     // The keys whose meaning shifted with #347 keep their places from 2.0.0 and after 2.0.4.
     assert.ok(WORKER_FEATURES.indexOf('startLookGaveUp') < WORKER_FEATURES.indexOf('draftDropTimeLimit'));
     assert.ok(WORKER_FEATURES.indexOf('startLookLateSuggestion') < WORKER_FEATURES.indexOf('canvasLoadUnder1s'));
     assert.equal(params[18], '{}');
+  });
+
+  it('keeps what a panel that never said ready met (#364), after the folder look\'s keys, and drops a time, a look-alike or an error-side copy', async () => {
+    const features = { noReadyHostHeld: 2, noReadyClosed30to60s: 1, noReadyClosedOver60s: 1 };
+    const params = await storedParams(
+      heartbeat({
+        features: { ...features, noReadyClosedMs: 45000, noReadyClosedUnder60s: 1, noReadyHostHeldMs: 12000, noReadyClosed: 1 },
+        errors: { webviewNoReadyCanvas: 2, noReadyHostHeld: 1, noReadyClosed30to60s: 1 },
+      }),
+    );
+    assert.deepEqual(JSON.parse(params[17]), features);
+    assert.deepEqual(JSON.parse(params[18]), { webviewNoReadyCanvas: 2 });
+    assert.deepEqual(
+      WORKER_FEATURES.slice(WORKER_FEATURES.indexOf('dbtSearchFromIndex') + 1),
+      ['noReadyHostHeld', 'noReadyClosed30to60s', 'noReadyClosedOver60s'],
+    );
   });
 
   it('keeps the automatic draft\'s time-limit drop key, after the import outcome keys', async () => {

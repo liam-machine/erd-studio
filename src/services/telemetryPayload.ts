@@ -857,6 +857,14 @@ export const FEATURES = [
   'startLookFoldersOver2000',
   'startLookFoundAfterDeadline',
   'dbtSearchFromIndex',
+  // #364: beside a webviewNoReady* code (src/services/readyWatch.ts), what the
+  // 30 s no-ready timeout met: its timer ran 5 s or more late, on a monotonic
+  // clock (the extension host was busy at 30 s); and the tab went away still
+  // blank, with no ready or reload since, as a fixed range from the show that
+  // ran out (never a time). Shared by the canvas, the draft page and Welcome.
+  'noReadyHostHeld',
+  'noReadyClosed30to60s',
+  'noReadyClosedOver60s',
 ] as const;
 export type TelemetryFeature = (typeof FEATURES)[number];
 

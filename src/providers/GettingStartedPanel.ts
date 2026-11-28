@@ -75,7 +75,7 @@ import {
 import type { CliLauncherInstallResult, CliLauncherOptions } from '../services/cliLauncherService';
 import { telemetry } from '../services/telemetryService';
 import { harnessFailureKeys, hookSkippedFeatures, welcomeFailureCode } from '../services/runtimeTelemetry';
-import { lateReadyFeatures, ReadyWatch } from '../services/readyWatch';
+import { closedBlankFeature, lateReadyFeatures, ReadyWatch } from '../services/readyWatch';
 import type { DraftModelEntry } from '../services/dbtDraft';
 import type { ManifestData } from '../types/manifest';
 import { normaliseName } from '../services/nameUtils';
@@ -823,6 +823,10 @@ export class GettingStartedPanel {
         if (slow) telemetry.feature('readySlowOver10s');
       },
       noReady: () => telemetry.error('webviewNoReadyWelcome'),
+      // Beside it (#364): the host was busy at 30 s; the panel closed still blank (a hide
+      // replaces this panel's page, so a panel hidden since is never counted).
+      noReadyHostHeld: () => telemetry.feature('noReadyHostHeld'),
+      closedBlank: (range) => telemetry.feature(closedBlankFeature(range)),
       // The panel was slow, not broken (#320).
       lateReady: (range) => { for (const key of lateReadyFeatures(range)) telemetry.feature(key); },
     });

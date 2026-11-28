@@ -1468,7 +1468,8 @@ Appended to `FEATURES` after the 2.0.0 list above (in
 the same terms: fixed keys, never a name, a path, a message or a count of
 tables (a size is one of a few fixed ranges: a failed layout's, below, and the
 project's, #331, near the end; a time is a fixed range too, #333, and so is how
-far a folder walk had got, #347, at the end). Deploy the
+far a folder walk had got, #347, and how long a blank tab stayed open, #364,
+at the end). Deploy the
 Worker before the extension release that records them, or their counts are
 dropped. The failed-layout codes, the dbt search failure reasons and the canvas
 handler failure steps in this section are appended to `ERROR_CODES` in the
@@ -1934,6 +1935,44 @@ How to read them, per `os`:
 npx wrangler d1 execute erd-studio-telemetry --remote --command \
   "SELECT h.os, h.ext_version, j.key, COUNT(DISTINCT h.install_id) AS installs FROM heartbeats h, json_each(h.features) j WHERE h.day >= date('now','-28 days') AND h.day < date('now') AND COALESCE(h.dev, 0) = 0 AND (j.key LIKE 'startLook%' OR j.key IN ('dbtSearchFromIndex', 'dbtSearchSkipped', 'dbtSearchTimedOut', 'activationOver10s')) GROUP BY 1, 2, 3 ORDER BY 1, 2, installs DESC"
 ```
+
+**Reading `webviewNoReady*`** (added after 2.0.12, #364). A
+`webviewNoReady*` code says a visible panel had not said ready after 30 s.
+`readyAfterNoReady` (#320, above) counts the ones that came up late; on its
+own the code could not say whether the extension host was too busy to hear
+the page, whether the page never loaded, or whether the user gave up on the
+blank tab. `ReadyWatch` (`src/services/readyWatch.ts`), shared by the canvas,
+the draft page and the Welcome panel, now records beside it:
+
+- `noReadyHostHeld` — the 30 s no-ready timer ran 5 s or more late (35 s or more after it was armed): the extension host's one thread was not running timers, so it was busy at 30 s. Timed on a monotonic clock (`performance.now()`), which does not jump with the wall clock and, on macOS and Linux, does not run while the machine sleeps, so a laptop that slept through the 30 s is not counted (on Windows that is unverified). Recorded right after the `webviewNoReady*` code, as often.
+- `noReadyClosed30to60s` — the panel went away after its `webviewNoReady*` with no ready and no Reload since, under 60 s after it was shown (by the clock from the show whose 30 s ran out, as `readyLate*`): the user most likely gave up on the blank tab. At most once per panel.
+- `noReadyClosedOver60s` — the same, 60 s or more after it was shown.
+
+How to read them:
+
+- **Compare each with the sum of the `webviewNoReady*` codes.** The keys are shared by the three panels; read them beside which `webviewNoReadyCanvas`, `webviewNoReadyDraft` or `webviewNoReadyWelcome` the row carries.
+- **`noReadyHostHeld` says how busy the host was at 30 s, not whether the page mounted.** A page that mounted behind a held host either has its queued ready handled before the overdue timer (then nothing is recorded at all) or after it (then `readyAfterNoReady` follows). So a `webviewNoReady*` with neither `readyAfterNoReady` nor Reload means no ready reached the host while the tab was open, held host or not. With `noReadyHostHeld`, read it beside `diagramTables*`, `libraryTables*` and `canvasLoad*`: the fix is in how large projects are read (#333, #357). Without it, on an idle host, the page did not load (the bundle, the CSP, a webview restored without a live page): a bug of ours.
+- **A missing `noReadyHostHeld` does not prove an idle host.** A host held in many short stretches can still run the 30 s timer within 5 s of time.
+- **The closed keys are a lower bound.** A window closed or reloaded with the blank tab open may not dispose the panel, and the write at shutdown is best effort, so such a tab usually sends neither. On a held host the close is timed when the host gets to it, not when the user clicked: a close at 35 s on a host held until 75 s reads `noReadyClosedOver60s`, and a close the host handles before the overdue timer records no `webviewNoReady*` and no closed key at all. Read the closed range beside `noReadyHostHeld`, and treat the split as a lower bound for quick closes on a held host.
+- **ERD Studio's own closes count too.** Move (`moveDbml.ts`), Convert to DBML (`convertProjectToDbml.ts`), Reopen With → Text and `workbench.editor.limit` close a canvas, and a blank one counts as closed blank. The draft page's own closes (Keep, discard, another way to start) all follow its ready, so they never count.
+- **A crash screen is not a blank tab, but can count as one.** A canvas or draft page that crashed before it said ready shows its crash screen and still has no ready; closed without Reload, it counts here. Read the closed keys beside `webviewCrash*` the same day.
+- **Read them per install over a window, never as a per-day subtraction.** A blank tab left open past midnight UTC and closed then lands its closed key on a day with no `webviewNoReady*`.
+- **A Welcome panel hidden after its 30 s is never counted as closed blank**: it does not keep its page while hidden, so the page reported was replaced. One shown blank again after that is not judged a second time.
+- **The ledger**, per install over a window: `webviewNoReady*` = `readyAfterNoReady` + Reload on the notification (`crashFallbackReload`; for Welcome, a hide) + `noReadyClosed30to60s` + `noReadyClosedOver60s` + the tabs still blank when the window closed.
+- An oversized body's trim (`trimHeartbeat`) takes these first, as the newest keys: they are not on its keep list, and an oversized day is most likely a large project's. `heartbeatTrimmed` marks such a day.
+
+```bash
+# What each webviewNoReadyCanvas met, per version (installs, last 28 days): a late ready, a held host, a blank tab closed, a Reload
+npx wrangler d1 execute erd-studio-telemetry --remote --command \
+  "SELECT h.ext_version, COUNT(DISTINCT h.install_id) AS no_ready, COUNT(DISTINCT CASE WHEN json_extract(h.features,'$.readyAfterNoReady') IS NOT NULL THEN h.install_id END) AS late_ready, COUNT(DISTINCT CASE WHEN json_extract(h.features,'$.noReadyHostHeld') IS NOT NULL THEN h.install_id END) AS host_held, COUNT(DISTINCT CASE WHEN json_extract(h.features,'$.noReadyClosed30to60s') IS NOT NULL THEN h.install_id END) AS closed_fast, COUNT(DISTINCT CASE WHEN json_extract(h.features,'$.noReadyClosedOver60s') IS NOT NULL THEN h.install_id END) AS closed_later, COUNT(DISTINCT CASE WHEN json_extract(h.features,'$.crashFallbackReload') IS NOT NULL THEN h.install_id END) AS reloaded FROM heartbeats h WHERE COALESCE(h.dev, 0) = 0 AND h.day >= date('now','-28 days') AND h.day < date('now') AND json_extract(h.features,'$.versionMixed') IS NULL AND json_extract(h.errors,'$.webviewNoReadyCanvas') IS NOT NULL GROUP BY 1 ORDER BY 1"
+```
+
+`host_held` on most `no_ready` installs points at a busy host (H1 in #364);
+`no_ready` without `host_held` at a page that did not load on an idle host
+(H2, raise it as a bug); `closed_fast` and `closed_later` at users who gave up
+(H3). The query counts closes on `webviewNoReadyCanvas` days only, so a close
+after midnight UTC is missed: for the ledger, count each key per install over
+the window without that filter.
 
 ## The local archive
 

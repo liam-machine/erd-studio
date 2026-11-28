@@ -946,6 +946,12 @@ const FEATURES = [
   'startLookFoldersOver2000',
   'startLookFoundAfterDeadline',
   'dbtSearchFromIndex',
+  // Added after 2.0.12 (#364): beside a webviewNoReady* code, the 30 s no-ready timer ran
+  // 5 s or more late (the extension host was busy), and the tab went away still blank,
+  // as a fixed range from the show, never a time.
+  'noReadyHostHeld',
+  'noReadyClosed30to60s',
+  'noReadyClosedOver60s',
 ];
 
 /** The only keys `errors` may carry; anything else is dropped. */
