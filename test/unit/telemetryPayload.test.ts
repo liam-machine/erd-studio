@@ -683,7 +683,8 @@ describe('allowlists agree with the Worker', () => {
     // major update notice's, the layout fallbacks', then the start suggestion's repeat and the canvas's Convert button, #305,
     // ... then where outside changes came from, #329, then whether models are shared, #332, then how long
     // a diagram took to open, #333, then the one look at the open folder, #347, then what a panel that never said ready met, #364,
-    // then what a SQL import's tables defined twice were, #358, then which step held a slow open, #371), never put before it.
+    // then what a SQL import's tables defined twice were, #358, then which step held a slow open, #371,
+    // then a look that stopped early and looking for longer, #357), never put before it.
     expect(FEATURES.slice(FEATURES.indexOf('draftDropTimeLimit') + 1)).toEqual([
       'importGuideActionFabricCatalog', 'importGuideCopiedFabricCatalog',
       'importFabricOutcomeClean', 'importFabricOutcomeRepaired', 'importFabricOutcomePartial',
@@ -716,6 +717,8 @@ describe('allowlists agree with the Worker', () => {
       // #371: which step held a slow open.
       'canvasLoadSlowManifest', 'canvasLoadSlowYml', 'canvasLoadSlowCatalog', 'canvasLoadSlowRead',
       'canvasLoadSlowPositions', 'canvasLoadSlowPhysical', 'canvasLoadSlowDisplay', 'canvasLoadSlowOther',
+      // #357: a look that stopped early, and looking for longer.
+      'dbtLookStopped', 'dbtLookLonger', 'dbtLookLongerFound',
     ]);
     // #262's per-step load codes follow the logged-error ones and close the 2.0.0 error list;
     // what a failed layout was like (after 2.0.4) is appended after them, then #304's, #319's
@@ -802,6 +805,8 @@ describe('allowlists agree with the Worker', () => {
       // #371: which step held a slow open.
       'canvasLoadSlowManifest', 'canvasLoadSlowYml', 'canvasLoadSlowCatalog', 'canvasLoadSlowRead',
       'canvasLoadSlowPositions', 'canvasLoadSlowPhysical', 'canvasLoadSlowDisplay', 'canvasLoadSlowOther',
+      // #357: a look that stopped early, and looking for longer.
+      'dbtLookStopped', 'dbtLookLonger', 'dbtLookLongerFound',
     ]);
     for (const key of added) expect(section, key).toMatch(new RegExp(`^- \`${key}\` `, 'm'));
     // The error codes appended after the 2.0.0 list (a failed layout's class, size, duration and fallbacks;

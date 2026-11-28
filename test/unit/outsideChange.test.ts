@@ -197,7 +197,7 @@ describe('classifyOutsideChange: the rule', () => {
     });
   });
 
-  it('the seven keys are appended to FEATURES after #331\'s, and only #332\'s, #333\'s, #347\'s, #364\'s, #358\'s and #371\'s follow them', () => {
+  it('the seven keys are appended to FEATURES after #331\'s, and only #332\'s, #333\'s, #347\'s, #364\'s, #358\'s, #371\'s and #357\'s follow them', () => {
     expect(FEATURES.slice(FEATURES.indexOf('diagramTables500Plus') + 1)).toEqual([
       'domainCreatedExternalGit', 'domainCreatedExternalLocal', 'domainCreatedExternalNoGit',
       'modelChangedExternalGit', 'modelChangedExternalNoGit', 'modelChangedExternalEditor', 'modelChangedExternalDisk',
@@ -215,6 +215,8 @@ describe('classifyOutsideChange: the rule', () => {
       // #371: which step held a slow open.
       'canvasLoadSlowManifest', 'canvasLoadSlowYml', 'canvasLoadSlowCatalog', 'canvasLoadSlowRead',
       'canvasLoadSlowPositions', 'canvasLoadSlowPhysical', 'canvasLoadSlowDisplay', 'canvasLoadSlowOther',
+      // #357: a look that stopped early, and looking for longer.
+      'dbtLookStopped', 'dbtLookLonger', 'dbtLookLongerFound',
     ]);
     // The total stays where it was, and is still a 1.x key.
     expect(FEATURES.indexOf('domainCreatedExternal')).toBeLessThan(FEATURES.indexOf('heartbeatProvisional'));

@@ -101,7 +101,7 @@ describe('the ranges (#333)', () => {
     }
   });
 
-  it('the families are listed in FEATURES, fastest first, and the new keys are appended after #332\'s (only #347\'s, #364\'s, #358\'s and #371\'s follow them)', () => {
+  it('the families are listed in FEATURES, fastest first, and the new keys are appended after #332\'s (only #347\'s, #364\'s, #358\'s, #371\'s and #357\'s follow them)', () => {
     expect([...CANVAS_LOAD_FEATURES]).toEqual(['canvasLoadUnder1s', 'canvasLoad1to5s', 'canvasLoad5to20s', 'canvasLoadOver20s']);
     expect([...CANVAS_PAINT_FEATURES]).toEqual(['canvasPaintUnder1s', 'canvasPaint1to5s', 'canvasPaintOver5s']);
     expect(FEATURES.slice(FEATURES.indexOf('modelRepoHasRemote') + 1)).toEqual([
@@ -118,6 +118,8 @@ describe('the ranges (#333)', () => {
       // #371: which step held a slow open.
       'canvasLoadSlowManifest', 'canvasLoadSlowYml', 'canvasLoadSlowCatalog', 'canvasLoadSlowRead',
       'canvasLoadSlowPositions', 'canvasLoadSlowPhysical', 'canvasLoadSlowDisplay', 'canvasLoadSlowOther',
+      // #357: a look that stopped early, and looking for longer.
+      'dbtLookStopped', 'dbtLookLonger', 'dbtLookLongerFound',
     ]);
     // canvasLoadOver20s stays where 2.0.0 put it.
     expect(FEATURES.indexOf('canvasLoadOver20s')).toBeLessThan(FEATURES.indexOf('draftDropTimeLimit'));

@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
+import { holdCommands, registerCommand, releaseHeldCommands, resetHeldCommands } from './commands/heldCommands';
 
 import { SubjectAreaService, renameSubjectAreaInRaw, subjectAreaTableNames } from './services/domainService';
 import { LayerService, LayersFileUnreadableError, NEW_PROJECT_LAYERS_WITHOUT_DBT, reservedLayerNameMessage } from './services/layerService';
@@ -60,7 +61,8 @@ import { erdStudioSettingSource, getErdStudioSetting } from './services/configSe
 import { LAYER_DEFINITION, WHICH_LAYER_FOR_DIAGRAM, defaultDiagramLayer } from './services/layerWording';
 import { manifestDisplayPath, readDbtProjectConfig, resolveManifestPath, type DbtProjectConfig } from './services/dbtProjectConfig';
 import { detectPhysicalTooling, toolingExclude, type ToolingProbe } from './services/physicalTooling';
-import { DBT_SEARCH_EXCLUDE_GLOB, sortDbtCandidates } from './services/dbtProjectSearch';
+import { DBT_SEARCH_EXCLUDE_GLOB, hasDbtProjectFile, sortDbtCandidates } from './services/dbtProjectSearch';
+import { pathKey } from './services/pathKey';
 import { getLastDbtParseLaunchAt, RUN_DBT_PARSE_ACTION, runDbtParse } from './commands/runDbtParse';
 import { workspaceFolderOf } from './commands/dbtCandidate';
 import { openPhysicalCanvas, setDbtRunHost } from './commands/dbtRunHost';
@@ -172,6 +174,7 @@ import { RelationshipsTreeProvider, type RelationshipsGrouping, type Relationshi
 import { registerSidebarFilters } from './providers/sidebarFilter';
 import { registerRowDetails } from './providers/rowDetails';
 import { installContextKeyRecorder } from './providers/glassSidebar/contextKeys';
+import { DbtLookNotice } from './services/dbtLookNotice';
 import { FOCUS_GLASS_SEARCH_COMMAND, TOGGLE_GLASS_SIDEBAR_COMMAND, glassSidebarEnabled, registerGlassSidebar } from './providers/glassSidebar/GlassSidebarProvider';
 import { diagramsShowing, openInDiagram, openRelationshipSource, openTableFile, type RelationshipsViewDeps } from './commands/relationshipsView';
 import { PendingOpens, RowActivations, diagramTheClickChooses, openDiagramFile, rowActivationKey } from './commands/sidebarRowClick';
@@ -465,6 +468,21 @@ function resolveWorkspaceProject(
 let folderLooks: FolderLooks | undefined;
 
 /**
+ * The sidebar's status for the look activation waits on, and the notice of
+ * a look that stopped early (#357). Set by `activate`, so a failed
+ * activation can take what it shows away.
+ */
+let dbtLookNotice: DbtLookNotice | undefined;
+/** Set once the user dismissed that notice in this workspace: it does not come back on later starts. */
+export const DBT_LOOK_NOTICE_DISMISSED_KEY = 'erdStudio.dbtLookNoticeDismissed';
+/**
+ * dbt projects a longer look found (Look for Longer, #357) that the window's
+ * ordinary look does not reach: kept for the session, so Select dbt Project…
+ * and the count of the workspace's projects still see them.
+ */
+let dbtProjectsFoundLater: string[] = [];
+
+/**
  * The dbt projects below the open folders, from the window's shared look:
  * the tracked ones git's index lists and the ones the walk meets, as deep as
  * the dbt project walk has always gone. Asynchronous: the extension host is
@@ -474,7 +492,10 @@ async function dbtProjectsBelowFolders(): Promise<string[]> {
   const looks = folderLooks;
   if (!looks) return [];
   try {
-    return await looks.dbtProjectsBelow(workspaceFolderPaths());
+    const below = await looks.dbtProjectsBelow(workspaceFolderPaths());
+    // What a longer look found stays known while it is still a dbt project.
+    const later = dbtProjectsFoundLater.filter((dir) => hasDbtProjectFile(dir));
+    return later.length === 0 ? below : [...below, ...later.filter((dir) => !below.some((b) => pathKey(b) === pathKey(dir)))];
   } catch (err) {
     log.warn('[ERD Studio] Looking for dbt projects below the open folders failed:', err);
     return [];
@@ -1127,11 +1148,11 @@ function registerFallbackCommands(context: vscode.ExtensionContext): void {
     // PRE_REGISTERED_COMMANDS are registered by activate() before this fallback
     // runs and work without a project; registering again would throw ("already exists").
     if (!command.startsWith('erdStudio.') || PRE_REGISTERED_COMMANDS.has(command)) { continue; }
-    context.subscriptions.push(vscode.commands.registerCommand(command, showNoProjectWarning));
+    context.subscriptions.push(registerCommand(command, showNoProjectWarning));
     // Post-rename commands never had a dbtSemantic.* id — see NO_LEGACY_ALIAS.
     if (NO_LEGACY_ALIAS.has(command)) { continue; }
     context.subscriptions.push(
-      vscode.commands.registerCommand(command.replace(/^erdStudio\./, 'dbtSemantic.'), showNoProjectWarning),
+      registerCommand(command.replace(/^erdStudio\./, 'dbtSemantic.'), showNoProjectWarning),
     );
   }
 
@@ -1505,7 +1526,51 @@ function activationCheckpoint(phase: ActivationPhase): vscode.Disposable {
  * activateInner) cannot be recorded: the facade is a no-op until then. The
  * exception's text stays in the local log.
  */
+/**
+ * Lets `activate()` resolve while activation carries on (#357). VS Code draws
+ * no webview view, so no glass sidebar, until `activate()` resolves: a look
+ * through the open folders that runs long calls this, so the sidebar can say
+ * what the look is doing. Until activation is over, every contributed command
+ * it has not registered yet is held (`heldCommands.ts`): invoked meanwhile, it
+ * waits and then runs, as it waited before. The project that opens, and
+ * everything activation does, are unchanged; only when VS Code is told.
+ * A no-op once activation is over, and for a look that answers in time.
+ */
+let letActivationCarryOn: (() => void) | undefined;
+/** Resolves when the activation now running is over, whether or not `activate()` resolved before it (never rejects). */
+let activationOver: Promise<void> = Promise.resolve();
+
+/** When the activation now running (or the last one) is over. For tests: `activate()` itself may resolve first (#357). */
+export function _activationOverForTests(): Promise<void> {
+  return activationOver;
+}
+
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
+  resetHeldCommands();
+  let carriedOn = false;
+  let carryOn!: () => void;
+  const carryingOn = new Promise<'carriedOn'>((resolve) => { carryOn = () => resolve('carriedOn'); });
+  const whole = activateGuarded(context, () => carriedOn);
+  // Over either way: the stand-ins go first, then whatever waited on them runs.
+  const over = whole.then(() => undefined, () => undefined).then(() => {
+    if (letActivationCarryOn === release) letActivationCarryOn = undefined;
+    releaseHeldCommands();
+  });
+  activationOver = over;
+  const release = (): void => {
+    if (carriedOn) return;
+    carriedOn = true;
+    const contributed = (context.extension?.packageJSON as { contributes?: { commands?: Array<{ command?: unknown }> } } | undefined)?.contributes?.commands ?? [];
+    holdCommands(contributed.map((c) => c.command).filter((id): id is string => typeof id === 'string'), over);
+    carryOn();
+  };
+  letActivationCarryOn = release;
+  if (await Promise.race([whole.then(() => 'over' as const, () => 'over' as const), carryingOn]) === 'carriedOn') return;
+  return whole;
+}
+
+/** `activateInner`, with a failure recorded and what activation had put up taken down. */
+async function activateGuarded(context: vscode.ExtensionContext, carriedOn: () => boolean): Promise<void> {
   activationPhase = 'Discovery';
   try {
     return await activateInner(context);
@@ -1519,10 +1584,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     // The Diagrams view can exist before the look for dbt projects (#357):
     // a failure from there on would leave its "Loading diagrams…" up for good.
     try {
+      dbtLookNotice?.clear();
       void vscode.commands.executeCommand('setContext', 'erdStudio.diagramsLoading', false);
       void vscode.commands.executeCommand('setContext', 'erdStudio.tablesLoading', false);
     } catch {
       // Best effort: never replace the activation error.
+    }
+    // `activate()` already resolved (#357): VS Code will not report this, so ERD Studio does.
+    if (carriedOn()) {
+      void vscode.window.showErrorMessage('ERD Studio could not finish starting. Its output channel (ERD Studio) has the details.');
     }
     throw err;
   }
@@ -1639,7 +1709,7 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
   let editorProviderForFeedback: SemanticEditorProvider | undefined;
   let trackingServiceForFeedback: ReportTrackingService | undefined;
   context.subscriptions.push(
-    vscode.commands.registerCommand(
+    registerCommand(
       'erdStudio.reportBug',
       async (prefill?: { kind?: FeedbackKind; title?: string; description?: string }) => {
         if (editorProviderForFeedback?.requestFeedbackDialog(prefill)) return;
@@ -1654,7 +1724,7 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
   // gettingStartedDeps below (late-bound, like editorProviderForFeedback).
   let gettingStartedDeps: GettingStartedDeps | undefined;
   context.subscriptions.push(
-    vscode.commands.registerCommand('erdStudio.showGettingStarted', () => {
+    registerCommand('erdStudio.showGettingStarted', () => {
       GettingStartedPanel.createOrShow(context, gettingStartedDeps ?? noProjectGettingStartedDeps());
     }),
   );
@@ -1662,14 +1732,14 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
   // "Try the Sample Project" is for people with no dbt project yet, so it must
   // work in any window: confirm, then clone the fixed public sample repo.
   context.subscriptions.push(
-    vscode.commands.registerCommand(TRY_SAMPLE_COMMAND, async () => {
+    registerCommand(TRY_SAMPLE_COMMAND, async () => {
       if (await trySampleProject() !== 'cancelled') { telemetry.feature('trySample'); }
     }),
   );
 
   // "Show Logs" opens the ERD Studio output channel; it works in any window.
   context.subscriptions.push(
-    vscode.commands.registerCommand(SHOW_LOGS_COMMAND, () => { outputChannel.show(true); }),
+    registerCommand(SHOW_LOGS_COMMAND, () => { outputChannel.show(true); }),
   );
 
   // The start screen's one door (src/types/startActions.ts): every start
@@ -1764,7 +1834,7 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
   // The project path fills in the folder's part; an empty window gets the example.
   let showMeAroundInProject: () => Promise<boolean> = async () => false;
   context.subscriptions.push(
-    vscode.commands.registerCommand(SHOW_ME_AROUND_COMMAND, () => countThrow('guideOpenFailed', async () => {
+    registerCommand(SHOW_ME_AROUND_COMMAND, () => countThrow('guideOpenFailed', async () => {
       if (await showMeAroundInProject()) return;
       if (draftPreview.isOpen()) {
         draftPreview.startGuide?.(onboardingGuide.startOnOpenDraft());
@@ -1775,13 +1845,13 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     })),
   );
   context.subscriptions.push(
-    vscode.commands.registerCommand(OPEN_EXAMPLE_PROJECT_COMMAND, () => countThrow('exampleOpenFailed', () => runExampleDraft('example'))),
+    registerCommand(OPEN_EXAMPLE_PROJECT_COMMAND, () => countThrow('exampleOpenFailed', () => runExampleDraft('example'))),
     // Open Example Diagram stays registered (hidden from the palette) as an alias of the
     // one example command, so old keybindings and the setup skill's mention keep working.
-    vscode.commands.registerCommand(OPEN_EXAMPLE_DIAGRAM_COMMAND, () => vscode.commands.executeCommand(OPEN_EXAMPLE_PROJECT_COMMAND)),
+    registerCommand(OPEN_EXAMPLE_DIAGRAM_COMMAND, () => vscode.commands.executeCommand(OPEN_EXAMPLE_PROJECT_COMMAND)),
   );
   context.subscriptions.push(
-    vscode.commands.registerCommand(START_COMMAND, (arg?: unknown) => runStart(arg, {
+    registerCommand(START_COMMAND, (arg?: unknown) => runStart(arg, {
       context: () => startContext(),
       // With its arguments: a direct import's { quick: true } (startActionArgs) is its quick path.
       executeCommand: (command, ...args) => vscode.commands.executeCommand(command, ...args),
@@ -1795,7 +1865,7 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
   let importGuideContext: () => ImportGuideContext = () => ({ hasProject: false, hasDbt: false });
   let refreshImportGuideIntent: () => Promise<unknown> = async () => undefined;
   context.subscriptions.push(
-    vscode.commands.registerCommand(IMPORT_GUIDE_COMMAND, async (arg?: unknown) => {
+    registerCommand(IMPORT_GUIDE_COMMAND, async (arg?: unknown) => {
       const from = parseImportGuideArgs(arg);
       telemetry.feature(IMPORT_GUIDE_OPENED_FEATURE);
       if (from) telemetry.feature(IMPORT_GUIDE_SURFACE_FEATURES[from]);
@@ -1871,6 +1941,38 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     return { data, view };
   };
   const earlyDiagramsView = firstOpenFolder(workspaceFolderPaths()) !== undefined ? createDiagramsView() : undefined;
+  // What the sidebar says while the look below runs, and after one that
+  // stopped early (#357): folders checked, the time left, Look for Longer.
+  /** Set where the tree's project row is made: reveals Select dbt Project for projects found later. */
+  let revealLaterDbtProjects: (paths: readonly string[]) => void = () => undefined;
+  dbtProjectsFoundLater = [];
+  const lookNotice = new DbtLookNotice({
+    looks,
+    show: (status, onAction) => glassSidebar.setSectionStatus('diagrams', status, onAction),
+    hostSearch: async (timeoutMs) => {
+      const search = await findHostDbtProjects(timeoutMs);
+      if (search.outcome === 'error') for (const code of dbtSearchFailureCodes(search.reason)) telemetry.error(code);
+      return search;
+    },
+    selectProject: () => { void vscode.commands.executeCommand('erdStudio.selectDbtProject'); },
+    found: (paths) => {
+      dbtProjectsFoundLater = [...dbtProjectsFoundLater, ...paths];
+      revealLaterDbtProjects(paths);
+    },
+    dismissed: () => context.workspaceState.get<boolean>(DBT_LOOK_NOTICE_DISMISSED_KEY) === true,
+    setDismissed: () => { void context.workspaceState.update(DBT_LOOK_NOTICE_DISMISSED_KEY, true); },
+    lookIsSlow: () => letActivationCarryOn?.(),
+    stoppedEarly: () => telemetry.featureQuiet('dbtLookStopped'),
+    askedLonger: () => telemetry.feature('dbtLookLonger'),
+    longerFound: () => telemetry.feature('dbtLookLongerFound'),
+  });
+  dbtLookNotice = lookNotice;
+  context.subscriptions.push({ dispose: () => {
+    lookNotice.dispose();
+    if (dbtLookNotice === lookNotice) dbtLookNotice = undefined;
+  } });
+  /** Whether activation waited on the look (only then is there anything to say about it). */
+  let waitedForLook = false;
   const dbtSearchStart = Date.now();
   // Undefined when activation did not wait for the search (dbtSearchSkipped).
   let hostDbtSearch: DbtSearchResult | undefined;
@@ -1906,6 +2008,8 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     // The host's search still runs, beside the look: only it finds a project
     // that is neither tracked by git nor within the walk's reach.
     const hostSearch = findHostDbtProjects(ACTIVATION_DBT_SEARCH_MS);
+    waitedForLook = true;
+    lookNotice.watch(folders);
     // Milliseconds as a rule: one file read per folder (none outside a repository), 3 s at the very most.
     if (await looks.indexed(folders)) telemetry.featureQuiet('dbtSearchFromIndex');
     dbtProjectsBelow = await below;
@@ -1927,6 +2031,14 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
   // Logical-only mode: a root without dbt_project.yml (any folder now opens).
   // No Physical stage, no dbt services or watchers, nothing written unasked.
   const hasDbt = projectResolution.hasDbt;
+  // The look is over: its status goes. One that stopped before it had been
+  // everywhere, with no answer from the host's search either, may have missed
+  // a project: the sidebar says so and offers to look for longer (#357).
+  if (waitedForLook && workspaceRoot) {
+    lookNotice.settled({ hostSearchAnswered: hostDbtSearch?.outcome === 'ok', opened: workspaceRoot, hasDbt, known: projectResolution.candidates });
+  } else {
+    lookNotice.clear();
+  }
   // Pick which sidebar welcome text shows (package.json viewsWelcome):
   // hasProject = a folder is open; hasDbtProject = it holds dbt_project.yml.
   // The ERD Studio view and its loading keys were set up before the look
@@ -3772,6 +3884,8 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
       };
       void lateHostDbtSearch?.then(revealMoreProjects);
       void lateDbtLook?.then(revealMoreProjects);
+      // A longer look the user asked for (#357) reveals them the same way.
+      revealLaterDbtProjects = revealMoreProjects;
       /** Each change of folders counts afresh; an older count that lands later is dropped. */
       let folderCount = 0;
       const foldersChanged = vscode.workspace.onDidChangeWorkspaceFolders(() => {
@@ -3984,16 +4098,16 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
           dropSeen: (filePath) => editorProvider.noteDropSeen('missedDrop', filePath),
           workspaceRoot,
         }),
-        vscode.commands.registerCommand(GO_TO_TABLE_COMMAND, (query?: unknown) =>
+        registerCommand(GO_TO_TABLE_COMMAND, (query?: unknown) =>
           goToTableCommand(goToTableDeps, typeof query === 'string' ? query : undefined)),
         // Add to Diagram… always asks which diagram (the open one first); Add to Open Diagram (the row's
         // inline + and the right-click menu) adds to the diagram that is open, asking only with none or several.
-        vscode.commands.registerCommand(ADD_TO_DIAGRAM_COMMAND, (arg?: unknown, selection?: unknown) =>
+        registerCommand(ADD_TO_DIAGRAM_COMMAND, (arg?: unknown, selection?: unknown) =>
           addToDiagramCommand(addToDiagramDeps, tableRowsFromTreeArgs(arg, selection), { ask: true })),
-        vscode.commands.registerCommand(ADD_TO_OPEN_DIAGRAM_COMMAND, (arg?: unknown, selection?: unknown) =>
+        registerCommand(ADD_TO_OPEN_DIAGRAM_COMMAND, (arg?: unknown, selection?: unknown) =>
           addToDiagramCommand(addToDiagramDeps, tableRowsFromTreeArgs(arg, selection))),
         // `filePath` (optional): the table's file, whose row is revealed (two schema folders may share the name).
-        vscode.commands.registerCommand(REVEAL_IN_TABLE_LIBRARY_COMMAND, async (name?: unknown, filePath?: unknown) => {
+        registerCommand(REVEAL_IN_TABLE_LIBRARY_COMMAND, async (name?: unknown, filePath?: unknown) => {
           const file = typeof filePath === 'string' ? filePath : undefined;
           let node = typeof name === 'string' ? tableLibraryProvider.findTableNode(name, file) : undefined;
           // Hidden by the view's filter: clear it, then reveal the table.
@@ -4011,19 +4125,19 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
           else await tableLibraryView?.reveal(node, { select: true, focus: true });
         }),
         // Open in File, and a relationship row's double-click (`{ doubleClick: true }`): a pick the click left open closes first.
-        vscode.commands.registerCommand('erdStudio.openRelationshipSource', async (node?: RelationshipsNode, options?: unknown) => {
+        registerCommand('erdStudio.openRelationshipSource', async (node?: RelationshipsNode, options?: unknown) => {
           if (isPlainObject(options) && options.doubleClick === true) await rowActivations.settle();
           await openRelationshipSource(node, deps);
         }),
         // A table row's Open File, and its double-click (`{ doubleClick: true }`: the tab is kept, as the Explorer's is).
-        vscode.commands.registerCommand('erdStudio.openTableFile', async (node?: unknown, options?: unknown) => {
+        registerCommand('erdStudio.openTableFile', async (node?: unknown, options?: unknown) => {
           const doubleClick = isPlainObject(options) && options.doubleClick === true;
           if (doubleClick) await rowActivations.settle();
           await openTableFile(node, { pinned: doubleClick });
         }),
         // A table row's Show on Another Diagram…: the diagrams its click does not choose (the canvas's
         // Show on Other Diagrams… path, `excludeDiagram`), selected gently as the click does.
-        vscode.commands.registerCommand('erdStudio.showOnAnotherDiagram', async (node?: unknown) => {
+        registerCommand('erdStudio.showOnAnotherDiagram', async (node?: unknown) => {
           if (!isPlainObject(node) || node.type !== 'model' || typeof node.name !== 'string') {
             void vscode.window.showErrorMessage('Show on Another Diagram: Right-click a table in the Table Library.');
             return;
@@ -4034,15 +4148,15 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
           const excludeDiagram = diagramTheClickChooses(shownOn, deps.lookingAtDiagram?.());
           await openInDiagram(row, deps, { highlight: true, ...(excludeDiagram !== undefined ? { excludeDiagram } : {}) });
         }),
-        vscode.commands.registerCommand('erdStudio.groupRelationshipsByFile', () => setRelationshipsGrouping('file')),
-        vscode.commands.registerCommand('erdStudio.groupRelationshipsByTable', () => setRelationshipsGrouping('table')),
+        registerCommand('erdStudio.groupRelationshipsByFile', () => setRelationshipsGrouping('file')),
+        registerCommand('erdStudio.groupRelationshipsByTable', () => setRelationshipsGrouping('table')),
         // A row's click (a Table Library table, a relationship grouped by table) passes
         // `{ fallBackToFile: true, rowClick: true }`: the diagram in front of the user, else
         // the only one, else a pick, else the file; a second click soon after opens the file.
         // From a row's menu (no options, or the Table Library's selection) it is the same
         // rule without the file. The canvas's Show on Other Diagrams… (`excludeDiagram`)
         // keeps centring the table with its panel open.
-        vscode.commands.registerCommand('erdStudio.openInDiagram', (node?: RelationshipsNode | TableLibraryTableNode, options?: unknown) => {
+        registerCommand('erdStudio.openInDiagram', (node?: RelationshipsNode | TableLibraryTableNode, options?: unknown) => {
           if (!node) {
             void vscode.window.showErrorMessage('Open in Diagram: Right-click a relationship or a table in the Relationships view, or an ignored duplicate in the Table Library.');
             return;
@@ -4064,15 +4178,15 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
         }),
       );
     })(),
-    vscode.commands.registerCommand('erdStudio.setFeedbackApiKey', () => setFeedbackApiKey(context)),
-    vscode.commands.registerCommand('erdStudio.clearFeedbackApiKey', () => clearFeedbackApiKey(context)),
-    vscode.commands.registerCommand('erdStudio.refreshMyReports', () => trackingService.refresh({ force: true })),
+    registerCommand('erdStudio.setFeedbackApiKey', () => setFeedbackApiKey(context)),
+    registerCommand('erdStudio.clearFeedbackApiKey', () => clearFeedbackApiKey(context)),
+    registerCommand('erdStudio.refreshMyReports', () => trackingService.refresh({ force: true })),
     // Code-only (never contributed): the row's own command, so it stays out of
     // the palette and out of registerFallbackCommands.
-    vscode.commands.registerCommand('erdStudio.openTrackedReport', (node?: MyReportNode) => {
+    registerCommand('erdStudio.openTrackedReport', (node?: MyReportNode) => {
       if (node?.report?.url) { void vscode.env.openExternal(vscode.Uri.parse(node.report.url)); }
     }),
-    vscode.commands.registerCommand('erdStudio.deleteLogicalModel', async (node: TableLibraryNode | undefined, selection?: readonly TableLibraryNode[]) => {
+    registerCommand('erdStudio.deleteLogicalModel', async (node: TableLibraryNode | undefined, selection?: readonly TableLibraryNode[]) => {
       if (!node || node.type !== 'model') {
         void vscode.window.showErrorMessage('Delete Table: No table selected. Right-click a table in the Table Library.');
         return;
@@ -4142,11 +4256,11 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
         tableLibraryProvider.refresh();
       }
     }),
-    vscode.commands.registerCommand('erdStudio.selectDbtProject', (target?: unknown) =>
+    registerCommand('erdStudio.selectDbtProject', (target?: unknown) =>
       selectDbtProject(context, workspaceRoot, semanticDir, typeof target === 'string' ? target : undefined)),
     // Move top-level logical-models/*.yml files into the folder of the one
     // layer whose domains use them (issue #76). Prompted, one WorkspaceEdit.
-    vscode.commands.registerCommand('erdStudio.organizeModelLibrary', async () => {
+    registerCommand('erdStudio.organizeModelLibrary', async () => {
       if (!tableLibraryService.dirExists()) {
         void vscode.window.showInformationMessage('Organise Table Library: there is no Table Library folder yet.');
         return;
@@ -4305,20 +4419,20 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     }),
     // Move a DBML table to another schema folder (any layer), or a DBML diagram
     // to another layer (§2.8): every use line and Ref end follows, one edit.
-    vscode.commands.registerCommand(MOVE_TABLE_COMMAND, (arg?: unknown, selection?: unknown) =>
+    registerCommand(MOVE_TABLE_COMMAND, (arg?: unknown, selection?: unknown) =>
       moveTableCommand(moveDbmlDeps, arg, selection)),
-    vscode.commands.registerCommand(MOVE_DIAGRAM_COMMAND, (arg?: unknown) => moveDiagramCommand(moveDbmlDeps, arg)),
+    registerCommand(MOVE_DIAGRAM_COMMAND, (arg?: unknown) => moveDiagramCommand(moveDbmlDeps, arg)),
     // A table file on no diagram yet, from the Table Library: in a layer row's
     // layer, a schema row's schema, or one picked. New Schema… names the schema
     // and carries on into its first table (a schema is the folder its tables sit in).
-    vscode.commands.registerCommand(NEW_TABLE_COMMAND, (arg?: unknown) => newTableCommand(newTableDeps, arg)),
-    vscode.commands.registerCommand(NEW_SCHEMA_COMMAND, (arg?: unknown) => newSchemaCommand(newTableDeps, arg)),
+    registerCommand(NEW_TABLE_COMMAND, (arg?: unknown) => newTableCommand(newTableDeps, arg)),
+    registerCommand(NEW_SCHEMA_COMMAND, (arg?: unknown) => newSchemaCommand(newTableDeps, arg)),
     // A second file with a name the library already has is ignored (names are
     // identities). Give it its own name — `{layer}_{name}`, or `{schema}_{name}`
     // when both DBML copies sit in one layer — with an alias that
     // keeps the table name, and repoint the domains of its layer at it.
     // Prompted, one WorkspaceEdit, one undo step.
-    vscode.commands.registerCommand('erdStudio.resolveDuplicateModel', async (arg?: TableLibraryNode | string) => {
+    registerCommand('erdStudio.resolveDuplicateModel', async (arg?: TableLibraryNode | string) => {
       const entries = tableLibraryService.listTableFiles();
       // A duplicate within one library (#182: `tables/` too; a DBML table shadowed
       // by a DBML table). A copy in another kind of library (a `tables/` file
@@ -4533,7 +4647,7 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     }),
     // Store every domain file's relationships once, in their from-models'
     // library files (#126). The opt-in for a project that keeps them per domain.
-    vscode.commands.registerCommand('erdStudio.moveRelationshipsToLibrary', () =>
+    registerCommand('erdStudio.moveRelationshipsToLibrary', () =>
       moveRelationshipsToLibrary({
         workspaceRoot,
         semanticDir,
@@ -4552,7 +4666,7 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
         },
       })),
     // A Table Library table, schema, layer or folder row (its file or folder), or a Diagrams diagram row (its file).
-    vscode.commands.registerCommand('erdStudio.revealLogicalModel', (node: unknown) => {
+    registerCommand('erdStudio.revealLogicalModel', (node: unknown) => {
       const target = revealInExplorerPath(node);
       if (!target) {
         void vscode.window.showErrorMessage('Reveal in Explorer: Nothing selected. Right-click a table or a diagram in the ERD Studio side panel.');
@@ -4560,7 +4674,7 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
       }
       void vscode.commands.executeCommand('revealInExplorer', vscode.Uri.file(target));
     }),
-    vscode.commands.registerCommand('erdStudio.openDomain', async (filePath?: string, stage?: Stage) => {
+    registerCommand('erdStudio.openDomain', async (filePath?: string, stage?: Stage) => {
       // From the palette or the status bar there is no file: ask which.
       if (typeof filePath !== 'string' || !filePath) {
         await openCanvas();
@@ -4583,20 +4697,20 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
       }
     }),
     // A diagram row's double-click in the glass sidebar (`{ doubleClick: true }`): its file as text, once the click's own open has landed.
-    vscode.commands.registerCommand('erdStudio.openDiagramFile', async (node?: unknown, options?: unknown) => {
+    registerCommand('erdStudio.openDiagramFile', async (node?: unknown, options?: unknown) => {
       if (typeof options === 'object' && options !== null && (options as { doubleClick?: unknown }).doubleClick === true) await diagramOpens.settle();
       await openDiagramFile(node);
     }),
     // Customise Fields…: open <semanticDir>/fields.yml, or an unsaved one
     // holding the starting set. Writes nothing (the user saves it).
-    vscode.commands.registerCommand(CUSTOMISE_FIELDS_COMMAND, () => customiseFields(fullSemanticDirPath)),
+    registerCommand(CUSTOMISE_FIELDS_COMMAND, () => customiseFields(fullSemanticDirPath)),
     // Suggest Relationships…: on the active canvas (the editor title menu passes its Uri). Writes only what the user accepts.
-    vscode.commands.registerCommand(SUGGEST_RELATIONSHIPS_COMMAND, (arg?: unknown) =>
+    registerCommand(SUGGEST_RELATIONSHIPS_COMMAND, (arg?: unknown) =>
       editorProvider.suggestRelationships(arg instanceof vscode.Uri ? arg : undefined)),
     // Export a domain's logical design as Mermaid or DBML. The argument is
     // the canvas's document Uri, the domain tree's node, or nothing (the
     // focused canvas, else the domain picker). Writes no ERD Studio file.
-    vscode.commands.registerCommand(EXPORT_DIAGRAM_COMMAND, (arg?: unknown) =>
+    registerCommand(EXPORT_DIAGRAM_COMMAND, (arg?: unknown) =>
       exportDiagramCommand({
         exportDomain: async (domainPath, format) => {
           // dbt's key evidence, as the canvas reads the domain, so a link
@@ -4618,7 +4732,7 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
       }, arg)),
     // Export every domain's logical design into a folder the user picks, one
     // file each (rich DBML carries its positions in erd_layout).
-    vscode.commands.registerCommand(EXPORT_ALL_DIAGRAMS_COMMAND, () =>
+    registerCommand(EXPORT_ALL_DIAGRAMS_COMMAND, () =>
       exportAllDiagramsCommand({
         listSubjectAreas: () => subjectAreaService.listSubjectAreas(workspaceRoot, semanticDir),
         exportAll: async (domainPaths, format) => {
@@ -4637,7 +4751,7 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
       })),
     // Import from dbt (§5.2): the top-ranked models folder as a draft, with the
     // Folder switcher and Change options… (the picker). A start passes { draft }.
-    vscode.commands.registerCommand(DRAW_FROM_DBT_COMMAND, async (arg?: unknown) => {
+    registerCommand(DRAW_FROM_DBT_COMMAND, async (arg?: unknown) => {
       if (!hasDbt) {
         void vscode.window.showInformationMessage(DRAW_FROM_DBT_NEEDS_DBT_MESSAGE);
         return;
@@ -4649,7 +4763,7 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     // With a file URI (the canvas's "Import these tables…" banner over a
     // single-file DBML in a layer folder, §2.5) that file is imported;
     // without one the user picks a file. Every run ends in a draft (§5.1).
-    vscode.commands.registerCommand(IMPORT_DBML_COMMAND, async (file?: unknown) => {
+    registerCommand(IMPORT_DBML_COMMAND, async (file?: unknown) => {
       const deps = importDbmlDeps(importDraftFor(startDraftTriggerOf(file) ?? 'palette'));
       // A start (Import your DBML file, the start suggestion's Show Me): the quick path, that file taken.
       if (isQuickImportArg(file)) {
@@ -4662,13 +4776,13 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     }),
     // Import… (the start screen's Import): DBML, SQL DDL or a Power BI /
     // Fabric semantic model, the source the folder seems to hold first.
-    vscode.commands.registerCommand(IMPORT_MODEL_COMMAND, () => runImportModel(vscodeImportModelDeps(workspaceRoot, semanticDir, looks))),
+    registerCommand(IMPORT_MODEL_COMMAND, () => runImportModel(vscodeImportModelDeps(workspaceRoot, semanticDir, looks))),
     // CREATE TABLE scripts and semantic models are converted to DBML, then go
     // through Import DBML's own flow (layer, name, the draft, Keep).
     // A start (the start screen's primary import, the start suggestion) passes
     // { quick: true, draft }: the quick path, defaults chosen and the draft the one question.
     // The import guide's SQL cards pass { dialect }: the scripts are read as that dialect, not asked.
-    vscode.commands.registerCommand(IMPORT_SQL_DDL_COMMAND, async (arg?: unknown) => {
+    registerCommand(IMPORT_SQL_DDL_COMMAND, async (arg?: unknown) => {
       const deps = sqlDeps(importDraftFor(startDraftTriggerOf(arg) ?? 'palette'));
       if (isQuickImportArg(arg)) {
         await quickImportSqlDdl(deps);
@@ -4679,15 +4793,15 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
       const guideSource = importGuideSourceOfImportArg(arg);
       await importSqlDdl(deps, undefined, { ...(dialect ? { dialect, dialectChosen: true } : {}), ...(guideSource ? { guideSource } : {}) });
     }),
-    vscode.commands.registerCommand(IMPORT_SEMANTIC_MODEL_COMMAND, async (arg?: unknown) => {
+    registerCommand(IMPORT_SEMANTIC_MODEL_COMMAND, async (arg?: unknown) => {
       const deps = semanticModelDeps(importDraftFor(startDraftTriggerOf(arg) ?? 'palette'));
       await (isQuickImportArg(arg) ? quickImportSemanticModel : importSemanticModel)(deps);
     }),
     // Show Import Report: the last import's ledger, grouped and counted, read-only
     // (src/services/importReport.ts). Linked from the draft's banner, the toast
     // after a Keep that left tables out and the imports' failure messages.
-    vscode.commands.registerCommand(SHOW_IMPORT_REPORT_COMMAND, (arg?: unknown) => showImportReport(arg)),
-    vscode.commands.registerCommand(
+    registerCommand(SHOW_IMPORT_REPORT_COMMAND, (arg?: unknown) => showImportReport(arg)),
+    registerCommand(
       'erdStudio.createDomain',
       async (layerArg?: Layer | { type: 'layer'; layer: Layer }) => {
         // Step 1: Determine layer. A layer row's inline + and right-click
@@ -4762,7 +4876,7 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
         await createDiagramFile(chosenLayer, slug, '', undefined);
       },
     ),
-    vscode.commands.registerCommand(
+    registerCommand(
       'erdStudio.deleteDomain',
       async (element?: TreeElement) => {
         const target = await diagramToChange(element, 'Delete which diagram?');
@@ -4819,7 +4933,7 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
         await deleteFile();
       },
     ),
-    vscode.commands.registerCommand(
+    registerCommand(
       'erdStudio.renameDomain',
       async (element?: TreeElement) => {
         const target = await diagramToChange(element, 'Rename which diagram?');
@@ -4955,7 +5069,7 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     // The escape hatch for a setup where file events do not arrive, and the
     // "not shown" strip's Reload from disk: read every file again, redraw the
     // open canvases and refresh the sidebar. Read-only: it writes nothing.
-    vscode.commands.registerCommand('erdStudio.reloadFromDisk', async () => {
+    registerCommand('erdStudio.reloadFromDisk', async () => {
       draftGeneration.bump();
       treeProvider.invalidateSubjectArea();
       await editorProvider.reloadFromDisk();
@@ -4964,7 +5078,7 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
       decorationProvider.refresh();
       refreshContextKeys();
     }),
-    vscode.commands.registerCommand('erdStudio.refreshManifest', async () => {
+    registerCommand('erdStudio.refreshManifest', async () => {
       if (!hasDbt) {
         void vscode.window.showInformationMessage(NEEDS_DBT_PROJECT_MESSAGE);
         return;
@@ -4973,7 +5087,7 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     }),
     // Regenerate the root selectors.yml from current domain files.
     // Run a domain refresh in dbt with: dbt build --selector domain_{layer}_{domain}
-    vscode.commands.registerCommand('erdStudio.syncDomainTags', async () => {
+    registerCommand('erdStudio.syncDomainTags', async () => {
       // Hidden from the palette without dbt; a keybinding or another caller
       // gets the one sentence, with no "Regenerating dbt selectors.yml" progress first.
       if (!hasDbt) {
@@ -5014,7 +5128,7 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     }),
     // One-shot cleanup: strip legacy `domain:*` tags from every model YAML
     // left behind by the old SchemaTagService. Safe to run repeatedly.
-    vscode.commands.registerCommand('erdStudio.stripLegacyDomainTags', async () => {
+    registerCommand('erdStudio.stripLegacyDomainTags', async () => {
       // It rewrites dbt schema files under models/: never in a plain folder.
       if (!hasDbt) {
         void vscode.window.showInformationMessage(NEEDS_DBT_PROJECT_MESSAGE);
@@ -5081,7 +5195,7 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
       );
     }),
     // Migrate v4 domains to v5 central model store
-    vscode.commands.registerCommand('erdStudio.migrateToV5', async () => {
+    registerCommand('erdStudio.migrateToV5', async () => {
       if (!migrationService.needsMigration()) {
         void vscode.window.showInformationMessage('Nothing to migrate: every diagram already keeps its tables in the Table Library.');
         return;
@@ -5089,15 +5203,15 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
       // v4 → v5, then on to the new file naming (#182), so nobody goes through two prompts.
       if (await runMigrateToV5Command()) await migrateNaming();
     }),
-    vscode.commands.registerCommand('erdStudio.migrateToTableNaming', async () => { await migrateNaming(); }),
-    vscode.commands.registerCommand('erdStudio.convertProjectToDbml', async () => {
+    registerCommand('erdStudio.migrateToTableNaming', async () => { await migrateNaming(); }),
+    registerCommand('erdStudio.convertProjectToDbml', async () => {
       await convertToDbml();
       // Converted, refused or cancelled: each canvas's Convert information button follows.
       editorProvider.refreshConvertOffer();
     }),
 
     // F408: Set up semantic directory for new projects
-    vscode.commands.registerCommand(
+    registerCommand(
       'erdStudio.setupSemanticDirectory',
       async () => {
         const fullSemanticDir = path.join(workspaceRoot, semanticDir);
@@ -5160,7 +5274,7 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     // -------------------------------------------------------------------------
     // Layer Management Commands (unchanged)
     // -------------------------------------------------------------------------
-    vscode.commands.registerCommand(
+    registerCommand(
       'erdStudio.addLayer',
       // New Diagram's layer picker passes `{ thenNewDiagram: true }` and goes on
       // with the id this returns; anywhere else, the toast offers that step.
@@ -5242,7 +5356,7 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
         }
       },
     ),
-    vscode.commands.registerCommand(
+    registerCommand(
       'erdStudio.editLayer',
       async (element?: TreeElement) => {
         let layerId: string | undefined;
@@ -5328,7 +5442,7 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
         }
       },
     ),
-    vscode.commands.registerCommand(
+    registerCommand(
       'erdStudio.removeLayer',
       async (element?: TreeElement) => {
         let layerId: string | undefined;
@@ -5401,7 +5515,7 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
         }
       },
     ),
-    vscode.commands.registerCommand(
+    registerCommand(
       'erdStudio.initializeLayerConfig',
       async () => {
         // saveConfig refuses to overwrite an unreadable layers.json (H18) —
@@ -5445,7 +5559,7 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     // -------------------------------------------------------------------------
     // AI Coding Harness Installation
     // -------------------------------------------------------------------------
-    vscode.commands.registerCommand(
+    registerCommand(
       'erdStudio.installCodingHarness',
       async () => {
         const harnessService = new HarnessService(semanticDir);
@@ -5636,7 +5750,7 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
   };
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('erdStudio.setupAiHelper', async () => {
+    registerCommand('erdStudio.setupAiHelper', async () => {
       const outcome = await runSetup();
       await GettingStartedPanel.currentPanel?.postSetupResult(outcome);
       if (!outcome.ok) {
@@ -5695,7 +5809,7 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     vscode.workspace.onDidChangeConfiguration((e) => {
       if (e.affectsConfiguration(`erdStudio.${START_SUGGESTIONS_SETTING}`)) publishStartSuggestionsOff();
     }),
-    vscode.commands.registerCommand(TURN_OFF_START_SUGGESTIONS_COMMAND, async () => {
+    registerCommand(TURN_OFF_START_SUGGESTIONS_COMMAND, async () => {
       await saveStartSuggestionState({ ...startSuggestionState(), off: true });
       telemetry.feature('startSuggestionsOff');
       publishStartSuggestionsOff();
@@ -5703,7 +5817,7 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
         if (choice === UNDO_BUTTON) void vscode.commands.executeCommand(TURN_ON_START_SUGGESTIONS_COMMAND, START_SUGGESTIONS_UNDO_ARG);
       });
     }),
-    vscode.commands.registerCommand(TURN_ON_START_SUGGESTIONS_COMMAND, async (arg?: unknown) => {
+    registerCommand(TURN_ON_START_SUGGESTIONS_COMMAND, async (arg?: unknown) => {
       // A fresh start: the count and an earlier answer are forgotten too. From the
       // palette it is asked for here, so an upgrader's once-per-machine limit does not
       // hold this folder back. An Undo (#305) only takes the off back: it keeps an
@@ -6267,7 +6381,7 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
   ];
   for (const name of LEGACY_ALIASED_COMMANDS) {
     context.subscriptions.push(
-      vscode.commands.registerCommand(`dbtSemantic.${name}`, (...args: unknown[]) =>
+      registerCommand(`dbtSemantic.${name}`, (...args: unknown[]) =>
         vscode.commands.executeCommand(`erdStudio.${name}`, ...args),
       ),
     );

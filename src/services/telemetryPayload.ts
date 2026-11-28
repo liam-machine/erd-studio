@@ -887,6 +887,14 @@ export const FEATURES = [
   'canvasLoadSlowPhysical',
   'canvasLoadSlowDisplay',
   'canvasLoadSlowOther',
+  // #357: the look activation waited on stopped before it had been everywhere
+  // and the host's own search had not answered either, so the sidebar's notice
+  // was due (counted whether or not it was shown: a workspace that dismissed
+  // it still counts; off the onboarding trail); the user pressed Look for
+  // Longer on it; and a longer look found a dbt project the window did not know.
+  'dbtLookStopped',
+  'dbtLookLonger',
+  'dbtLookLongerFound',
 ] as const;
 export type TelemetryFeature = (typeof FEATURES)[number];
 

@@ -195,8 +195,9 @@ describe('#371 which step held a slow open', () => {
       'canvasLoadSlowManifest', 'canvasLoadSlowYml', 'canvasLoadSlowCatalog', 'canvasLoadSlowRead',
       'canvasLoadSlowPositions', 'canvasLoadSlowPhysical', 'canvasLoadSlowDisplay', 'canvasLoadSlowOther',
     ]);
-    // Appended at the tail, after #358's keys.
-    expect(FEATURES.slice(FEATURES.indexOf('importPartialDuplicateOnly') + 1)).toEqual([...CANVAS_LOAD_SLOW_FEATURES]);
+    // Appended after #358's keys, as one block (#357's follow; the exact tail is pinned in telemetryPayload.test.ts).
+    const at = FEATURES.indexOf('importPartialDuplicateOnly') + 1;
+    expect(FEATURES.slice(at, at + CANVAS_LOAD_SLOW_FEATURES.length)).toEqual([...CANVAS_LOAD_SLOW_FEATURES]);
   });
 
   it('the step-to-key map covers every SubjectAreaLoadStep, one key each, in the steps\' order', () => {

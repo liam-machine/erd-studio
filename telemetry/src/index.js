@@ -971,6 +971,12 @@ const FEATURES = [
   'canvasLoadSlowPhysical',
   'canvasLoadSlowDisplay',
   'canvasLoadSlowOther',
+  // Added after 2.0.12 (#357): activation's look through the open folders stopped early with
+  // no answer from the host's search, the user asked it to look for longer, and that found a
+  // dbt project the window did not know. Fixed keys, never a path, a count or a time.
+  'dbtLookStopped',
+  'dbtLookLonger',
+  'dbtLookLongerFound',
 ];
 
 /** The only keys `errors` may carry; anything else is dropped. */

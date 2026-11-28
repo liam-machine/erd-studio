@@ -16,6 +16,7 @@
  * project file.
  */
 import * as vscode from 'vscode';
+import { registerCommand } from '../commands/heldCommands';
 
 import { getErdStudioSetting } from '../services/configService';
 
@@ -65,8 +66,8 @@ export function registerRowDetails(trees: readonly RowDetailsTree[]): vscode.Dis
     apply();
   };
   return [
-    vscode.commands.registerCommand(ROW_DETAILS_COMMANDS.show, () => set('full')),
-    vscode.commands.registerCommand(ROW_DETAILS_COMMANDS.hide, () => set('compact')),
+    registerCommand(ROW_DETAILS_COMMANDS.show, () => set('full')),
+    registerCommand(ROW_DETAILS_COMMANDS.hide, () => set('compact')),
     vscode.workspace.onDidChangeConfiguration((e) => {
       if (e.affectsConfiguration(`erdStudio.${ROW_DETAILS_SETTING}`)) apply();
     }),

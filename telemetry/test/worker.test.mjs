@@ -734,15 +734,31 @@ describe('validation — acceptance and normalisation', () => {
       }),
     );
     assert.deepEqual(JSON.parse(params[17]), features);
-    // The newest keys close the list.
     assert.deepEqual(
-      WORKER_FEATURES.slice(WORKER_FEATURES.indexOf('importPartialDuplicateOnly') + 1),
+      WORKER_FEATURES.slice(WORKER_FEATURES.indexOf('importPartialDuplicateOnly') + 1, WORKER_FEATURES.indexOf('canvasLoadSlowOther') + 1),
       [
         'canvasLoadSlowManifest', 'canvasLoadSlowYml', 'canvasLoadSlowCatalog', 'canvasLoadSlowRead',
         'canvasLoadSlowPositions', 'canvasLoadSlowPhysical', 'canvasLoadSlowDisplay', 'canvasLoadSlowOther',
       ],
     );
     assert.equal(params[18], '{}');
+  });
+
+  it('keeps what a look that stopped early led to (#357), after #371\'s keys, and drops a count, a time, a look-alike or an error-side copy', async () => {
+    const features = { dbtLookStopped: 1, dbtLookLonger: 2, dbtLookLongerFound: 1 };
+    const params = await storedParams(
+      heartbeat({
+        features: { ...features, dbtLookStoppedFolders: 5000, dbtLookLongerMs: 300000, dbtLookFound: 1, dbtLook: 1 },
+        errors: { dbtLookStopped: 1, dbtLookLonger: 1 },
+      }),
+    );
+    assert.deepEqual(JSON.parse(params[17]), features);
+    assert.equal(params[18], '{}');
+    // The newest keys close the list.
+    assert.deepEqual(
+      WORKER_FEATURES.slice(WORKER_FEATURES.indexOf('canvasLoadSlowOther') + 1),
+      ['dbtLookStopped', 'dbtLookLonger', 'dbtLookLongerFound'],
+    );
   });
 
   it('keeps the automatic draft\'s time-limit drop key, after the import outcome keys', async () => {

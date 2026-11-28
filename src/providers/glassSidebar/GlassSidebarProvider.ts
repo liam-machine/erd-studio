@@ -39,6 +39,7 @@
  */
 import * as crypto from 'crypto';
 import * as vscode from 'vscode';
+import { registerCommand } from '../../commands/heldCommands';
 
 import { log } from '../../services/logger';
 import type { LibraryDragRelease } from '../../types/messages';
@@ -68,6 +69,7 @@ import {
   type GlassHostMessage,
   type GlassMenuEntry,
   type GlassSection,
+  type GlassSectionStatus,
   type GlassSectionKey,
   type GlassWebviewMessage,
   type SerialisedNode,
@@ -284,6 +286,8 @@ export function parseGlassInbound(raw: unknown): Inbound | undefined {
     }
     case 'welcomeLink':
       return isIndex(m.entry) && isIndex(m.link) ? { type: 'welcomeLink', section, entry: m.entry, link: m.link } : undefined;
+    case 'statusAction':
+      return isIndex(m.index) ? { type: 'statusAction', section, index: m.index } : undefined;
     default:
       return undefined;
   }
@@ -319,6 +323,8 @@ export class GlassSidebarProvider implements vscode.WebviewViewProvider, vscode.
   private queued: GlassHostMessage[] = [];
   /** Tasks under way per section (withSectionProgress): the section's header shows a bar while any run. */
   private readonly busy = new Map<GlassSectionKey, number>();
+  /** What each section says it is doing (setSectionStatus), with what its buttons run. */
+  private readonly status = new Map<GlassSectionKey, { status: GlassSectionStatus; onAction?: (index: number) => void }>();
   /** The sections the page last said it draws open (`sectionsShown`). */
   private pageOpen = new Set<GlassSectionKey>();
   private readonly shownEmitter = new vscode.EventEmitter<void>();
@@ -526,6 +532,21 @@ export class GlassSidebarProvider implements vscode.WebviewViewProvider, vscode.
    */
   enabledChanged(): void {
     this.shownEmitter.fire();
+  }
+
+  // ---------------------------------------------------------------- status
+
+  /**
+   * Say what ERD Studio is doing in a section, above its rows or its empty
+   * state (#357), or take the block away (`undefined`). `onAction` runs when
+   * one of the status's buttons is pressed, with the button's index: the page
+   * sends only that index, never a command. Glass only: the native view has
+   * no such block.
+   */
+  setSectionStatus(key: GlassSectionKey, status: GlassSectionStatus | undefined, onAction?: (index: number) => void): void {
+    if (status) this.status.set(key, { status, ...(onAction ? { onAction } : {}) });
+    else if (!this.status.delete(key)) return;
+    this.schedulePost();
   }
 
   // ---------------------------------------------------------------- progress
@@ -893,6 +914,7 @@ export class GlassSidebarProvider implements vscode.WebviewViewProvider, vscode.
         ...(section.multiSelect ? { multiSelect: true } : {}),
         ...(section.collapseAll ? { collapseAll: true } : {}),
         ...(this.busy.has(key) ? { busy: true } : {}),
+        ...(this.status.has(key) ? { status: this.status.get(key)!.status } : {}),
         welcome,
         nodes: decorate(section.nodes),
       };
@@ -1099,6 +1121,13 @@ export class GlassSidebarProvider implements vscode.WebviewViewProvider, vscode.
         if (command) await vscode.commands.executeCommand(command);
         return;
       }
+      case 'statusAction': {
+        // Only a button of the status the section shows now.
+        const shown = this.status.get(msg.section);
+        if (!shown || msg.index >= (shown.status.actions?.length ?? 0)) return;
+        shown.onAction?.(msg.index);
+        return;
+      }
       case 'welcomeLink': {
         // Only an empty state the section shows now, and only a link in it.
         if (section.nodes.length > 0) return;
@@ -1209,7 +1238,7 @@ export function registerGlassSidebar(context: vscode.ExtensionContext): GlassSid
     // The page itself is light (one document, no framework); a real reload still restores
     // its scroll and open rows from its saved state (html.ts).
     vscode.window.registerWebviewViewProvider(GLASS_SIDEBAR_VIEW_ID, provider, { webviewOptions: { retainContextWhenHidden: true } }),
-    vscode.commands.registerCommand(TOGGLE_GLASS_SIDEBAR_COMMAND, async () => {
+    registerCommand(TOGGLE_GLASS_SIDEBAR_COMMAND, async () => {
       const on = !glassSidebarEnabled(context.globalState);
       await context.globalState.update(GLASS_SIDEBAR_ENABLED_KEY, on);
       await apply(on);
@@ -1219,7 +1248,7 @@ export function registerGlassSidebar(context: vscode.ExtensionContext): GlassSid
         : 'ERD Studio: the glass sidebar is off; the standard tree views are back.');
     }),
     // Cmd/Ctrl+F with the glass view focused (its keybinding), when the page itself did not get the key.
-    vscode.commands.registerCommand(FOCUS_GLASS_SEARCH_COMMAND, () => provider.focusSearch()),
+    registerCommand(FOCUS_GLASS_SEARCH_COMMAND, () => provider.focusSearch()),
   );
   return provider;
 }

@@ -2123,6 +2123,34 @@ npx wrangler d1 execute erd-studio-telemetry --remote --command \
   "SELECT h.os, CASE WHEN json_extract(h.features,'$.canvasLoadOver20s') IS NOT NULL THEN 'over20s' ELSE '5to20s' END AS range, j.key, COUNT(DISTINCT h.install_id) AS installs, SUM(json_extract(h.features,'$.canvasLoadCold') IS NOT NULL) AS cold_days FROM heartbeats h, json_each(h.features) j WHERE h.day >= date('now','-28 days') AND h.day < date('now') AND COALESCE(h.dev, 0) = 0 AND j.key LIKE 'canvasLoadSlow%' GROUP BY 1, 2, 3 ORDER BY 1, 2, installs DESC"
 ```
 
+**A look that stopped early, and looking for longer** (added after 2.0.12,
+#357). Activation waits on one look per open folder for the project to open
+(`folderLook.ts`): at most 60 s of walking, 5,000 folders for the dbt search,
+then 10 s of asking the folders it did not list by name. `activationOver10s`
+and `activationSlowWalk` say the wait was long; nothing said whether the look
+gave up with folders left, or what the user did then. The glass sidebar now
+says what the look is doing while it runs and, when it stopped early with no
+answer from the host's own search either (so a project may have been missed),
+shows a notice with **Look for Longer** (`dbtLookNotice.ts`).
+
+- `dbtLookStopped` — the notice's condition held at activation: the look stopped at a limit before every folder it goes to was listed, and `workspace.findFiles` had not answered. Counted with `featureQuiet` (off the onboarding trail), once per window, whether or not the notice was drawn: a workspace that dismissed it before still counts, and so does a window with the native sidebar, where there is no notice.
+- `dbtLookLonger` — the user pressed **Look for Longer** (each press: a second press after a second stop counts again).
+- `dbtLookLongerFound` — a longer look found a dbt project the window did not know.
+
+How to read them: `dbtLookStopped` against the installs of a version says how
+often the limits are met (compare with `activationSlowWalk`, which counts a
+slow walk whether or not it stopped). `dbtLookLonger` over `dbtLookStopped`
+is how many cared to look further, a lower bound (a dismissed workspace still
+counts `dbtLookStopped`). `dbtLookLongerFound` over `dbtLookLonger` is how often
+the limits cost someone a project: if it is most of them, raise the limits.
+Never a path, a folder count or a time.
+
+```bash
+# How often the look stops early, and what users do then, per OS (installs, last 28 days)
+npx wrangler d1 execute erd-studio-telemetry --remote --command \
+  "SELECT h.os, COUNT(DISTINCT h.install_id) AS installs, COUNT(DISTINCT CASE WHEN json_extract(h.features,'$.dbtLookStopped') IS NOT NULL THEN h.install_id END) AS stopped, COUNT(DISTINCT CASE WHEN json_extract(h.features,'$.dbtLookLonger') IS NOT NULL THEN h.install_id END) AS looked_longer, COUNT(DISTINCT CASE WHEN json_extract(h.features,'$.dbtLookLongerFound') IS NOT NULL THEN h.install_id END) AS found FROM heartbeats h WHERE COALESCE(h.dev, 0) = 0 AND h.day >= date('now','-28 day') AND json_extract(h.features,'$.versionMixed') IS NULL GROUP BY h.os"
+```
+
 ## The local archive
 
 Because D1 keeps raw rows for only 90 days, the operator's machine keeps
