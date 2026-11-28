@@ -189,6 +189,39 @@ describe('#358 what kind of table was defined twice (red on origin/develop)', ()
       'a.sql': 'CREATE TABLE orders (id int PRIMARY KEY, total int);\n',
       'b.sql': 'CREATE TABLE orders (id int, total int, PRIMARY KEY (id));\n',
     })).toEqual([{ same: true, defaultSchema: true }]);
+    // A key column is NOT NULL whether or not it says so.
+    expect(duplicateFlags('postgres', {
+      'a.sql': 'CREATE TABLE t (id int PRIMARY KEY, x int);\n',
+      'b.sql': 'CREATE TABLE t (id int NOT NULL PRIMARY KEY, x int);\n',
+    })).toEqual([{ same: true, defaultSchema: true }]);
+    expect(duplicateFlags('postgres', {
+      'a.sql': 'CREATE TABLE ol (a int, b int, PRIMARY KEY (a, b));\n',
+      'b.sql': 'CREATE TABLE ol (a int NOT NULL, b int NOT NULL, PRIMARY KEY (b, a));\n',
+    })).toEqual([{ same: true, defaultSchema: true }]);
+  });
+
+  it('an identical copy of a script that ALTERs its table is still Same: each definition is compared as its own CREATE left it', async () => {
+    const script = 'CREATE TABLE t (id int, x int);\nALTER TABLE t ADD COLUMN y int;\n';
+    await importFolder('postgres', { 'a.sql': script, 'backup/a.sql': script });
+    expect(dupKeys()).toEqual(['importDuplicateSame', 'importPartialDuplicateOnly']);
+
+    const copy = (dialect: SqlDialect, text: string): unknown[] => duplicateFlags(dialect, { 'a.sql': text, 'backup/a.sql': text });
+    const create = 'CREATE TABLE t (id int, x int);\n';
+    for (const alter of [
+      'ALTER TABLE t ADD COLUMN y int;',
+      'ALTER TABLE t DROP COLUMN x;',
+      'ALTER TABLE t ALTER COLUMN x TYPE bigint;',
+      'ALTER TABLE t ALTER COLUMN x SET NOT NULL;',
+    ]) expect(copy('postgres', `${create}${alter}\n`), alter).toEqual([{ same: true, defaultSchema: true }]);
+    expect(copy('mysql', `${create}ALTER TABLE t ADD y int;\n`)).toEqual([{ same: true, defaultSchema: true }]);
+    expect(copy('sqlserver', 'CREATE TABLE dbo.t (id int, x int);\nALTER TABLE dbo.t ADD y int;\n')).toEqual([{ same: true, defaultSchema: true }]);
+    // pg_dump's deferred key on both copies still reads Same.
+    expect(copy('postgres', `${create}ALTER TABLE ONLY public.t ADD CONSTRAINT t_pkey PRIMARY KEY (id);\n`)).toEqual([{ same: true, defaultSchema: true }]);
+    // A CREATE that already has the column an ALTER added to the other is written differently: Differs.
+    expect(duplicateFlags('postgres', {
+      'a.sql': `${create}ALTER TABLE t ADD COLUMN y int;\n`,
+      'b.sql': 'CREATE TABLE t (id int, x int, y int);\n',
+    })).toEqual([{ same: false, defaultSchema: true }]);
   });
 
   it('a primary key, a NOT NULL, a type or a column name alone makes it differ', () => {

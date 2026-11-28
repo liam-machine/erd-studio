@@ -73,7 +73,8 @@ export interface SqlDdlProblem {
 /**
  * A table defined twice, as two fixed flags (telemetry only): `same` when
  * the second definition has the kept one's columns (names, type text, primary
- * key and NOT NULL, in any order; notes and defaults are not compared), and
+ * key and NOT NULL, in any order; notes and defaults are not compared), each as
+ * its own CREATE TABLE left it (a later ALTER TABLE does not count), and
  * `defaultSchema` when both resolve to the dialect's default schema (no schema,
  * `public`, `dbo`…), so a second database's table of the same name can land here.
  */
@@ -422,24 +423,45 @@ export function sameSchema(a: string | null, b: string | null, dialect: SqlDiale
 /** A type as written, for comparing two definitions: case and whitespace do not matter (`VARCHAR (50)` is `varchar(50)`). */
 const typeText = (type: string): string => type.toLowerCase().replace(/\s+/g, '');
 
+/** What `sameColumns` compares of a table: its columns' names, type text, NOT NULL and the primary key. */
+export interface TableColumns {
+  fields: ReadonlyArray<Pick<ModelField, 'name' | 'type' | 'notNull' | 'pk'>>;
+  primaryKey?: readonly string[];
+}
+
+/**
+ * A copy of what `sameColumns` compares, as `table` is now: taken when a
+ * CREATE TABLE has been read, so a later ALTER TABLE on the table (which
+ * edits it in place) does not change what a second definition is compared to.
+ */
+export function columnsOf(table: ModelTable): TableColumns {
+  return {
+    fields: table.fields.map(({ name, type, notNull, pk }) => ({ name, type, notNull, pk })),
+    ...(table.primaryKey ? { primaryKey: [...table.primaryKey] } : {}),
+  };
+}
+
 /**
  * Whether two definitions of a table have the same columns (a table defined
  * twice, telemetry only): as many, each matched by name in any case and in
- * any order, with the same type text and NOT NULL, and the same primary key
- * (inline or as a table constraint, its columns in any order). Notes, defaults
- * and the rest are not compared, so `int` and `integer` differ.
+ * any order, with the same type text and NOT NULL (a primary key column is
+ * NOT NULL whether or not it says so), and the same primary key (inline or as
+ * a table constraint, its columns in any order). Notes, defaults and the rest
+ * are not compared, so `int` and `integer` differ.
  */
-export function sameColumns(a: ModelTable, b: ModelTable): boolean {
+export function sameColumns(a: TableColumns, b: TableColumns): boolean {
   if (a.fields.length !== b.fields.length) return false;
+  const keyA = a.primaryKey ?? a.fields.filter((f) => f.pk).map((f) => f.name);
+  const keyB = b.primaryKey ?? b.fields.filter((f) => f.pk).map((f) => f.name);
+  const notNull = (f: TableColumns['fields'][number], key: readonly string[]): boolean =>
+    f.notNull || key.some((k) => sameIdent(k, f.name));
   const columnsMatch = a.fields.every((fa) => {
     const matches = b.fields.filter((fb) => sameIdent(fa.name, fb.name));
     if (matches.length !== 1) return false;
     const fb = matches[0];
-    return typeText(fa.type) === typeText(fb.type) && fa.notNull === fb.notNull;
+    return typeText(fa.type) === typeText(fb.type) && notNull(fa, keyA) === notNull(fb, keyB);
   });
   if (!columnsMatch) return false;
-  const keyA = primaryKeyOf(a);
-  const keyB = primaryKeyOf(b);
   return keyA.length === keyB.length && keyA.every((ca) => keyB.some((cb) => sameIdent(ca, cb)));
 }
 
