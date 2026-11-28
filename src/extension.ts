@@ -2938,6 +2938,11 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     takeOwnRename: (from, to) => ownFileOperations.takeOwnRename(from, to),
     applyWrites: (writes, renames = []) => applyHeldLifecycleWrites(writes, fullSemanticDirPath, renames),
     afterUpdated: moveDbmlDeps.afterTablesMoved,
+    saveFile: async (filePath) => {
+      if (!(await saveDocumentByUri(vscode.Uri.file(filePath)))) return false;
+      ownWrites.recordWrite(filePath);
+      return true;
+    },
   };
   context.subscriptions.push(vscode.workspace.onDidRenameFiles((event) => onDbmlFilesRenamed(explorerMoveDeps, event.files).catch((err) => {
     log.error('[ERD Studio] Following an Explorer move failed:', err);
@@ -3924,6 +3929,7 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
             ?? path.basename(filePath, path.extname(filePath)),
           addTables: (filePath, tables, files) => addToDiagramDeps.addTables(filePath, tables, files),
           dropSeen: (filePath) => editorProvider.noteDropSeen('missedDrop', filePath),
+          workspaceRoot,
         }),
         vscode.commands.registerCommand(GO_TO_TABLE_COMMAND, (query?: unknown) =>
           goToTableCommand(goToTableDeps, typeof query === 'string' ? query : undefined)),
@@ -4874,7 +4880,7 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
           }
           for (const p of created) subjectAreasCreatedHere.delete(p);
           // A file the reconcile could not put back is already named in its
-          // modal ("Restore these from source control"): nothing to retry.
+          // modal ("left part-changed … Restore them from source control"): nothing to retry.
           if (applied.unrestored.length > 0) { return false; }
           // Nothing was changed: the diagram comes back where it was.
           if (oldTabs.length > 0) { void vscode.commands.executeCommand('vscode.openWith', oldFileUri, SUBJECT_AREA_EDITOR_VIEW_TYPE); }

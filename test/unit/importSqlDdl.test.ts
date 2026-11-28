@@ -24,6 +24,7 @@ import {
   dialectPickRows,
   gatherSqlFiles,
   importSqlDdl,
+  quickImportSqlDdl,
   type ImportSqlDdlDeps,
   type ImportSqlDdlUi,
   type SqlDialectItem,
@@ -42,6 +43,8 @@ import { SHOW_LOGS_BUTTON } from '../../src/services/showLogs';
 import packageJson from '../../package.json';
 import { decodeText } from '../../src/services/readFileStart';
 import { log } from '../../src/services/logger';
+import { SHOW_FILE_BUTTON, TRY_AGAIN_BUTTON } from '../../src/services/commandErrors';
+import { GUIDE_SOURCE_OUTCOME_FEATURES } from '../../src/services/importOutcomeTelemetry';
 
 const FIXTURES = path.join(__dirname, '../fixtures/sql-ddl');
 
@@ -343,6 +346,108 @@ describe('Import SQL DDL…', () => {
     await importSqlDdl(deps(sql, importUi()));
     expect(sql.infos).toEqual(['Import SQL DDL: empty has no .sql files, so there is nothing to import.']);
     expect(sql.dialectPicks).toEqual([]);
+  });
+});
+
+describe('Import SQL DDL… — a script it cannot read (#355)', () => {
+  const SHOP = path.join(FIXTURES, 'mysql', 'shop.sql');
+  /** `file` does not read until `readable()` says so; Show File is recorded. */
+  function unreadableUi(file: string, sources: SqlSources | undefined, button?: string) {
+    let canRead = false;
+    const sql = sqlUi(sources, 'mysql', button);
+    const revealed: string[] = [];
+    let picks = 0;
+    const pick = sql.pickSources;
+    sql.pickSources = async (folder) => { picks++; return pick(folder); };
+    sql.readFile = async (p) => {
+      if (p === file && !canRead) throw new Error(`EACCES: permission denied, open '${p}'`);
+      return fs.readFileSync(p === file ? SHOP : p, 'utf-8');
+    };
+    sql.revealFile = async (p) => { revealed.push(p); };
+    return { sql, revealed, picks: () => picks, readable: () => { canRead = true; } };
+  }
+
+  it('keeps its sentence and adds Show File, which shows that file, and Try Again', async () => {
+    const file = path.join(tmp, 'shop.sql');
+    const { sql, revealed } = unreadableUi(file, { files: [file] }, SHOW_FILE_BUTTON);
+    expect(await importSqlDdl(deps(sql, importUi()))).toBeUndefined();
+    expect(sql.errors).toEqual([{
+      message: "Import SQL DDL couldn't read shop.sql. Check that the file still exists and that you can open it, then try again.",
+      items: [SHOW_FILE_BUTTON, TRY_AGAIN_BUTTON],
+    }]);
+    await vi.waitFor(() => expect(revealed).toEqual([file]));
+  });
+
+  it('Try Again reads the same files again, never the file dialog, and the import goes on', async () => {
+    const file = path.join(tmp, 'shop.sql');
+    const ui = unreadableUi(file, { files: [file] });
+    const importer = importUi();
+    ui.sql.showErrorMessage = async (message, ...items) => {
+      ui.sql.errors.push({ message, items });
+      if (!items.includes(TRY_AGAIN_BUTTON)) return undefined;
+      ui.readable();
+      return TRY_AGAIN_BUTTON;
+    };
+    await importSqlDdl(deps(ui.sql, importer));
+    await vi.waitFor(() => expect(importer.confirms).toHaveLength(1));
+    expect(ui.picks()).toBe(1);
+    expect(ui.sql.dialectPicks).toHaveLength(1);
+    expect(ui.sql.errors).toHaveLength(1);
+  });
+
+  it('Try Again keeps the import guide card it started from (its outcome key is still counted)', async () => {
+    const quiet = vi.spyOn(telemetry, 'featureQuiet');
+    const file = path.join(tmp, 'shop.sql');
+    const ui = unreadableUi(file, { files: [file] });
+    let tries = 0;
+    ui.sql.showErrorMessage = async (message, ...items) => {
+      ui.sql.errors.push({ message, items });
+      return items.includes(TRY_AGAIN_BUTTON) && tries++ === 0 ? TRY_AGAIN_BUTTON : undefined;
+    };
+    await importSqlDdl(deps(ui.sql, importUi()), undefined, { guideSource: 'fabric' });
+    await vi.waitFor(() => expect(ui.sql.errors).toHaveLength(2));
+    const fabricFailed = quiet.mock.calls.filter((c) => c[0] === GUIDE_SOURCE_OUTCOME_FEATURES.fabric.failed);
+    expect(fabricFailed).toHaveLength(2);
+    expect(ui.picks()).toBe(1);
+  });
+
+  it('a UI with no Show File (an older fake) still offers Try Again', async () => {
+    const file = path.join(tmp, 'shop.sql');
+    const { sql } = unreadableUi(file, { files: [file] });
+    delete sql.revealFile;
+    await importSqlDdl(deps(sql, importUi()));
+    expect(sql.errors[0].items).toEqual([TRY_AGAIN_BUTTON]);
+  });
+
+  it('the quick path: Try Again runs it again (it finds the scripts itself, so no file dialog)', async () => {
+    const file = path.join(tmp, 'shop.sql');
+    fs.copyFileSync(SHOP, file);
+    const ui = unreadableUi(file, undefined);
+    ui.sql.readFileStart = async (p, chars) => fs.readFileSync(p, 'utf-8').slice(0, chars);
+    const importer = importUi();
+    ui.sql.showErrorMessage = async (message, ...items) => {
+      ui.sql.errors.push({ message, items });
+      if (!items.includes(TRY_AGAIN_BUTTON)) return undefined;
+      ui.readable();
+      return TRY_AGAIN_BUTTON;
+    };
+    await quickImportSqlDdl(deps(ui.sql, importer));
+    expect(ui.sql.errors[0].items).toEqual([SHOW_FILE_BUTTON, TRY_AGAIN_BUTTON]);
+    await vi.waitFor(() => expect(importer.confirms).toHaveLength(1));
+    expect(ui.picks()).toBe(0);
+  });
+
+  it('the automatic draft (quiet) shows nothing and offers nothing', async () => {
+    const file = path.join(tmp, 'shop.sql');
+    fs.copyFileSync(SHOP, file);
+    const ui = unreadableUi(file, undefined);
+    ui.sql.readFileStart = async (p, chars) => fs.readFileSync(p, 'utf-8').slice(0, chars);
+    const drops: string[] = [];
+    const draft = { preview: {} as never, trigger: 'sidebar' as const, quiet: true, quietDrop: (r: string) => { drops.push(r); } };
+    expect(await quickImportSqlDdl(deps(ui.sql, importUi(), { draft } as Partial<ImportSqlDdlDeps>))).toBeUndefined();
+    expect(ui.sql.errors).toEqual([]);
+    expect(ui.revealed).toEqual([]);
+    expect(drops).toEqual(['unreadable']);
   });
 });
 

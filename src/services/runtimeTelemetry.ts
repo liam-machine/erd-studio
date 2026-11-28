@@ -447,6 +447,10 @@ export const LOGGED_ERROR_AREAS: Readonly<Record<string, LoggedErrorArea>> = {
   RefreshGate: 'Canvas',
   ConvertToDbmlPanel: 'Other',
   DomainTreeProvider: 'Sidebar',
+  // A Table Library drop the canvas missed (#355): the Diagrams view drop's twin.
+  MissedCanvasDrop: 'Sidebar',
+  // A half-applied edit that could not be put back (#355): the edit pipeline.
+  ApplyFileWrites: 'Canvas',
   FileWatcherService: 'Other',
   GettingStarted: 'Other',
   LayerService: 'Other',

@@ -166,6 +166,35 @@ export function projectPathInvalidMessage(input: ProjectPathInvalidInput): Proje
   };
 }
 
+/**
+ * VS Code applied part of an edit and then refused to put that part back
+ * (#355): which files are left part-changed and how to restore them. Said
+ * neutrally, because the usual cause is the environment (a file another
+ * program has open, a folder the user can't write to), as
+ * `editNotAccepted` says it. `certain` is false when the files could not be
+ * told apart and every planned file is listed ("may be left").
+ */
+export function partChangedMessage(shown: readonly string[], certain: boolean): string {
+  return "ERD Studio couldn't finish this change, and VS Code didn't accept putting back the part already made. " +
+    "This is usually a file another program has open or a folder you can't write to. " +
+    `These files ${certain ? 'are' : 'may be'} left part-changed: ${shown.join(', ')}. ` +
+    'Restore them from source control (for example, Discard Changes in the Source Control view), then try again.';
+}
+
+/** The button that reloads every open diagram from disk (`erdStudio.reloadFromDisk`, as the palette names it). */
+export const RELOAD_DIAGRAMS_BUTTON = 'Reload Diagrams from Disk';
+
+/**
+ * An update was made (the files hold it, open in VS Code) but saving them
+ * failed (#355): say the update landed, so the user saves rather than redoes
+ * it. `shown` are the files as the user sees them (project-relative).
+ */
+export function unsavedAfterUpdateMessage(shown: readonly string[], what: string): string {
+  const list = shown.length > 1 ? `${shown.slice(0, -1).join(', ')} and ${shown[shown.length - 1]}` : shown[0] ?? 'the files';
+  return `ERD Studio updated ${list} for ${what} but couldn't save ${shown.length === 1 ? 'it' : 'them'}. ` +
+    `${shown.length === 1 ? 'It has' : 'They have'} unsaved changes in VS Code.`;
+}
+
 /** A failure's buttons, by label, and what each one does. */
 export type ErrorActions = Readonly<Record<string, () => unknown>>;
 
