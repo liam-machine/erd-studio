@@ -161,9 +161,10 @@ export interface SelectorsServiceHooks {
    */
   dbtModelsOf?: (unified: UnifiedSubjectArea) => ReadonlyMap<string, string | null>;
   /**
-   * Run before a scheduled check (`scheduleCheck`), only when selectors.yml
-   * exists in a dbt project: load whatever `dbtModelsOf` reads, so the check
-   * compares with the dbt data, not with none.
+   * Run before a scheduled check (`scheduleCheck`) and before a write
+   * (`regenerateWhenReady`, `scheduleRegenerate`), only in a dbt project
+   * with a selectors.yml to compare or to write: load whatever `dbtModelsOf`
+   * reads, so the writer and the check see the same dbt data, never none.
    */
   prepareCheck?: () => Promise<void>;
   /** The result of a scheduled check, and `'absent'` from a scheduled write that found no file. */
@@ -222,6 +223,8 @@ function definitionMeaning(definition: unknown): string {
 
 export class SelectorsService {
   private debounceTimer: ReturnType<typeof setTimeout> | undefined;
+  /** A scheduled write waiting for `hooks.prepareCheck`: a check due meanwhile is dropped, as while its timer runs. */
+  private writing = false;
   /** The scheduled check's own timer: a check never cancels or delays a scheduled write. */
   private checkTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -246,7 +249,8 @@ export class SelectorsService {
    * The post-edit path: debounced, so a burst of mutations (e.g. bulk add) is
    * one write, and update-only (`createIfMissing: false`): an existing
    * selectors.yml is rebuilt from every diagram, a missing one is not
-   * created. Safe to call from any mutation handler.
+   * created. Safe to call from any mutation handler. When the file exists,
+   * `hooks.prepareCheck` runs first, as before a check.
    */
   scheduleRegenerate(delayMs = 250): void {
     if (this.debounceTimer) {
@@ -254,15 +258,56 @@ export class SelectorsService {
     }
     this.debounceTimer = setTimeout(() => {
       this.debounceTimer = undefined;
-      try {
-        const result = this.regenerate({ createIfMissing: false });
-        // The file is gone: whatever a check last said about it no longer holds.
-        if (result.status === 'absent') this.hooks?.onChecked?.(result);
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        log.error(`[SelectorsService] Regenerate failed: ${msg}`);
+      if (!this.needsPrepare({ createIfMissing: false })) {
+        this.runScheduledRegenerate();
+        return;
       }
+      this.writing = true;
+      void this.hooks!.prepareCheck!()
+        .catch((err) => log.warn(`[SelectorsService] Loading dbt data before the write failed: ${err instanceof Error ? err.message : String(err)}`))
+        .finally(() => {
+          this.writing = false;
+          // A newer write was scheduled meanwhile: it writes instead.
+          if (!this.debounceTimer) this.runScheduledRegenerate();
+        });
     }, delayMs);
+  }
+
+  /**
+   * The scheduled write itself. A write that throws (a locked file, no
+   * permission) leaves the file as it was and reports a fresh check, since
+   * a check due meanwhile was dropped for it.
+   */
+  private runScheduledRegenerate(): void {
+    try {
+      const result = this.regenerate({ createIfMissing: false });
+      // The file is gone: whatever a check last said about it no longer holds.
+      if (result.status === 'absent') this.hooks?.onChecked?.(result);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      log.error(`[SelectorsService] Regenerate failed: ${msg}`);
+      try {
+        this.hooks?.onChecked?.(this.check());
+      } catch (checkErr) {
+        log.error(`[SelectorsService] Check failed: ${checkErr instanceof Error ? checkErr.message : String(checkErr)}`);
+      }
+    }
+  }
+
+  /** Whether a write with `options` has a file to compare or write, so `hooks.prepareCheck` must run first. */
+  private needsPrepare(options: RegenerateOptions): boolean {
+    return !!this.hooks?.prepareCheck && hasDbtProjectFile(this.workspaceRoot)
+      && (options.createIfMissing !== false || this.fileExists());
+  }
+
+  /**
+   * `regenerate(options)` once `hooks.prepareCheck` has loaded the dbt data
+   * `dbtModelsOf` reads, so what is written is what the next check expects
+   * (the command's path: a fresh window has loaded none).
+   */
+  async regenerateWhenReady(options: RegenerateOptions = {}): Promise<RegenerateResult> {
+    if (this.needsPrepare(options)) await this.hooks!.prepareCheck!();
+    return this.regenerate(options);
   }
 
   /**
@@ -278,7 +323,7 @@ export class SelectorsService {
     }
     this.checkTimer = setTimeout(() => {
       this.checkTimer = undefined;
-      if (this.debounceTimer) return;
+      if (this.debounceTimer || this.writing) return;
       void this.runScheduledCheck();
     }, delayMs);
   }
@@ -289,7 +334,7 @@ export class SelectorsService {
         await this.hooks.prepareCheck();
       }
       // A write scheduled meanwhile reports its own outcome.
-      if (this.debounceTimer) return;
+      if (this.debounceTimer || this.writing) return;
       this.hooks?.onChecked?.(this.check());
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -721,7 +766,13 @@ export class SelectorsService {
   /** Write via temp file + rename so a crash never leaves a partial selectors.yml. */
   private atomicWrite(filePath: string, content: string): void {
     const tmpPath = `${filePath}.tmp-${process.pid}`;
-    fs.writeFileSync(tmpPath, content, 'utf-8');
-    fs.renameSync(tmpPath, filePath);
+    try {
+      fs.writeFileSync(tmpPath, content, 'utf-8');
+      fs.renameSync(tmpPath, filePath);
+    } catch (err) {
+      // Never leave the temporary file in the user's project.
+      try { fs.rmSync(tmpPath, { force: true }); } catch { /* nothing more to do */ }
+      throw err;
+    }
   }
 }

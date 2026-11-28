@@ -1168,6 +1168,70 @@ describe('SelectorsService: who may write, and the read-only check', () => {
     expect(readSelectors(tmpDir).selectors).toHaveLength(2);
     expect(onChecked).toHaveBeenLastCalledWith({ status: 'current', filePath: file() });
   });
+
+  /** dbtModelsOf over dbt data nothing has loaded yet, as in a fresh window: fct_orders is dbt's stg_orders once loaded. */
+  function lazyDbtHooks(): Pick<SelectorsServiceHooks, 'prepareCheck' | 'dbtModelsOf'> & { loaded: () => boolean } {
+    let loaded = false;
+    return {
+      loaded: () => loaded,
+      prepareCheck: async () => { loaded = true; },
+      dbtModelsOf: () => new Map(loaded ? [['fct_orders', 'stg_orders']] : []),
+    };
+  }
+  const silverMembers = (): string[] | undefined =>
+    readSelectors(tmpDir).selectors.find((s) => s.name === 'domain_silver_customer_360')?.definition.union.map((u) => u.value);
+
+  it('the command\'s write loads the dbt data the check reads first, so the check finds that write current', async () => {
+    // Without it (plain regenerate() in a fresh window) the write and the next check disagree.
+    const unready = lazyDbtHooks();
+    new SelectorsService(fakeSubjectAreaService(domains), tmpDir, '.erd-studio', unready).regenerate();
+    await unready.prepareCheck!();
+    expect(new SelectorsService(fakeSubjectAreaService(domains), tmpDir, '.erd-studio', unready).check().status).toBe('stale');
+
+    fs.rmSync(file());
+    const hooks = lazyDbtHooks();
+    const svc = new SelectorsService(fakeSubjectAreaService(domains), tmpDir, '.erd-studio', hooks);
+    const result = await svc.regenerateWhenReady();
+    expect(result).toMatchObject({ status: 'written', created: true });
+    expect(silverMembers()).toEqual(['dim_customer', 'stg_orders']);
+    expect(svc.check().status).toBe('current');
+  });
+
+  it('a scheduled write to an existing file loads the dbt data first too', async () => {
+    vi.useFakeTimers();
+    writeSelectors(tmpDir, 'selectors: []\n');
+    const hooks = lazyDbtHooks();
+    const svc = new SelectorsService(fakeSubjectAreaService(domains), tmpDir, '.erd-studio', hooks);
+    svc.scheduleRegenerate();
+    await vi.runAllTimersAsync();
+    expect(silverMembers()).toEqual(['dim_customer', 'stg_orders']);
+    expect(svc.check().status).toBe('current');
+
+    // No file: nothing to load, and nothing written.
+    fs.rmSync(file());
+    const absent = lazyDbtHooks();
+    new SelectorsService(fakeSubjectAreaService(domains), tmpDir, '.erd-studio', absent).scheduleRegenerate();
+    await vi.runAllTimersAsync();
+    expect(absent.loaded()).toBe(false);
+    expect(fs.existsSync(file())).toBe(false);
+  });
+
+  it('a scheduled write that throws reports a fresh check (the check it stood in for) and leaves no temporary file', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    writeSelectors(tmpDir, 'selectors: []\n');
+    const onChecked = vi.fn();
+    const svc = new SelectorsService(fakeSubjectAreaService(domains), tmpDir, '.erd-studio', { onChecked });
+    vi.mocked(fs.renameSync).mockImplementationOnce(() => { throw Object.assign(new Error('EBUSY: resource busy or locked'), { code: 'EBUSY' }); });
+
+    svc.scheduleCheck(5);
+    svc.scheduleRegenerate(20);
+    await vi.runAllTimersAsync();
+    expect(fs.readFileSync(file(), 'utf-8')).toBe('selectors: []\n');
+    expect(onChecked).toHaveBeenCalledTimes(1);
+    expect(onChecked.mock.calls[0][0]).toMatchObject({ status: 'stale' });
+    expect(fs.readdirSync(tmpDir).filter((name) => name.includes('.tmp-'))).toEqual([]);
+  });
 });
 
 // The real subject areas of the dbt fixture, on both storages: selectors come

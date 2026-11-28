@@ -2289,6 +2289,30 @@ describe('selectors.yml at activation: checked, never written', () => {
     expect(loadManifest).toHaveBeenCalledWith(dbt);
   });
 
+  it('Regenerate dbt selectors.yml loads the dbt data the check reads before it writes, so the check agrees with it', async () => {
+    const { SelectorsService } = await import('../../src/services/selectorsService');
+    const { SubjectAreaService } = await import('../../src/services/domainService');
+    const { YmlParserService } = await import('../../src/services/ymlParserService');
+    vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);
+    await activate(context);
+    await vi.advanceTimersByTimeAsync(1000);
+
+    vi.spyOn(SubjectAreaService.prototype, 'hasSharedNameTable').mockReturnValue(true);
+    const order: string[] = [];
+    const load = YmlParserService.prototype.loadYmlData;
+    vi.spyOn(YmlParserService.prototype, 'loadYmlData').mockImplementation(function (this: InstanceType<typeof YmlParserService>, ...args: Parameters<typeof load>) {
+      order.push('load');
+      return load.apply(this, args);
+    });
+    const regenerate = SelectorsService.prototype.regenerate;
+    vi.spyOn(SelectorsService.prototype, 'regenerate').mockImplementation(function (this: InstanceType<typeof SelectorsService>, ...args: Parameters<typeof regenerate>) {
+      order.push('write');
+      return regenerate.apply(this, args);
+    });
+    await vscode.commands.executeCommand('erdStudio.syncDomainTags');
+    expect(order).toEqual(['load', 'write']);
+  });
+
   it('Regenerate dbt selectors.yml creates the file and says edits now keep it up to date; not again once it exists', async () => {
     fs.rmSync(selectorsPath());
     const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);

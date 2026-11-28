@@ -2099,7 +2099,8 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
       // summary loads it when first needed), and dbtModelsOf above reads only
       // what is loaded. A diagram with a table whose name two schema folders
       // share is the only one that reads it: load it for such a diagram, so a
-      // check never reads that table as missing. Cached after the first load.
+      // check never reads that table as missing and a write never leaves it
+      // out (the command and the post-edit write run this too). Cached after the first load.
       prepareCheck: async () => {
         const needsDbtData = subjectAreaService.listSubjectAreas(workspaceRoot, semanticDir).some((summary) => {
           try {
@@ -4945,7 +4946,8 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
         async () => {
           try {
             // The command is the one write that creates selectors.yml: how a project opts in.
-            const result = selectorsService.regenerate();
+            // It loads the dbt data the next check reads first, so that check finds its own write current.
+            const result = await selectorsService.regenerateWhenReady();
             if (result.status === 'written') {
               const relPath = path.relative(workspaceRoot, result.filePath);
               void vscode.window.showInformationMessage(
