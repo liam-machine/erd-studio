@@ -715,7 +715,8 @@ describe('allowlists agree with the Worker', () => {
       'importDuplicateSame', 'importDuplicateDiffers', 'importDuplicateDiffersDefaultSchema', 'importPartialDuplicateOnly',
     ]);
     // #262's per-step load codes follow the logged-error ones and close the 2.0.0 error list;
-    // what a failed layout was like (after 2.0.4) is appended after them.
+    // what a failed layout was like (after 2.0.4) is appended after them, then #304's, #319's
+    // and which site a logged error came from (#354).
     expect(ERROR_CODES.slice(ERROR_CODES.indexOf('loggedErrorOther') + 1)).toEqual([
       'domainLoadInternalManifest', 'domainLoadInternalYml', 'domainLoadInternalCatalog', 'domainLoadInternalRead',
       'domainLoadInternalPositions', 'domainLoadInternalPhysical', 'domainLoadInternalDisplay', 'domainLoadInternalOther',
@@ -727,6 +728,9 @@ describe('allowlists agree with the Worker', () => {
       'dbtSearchFailedRejected', 'dbtSearchFailedSort', 'dbtSearchFailedThrew',
       'handlerFailedAtRead', 'handlerFailedAtMutate', 'handlerFailedAtLayoutWrite', 'handlerFailedAtStorageWrite',
       'handlerFailedAtJsonWrite', 'handlerFailedAtSave', 'handlerFailedAtOther', 'handlerFailedDbml', 'handlerFailedJson',
+      'loggedErrorAtWatcher', 'loggedErrorAtLegacyRename', 'loggedErrorAtRedraw', 'loggedErrorAtExplorerMove',
+      'loggedErrorAtFeedbackSend', 'loggedErrorAtFailureAction', 'loggedErrorAtTrackingSession', 'loggedErrorAtTrackingRefresh',
+      'loggedErrorUnlistedTag',
     ]);
     // Liam's decision for B6: no table-count bucket is ever a key of a draft. A canvas open's
     // size is model_count, plus (#331) one fixed range past its 51+; the Table Library's
@@ -794,9 +798,10 @@ describe('allowlists agree with the Worker', () => {
     ]);
     for (const key of added) expect(section, key).toMatch(new RegExp(`^- \`${key}\` `, 'm'));
     // The error codes appended after the 2.0.0 list (a failed layout's class, size, duration and fallbacks;
-    // then why the host's dbt search failed, #304; then where a canvas handler failure came from, #319), marked as errors.
+    // then why the host's dbt search failed, #304; then where a canvas handler failure came from, #319;
+    // then which site a logged error came from, #354), marked as errors.
     const addedErrors = ERROR_CODES.slice(ERROR_CODES.indexOf('domainLoadInternalOther') + 1);
-    expect(addedErrors).toHaveLength(33);
+    expect(addedErrors).toHaveLength(42);
     for (const code of addedErrors) expect(section, code).toMatch(new RegExp(`^- \`${code}\` \\(error\\) `, 'm'));
     // Import outcomes: a failure inside ERD Studio is an outcome key; one inside Fabric is a copy with no outcome.
     const outcomes = readme.slice(readme.indexOf('### Import outcomes (2.0)'), readme.indexOf('### Onboarding funnel'));

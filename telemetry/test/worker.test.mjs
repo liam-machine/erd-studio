@@ -699,6 +699,32 @@ describe('validation — acceptance and normalisation', () => {
     );
   });
 
+  it('keeps which site a logged error came from (#354), closing the error list, and drops a look-alike, a tag or a feature-side copy', async () => {
+    const errors = {
+      loggedError: 3, loggedErrorOther: 3,
+      loggedErrorAtWatcher: 1, loggedErrorAtLegacyRename: 1, loggedErrorAtRedraw: 2, loggedErrorAtExplorerMove: 1,
+      loggedErrorAtFeedbackSend: 1, loggedErrorAtFailureAction: 1, loggedErrorAtTrackingSession: 1, loggedErrorAtTrackingRefresh: 1,
+      loggedErrorUnlistedTag: 1,
+    };
+    const params = await storedParams(
+      heartbeat({
+        features: { loggedErrorAtTrackingRefresh: 1, loggedErrorUnlistedTag: 1 },
+        errors: { ...errors, loggedErrorAtSomethingNew: 1, 'loggedErrorAt[ERD Studio]': 1, loggedErrorUnlisted: 1, loggedErrorAtTracking: 1 },
+      }),
+    );
+    assert.equal(params[17], '{}');
+    assert.deepEqual(JSON.parse(params[18]), errors);
+    // The newest codes close the list, after #319's.
+    assert.deepEqual(
+      WORKER_ERROR_CODES.slice(WORKER_ERROR_CODES.indexOf('handlerFailedJson') + 1),
+      [
+        'loggedErrorAtWatcher', 'loggedErrorAtLegacyRename', 'loggedErrorAtRedraw', 'loggedErrorAtExplorerMove',
+        'loggedErrorAtFeedbackSend', 'loggedErrorAtFailureAction', 'loggedErrorAtTrackingSession', 'loggedErrorAtTrackingRefresh',
+        'loggedErrorUnlistedTag',
+      ],
+    );
+  });
+
   it('keeps the automatic draft\'s time-limit drop key, after the import outcome keys', async () => {
     const params = await storedParams(heartbeat({ features: { draftDropTimeLimit: 1, importCauseTimeLimit: 1, draftDropTimeLimits: 1 } }));
     assert.equal(params[17], '{"importCauseTimeLimit":1,"draftDropTimeLimit":1}');

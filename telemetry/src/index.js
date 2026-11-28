@@ -1230,6 +1230,17 @@ const ERROR_CODES = [
   'handlerFailedAtOther',
   'handlerFailedDbml',
   'handlerFailedJson',
+  // Added after 2.0.12 (#354): which site a loggedErrorOther line came from, and a tag the
+  // extension's area table does not list. Fixed keys, never the tag or the line's text.
+  'loggedErrorAtWatcher',
+  'loggedErrorAtLegacyRename',
+  'loggedErrorAtRedraw',
+  'loggedErrorAtExplorerMove',
+  'loggedErrorAtFeedbackSend',
+  'loggedErrorAtFailureAction',
+  'loggedErrorAtTrackingSession',
+  'loggedErrorAtTrackingRefresh',
+  'loggedErrorUnlistedTag',
 ];
 
 /** Every event the trail may carry: a marker, a feature key, or an error code written `!code`. */

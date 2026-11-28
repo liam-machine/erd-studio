@@ -1355,7 +1355,7 @@ The rest of a failed layout's codes (its other classes, size buckets, duration a
 - `loggedErrorDbt` (error) — a logged error from the dbt integration.
 - `loggedErrorOther` (error) — a logged error from anywhere else.
 
-The area comes from the `[tag]` the error line starts with (a `createLogger` scope, or the literal tag of an unscoped line), through a fixed table in `src/services/runtimeTelemetry.ts`; the hook is never handed the rest of the line. Lines tagged `[ERD Studio]` (most commands, the imports included) count as `loggedErrorOther`. `loggedErrorImport` and `loggedErrorHarness` therefore stay near 0 until those commands get their own scoped loggers. A `loggedError*` code never starts the known-fixes check (`knownFixesService.ts` skips them), so it never downloads the registry by itself, and never asks for an interim copy on its own (`provisionalTrigger` skips them; a failure of ours records its own code beside it). A canvas handler logs a refusal the user was told about, and a diagram file the user broke, as a warning, so neither is counted here.
+The area comes from the `[tag]` the error line starts with (a `createLogger` scope, the literal tag of an unscoped line, or a `hostErrorLog.record` source), through a fixed table in `src/services/runtimeTelemetry.ts`, looked up exactly and then by the tag's part before the first `.`; the hook is never handed the rest of the line. Lines tagged `[ERD Studio]` (most commands, the imports included) count as `loggedErrorOther`. After 2.0.12 the sites of ours that log such a line with no code of their own record a `loggedErrorAt*` code beside it, and a tag the table does not list also records `loggedErrorUnlistedTag` (#354, under Keys added after 2.0.0). `loggedErrorImport` and `loggedErrorHarness` therefore stay near 0 until those commands get their own scoped loggers. A `loggedError*` code never starts the known-fixes check (`knownFixesService.ts` skips them), so it never downloads the registry by itself, and never asks for an interim copy on its own (`provisionalTrigger` skips them; a failure of ours records its own code beside it). A canvas handler logs a refusal the user was told about, and a diagram file the user broke, as a warning, so neither is counted here.
 
 **#262 — which canvas load step threw, when the load failed for a reason of ours.**
 
@@ -2014,6 +2014,51 @@ a product question about which definition to keep.
 `importDuplicateDiffersDefaultSchema` on 2 or more installs: two different
 tables merged into one (H3), a bug, already confirmed for SQL Server's
 `USE db1` / `USE db2`.
+
+**Which site a `loggedErrorOther` came from** (added after 2.0.12, #354).
+`loggedErrorOther` is the catch-all for every error line whose tag is not the
+canvas, the sidebar, a draft, dbt or the AI helper. Most of its sites record a
+narrower code of their own beside the line; these did not, so on their own
+they sent `loggedError` + `loggedErrorOther` and nothing else. Each now
+records one fixed code right beside its existing log line, once per line,
+never with the tag or the text:
+
+- `loggedErrorAtWatcher` (error) — a listener of a file-change event threw (`src/watchers/FileWatcherService.ts`, `safeFireEvent`). Probably reads 0 in a real host: VS Code's own event emitter catches a listener's error before it reaches this catch (unverified; the test mock rethrows, so the unit test proves only the catch).
+- `loggedErrorAtLegacyRename` (error) — renaming a legacy `erd-studio/` folder to `.erd-studio/` at start failed (`src/extension.ts`).
+- `loggedErrorAtRedraw` (error) — redrawing an open diagram from its file after an outside change, or after a `fields.yml` change, failed (two sites in `src/extension.ts`).
+- `loggedErrorAtExplorerMove` (error) — following a move made in the Explorer failed (`src/extension.ts`, `onDidRenameFiles`).
+- `loggedErrorAtFeedbackSend` (error) — Send Feedback without a canvas could not record the report it opened, or copy what the user typed after a failure of ours (two sites in `src/extension.ts`).
+- `loggedErrorAtFailureAction` (error) — a button on a failure message threw: Send Feedback's, Migrate to v5's (two), Refresh Manifest's (all `src/extension.ts`) and every diagram or layer command's (`src/commands/commandFailure.ts`, where `commandFailedOurs` follows too).
+- `loggedErrorAtTrackingSession` (error) — My Reports' **silent** GitHub session lookup threw, for example no GitHub sign-in provider (`src/services/reportTrackingService.ts`, `getHandle`).
+- `loggedErrorAtTrackingRefresh` (error) — My Reports' search of GitHub failed: a 403 rate limit, offline, a proxy (`reportTrackingService.ts`, `refresh`). It runs in the background at every start when the user is signed in to GitHub, `erdStudio.feedback.trackReports` is on (the default) and the cache is over 6 hours old, with no canvas needed: the strongest fit for the "at start, no diagram opened" shape #354 reported.
+- `loggedErrorUnlistedTag` (error) — the line's tag is in no entry of the fixed area table, exactly or by its part before the first `.`. It reads 0 in a correct build: every literal `createLogger` scope, `log.error('[Tag]…')` tag and `hostErrorLog.record('…')` source is listed, which `test/unit/runtimeTelemetry.test.ts` checks, so above 0 means a tag built at run time or a hole in that test. An untagged line (`''`) stays plain `loggedErrorOther`.
+
+How to read them:
+
+- **Every new code starts with `loggedError`**, so like the rest of B19 none starts the known-fixes check (`knownFixesService.ts`) or asks for an interim copy (`provisionalTrigger`). A background poll failing on every offline start costs nothing extra.
+- **One code can cover several sites**: `loggedErrorAtRedraw` two, `loggedErrorAtFeedbackSend` two, `loggedErrorAtFailureAction` five.
+- **Every canvas load failure also lights `loggedErrorOther`.** It writes two error lines, `hostErrorLog.record('sendDomainData', …)` (listed as `Other`, as it always counted) and `[SemanticEditorProvider] Failed to load domain…` (`Canvas`), so `loggedError` counts twice and `loggedErrorOther` sits beside `loggedErrorCanvas` and a `domainLoad*` code. The feedback dialog's own sources (`feedbackAnalysis.*`, `submitFeedback*`, `setLineStyle`, …) are listed as `Other` too. Only "`loggedErrorOther` with no other code beside it" is a clean reading.
+- **Not given a site code**: `src/services/recoveryService.ts` (Save All threw, Show Files failed) and `src/providers/ConvertToDbmlPanel.ts` (the Convert review panel's handler, opening a file from it). Both run only after the user started them, so they cannot explain a day with no canvas; they stay `loggedErrorOther` alone.
+- **No area changed meaning.** Every source listed for #354 is `Other`, which it already counted as while unlisted, and every earlier entry kept its area.
+
+```bash
+# What sits beside loggedErrorOther, on releases that carry the #354 keys (installs and install-days)
+npx wrangler d1 execute erd-studio-telemetry --remote --command \
+  "SELECT e.key, COUNT(DISTINCT h.install_id) AS installs, COUNT(*) AS install_days FROM heartbeats h, json_each(h.errors) e WHERE COALESCE(h.dev, 0) = 0 AND json_extract(h.features,'$.versionMixed') IS NULL AND json_extract(h.errors,'$.loggedErrorOther') IS NOT NULL GROUP BY 1 ORDER BY 2 DESC"
+# loggedErrorOther still alone: no other code but loggedError beside it (no site code, no unlisted tag, no table-file or load code)
+npx wrangler d1 execute erd-studio-telemetry --remote --command \
+  "SELECT h.ext_version, COUNT(DISTINCT h.install_id) AS installs, COUNT(*) AS install_days, SUM(h.canvas_opens > 0) AS with_canvas FROM heartbeats h WHERE COALESCE(h.dev, 0) = 0 AND json_extract(h.errors,'$.loggedErrorOther') IS NOT NULL AND NOT EXISTS (SELECT 1 FROM json_each(h.errors) e WHERE e.key NOT IN ('loggedError', 'loggedErrorOther')) GROUP BY 1 ORDER BY 1"
+```
+
+Filter `h.ext_version` to the first release that carries the keys (compare it
+numerically). `loggedErrorAtTrackingRefresh` or `loggedErrorAtTrackingSession`
+beside it: My Reports' background check (expected offline or rate-limited;
+raise it only if it is most of them). `loggedErrorAtWatcher`: a listener bug of
+ours. `loggedErrorAtLegacyRename`: a `ux` question (is the user told?).
+`loggedErrorAtRedraw` or `loggedErrorAtExplorerMove`: a bug. With
+`loggedErrorUnlistedTag`: find the line whose tag is built at run time. Still
+alone on the new release (the second query): a site this list missed, or
+`recoveryService.ts` / `ConvertToDbmlPanel.ts`; list the `Other` sites again.
 
 ## The local archive
 

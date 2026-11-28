@@ -1190,6 +1190,22 @@ export const ERROR_CODES = [
   'handlerFailedAtOther',
   'handlerFailedDbml',
   'handlerFailedJson',
+  // #354: which site a loggedErrorOther line came from, recorded at the site
+  // beside its log line: a throwing file-change listener, the legacy folder
+  // rename, a redraw from a diagram's file or fields.yml, following an
+  // Explorer move, Send Feedback without a canvas recording or copying, a
+  // failure's own button, and My Reports' silent session or its poll. Then a
+  // tag LOGGED_ERROR_AREAS does not list. All start with loggedError, so none
+  // triggers the known-fixes check or an interim heartbeat.
+  'loggedErrorAtWatcher',
+  'loggedErrorAtLegacyRename',
+  'loggedErrorAtRedraw',
+  'loggedErrorAtExplorerMove',
+  'loggedErrorAtFeedbackSend',
+  'loggedErrorAtFailureAction',
+  'loggedErrorAtTrackingSession',
+  'loggedErrorAtTrackingRefresh',
+  'loggedErrorUnlistedTag',
 ] as const;
 export type TelemetryErrorCode = (typeof ERROR_CODES)[number];
 
