@@ -175,6 +175,14 @@
   font-size: var(--text-md);
 }
 
+/* What the host reads before the diagram ("Reading your dbt project's files…"):
+   a quieter line held close under the loading line. */
+.editor-message--loading > .editor-message__loading-detail {
+  margin-top: calc(-1 * var(--space-3));
+  color: var(--text-tertiary);
+  font-size: var(--text-sm);
+}
+
 /* Merge-conflict screen (#145): a plain explanation rather than an error dump. */
 .editor-message__title {
   margin: 0;

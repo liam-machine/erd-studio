@@ -1935,6 +1935,41 @@ npx wrangler d1 execute erd-studio-telemetry --remote --command \
   "SELECT h.os, h.ext_version, j.key, COUNT(DISTINCT h.install_id) AS installs FROM heartbeats h, json_each(h.features) j WHERE h.day >= date('now','-28 days') AND h.day < date('now') AND COALESCE(h.dev, 0) = 0 AND (j.key LIKE 'startLook%' OR j.key IN ('dbtSearchFromIndex', 'dbtSearchSkipped', 'dbtSearchTimedOut', 'activationOver10s')) GROUP BY 1, 2, 3 ORDER BY 1, 2, installs DESC"
 ```
 
+**Which step held a slow open** (added after 2.0.12, #371). `canvasLoad*`
+says how long the day's slowest open took, not where the time went: an
+install on 2.0.11 recorded `canvasLoadOver20s` with an ordinary YAML project
+and a dbt project, and nothing could say whether dbt's files, the diagram or
+something else held it. In a dbt project an open reads manifest.json, every
+schema yml and catalog.json before it reads the diagram (the schema yml walk
+runs on the extension host thread: about 6 s for 3,000 files on a fast Mac).
+`sendSubjectAreaData` now times the steps it already names for a failure
+(`domainLoadInternal*`, #262), and the `ready` handler records the longest as
+one of these keys. Recorded only with the day's `canvasLoad5to20s` or
+`canvasLoadOver20s`, by `canvasLoadCold`'s rule: a slower range replaces the
+step keys with this open's, the same range adds this open's beside them, a
+faster or under-5 s open changes nothing. So a day carries one key per slow
+open of its slowest range, usually one. Never a time; off the onboarding
+trail; the size guard (`trimHeartbeat`) never drops them. A tie goes to the
+earlier step.
+
+- `canvasLoadSlowManifest` — the step that held the day's slowest open (over 5 s) was reading dbt's `target/manifest.json` (parsed in a worker thread, with a 120 s limit). Cold on a window's first open, and again after dbt writes `target/` or Refresh Manifest: read beside `canvasLoadCold`, whose absence says nothing about dbt.
+- `canvasLoadSlowYml` — it was reading the dbt project's schema yml files (`model-paths`, `seed-paths`, `snapshot-paths`), synchronously on the extension host. Cold on a window's first open and after any schema yml changes.
+- `canvasLoadSlowCatalog` — it was reading `target/catalog.json` (skipped over 64 MB).
+- `canvasLoadSlowRead` — it was reading the diagram and its table files (with the dbt key index built from what dbt's files held).
+- `canvasLoadSlowPositions` — it was placing tables that had no position, including saving them to the diagram.
+- `canvasLoadSlowPhysical` — it was building the Physical stage's canvas.
+- `canvasLoadSlowDisplay` — it was building the Logical stage's canvas.
+- `canvasLoadSlowOther` — no step above: the time went before the first one (the `loading` posts and their yields, the line style, an extension host already busy with another window's or extension's work) or after the diagram went out. The whole span less the steps above, so a host that was busy when `ready` arrived lands here, not on the manifest.
+
+A day with no slow open has none of these. A pre-#371 client sends none at
+all: read them only from the release after 2.0.12 (`ext_version`).
+
+```bash
+# Which step held the slow opens, per OS, by the slowest range (installs, last 28 days)
+npx wrangler d1 execute erd-studio-telemetry --remote --command \
+  "SELECT h.os, CASE WHEN json_extract(h.features,'$.canvasLoadOver20s') IS NOT NULL THEN 'over20s' ELSE '5to20s' END AS range, j.key, COUNT(DISTINCT h.install_id) AS installs, SUM(json_extract(h.features,'$.canvasLoadCold') IS NOT NULL) AS cold_days FROM heartbeats h, json_each(h.features) j WHERE h.day >= date('now','-28 days') AND h.day < date('now') AND COALESCE(h.dev, 0) = 0 AND j.key LIKE 'canvasLoadSlow%' GROUP BY 1, 2, 3 ORDER BY 1, 2, installs DESC"
+```
+
 ## The local archive
 
 Because D1 keeps raw rows for only 90 days, the operator's machine keeps

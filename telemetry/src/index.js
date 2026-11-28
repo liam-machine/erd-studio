@@ -946,6 +946,18 @@ const FEATURES = [
   'startLookFoldersOver2000',
   'startLookFoundAfterDeadline',
   'dbtSearchFromIndex',
+  // Added after 2.0.12 (#371): which step held the day's slowest open, when it took
+  // over 5 s (canvasLoad5to20s or canvasLoadOver20s): dbt's manifest.json, its schema
+  // yml, catalog.json, the diagram and its tables, positions for new tables, the
+  // Physical or Logical canvas's build, or anything else. Fixed keys, never a time.
+  'canvasLoadSlowManifest',
+  'canvasLoadSlowYml',
+  'canvasLoadSlowCatalog',
+  'canvasLoadSlowRead',
+  'canvasLoadSlowPositions',
+  'canvasLoadSlowPhysical',
+  'canvasLoadSlowDisplay',
+  'canvasLoadSlowOther',
 ];
 
 /** The only keys `errors` may carry; anything else is dropped. */

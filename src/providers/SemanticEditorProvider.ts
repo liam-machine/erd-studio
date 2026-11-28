@@ -186,7 +186,7 @@ import {
 import { lateReadyFeatures, ReadyWatch } from '../services/readyWatch';
 import { saveDocument, saveDocumentByUri, saveWithoutFormatting } from './documentSave';
 import { dirtyFiles } from './dirtyDocuments';
-import { subjectAreaLoadErrorCode, subjectAreaLoadStepCode, layoutFeature, saveFailureCodes, type SaveFailure, type SubjectAreaLoadFailure, type SubjectAreaLoadStep, type TelemetryFeature } from '../services/telemetryPayload';
+import { subjectAreaLoadErrorCode, subjectAreaLoadStepCode, layoutFeature, saveFailureCodes, slowestLoadStep, type SaveFailure, type SubjectAreaLoadFailure, type SubjectAreaLoadStep, type TelemetryFeature } from '../services/telemetryPayload';
 import { openTableFileAt } from '../commands/openModelFile';
 import { redactPaths } from '../types/feedback';
 import {
@@ -1406,6 +1406,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * diagram is read, then again with its table count — counted from the
    * diagram's own text, no table read — each followed by a turn of the
    * event loop so the message leaves the host before the read blocks it.
+   * In a dbt project whose schema yml is not read yet (the window's first
+   * open, or after dbt or an edit changed them), the count also carries
+   * `reading: 'dbt'`: the open reads dbt's files before the diagram (#371).
    */
   private async postLoading(document: vscode.TextDocument, webview: vscode.Webview): Promise<void> {
     this.post(webview, { type: 'loading', payload: {} });
@@ -1417,7 +1420,10 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       // The read that follows reports what is wrong with the file.
       return;
     }
-    this.post(webview, { type: 'loading', payload: { tables } });
+    // `peekYmlData?.()`: test harnesses stub the service without it. Not the
+    // manifest's peek: that returns the last good manifest after an invalidate.
+    const readingDbt = !this.logicalOnly && this.ymlParserService.peekYmlData?.() === undefined;
+    this.post(webview, { type: 'loading', payload: { tables, ...(readingDbt ? { reading: 'dbt' as const } : {}) } });
     await yieldToEventLoop();
   }
 
@@ -2652,16 +2658,18 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
               this.postLineStyle(webviewPanel.webview);
               // The initial load is the one refresh path allowed to persist
               // auto-computed positions for models that lack them.
-              const posted = await this.sendSubjectAreaData(document, webviewPanel.webview, panelKey, { persistPositions: true });
+              const timing: Partial<Record<SubjectAreaLoadStep, number>> = {};
+              const posted = await this.sendSubjectAreaData(document, webviewPanel.webview, panelKey, { persistPositions: true, timing });
               const loadMs = Date.now() - readyAt;
               const filesRead = this.tableLibraryService.tableFileReads() - readsAtReady;
               canvasLog.info(posted === undefined
                 ? `Opening ${document.uri.fsPath} ended without a diagram after ${elapsedMs(readyAt)} ms`
                 : `Opened ${document.uri.fsPath}: ${plural(posted, 'table')} posted ${elapsedMs(readyAt)} ms after ready; ${plural(filesRead, 'table file')} read from disk`);
               // How long the diagram took to read and post (#333; over 20 s was 2.0 B17's
-              // canvasLoadOver20s): a range for the day's slowest open, and whether
-              // it read table files from disk. A load that posted no diagram records nothing.
-              if (posted !== undefined) telemetry.canvasLoad(loadMs, filesRead > 0);
+              // canvasLoadOver20s): a range for the day's slowest open, whether
+              // it read table files from disk, and (#371) the step that held it, the
+              // time before the first step counted as `other`. A load that posted no diagram records nothing.
+              if (posted !== undefined) telemetry.canvasLoad(loadMs, filesRead > 0, slowestLoadStep(timing, loadMs));
               const entry = this.openPanels.get(panelKey);
               if (posted !== undefined && entry?.webview === webviewPanel.webview) {
                 entry.loaded = true;
@@ -6502,12 +6510,14 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * watcher-driven refreshes (manifest / yml changes, external edits) never
    * write to the domain file. Pass `persistPositions: true` (the `ready` path)
    * to also write them back via WorkspaceEdit so they survive reloads.
+   * `timing`, when given, is filled with the milliseconds each step took
+   * (the `ready` path's #371 telemetry: which step held a slow open).
    */
   private async sendSubjectAreaData(
     document: vscode.TextDocument,
     webview: vscode.Webview,
     panelKey?: string,
-    options: { persistPositions?: boolean; reshowError?: boolean } = {},
+    options: { persistPositions?: boolean; reshowError?: boolean; timing?: Partial<Record<SubjectAreaLoadStep, number>> } = {},
   ): Promise<number | undefined> {
     const errorKey = panelKey ?? document.uri.toString();
     const reshow = options.reshowError === true;
@@ -6542,6 +6552,17 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
     // Which step is running, for an internal failure's telemetry (#262).
     let step: SubjectAreaLoadStep = 'manifest';
+    // How long each step ran (#371): `mark` closes the running step and starts `next`.
+    const timing = options.timing;
+    let since = Date.now();
+    const mark = (next: SubjectAreaLoadStep): void => {
+      if (timing) {
+        const now = Date.now();
+        timing[step] = (timing[step] ?? 0) + (now - since);
+        since = now;
+      }
+      step = next;
+    };
     try {
       const key = panelKey ?? document.uri.toString();
       const panel = this.openPanels.get(key);
@@ -6552,13 +6573,16 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       const timer = phaseTimer(canvasLog, `${options.persistPositions ? 'Open' : 'Refresh'} ${document.uri.fsPath}`,
         { level: options.persistPositions ? 'info' : 'debug' });
 
-      timer.phase('reading dbt files');
+      // One phase per dbt read, so the log names the slow one (#371).
+      timer.phase('reading dbt manifest.json');
       const manifest = await this.manifestService.loadManifest(this.workspaceRoot);
-      step = 'yml';
+      mark('yml');
+      timer.phase('reading dbt schema yml');
       const ymlData = await this.ymlParserService.loadYmlData(this.workspaceRoot, undefined);
-      step = 'catalog';
+      mark('catalog');
+      timer.phase('reading dbt catalog.json');
       const catalog = await this.loadCatalog();
-      step = 'read';
+      mark('read');
       const dbtKeyIndex = dbtKeyIndexOf(ymlData, manifest);
 
       timer.phase('reading the diagram and its tables');
@@ -6579,7 +6603,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       const autoLayout = activeStage === 'logical' && isFreshLayout(unifiedDomain);
 
       // Auto-assign positions for models that lack them (e.g. added by AI agents)
-      step = 'positions';
+      mark('positions');
       const computed = this.computeMissingPositions(unifiedDomain);
       if (computed) {
         if (options.persistPositions && !autoLayout) {
@@ -6599,7 +6623,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       timer.phase(`building the ${activeStage} canvas`);
       let postedTables: number;
       if (activeStage === 'physical') {
-        step = 'physical';
+        mark('physical');
         const physicalDomain = this.subjectAreaService.buildPhysicalSubjectArea(unifiedDomain, ymlData, manifest, catalog);
         postedTables = physicalDomain.models.length;
         const layerConfig = this.layerService.getLayer(unifiedDomain.layer);
@@ -6607,12 +6631,12 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         const fields = this.displayFields();
         if (fields) { physicalDomain.fields = fields; }
         this.post(webview, { type: 'domainLoaded', payload: physicalDomain });
-        step = 'other';
+        mark('other');
         this.cancelCanvasContext(webview);
         this.noteDrawn(key, unifiedDomain.logical.models.map((m) => m.name));
         if (options.persistPositions) this.recordCanvasOpen(document, 'physical', physicalDomain.models.length, catalog !== undefined);
       } else {
-        step = 'display';
+        mark('display');
         const domain = SubjectAreaService.toLogicalStage(unifiedDomain);
         const displayDomain = this.buildDisplaySubjectArea(domain, manifest, ymlData, unifiedDomain.viewConfig, unifiedDomain.stubColumns, document.uri.fsPath);
         postedTables = displayDomain.models.length;
@@ -6625,7 +6649,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           ...this.manifestHintFlag(),
           ...this.logicalOnlyFlag(),
         });
-        step = 'other';
+        mark('other');
         // What the canvas knows beyond the diagram, once the diagram has gone out.
         void this.sendCanvasContext(webview, displayDomain.models.map((m) => m.name), unifiedDomain.layer, document);
         // What the files hold that this picture does not show ("not shown" notes), worked out after it has gone out.
@@ -6646,6 +6670,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       // A payload went out, so the next failure is news again.
       this.lastLoadError.delete(errorKey);
       timer.end(`posted ${plural(postedTables, 'table')}${autoLayout ? ' (auto layout next)' : ''}`);
+      // Close the last step (what ran after the post), so `timing` adds up to this call.
+      mark('other');
       return postedTables;
     } catch (err) {
       // A restored tab, or a refresh, whose file is gone (#161): the same

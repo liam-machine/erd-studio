@@ -682,7 +682,7 @@ describe('allowlists agree with the Worker', () => {
     // It closes the 2.0.0 list: what follows was appended later (the Fabric card's keys, then the
     // major update notice's, the layout fallbacks', then the start suggestion's repeat and the canvas's Convert button, #305,
     // ... then where outside changes came from, #329, then whether models are shared, #332, then how long
-    // a diagram took to open, #333, then the one look at the open folder, #347), never put before it.
+    // a diagram took to open, #333, then the one look at the open folder, #347, then which step held a slow open, #371), never put before it.
     expect(FEATURES.slice(FEATURES.indexOf('draftDropTimeLimit') + 1)).toEqual([
       'importGuideActionFabricCatalog', 'importGuideCopiedFabricCatalog',
       'importFabricOutcomeClean', 'importFabricOutcomeRepaired', 'importFabricOutcomePartial',
@@ -708,6 +708,9 @@ describe('allowlists agree with the Worker', () => {
       'startLookFromIndex', 'startLookIndexFallback',
       'startLookFoldersUnder200', 'startLookFolders200to2000', 'startLookFoldersOver2000',
       'startLookFoundAfterDeadline', 'dbtSearchFromIndex',
+      // #371: which step held a slow open.
+      'canvasLoadSlowManifest', 'canvasLoadSlowYml', 'canvasLoadSlowCatalog', 'canvasLoadSlowRead',
+      'canvasLoadSlowPositions', 'canvasLoadSlowPhysical', 'canvasLoadSlowDisplay', 'canvasLoadSlowOther',
     ]);
     // #262's per-step load codes follow the logged-error ones and close the 2.0.0 error list;
     // what a failed layout was like (after 2.0.4) is appended after them.
@@ -782,6 +785,9 @@ describe('allowlists agree with the Worker', () => {
       'startLookFromIndex', 'startLookIndexFallback',
       'startLookFoldersUnder200', 'startLookFolders200to2000', 'startLookFoldersOver2000',
       'startLookFoundAfterDeadline', 'dbtSearchFromIndex',
+      // #371: which step held a slow open.
+      'canvasLoadSlowManifest', 'canvasLoadSlowYml', 'canvasLoadSlowCatalog', 'canvasLoadSlowRead',
+      'canvasLoadSlowPositions', 'canvasLoadSlowPhysical', 'canvasLoadSlowDisplay', 'canvasLoadSlowOther',
     ]);
     for (const key of added) expect(section, key).toMatch(new RegExp(`^- \`${key}\` `, 'm'));
     // The error codes appended after the 2.0.0 list (a failed layout's class, size, duration and fallbacks;

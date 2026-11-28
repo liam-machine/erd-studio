@@ -647,9 +647,9 @@ describe('validation — acceptance and normalisation', () => {
       }),
     );
     assert.deepEqual(JSON.parse(params[17]), features);
-    // Everything after #333's keys: the newest keys close the list.
+    // Everything after #333's keys, up to #371's.
     assert.deepEqual(
-      WORKER_FEATURES.slice(WORKER_FEATURES.indexOf('canvasPaintOver5s') + 1),
+      WORKER_FEATURES.slice(WORKER_FEATURES.indexOf('canvasPaintOver5s') + 1, WORKER_FEATURES.indexOf('dbtSearchFromIndex') + 1),
       [
         'startLookFromIndex', 'startLookIndexFallback',
         'startLookFoldersUnder200', 'startLookFolders200to2000', 'startLookFoldersOver2000',
@@ -659,6 +659,26 @@ describe('validation — acceptance and normalisation', () => {
     // The keys whose meaning shifted with #347 keep their places from 2.0.0 and after 2.0.4.
     assert.ok(WORKER_FEATURES.indexOf('startLookGaveUp') < WORKER_FEATURES.indexOf('draftDropTimeLimit'));
     assert.ok(WORKER_FEATURES.indexOf('startLookLateSuggestion') < WORKER_FEATURES.indexOf('canvasLoadUnder1s'));
+    assert.equal(params[18], '{}');
+  });
+
+  it('keeps which step held a slow open (#371), after the one look at the folder, and drops a time, a look-alike or an error-side copy', async () => {
+    const features = { canvasLoadOver20s: 1, canvasLoadSlowManifest: 1, canvasLoadSlowYml: 1, canvasLoadSlowOther: 1 };
+    const params = await storedParams(
+      heartbeat({
+        features: { ...features, canvasLoadSlowYmlMs: 5800, canvasLoadSlowDbt: 1, canvasLoadSlow: 1 },
+        errors: { canvasLoadSlowYml: 1 },
+      }),
+    );
+    assert.deepEqual(JSON.parse(params[17]), features);
+    // The newest keys close the list.
+    assert.deepEqual(
+      WORKER_FEATURES.slice(WORKER_FEATURES.indexOf('dbtSearchFromIndex') + 1),
+      [
+        'canvasLoadSlowManifest', 'canvasLoadSlowYml', 'canvasLoadSlowCatalog', 'canvasLoadSlowRead',
+        'canvasLoadSlowPositions', 'canvasLoadSlowPhysical', 'canvasLoadSlowDisplay', 'canvasLoadSlowOther',
+      ],
+    );
     assert.equal(params[18], '{}');
   });
 
