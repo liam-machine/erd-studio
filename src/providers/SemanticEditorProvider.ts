@@ -48,8 +48,11 @@
  *     PHYSICAL_READ_ONLY_MESSAGE.
  *   - `withMessageErrorBoundary` turns a throwing/rejecting handler into an
  *     `error` message instead of an unhandled rejection.
- *   - Refresh paths (watchers, external edits, stage switches) never write;
- *     only the initial `ready` load persists auto-computed positions.
+ *   - Opening a diagram and every refresh path (watchers, external edits,
+ *     stage switches, a webview reload) never write. Positions a canvas draws
+ *     for tables its diagram stores none for are held per panel
+ *     (`unstoredPositions`) and saved with the first user edit that writes
+ *     the layout ({@link foldUnstoredPositions}).
  *
  * Update loop prevention:
  *   `pendingUpdates` is held for the whole applySubjectAreaEdit / undo / redo so the
@@ -72,6 +75,8 @@ import {
   subjectAreaTableNames,
 } from '../services/domainService';
 import { computeSubjectAreaDiff } from '../services/stageDiff';
+import { buildDbtCommand, type DbtCommandTable } from '../services/dbtCommand';
+import { dbtModelNameOf } from '../services/dbtModelName';
 import { buildSyncPlan, countSyncPlanActions, syncPlanLibraryLookups } from '../services/syncPlanBuilder';
 import { findVenvDir } from '../services/dbtEnv';
 import { claudeTerminalLaunch } from './GettingStartedPanel';
@@ -138,7 +143,7 @@ import type { ReportTrackingService } from '../services/reportTrackingService';
 import type { CatalogService } from '../services/catalogService';
 import type { CatalogData } from '../types/catalog';
 import { OwnWriteTracker, ownWrites } from '../services/ownWriteTracker';
-import { ADD_FROM_DBT_NEEDS_DBT_MESSAGE, findOwningDbtProject, hasDbtProjectFile, samePath } from '../services/projectDiscovery';
+import { ADD_FROM_DBT_NEEDS_DBT_MESSAGE, DBT_COMMAND_NEEDS_DBT_MESSAGE, findOwningDbtProject, hasDbtProjectFile, samePath } from '../services/projectDiscovery';
 import type {
   AddModelMessage,
   AddRelationshipMessage,
@@ -163,7 +168,7 @@ import type { YmlData } from '../types/ymlData';
 import type { DiscrepancyReport } from '../types/discrepancy';
 import type { DisplaySubjectArea, DisplayRelationship } from '../types/display';
 import type { Rationale, Cardinality, ColumnDef, DesignTable, Meta, Stage } from '../types/semantic';
-import type { CanvasFrame, CanvasNoticeMessage, CanvasVisibilityMessage, DropTablesMessage, LibraryDragEndedMessage, LibraryDragRelease, LibraryDragReleasedMessage, LibraryDragStartedMessage, RevealRelationshipMessage, RevealTableMessage, SelectTablesMessage, UpdateColumnPayloadColumn, UpdateMetaMessage } from '../types/messages';
+import type { CanvasFrame, CanvasNoticeMessage, CanvasVisibilityMessage, CopyDbtCommandMessage, DropTablesMessage, LibraryDragEndedMessage, LibraryDragRelease, LibraryDragReleasedMessage, LibraryDragStartedMessage, RevealRelationshipMessage, RevealTableMessage, SelectTablesMessage, UpdateColumnPayloadColumn, UpdateMetaMessage } from '../types/messages';
 import { GO_TO_TABLE_COMMAND, REVEAL_IN_TABLE_LIBRARY_COMMAND, projectRelativePath } from '../commands/goToTable';
 import { MOVE_TABLE_COMMAND } from '../commands/moveDbml';
 import type { GroundTruth } from '../types/syncPlan';
@@ -483,9 +488,9 @@ export function describeSkippedDbtModels(skipped: readonly DraftSkipped[], optio
 /**
  * True when the domain has at least one model and NONE of them has a stored
  * `viewConfig.positions` entry (missing or empty `positions` included) — the
- * case where the webview should run the ELK auto layout on first open rather
- * than the host persisting its simple placement. A domain with any stored
- * position is not fresh: the missing ones keep today's host placement.
+ * case where the webview runs the ELK auto layout on first open rather than
+ * drawing the host's simple placement. A domain with any stored position is
+ * not fresh: the missing ones keep the host's placement.
  */
 export function isFreshLayout(
   unifiedDomain: { logical: { models: Array<{ name: string }> }; viewConfig: { positions?: Record<string, NodePosition> } },
@@ -537,6 +542,126 @@ function pruneViewConfigForRemovedTables(
       }
     }
   }
+}
+
+/** A diagram's tables as a key that ignores order and case: what an unstored layout was drawn for. */
+/** Whether two member lists name the same tables, spelled the same (selectors.yml writes the names as they are); unknown is never the same. */
+function sameMemberNames(a: readonly string[] | undefined, b: readonly string[] | undefined): boolean {
+  return a !== undefined && b !== undefined && a.length === b.length && [...a].sort().join('\n') === [...b].sort().join('\n');
+}
+
+function membersKeyOf(names: readonly string[]): string {
+  return names.map((n) => n.toLowerCase()).sort().join('\n');
+}
+
+/** A parsed diagram's member names: `logical.models` (names in v5, model objects in v4). */
+function parsedMemberNames(doc: Record<string, unknown>): string[] {
+  const logical = doc.logical as Record<string, unknown> | undefined;
+  const models = logical && Array.isArray(logical.models) ? logical.models as unknown[] : [];
+  return models.flatMap((m) => {
+    if (typeof m === 'string') return [m];
+    const name = m && typeof m === 'object' ? (m as { name?: unknown }).name : undefined;
+    return typeof name === 'string' ? [name] : [];
+  });
+}
+
+/** A parsed diagram's stored positions, or undefined when it has no `viewConfig.positions` map. */
+function parsedPositions(doc: Record<string, unknown>): Record<string, unknown> | undefined {
+  const vc = doc.viewConfig;
+  if (!vc || typeof vc !== 'object' || Array.isArray(vc)) return undefined;
+  const positions = (vc as Record<string, unknown>).positions;
+  return positions && typeof positions === 'object' && !Array.isArray(positions) ? positions as Record<string, unknown> : undefined;
+}
+
+/**
+ * The position objects {@link foldUnstoredPositions} put into an edit, by
+ * identity: an edit that leaves one in place did not move that table (a drag
+ * of it posts a new object, even to the same spot).
+ */
+const unstoredPoints = new WeakSet<object>();
+
+/** Whether `point` is a position folded into this edit rather than one the file stores. */
+function isUnstoredPoint(point: unknown): boolean {
+  return !!point && typeof point === 'object' && unstoredPoints.has(point);
+}
+
+const samePoint = (a: unknown, b: unknown): boolean =>
+  !!a && !!b && (a as NodePosition).x === (b as NodePosition).x && (a as NodePosition).y === (b as NodePosition).y;
+
+function samePositions(a: Record<string, unknown>, b: Record<string, unknown>): boolean {
+  const keys = Object.keys(a);
+  return keys.length === Object.keys(b).length && keys.every((k) => Object.prototype.hasOwnProperty.call(b, k) && samePoint(a[k], b[k]));
+}
+
+/**
+ * Run an edit's `mutate` over `parsed` with the positions a canvas draws but
+ * its diagram does not store (`unstored`) folded in, so the first user edit
+ * that writes the layout saves the picture the user saw: a table placed but
+ * never stored keeps its place when a neighbour moves, and a fresh diagram's
+ * ELK layout survives its first drag. Mutates `parsed` in place.
+ *
+ * - Only members with no stored position are folded in, and they are in
+ *   `parsed` while `mutate` runs, so add-table placement sees them and puts
+ *   a new table beside them, not on top of one.
+ * - Kept only when the edit itself changed the layout: a stored position
+ *   (a drag, a layout, a rename's key) or the member list (add, drop,
+ *   remove). Any other edit (a column, a description) is given back exactly
+ *   what it wrote: no position is added to it.
+ * - A position for a table the edit removed is not kept (no orphan key).
+ *
+ * `before` is the diagram as read (the codec's snapshot). Returns the names
+ * whose position the edit now stores because of the fold. `mutate` may throw
+ * (an `EditAborted` included); the throw propagates. DBML diagrams match
+ * names without case, like {@link pruneViewConfigForRemovedTables}.
+ */
+export function foldUnstoredPositions(
+  before: Record<string, unknown>,
+  parsed: Record<string, unknown>,
+  unstored: Readonly<Record<string, NodePosition>>,
+  mutate: () => void,
+  caseInsensitive = false,
+): string[] {
+  const keyOf = (name: string): string => (caseInsensitive ? name.toLowerCase() : name);
+  const members = new Set(parsedMemberNames(parsed).map(keyOf));
+  const stored = parsedPositions(parsed);
+  const storedKeys = new Set(Object.keys(stored ?? {}).map(keyOf));
+  const injected: Record<string, NodePosition> = {};
+  for (const [name, p] of Object.entries(unstored)) {
+    if (!members.has(keyOf(name)) || storedKeys.has(keyOf(name))) continue;
+    injected[name] = { x: p.x, y: p.y };
+    unstoredPoints.add(injected[name]);
+  }
+  const names = Object.keys(injected);
+  const viewConfig = parsed.viewConfig;
+  const hadViewConfig = viewConfig !== undefined;
+  if (names.length === 0 || (hadViewConfig && (!viewConfig || typeof viewConfig !== 'object' || Array.isArray(viewConfig)))) {
+    mutate();
+    return [];
+  }
+  const hadPositions = stored !== undefined;
+  const vc = (viewConfig ?? {}) as Record<string, unknown>;
+  vc.positions = { ...(stored ?? {}), ...injected };
+  parsed.viewConfig = vc;
+
+  mutate();
+
+  const after = parsedPositions(parsed);
+  if (!after) return [];
+  // The folded positions the edit left in place; the rest is the edit's own layout.
+  const untouched = names.filter((n) => after[n] === injected[n]);
+  const own = Object.fromEntries(Object.entries(after).filter(([n]) => !untouched.includes(n)));
+  const layoutChanged = !samePositions(own, parsedPositions(before) ?? {})
+    || parsedMemberNames(before).join('\n') !== parsedMemberNames(parsed).join('\n');
+  if (!layoutChanged) {
+    for (const n of untouched) delete after[n];
+    const vcAfter = parsed.viewConfig as Record<string, unknown>;
+    if (!hadPositions && Object.keys(after).length === 0) delete vcAfter.positions;
+    if (!hadViewConfig && Object.keys(vcAfter).length === 0) delete parsed.viewConfig;
+    return [];
+  }
+  const membersAfter = new Set(parsedMemberNames(parsed).map(keyOf));
+  for (const n of untouched) if (!membersAfter.has(keyOf(n))) delete after[n];
+  return names.filter((n) => after[n] !== undefined);
 }
 
 /**
@@ -668,6 +793,7 @@ import {
   validateOpenModelFilePayload,
   validateGoToTablePayload,
   validateTableActionPayload,
+  validateCopyDbtCommandPayload,
   validateLayoutFinishedPayload,
   validateWebviewErrorPayload,
   validateCrashFallbackPayload,
@@ -691,6 +817,7 @@ import {
   validateNewDbmlTableName,
   validatePoint,
   validatePositions,
+  validateUnsavedPositionsFlag,
   validateAnalyzeFeedbackPayload,
   validateCopyFeedbackReportPayload,
   validateOpenFeedbackLinkPayload,
@@ -1275,8 +1402,42 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       drawnFrom?: { members: readonly string[]; signature: string };
       /** The diagram file's signature the canvas was last re-read for because its document was not following the disk. */
       resyncedFor?: string;
+      /**
+       * Where this canvas draws the tables its diagram stores no position for
+       * ({@link placeUnstoredTables}): replaced by every payload, so it only
+       * ever names members the file left unplaced at the last draw. Written by
+       * nothing that opens or refreshes; the first user edit that writes the
+       * layout saves them with it ({@link foldUnstoredPositions}).
+       * `laidOut`: they are the webview's first-open ELK layout (an
+       * `updatePositions` with `unsaved`), for the tables in `members`.
+       */
+      unstoredPositions?: { positions: Record<string, NodePosition>; members: string; laidOut?: true };
+      /**
+       * This canvas's next first-open auto layout is the user's own doing (they
+       * just created the diagram in this window, or added tables to an empty
+       * one): the payload carries `saveLayout`, so the webview saves it.
+       * Single-use: cleared once a payload has carried it, by a saved
+       * `updatePositions`, or by a load that is not fresh.
+       */
+      saveAutoLayout?: true;
     }
   >();
+
+  /**
+   * Diagrams the user just created in this window through an ERD Studio
+   * command ({@link saveFirstLayoutWhenOpened}), by path: their first load's
+   * automatic layout is saved, as part of making the file. Taken by that
+   * load; one older than {@link PENDING_REVEAL_MS} is dropped.
+   */
+  private readonly layoutOwed = new Map<string, number>();
+
+  /**
+   * Canvases of a file that a later canvas of the same file (opened to the
+   * side) replaced in `openPanels`, oldest first, by panel key. When the
+   * canvas in the entry closes, the newest of these takes it back, so what
+   * it holds (its `unstoredPositions` among them) is not lost.
+   */
+  private readonly displacedPanels = new Map<string, Array<NonNullable<ReturnType<SemanticEditorProvider['openPanels']['get']>>>>();
 
   /**
    * Relationship reveals asked for before their canvas had loaded (Open in
@@ -2555,6 +2716,11 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     // Kept for the dispose handler: VS Code marks the panel disposed before it fires
     // onDidDispose, and a disposed panel throws "Webview is disposed" on `webview`.
     const panelWebview = webviewPanel.webview;
+    // A second canvas of the same file (opened to the side) takes the entry; the first comes back when it closes.
+    const displaced = this.openPanels.get(panelKey);
+    if (displaced && displaced.webview !== panelWebview && !this.disposedWebviews.has(displaced.webview)) {
+      this.displacedPanels.set(panelKey, [...(this.displacedPanels.get(panelKey) ?? []), displaced]);
+    }
     this.openPanels.set(panelKey, { document, webview: panelWebview, activeStage: 'logical', panel: webviewPanel });
     this.lastActivePanelKey = panelKey;
     // Usage telemetry (2.0 B13): a canvas that stays blank, timed only while it is visible.
@@ -2619,6 +2785,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           'openModelFile', 'layoutFinished', 'exportDiagram', 'requestExistingTables', 'requestNewRelationshipFiles',
           // Finding a table elsewhere: they open, select or copy, never write.
           'goToTable', 'showTableOnOtherDiagrams', 'copyTablePath', 'revealTableInLibrary',
+          // The toolbar's dbt command menu: puts a command on the clipboard; runs nothing, writes no file.
+          'copyDbtCommand',
           // The onboarding guide: fixed action ids mapped to fixed commands and a fixed URL; writes no file.
           'guide',
           // Usage telemetry only (2.0 B13): a crash's kind and area.
@@ -2683,10 +2851,10 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
               this.postLineStyle(webviewPanel.webview);
               // And what the line under each name shows: the first layout sizes the tables with it.
               this.postTableSubtitle(webviewPanel.webview);
-              // The initial load is the one refresh path allowed to persist
-              // auto-computed positions for models that lack them.
+              // The first load: its timing and canvas-open telemetry. Like every
+              // other load it writes nothing (a diagram just created here aside).
               const timing: Partial<Record<SubjectAreaLoadStep, number>> = {};
-              const posted = await this.sendSubjectAreaData(document, webviewPanel.webview, panelKey, { persistPositions: true, timing });
+              const posted = await this.sendSubjectAreaData(document, webviewPanel.webview, panelKey, { firstLoad: true, timing });
               const loadMs = Date.now() - readyAt;
               const filesRead = this.tableLibraryService.tableFileReads() - readsAtReady;
               canvasLog.info(posted === undefined
@@ -2877,12 +3045,18 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           }
           case 'updatePositions': {
             const payload = (message as Record<string, unknown>).payload as
-              | { positions: Record<string, { x: number; y: number }>; annotations?: unknown }
+              | { positions: Record<string, { x: number; y: number }>; annotations?: unknown; unsaved?: unknown }
               | undefined;
             if (payload?.positions) {
-              const positionsError = validatePositions(payload.positions);
+              const positionsError = validatePositions(payload.positions) ?? validateUnsavedPositionsFlag(payload.unsaved);
               if (positionsError) {
                 this.post(webviewPanel.webview, { type: 'error', payload: { message: `Failed to save positions: ${positionsError}` } });
+                break;
+              }
+              if (payload.unsaved === true) {
+                // The first-open auto layout of a diagram the user did not just make:
+                // what the canvas now draws, held and never written.
+                this.holdAutoLayout(panelKey, webviewPanel.webview, payload.positions);
                 break;
               }
               const annotations = validateAnnotationPositions(payload.annotations);
@@ -3234,6 +3408,17 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
               break;
             }
             await this.handleTableAction(message.type, (payload as { modelName: string }).modelName.trim(), document, webviewPanel.webview);
+            break;
+          }
+          case 'copyDbtCommand': {
+            // The toolbar's dbt command menu. Copies; runs nothing, writes nothing (physical allowlist).
+            const payload = (message as { payload?: unknown }).payload;
+            const payloadError = validateCopyDbtCommandPayload(payload);
+            if (payloadError) {
+              this.post(webviewPanel.webview, { type: 'error', payload: { message: payloadError } });
+              break;
+            }
+            await this.handleCopyDbtCommand(document, webviewPanel.webview, payload as CopyDbtCommandMessage['payload']);
             break;
           }
           // --- Feedback dialog -------------------------------------------
@@ -3927,6 +4112,62 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       await vscode.commands.executeCommand(REVEAL_IN_TABLE_LIBRARY_COMMAND, table.name, table.filePath);
     } else {
       await vscode.commands.executeCommand(REVEAL_IN_TABLE_LIBRARY_COMMAND, table.name);
+    }
+  }
+
+  /**
+   * The toolbar's dbt command menu (`copyDbtCommand`, GitHub #378): put
+   * `dbt <verb> --select …` on the clipboard for the selected tables, or for
+   * every table on the diagram, and say what was copied (`canvasNotice`).
+   * Each table's dbt model, and whether it is in dbt at all, is the node the
+   * physical stage finds it as (`dbtNodeNamesOf`, the lookup
+   * `buildPhysicalSubjectArea` uses), in dbt's own spelling: `--select`
+   * compares names exactly. Past `DBT_COMMAND_MAX_LENGTH`, with nothing
+   * selected, the diagram's selector is copied while selectors.yml is current
+   * and names every table the same way. Runs
+   * nothing and writes no file, on either stage; in a folder without dbt it
+   * says so and copies nothing.
+   */
+  private async handleCopyDbtCommand(
+    document: vscode.TextDocument,
+    webview: vscode.Webview,
+    payload: CopyDbtCommandMessage['payload'],
+  ): Promise<void> {
+    const notice = (message: string): void => {
+      this.post(webview, { type: 'canvasNotice', payload: { message } } satisfies CanvasNoticeMessage);
+    };
+    if (this.logicalOnly) {
+      notice(DBT_COMMAND_NEEDS_DBT_MESSAGE);
+      return;
+    }
+    try {
+      const manifest = await this.manifestService.loadManifest(this.workspaceRoot);
+      const ymlData = await this.ymlParserService.loadYmlData(this.workspaceRoot, undefined);
+      const catalog = await this.loadCatalog();
+      const unified = this.subjectAreaService.getSubjectArea(document.uri.fsPath, { dbtKeyIndex: dbtKeyIndexOf(ymlData, manifest) });
+      const dbtNodes = this.subjectAreaService.dbtNodeNamesOf(unified, ymlData, manifest, catalog);
+      const tables: DbtCommandTable[] = unified.logical.models.map((model) => ({
+        name: model.name,
+        dbtModel: dbtNodes.get(model.name.toLowerCase()) ?? null,
+      }));
+      // selectors.yml names a table as `dbtModelNameOf` does, which is its own
+      // name unless two schema folders share it: its selector stands in for the
+      // list only when it names every table as dbt does.
+      const dbtModels = this.subjectAreaService.dbtModelNamesOf(unified, ymlData, manifest);
+      const selectorNamesTheSame = unified.logical.models.every((model, i) =>
+        tables[i].dbtModel === null || dbtModelNameOf(model, dbtModels) === tables[i].dbtModel);
+      const result = buildDbtCommand({
+        verb: payload.verb,
+        tables,
+        selected: payload.tables?.map((name) => name.trim()),
+        currentSelector: () => selectorNamesTheSame ? this.selectorsService.currentSelectorFor(document.uri.fsPath) : undefined,
+      });
+      if (result.kind === 'copy') await vscode.env.clipboard.writeText(result.text);
+      notice(result.message);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      logHandlerFailure(`[SemanticEditorProvider] Copying a dbt command failed: ${message}`, err);
+      this.post(webview, { type: 'error', payload: { message: `Failed to copy a dbt command: ${message}` } });
     }
   }
 
@@ -5123,7 +5364,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     const unsaved: string[] = [];
     const expected = [document.uri.fsPath, ...(this.editedTablePaths.get(panelKey) ?? [])];
     const isDbml = this.isDbmlDocument(document);
-    const diskText = isDbml ? this.diskTextOf(document.uri.fsPath) : undefined;
+    // What the diagram held before this step: its members decide whether selectors.yml is updated.
+    const membersFrom = this.diskTextOf(document.uri.fsPath);
+    const diskText = isDbml ? membersFrom : undefined;
     // The undo of a drag rewinds the diagram's erd_layout and nothing else
     // (a minimal-range edit of the diagram alone): nothing the library or
     // the trees show changed.
@@ -5174,6 +5417,22 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     this.tableLibraryService.invalidateIndex();
     await this.sendSubjectAreaData(document, webview, panelKey);
     this._onDidWriteSubjectArea.fire({ uri: document.uri, modelLibraryChanged: true });
+    // selectors.yml lists the diagram's tables by name: only a step that adds,
+    // removes or renames one (as the edit it rewinds did) updates an existing
+    // file (never creates one). A drag, a colour or a column changes nothing there.
+    if (deletedHere.length > 0 || !sameMemberNames(this.memberNamesOfText(document, membersFrom), this.memberNamesOfText(document, document.getText()))) {
+      this.selectorsService.scheduleRegenerate();
+    }
+  }
+
+  /** The diagram's member names as `text` has them, or undefined when it does not read. */
+  private memberNamesOfText(document: vscode.TextDocument, text: string | undefined): string[] | undefined {
+    if (text === undefined) return undefined;
+    try {
+      return parsedMemberNames(this.parseSubjectAreaFile(document, text).parsed);
+    } catch {
+      return undefined;
+    }
   }
 
   /** What `filePath` holds on disk, or undefined when it cannot be read. */
@@ -5291,7 +5550,6 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     mutator: (section: Record<string, unknown>, parsed: Record<string, unknown>) => void,
     options: Parameters<SemanticEditorProvider['applySubjectAreaEdit']>[2],
   ): Promise<boolean> {
-    const { refreshWebview = true, webview, stage, modelFiles, errorLabel, onSuccess } = options;
     const at = options.at ?? newEditCursor();
     const panelKey = document.uri.toString();
 
@@ -5302,15 +5560,38 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     const file = this.parseSubjectAreaFile(document, text);
     const parsed = file.parsed;
     at.storage = file.storage;
-    const section = this.getStageSection(parsed, stage);
+    const section = this.getStageSection(parsed, options.stage);
 
     at.stage = 'mutate';
+    // Positions this canvas draws but the file does not store ride along when the edit writes the layout.
+    const unstored = this.openPanels.get(panelKey)?.unstoredPositions;
     try {
-      mutator(section, parsed);
+      if (unstored && !this.holdsBackUnstoredPositions(file)) {
+        foldUnstoredPositions(file.snapshot, parsed, unstored.positions, () => mutator(section, parsed), file.storage === 'dbml');
+      } else {
+        mutator(section, parsed);
+      }
     } catch (err) {
       if (err instanceof EditAborted) return false;
       throw err;
     }
+    // The panel keeps holding what it drew: the fold never overrides a stored
+    // position, the next payload replaces or clears the hold
+    // (`placeUnstoredTables`), and the undo of this edit draws it again
+    // instead of laying a fresh diagram out a second time.
+    return this.writeSubjectAreaEdit(document, file, text, options, at);
+  }
+
+  /** {@link runSubjectAreaEdit} once the mutator has run: the write, in the storage's own way. */
+  private async writeSubjectAreaEdit(
+    document: vscode.TextDocument,
+    file: ParsedSubjectArea,
+    text: string,
+    options: Parameters<SemanticEditorProvider['applySubjectAreaEdit']>[2],
+    at: EditCursor,
+  ): Promise<boolean> {
+    const { refreshWebview = true, webview, modelFiles, errorLabel, onSuccess } = options;
+    const panelKey = document.uri.toString();
     // Only positions or sticky-note boxes moved (a drag, a layout, a resize):
     // the layout is all that is written, in either storage, and the sidebar
     // trees are told nothing they show changed.
@@ -6563,11 +6844,14 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * Parse the document, build display domain for the active stage, and send to webview.
    * On parse failure, sends an error message instead.
    *
-   * Models that lack a viewConfig position get one computed. By default the
-   * computed positions are merged into the payload in memory only, so
-   * watcher-driven refreshes (manifest / yml changes, external edits) never
-   * write to the domain file. Pass `persistPositions: true` (the `ready` path)
-   * to also write them back via WorkspaceEdit so they survive reloads.
+   * Models that lack a viewConfig position get one ({@link placeUnstoredTables}):
+   * merged into the payload in memory and held by the panel, never written,
+   * so neither opening a diagram nor a refresh (manifest / yml changes,
+   * external edits, a branch switch) changes the domain file. The first user
+   * edit that writes the layout saves them ({@link foldUnstoredPositions}).
+   * `firstLoad` (the `ready` path) marks the first load for its timing and
+   * telemetry; for a diagram the user just created in this window
+   * ({@link saveFirstLayoutWhenOpened}) it also saves that load's layout.
    * `timing`, when given, is filled with the milliseconds each step took
    * (the `ready` path's #371 telemetry: which step held a slow open).
    */
@@ -6575,7 +6859,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     document: vscode.TextDocument,
     webview: vscode.Webview,
     panelKey?: string,
-    options: { persistPositions?: boolean; reshowError?: boolean; timing?: Partial<Record<SubjectAreaLoadStep, number>> } = {},
+    options: { firstLoad?: boolean; reshowError?: boolean; timing?: Partial<Record<SubjectAreaLoadStep, number>> } = {},
   ): Promise<number | undefined> {
     const errorKey = panelKey ?? document.uri.toString();
     const reshow = options.reshowError === true;
@@ -6631,8 +6915,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       if (panel && this.logicalOnly) { panel.activeStage = 'logical'; }
       const activeStage = panel?.activeStage ?? 'logical';
       // The first load's phases at info, a refresh's at debug.
-      const timer = phaseTimer(canvasLog, `${options.persistPositions ? 'Open' : 'Refresh'} ${document.uri.fsPath}`,
-        { level: options.persistPositions ? 'info' : 'debug' });
+      const timer = phaseTimer(canvasLog, `${options.firstLoad ? 'Open' : 'Refresh'} ${document.uri.fsPath}`,
+        { level: options.firstLoad ? 'info' : 'debug' });
 
       // One phase per dbt read, so the log names the slow one (#371).
       timer.phase('reading dbt manifest.json');
@@ -6653,33 +6937,39 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
       // A fresh domain — models but not one stored position, typically written
       // by an AI assistant with `viewConfig: {}` — is laid out by the webview's
-      // ELK auto layout instead, which persists through `updatePositions` (one
-      // edit, one undo step). The simple placement below still goes out in the
-      // payload so the first paint is never at (0,0), but it is not written:
-      // a layout ELK cannot finish falls back to the webview's grid, which is
-      // saved the same way, and only if even that fails does the next open
-      // ask again.
-      // A DBML diagram's positions live in its Project's `erd_layout`,
-      // written the same way.
-      const autoLayout = activeStage === 'logical' && isFreshLayout(unifiedDomain);
+      // ELK auto layout. The simple placement below still goes out in the
+      // payload so the first paint is never at (0,0). Neither is written: the
+      // webview sends its layout back as `updatePositions` with `unsaved`,
+      // which the panel holds and draws again on every refresh (no second
+      // layout, no jump), until the user's first layout edit saves it. Only a
+      // layout owed to the user's own create or add (`saveAutoLayout`) goes
+      // out with `saveLayout`, and the webview saves it as the Layout button
+      // does. A DBML diagram's positions live in its Project's `erd_layout`.
+      const fresh = activeStage === 'logical' && isFreshLayout(unifiedDomain);
 
-      // Auto-assign positions for models that lack them (e.g. added by AI agents)
+      // Place the models that lack a position (e.g. added by AI agents).
       mark('positions');
-      const computed = this.computeMissingPositions(unifiedDomain);
-      if (computed) {
-        if (options.persistPositions && !autoLayout) {
-          timer.phase(`saving positions for ${plural(Object.keys(computed).length, 'new table')}`);
-          const positionsWritten = await this.autoPositionNewTables(document, computed);
+      const placed = this.placeUnstoredTables(key, unifiedDomain);
+      const autoLayout = fresh && !placed?.laidOut;
+      // A logical load with tables, every one placed or some stored: no auto layout is owed any more.
+      if (panel && activeStage === 'logical' && unifiedDomain.logical.models.length > 0 && !fresh) panel.saveAutoLayout = undefined;
+      const owed = options.firstLoad === true && this.takeOwedLayout(document.uri.fsPath);
+      if (owed && autoLayout && panel) panel.saveAutoLayout = true;
+      if (placed) {
+        if (owed && !autoLayout) {
+          // The diagram the user just made opens partly placed: its placement is saved with it.
+          timer.phase(`saving positions for ${plural(Object.keys(placed.positions).length, 'new table')}`);
+          const positionsWritten = await this.autoPositionNewTables(document, placed.positions);
           if (positionsWritten === 'full') {
             // The full edit path may have settled more than the positions: read the diagram again.
             unifiedDomain = this.subjectAreaService.getSubjectArea(document.uri.fsPath, { dbtKeyIndex });
           }
           // A layout-only write stored exactly the positions merged below: nothing to read again.
         }
-        // Whether or not they were persisted, the payload carries the positions
-        // so the canvas never renders a model at (0,0).
-        unifiedDomain.viewConfig.positions = { ...(unifiedDomain.viewConfig.positions ?? {}), ...computed };
+        // The payload carries the positions so the canvas never renders a model at (0,0).
+        unifiedDomain.viewConfig.positions = { ...(unifiedDomain.viewConfig.positions ?? {}), ...placed.positions };
       }
+      const saveLayout = autoLayout && panel?.saveAutoLayout === true;
 
       timer.phase(`building the ${activeStage} canvas`);
       let postedTables: number;
@@ -6695,7 +6985,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         mark('other');
         this.cancelCanvasContext(webview);
         this.noteDrawn(key, unifiedDomain.logical.models.map((m) => m.name));
-        if (options.persistPositions) this.recordCanvasOpen(document, 'physical', physicalDomain.models.length, catalog !== undefined);
+        if (options.firstLoad) this.recordCanvasOpen(document, 'physical', physicalDomain.models.length, catalog !== undefined);
       } else {
         mark('display');
         const domain = SubjectAreaService.toLogicalStage(unifiedDomain);
@@ -6707,9 +6997,14 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           type: 'domainLoaded',
           payload: displayDomain,
           ...(autoLayout ? { autoLayout: true } : {}),
+          ...(saveLayout ? { saveLayout: true as const } : {}),
           ...this.manifestHintFlag(),
           ...this.logicalOnlyFlag(),
         });
+        // Asked once: the webview saves the layout this payload asks for. A
+        // later load (a watcher, a branch switch) is not the user's doing, so
+        // if this layout never comes back it is held, not saved.
+        if (saveLayout && panel) panel.saveAutoLayout = undefined;
         mark('other');
         // What the canvas knows beyond the diagram, once the diagram has gone out.
         void this.sendCanvasContext(webview, displayDomain.models.map((m) => m.name), unifiedDomain.layer, document);
@@ -6722,7 +7017,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           // A single-file DBML dropped into a layer folder (§2.5): offer Import.
           this.post(webview, { type: 'dbmlEmbeddedTables' });
         }
-        if (options.persistPositions) {
+        if (options.firstLoad) {
           this.recordCanvasOpen(document, 'logical', displayDomain.models.length, catalog !== undefined);
           if (displayDomain.models.length === 0) telemetry.feature('emptyCanvas');
         }
@@ -7048,9 +7343,101 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   }
 
   /**
-   * Persist auto-computed positions to the document via WorkspaceEdit so they
-   * survive reloads. Only called from the `ready` path — see sendSubjectAreaData.
-   * Returns true if positions were written.
+   * Where this canvas draws the tables `unifiedDomain` stores no position
+   * for, remembered as the panel's `unstoredPositions` (replaced, never
+   * merged, so a branch switch drops what no longer applies). Pure but for
+   * that: nothing is written. While the panel holds the webview's own
+   * first-open ELK layout for these same tables and the file still stores no
+   * position, those positions are drawn again (`laidOut`), so a refresh
+   * never re-runs the layout or jumps the tables back to the host's
+   * placement; otherwise (a stored position may sit where the held layout
+   * draws another table) they are computed
+   * ({@link computeMissingPositions}). Null when every table has a position.
+   */
+  private placeUnstoredTables(
+    panelKey: string,
+    unifiedDomain: Parameters<SemanticEditorProvider['computeMissingPositions']>[0],
+  ): { positions: Record<string, NodePosition>; laidOut: boolean } | null {
+    const entry = this.openPanels.get(panelKey);
+    const computed = this.computeMissingPositions(unifiedDomain);
+    if (!computed) {
+      if (entry) entry.unstoredPositions = undefined;
+      return null;
+    }
+    const members = membersKeyOf(unifiedDomain.logical.models.map((m) => m.name));
+    const held = entry?.unstoredPositions;
+    // Only while the file still stores no position: the held layout was drawn for an empty one, and a stored
+    // position (an AI assistant's, a checkout's) may sit where it draws another table.
+    if (held?.laidOut && held.members === members && isFreshLayout(unifiedDomain)
+      && Object.keys(computed).every((name) => held.positions[name])) {
+      const positions = Object.fromEntries(Object.keys(computed).map((name) => [name, held.positions[name]]));
+      entry!.unstoredPositions = { positions, members, laidOut: true };
+      return { positions, laidOut: true };
+    }
+    if (entry) entry.unstoredPositions = { positions: { ...computed }, members };
+    return { positions: computed, laidOut: false };
+  }
+
+  /**
+   * The webview's first-open ELK layout, sent as an `updatePositions` with
+   * `unsaved` (the host said this layout is not to be saved): held as what
+   * this canvas draws for the tables its diagram stores no position for, and
+   * never written. Positions for any other table (a member with a stored
+   * position, or no member at all) are ignored.
+   */
+  private holdAutoLayout(panelKey: string, webview: vscode.Webview, positions: Record<string, { x: number; y: number }>): void {
+    const entry = this.openPanels.get(panelKey);
+    const held = entry?.webview === webview ? entry.unstoredPositions : undefined;
+    if (!entry || !held) return;
+    const byLower = new Map(Object.keys(held.positions).map((name) => [name.toLowerCase(), name] as const));
+    const laidOut: Record<string, NodePosition> = { ...held.positions };
+    for (const [name, p] of Object.entries(positions)) {
+      const own = held.positions[name] ? name : byLower.get(name.toLowerCase());
+      if (own) laidOut[own] = { x: p.x, y: p.y };
+    }
+    entry.unstoredPositions = { positions: laidOut, members: held.members, laidOut: true };
+  }
+
+  /**
+   * A DBML diagram whose layout an unasked-for position must not change:
+   * read-only (a repeated Note name, a second Project), or below version 8
+   * listing both tables of a pair (as 2.0.2 left it), which a write would
+   * lift to version 8 with qualified lines (D-17; the user's own next edit
+   * makes that switch, as doctor says). Its unstored positions stay held.
+   */
+  private holdsBackUnstoredPositions(file: ParsedSubjectArea): boolean {
+    if (file.storage !== 'dbml') return false;
+    if (file.writable === false) return true;
+    const pair = (file.members?.rows ?? []).some((r) => r.ref.toLowerCase() !== r.name.toLowerCase());
+    return pair && (file.dbmlSchemaVersion ?? 7) < 8;
+  }
+
+  /**
+   * The user just created `domainPath` in this window through an ERD Studio
+   * command (New Diagram, an import or draft's Keep, Import from dbt): its
+   * first load's automatic layout is saved, as part of making the file.
+   * Call before the diagram opens.
+   */
+  saveFirstLayoutWhenOpened(domainPath: string): void {
+    this.layoutOwed.set(path.resolve(domainPath), Date.now());
+  }
+
+  /** Whether `domainPath`'s first load owes the user a saved layout ({@link saveFirstLayoutWhenOpened}); taken once. */
+  private takeOwedLayout(domainPath: string): boolean {
+    const key = path.resolve(domainPath);
+    const at = this.layoutOwed.get(key);
+    if (at === undefined) return false;
+    this.layoutOwed.delete(key);
+    return Date.now() - at <= PENDING_REVEAL_MS;
+  }
+
+  /**
+   * Save the host's placement of the tables a diagram the user just created
+   * stores no position for ({@link saveFirstLayoutWhenOpened}): its first
+   * load is part of the user's own create, so the picture is kept. Every
+   * other load writes nothing ({@link placeUnstoredTables}). A DBML diagram
+   * that holds back positions ({@link holdsBackUnstoredPositions}), or whose
+   * write is refused, is left as it is and the canvas still draws them.
    */
   private async autoPositionNewTables(
     document: vscode.TextDocument,
@@ -7074,17 +7461,10 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     };
     if (!this.isDbmlDocument(document)) return save();
     // A DBML diagram's save rewrites its erd_layout, which can be refused (the
-    // diagram is read-only, or erd_layout holds a merge conflict). A refresh
-    // path never fails on a write: the canvas still loads with the computed
-    // positions, and the next open asks again.
+    // diagram is read-only, or erd_layout holds a merge conflict). A load
+    // never fails on a write: the canvas still loads with the computed positions.
     try {
-      const file = this.parseSubjectAreaFile(document);
-      if (file.writable === false) return false;
-      // A diagram below version 8 that lists both tables of a pair (as 2.0.2 left it) would be lifted to
-      // version 8 with qualified lines by this write: opening it writes nothing (D-17), the canvas places
-      // the tables from the payload, and the next real edit makes the switch (as doctor says).
-      const pair = (file.members?.rows ?? []).some((r) => r.ref.toLowerCase() !== r.name.toLowerCase());
-      if (pair && (file.dbmlSchemaVersion ?? 7) < 8) return false;
+      if (this.holdsBackUnstoredPositions(this.parseSubjectAreaFile(document))) return false;
       return await save();
     } catch (err) {
       if (err instanceof EditRefused || err instanceof DbmlEditRefused) {
@@ -7225,8 +7605,11 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   closeCanvasesOf(fsPaths: readonly string[]): void {
     for (const [panelKey, entry] of Array.from(this.openPanels.entries())) {
       if (!fsPaths.some((p) => samePath(entry.document.uri.fsPath, p))) continue;
-      try { entry.panel?.dispose(); } catch { /* already disposed */ }
-      this.forgetPanel(panelKey, entry.webview);
+      // Every canvas of the file: the one in the entry and any it replaced.
+      for (const canvas of [...(this.displacedPanels.get(panelKey) ?? []), entry]) {
+        try { canvas.panel?.dispose(); } catch { /* already disposed */ }
+        this.forgetPanel(panelKey, canvas.webview);
+      }
     }
   }
 
@@ -7683,8 +8066,16 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   /** Drop everything kept for one canvas (on its dispose, or when it is found gone). */
   private forgetPanel(panelKey: string, webview: vscode.Webview): void {
     this.disposedWebviews.add(webview);
+    const displaced = (this.displacedPanels.get(panelKey) ?? []).filter((e) => e.webview !== webview && !this.disposedWebviews.has(e.webview));
     // Only this panel's entry: another canvas of the same file may have replaced it.
-    if (this.openPanels.get(panelKey)?.webview === webview) this.openPanels.delete(panelKey);
+    if (this.openPanels.get(panelKey)?.webview === webview) {
+      this.openPanels.delete(panelKey);
+      // The canvas it replaced is still open: it is the file's canvas again, with what it holds (`unstoredPositions`).
+      const back = displaced.pop();
+      if (back) this.openPanels.set(panelKey, back);
+    }
+    if (displaced.length > 0) this.displacedPanels.set(panelKey, displaced);
+    else this.displacedPanels.delete(panelKey);
     if (this.lastActivePanelKey === panelKey && !this.openPanels.has(panelKey)) this.lastActivePanelKey = undefined;
     this.editedTablePaths.delete(panelKey);
     this.deletedTablePaths.delete(panelKey);
@@ -9410,10 +9801,11 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         (_section, parsed) => {
           const existingViewConfig = (parsed.viewConfig ?? {}) as Record<string, unknown>;
           const existingPositions = (existingViewConfig.positions ?? {}) as Record<string, unknown>;
-          // Every table dropped where it already was, and no note moved: nothing to write.
+          // Every table dropped where the file already has it, and no note moved: nothing to write.
+          // A position the file does not store yet (folded in, {@link foldUnstoredPositions}) is written.
           const unmoved = Object.entries(positions).every(([name, p]) => {
             const old = existingPositions[name] as { x?: unknown; y?: unknown } | undefined;
-            return old?.x === p.x && old?.y === p.y;
+            return old?.x === p.x && old?.y === p.y && !isUnstoredPoint(old);
           });
           if (unmoved && annotations.length === 0) throw new EditAborted();
           // Merge incoming positions over disk positions — prevents concurrent tabs from
@@ -9433,6 +9825,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         },
         { refreshWebview: false, webview, stage: 'logical', errorLabel: 'Failed to save layout positions.', onLayoutOnly: () => { layoutOnly = true; } },
       );
+      // A layout is saved: an auto layout owed to the user's own create or add has had its save.
+      const entry = this.openPanels.get(document.uri.toString());
+      if (written && entry) entry.saveAutoLayout = undefined;
       const what = [
         ...(Object.keys(positions).length > 0 ? [plural(Object.keys(positions).length, 'table')] : []),
         ...(annotations.length > 0 ? [plural(annotations.length, 'note')] : []),
@@ -9971,9 +10366,10 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * files in ONE `applySubjectAreaEdit` — one save, one refresh, one undo step.
    *
    * An empty domain is left with no stored position for any model, so it is
-   * a fresh layout: the refresh carries `autoLayout: true` and the webview
-   * runs the same ELK layout as the Layout button. A domain that already has
-   * models gets host placement for the new ones instead.
+   * a fresh layout: the refresh carries `autoLayout: true` and `saveLayout`,
+   * and the webview runs the same ELK layout as the Layout button and saves
+   * it (the user's own edit). A domain that already has models gets host
+   * placement for the new ones instead.
    *
    * Cancelling the picker writes and posts nothing.
    */
@@ -10202,6 +10598,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         })();
       // Everything new to the diagram: the named tables, then the files under what the diagram calls them.
       const addedNames = [...draft.modelNames, ...byFileAdded.refs];
+      // Tables added to an empty diagram: the auto layout the refresh asks for is this edit's, so it is saved.
+      let layoutOwed = false;
       await this.applySubjectAreaEdit(
         document,
         (sec, p) => {
@@ -10228,9 +10626,11 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             vc.positions = { ...positions, ...dropGridPositions(added, dropAt) };
           } else if (wasEmpty) {
             // Keep it a fresh layout (isFreshLayout): no stored position for
-            // any model, so the refresh asks the webview for an ELK layout.
+            // any model, so the refresh asks the webview for an ELK layout,
+            // which it saves (`saveAutoLayout`) as part of this edit.
             for (const name of addedNames) delete positions[name];
             if (vc.positions !== undefined) vc.positions = positions;
+            layoutOwed = true;
           } else {
             // A member already listed (made from dbt where it was drawn as missing) keeps its place.
             const unplaced = addedNames.filter((name) => !Object.prototype.hasOwnProperty.call(positions, name));
@@ -10248,6 +10648,11 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           ...(routed.saves.length > 0 ? { modelFiles: { save: routed.saves } } : {}),
           ...(byFileAdded.renames.size > 0 ? { renamedMembers: byFileAdded.renames } : {}),
           ...(byFileAdded.refs.length > 0 ? { addedMembers: new Map(byFileAdded.refs.map((ref, i) => [ref, files[i].filePath])) } : {}),
+          // Before the refresh that asks for the layout.
+          onApplied: () => {
+            const entry = this.openPanels.get(document.uri.toString());
+            if (layoutOwed && entry) entry.saveAutoLayout = true;
+          },
           onSuccess: () => {
             if (fromDbt) telemetry.feature('addFromDbt');
             this.selectorsService.scheduleRegenerate();
@@ -10632,10 +11037,10 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
 
       const unifiedDomain = this.subjectAreaService.getSubjectArea(document.uri.fsPath, { dbtKeyIndex });
 
-      // Same in-memory auto-positioning as sendSubjectAreaData — never a write here.
-      const computed = this.computeMissingPositions(unifiedDomain);
-      if (computed) {
-        unifiedDomain.viewConfig.positions = { ...(unifiedDomain.viewConfig.positions ?? {}), ...computed };
+      // Same in-memory placement as sendSubjectAreaData (a held first-open layout included) — never a write here.
+      const placed = this.placeUnstoredTables(panelKey, unifiedDomain);
+      if (placed) {
+        unifiedDomain.viewConfig.positions = { ...(unifiedDomain.viewConfig.positions ?? {}), ...placed.positions };
       }
 
       const reply = requestId !== undefined ? { requestId } : {};

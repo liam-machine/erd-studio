@@ -1010,14 +1010,21 @@ export class SubjectAreaService {
   dbtModelNamesOf(unified: UnifiedSubjectArea, ymlData: YmlData, manifest?: ManifestData): Map<string, string | null> {
     const out = new Map<string, string | null>();
     // Nothing is indexed for a diagram with no such table (every diagram of a project with no shared name).
-    const isShared = this.sharedNameRule();
-    if (!unified.logical.models.some(isShared)) return out;
+    if (!this.hasSharedNameTable(unified)) return out;
     const match = this.dbtMatcher(unified, ymlData, manifest);
     for (const model of unified.logical.models) {
       const found = match(model);
       if (found.schemas) out.set(model.name.toLowerCase(), found.dbtName ?? null);
     }
     return out;
+  }
+
+  /**
+   * Whether `unified` has a table whose name two schema folders share: the
+   * only tables `dbtModelNamesOf` reads the dbt data for.
+   */
+  hasSharedNameTable(unified: UnifiedSubjectArea): boolean {
+    return unified.logical.models.some(this.sharedNameRule());
   }
 
   /** Whether a table's name is shared by two schema folders: two members of its diagram, or two tables of the library. */
@@ -1042,6 +1049,78 @@ export class SubjectAreaService {
     return out;
   }
 
+  /**
+   * What the physical stage finds each of `unified`'s tables as in dbt (the
+   * schema yml model, the manifest node, the source file, the catalog node),
+   * through {@link dbtMatcher}. The one lookup, shared by
+   * `buildPhysicalSubjectArea` and `dbtNodeNamesOf`, so the name the dbt
+   * command copies is the model the Physical tab draws.
+   */
+  private physicalSources(
+    unified: UnifiedSubjectArea,
+    ymlData: YmlData,
+    manifest: ManifestData | undefined,
+    catalog: CatalogData | undefined,
+  ) {
+    const ymlIndex = indexByNormalisedName(ymlData.models);
+    const catalogByRelation = catalog
+      ? indexByRelation([...catalog.byUniqueId.values()].filter(n => n.resourceType === 'model'), n => relationKey(n.schema, n.relationName))
+      : undefined;
+    const match = this.dbtMatcher(unified, ymlData, manifest);
+    return (model: SemanticTable) => {
+      const { byName, byRelation, dbtName, tableName, schemas } = match(model);
+      // Everything below is looked up by the dbt model's own name, which is
+      // the logical name unless the relation index resolved it. A table two
+      // schema folders share that matched no dbt model looks up nothing.
+      const key = dbtName === undefined ? undefined : normaliseName(dbtName);
+      const ymlModel = dbtName === undefined ? undefined : ymlData.models.get(dbtName) ?? ymlIndex.get(key!);
+      const manifestModel = byName ?? byRelation;
+      // `sourceFiles` is keyed by an already-normalised stem — look it up with
+      // normaliseName(), never through indexByNormalisedName().
+      const sourceFile = key === undefined ? undefined : ymlData.sourceFiles?.get(key);
+      // A disabled model's .sql is on disk but `ref()` to it fails, so the bare
+      // file must not upgrade it to "exists". The veto applies to THAT branch
+      // only: a disabled model still declared in a yml keeps what the yml says,
+      // because that is a different question.
+      const disabled = key === undefined ? false : manifest?.disabledModels.has(key) ?? false;
+      // unique_id first, then the short-name index (catalogNodeFor — the
+      // same lookup Import from dbt seeds types through); the relation index
+      // only when no manifest resolved the model. A table two schema folders share
+      // never takes the short-name index's node (owner decision H): with no
+      // manifest node to say which, only its own relation finds its columns.
+      const relation = model.alias ?? tableName ?? model.name;
+      const catalogNode = (key === undefined || (schemas !== undefined && !manifestModel) ? undefined : catalogNodeFor(catalog, manifestModel, key))
+        ?? (manifestModel ? undefined : onlyOne((schemas ?? [model.schema]).map((s) => catalogByRelation?.get(relationKey(s, relation)))));
+      const exists = !!ymlModel || !!manifestModel || !!catalogNode || (!!sourceFile && !disabled);
+      return { byName, byRelation, dbtName, tableName, schemas, key, ymlModel, manifestModel, sourceFile, disabled, catalogNode, exists };
+    };
+  }
+
+  /**
+   * The dbt node each of `unified`'s tables is, by lower-case reference, as
+   * the physical stage finds it ({@link physicalSources}): the manifest
+   * node's name, else the source file's stem (what dbt names a model), else
+   * the schema yml model's, else the catalog node's; null for a table the physical stage draws as
+   * not in dbt. dbt's own spelling, so a table matched through its
+   * warehouse relation (`orders_fact` for `fct_order`) or by a name in
+   * another case (`DIM_Customer` for `dim_customer`) is named as dbt names
+   * it: `--select` compares names exactly. For the canvas's dbt command.
+   */
+  dbtNodeNamesOf(unified: UnifiedSubjectArea, ymlData: YmlData, manifest?: ManifestData, catalog?: CatalogData): Map<string, string | null> {
+    const sourcesOf = this.physicalSources(unified, ymlData, manifest, catalog);
+    const out = new Map<string, string | null>();
+    for (const model of unified.logical.models) {
+      const found = sourcesOf(model);
+      const fileStem = found.sourceFile !== undefined && !found.disabled
+        ? path.basename(found.sourceFile).replace(/\.[^.]+$/, '')
+        : undefined;
+      const name = !found.exists ? undefined
+        : found.manifestModel?.name ?? fileStem ?? found.ymlModel?.name ?? found.catalogNode?.name;
+      out.set(model.name.toLowerCase(), name ?? null);
+    }
+    return out;
+  }
+
   buildPhysicalSubjectArea(
     unifiedDomain: UnifiedSubjectArea,
     ymlData: YmlData,
@@ -1051,11 +1130,7 @@ export class SubjectAreaService {
     const logicalStage = unifiedDomain.logical;
     const physicalModelNames = new Set<string>();
 
-    const ymlIndex = indexByNormalisedName(ymlData.models);
-    const catalogByRelation = catalog
-      ? indexByRelation([...catalog.byUniqueId.values()].filter(n => n.resourceType === 'model'), n => relationKey(n.schema, n.relationName))
-      : undefined;
-    const match = this.dbtMatcher(unifiedDomain, ymlData, manifest);
+    const sourcesOf = this.physicalSources(unifiedDomain, ymlData, manifest, catalog);
     // dbt model name (normalised) → logical name, for models resolved through
     // the relation index (or, for a name two schema folders share, any model
     // found under another name), so their relationship tests land on the
@@ -1069,7 +1144,7 @@ export class SubjectAreaService {
     // the rows are keyed to the logical columns, and the physical stage shows what the dbt project holds.
     // `test/unit/sampleRowsStages.test.ts` holds this.
     const models: DisplayTable[] = logicalStage.models.map(model => {
-        const { byName, byRelation, dbtName, tableName, schemas } = match(model);
+        const { byRelation, dbtName, tableName, schemas, key, ymlModel, manifestModel, sourceFile, disabled, catalogNode } = sourcesOf(model);
         if (byRelation) {
           resolvedViaRelation.set(normaliseName(byRelation.name), model.name);
         } else if (dbtName !== undefined && normaliseName(dbtName) !== normaliseName(model.name)) {
@@ -1078,28 +1153,6 @@ export class SubjectAreaService {
         if (schemas && (dbtName === undefined || normaliseName(dbtName) !== normaliseName(model.name))) {
           notTheirDbtModel.add(normaliseName(model.name));
         }
-        // Everything below is looked up by the dbt model's own name, which is
-        // the logical name unless the relation index resolved it. A table two
-        // schema folders share that matched no dbt model looks up nothing.
-        const key = dbtName === undefined ? undefined : normaliseName(dbtName);
-        const ymlModel = dbtName === undefined ? undefined : ymlData.models.get(dbtName) ?? ymlIndex.get(key!);
-        const manifestModel = byName ?? byRelation;
-        // `sourceFiles` is keyed by an already-normalised stem — look it up with
-        // normaliseName(), never through indexByNormalisedName().
-        const sourceFile = key === undefined ? undefined : ymlData.sourceFiles?.get(key);
-        // A disabled model's .sql is on disk but `ref()` to it fails, so the bare
-        // file must not upgrade it to "exists". The veto applies to THAT branch
-        // only: a disabled model still declared in a yml keeps what the yml says,
-        // because that is a different question.
-        const disabled = key === undefined ? false : manifest?.disabledModels.has(key) ?? false;
-        // unique_id first, then the short-name index (catalogNodeFor — the
-        // same lookup Import from dbt seeds types through); the relation index
-        // only when no manifest resolved the model. A table two schema folders share
-        // never takes the short-name index's node (owner decision H): with no
-        // manifest node to say which, only its own relation finds its columns.
-        const relation = model.alias ?? tableName ?? model.name;
-        const catalogNode = (key === undefined || (schemas !== undefined && !manifestModel) ? undefined : catalogNodeFor(catalog, manifestModel, key))
-          ?? (manifestModel ? undefined : onlyOne((schemas ?? [model.schema]).map((s) => catalogByRelation?.get(relationKey(s, relation)))));
         // Seed / snapshot documentation: DESCRIPTIONS ONLY. It never decides
         // existence, adds a column or pulls in an edge — those stay the job of
         // the model sources above, exactly as before seeds were documented.

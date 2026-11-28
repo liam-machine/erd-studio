@@ -50,8 +50,22 @@ describe('FileWatcherService', () => {
   });
 
   describe('initialization', () => {
-    it('creates seven file system watchers (the table files have two: YAML and the DBML tree; fields.yml its own)', () => {
-      expect(_mockFileWatchers).toHaveLength(7);
+    it('creates eight file system watchers (the table files have two: YAML and the DBML tree; fields.yml and selectors.yml their own)', () => {
+      expect(_mockFileWatchers).toHaveLength(8);
+    });
+
+    it('watches the root selectors.yml: one onSelectorsFileChanged per burst, for a create, a change and a delete', () => {
+      const watcher = _mockFileWatchers.find(w => (w._pattern as vscode.RelativePattern).pattern === 'selectors.yml')!;
+      const listener = vi.fn();
+      service.onSelectorsFileChanged(listener);
+      const file = vscode.Uri.file('/test/workspace/selectors.yml');
+      watcher._simulateCreate(file);
+      watcher._simulateChange(file);
+      vi.advanceTimersByTime(400);
+      expect(listener).toHaveBeenCalledTimes(1);
+      watcher._simulateDelete(file);
+      vi.advanceTimersByTime(400);
+      expect(listener).toHaveBeenCalledTimes(2);
     });
 
     it('without dbt (logical-only) creates only the semantic-dir watchers', () => {

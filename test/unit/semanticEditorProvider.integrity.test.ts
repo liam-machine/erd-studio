@@ -1081,6 +1081,51 @@ describe('SemanticEditorProvider (v5 model library integrity)', () => {
       expect(h.tableLibraryService.getTable('fct_order')!.columns!.map((c) => c.name)).toEqual(['order_key', 'customer_key', 'amount']);
     });
 
+    it('an undo / redo that rewinds a diagram edit updates selectors.yml like the edit did (scheduleRegenerate, update-only)', async () => {
+      const selectors = (h.provider as unknown as { selectorsService: SelectorsService }).selectorsService;
+      const schedule = vi.mocked(selectors.scheduleRegenerate);
+      const before = fs.readFileSync(h.domainPath, 'utf-8');
+      await h.send({ type: 'removeModels', payload: { modelNames: ['dim_task'] } });
+      const after = fs.readFileSync(h.domainPath, 'utf-8');
+      expect(JSON.parse(after).logical.models).toEqual(['fct_order']);
+      expect(schedule).toHaveBeenCalledTimes(1);
+      schedule.mockClear();
+
+      // VS Code rewinds the document in memory; the flush saves it.
+      const domainDoc = _mockDocuments.get(vscode.Uri.file(h.domainPath).toString())!;
+      domainDoc._setText(before);
+      await h.send({ type: 'undo' });
+      expect(schedule).toHaveBeenCalledTimes(1);
+      domainDoc._setText(after);
+      await h.send({ type: 'redo' });
+      expect(schedule).toHaveBeenCalledTimes(2);
+    });
+
+    it('an undo / redo that leaves the diagram\'s tables as they were (a drag, a column) does not touch selectors.yml', async () => {
+      const selectors = (h.provider as unknown as { selectorsService: SelectorsService }).selectorsService;
+      const schedule = vi.mocked(selectors.scheduleRegenerate);
+      const before = fs.readFileSync(h.domainPath, 'utf-8');
+      await h.send({ type: 'updatePositions', payload: { positions: { fct_order: { x: 11, y: 22 } } } });
+      const dragged = fs.readFileSync(h.domainPath, 'utf-8');
+      expect(dragged).not.toBe(before);
+      await h.send({
+        type: 'addColumn',
+        payload: { modelName: 'fct_order', column: { name: 'order_date', dataType: 'date', description: '' } },
+      });
+      schedule.mockClear();
+
+      const domainDoc = _mockDocuments.get(vscode.Uri.file(h.domainPath).toString())!;
+      const ymlDoc = _mockDocuments.get(vscode.Uri.file(ymlPath(h, 'fct_order')).toString())!;
+      ymlDoc._setText(h.tableLibraryService.serializeTable(FCT_ORDER));
+      await h.send({ type: 'undo' });
+      domainDoc._setText(before);
+      await h.send({ type: 'undo' });
+      expect(fs.readFileSync(h.domainPath, 'utf-8')).toBe(before);
+      domainDoc._setText(dragged);
+      await h.send({ type: 'redo' });
+      expect(schedule).not.toHaveBeenCalled();
+    });
+
     it('never force-saves a dirty model buffer the provider did not edit', async () => {
       // The user is hand-editing dim_customer.yml in a normal editor tab and
       // has NOT saved. The provider never touched that file.

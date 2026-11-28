@@ -301,12 +301,13 @@ describe('a dbt draft', () => {
     scopes = listDraftScopes({ ymlData, manifest, projectRoot: DBT_ROOT, modelPaths: ['models'] });
   });
 
-  const draw = (scope: DraftScope, limit?: number): Draft => {
+  const draw = (scope: DraftScope, limit?: number, selectorsFileExists?: boolean): Draft => {
     const built = buildDbtDraft({ modelNames: scope.modelNames, ymlData, manifest, libraryHas: () => false, ...(limit ? { limit } : {}) });
     const name = suggestSubjectAreaName(scope);
     return draftFromDbt({
       draft: built, relationships: built.relationships, scope, scopes, trigger: 'prompt',
       target: target(name, 'gold', 'Gold'), libraryTable: () => undefined, layers: DEFAULT_LAYERS,
+      ...(selectorsFileExists !== undefined ? { selectorsFileExists } : {}),
     });
   };
 
@@ -321,8 +322,10 @@ describe('a dbt draft', () => {
     expect(draft.title).toBe('Draft: gold');
     expect(draft.scopes?.current).toBe('folder:gold');
     expect(draft.banner.headline).toMatch(/^Draft from your dbt models in gold · \d+ tables?, (no|\d+) relationships? · not saved$/);
-    // Keep also regenerates the dbt project's selectors.yml (I1): the banner says so.
-    expect(draft.banner.detail).toBe("Keep saves it as gold in the Gold layer (.erd-studio/gold/diagrams/gold.dbml). Keep also adds a selector for it to selectors.yml at your dbt project's root.");
+    // Keep creates no selectors.yml (I1): with none, the banner names the command that does.
+    expect(draft.banner.detail).toBe('Keep saves it as gold in the Gold layer (.erd-studio/gold/diagrams/gold.dbml). Running ERD Studio: Regenerate dbt selectors.yml once makes a dbt selector for each diagram.');
+    // With one, Keep's post-edit regenerate adds the diagram's selector to it, and the banner says so.
+    expect(draw(defaultScope!, undefined, true).banner.detail).toBe("Keep saves it as gold in the Gold layer (.erd-studio/gold/diagrams/gold.dbml). Keep also adds a selector for it to selectors.yml at your dbt project's root.");
     expect(draft.otherStarts.map((s) => s.id)).toEqual(['blank', 'import', 'example']);
     expect(draft.keep).toMatchObject({ writer: 'drawFromDbt', scopeId: 'folder:gold' });
     expect(draft.summary.available).toBeUndefined();

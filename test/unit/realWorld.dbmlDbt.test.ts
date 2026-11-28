@@ -19,6 +19,7 @@ import { describe, expect, it } from 'vitest';
 import { loadTruth, runSample as runDetailed, scoreSample, type ImportRun } from './realWorldScorecard';
 import { runSample } from './realWorld/scorecardHarness';
 import type { ColumnDef } from '../../src/types/semantic';
+import { DBT_NO_SELECTORS_SENTENCE } from '../../src/services/draftModel';
 
 const truth = loadTruth();
 const dbmlOf = (c: ColumnDef): Record<string, unknown> => ((c.meta as Record<string, unknown> | undefined)?.dbml ?? {}) as Record<string, unknown>;
@@ -90,9 +91,11 @@ describe('dbt-synthea-omop (Import from dbt)', () => {
     expect(score.relationships.missingSilent).toEqual([]);
   });
 
-  it('the banner says Keep also writes selectors.yml (I1), and conservation holds', async () => {
+  it('the banner names the command that makes selectors.yml, which the project has none of (I1), and conservation holds', async () => {
     const { run: r } = await run('dbt-synthea-omop');
-    expect(r.shown.some((s) => /selectors\.yml at your dbt project's root/.test(s))).toBe(true);
+    // Keep creates no selectors.yml: with none, the banner says how to make one.
+    expect(r.shown.some((s) => s.includes(DBT_NO_SELECTORS_SENTENCE))).toBe(true);
+    expect(r.shown.some((s) => /selectors\.yml at your dbt project's root/.test(s))).toBe(false);
     const s = await runSample('dbt-synthea-omop');
     expect(Object.values(s.silentLoss).every((n) => n === 0)).toBe(true);
   });

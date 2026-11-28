@@ -750,7 +750,7 @@ export function convertedMessage(summary: Pick<DbmlConversionPlan['summary'], 't
 /** The toast's undo sentence: undo works from an editor of the edit's files, so it names the one Convert left in front. */
 export function convertedUndoSentence(undoFrom: UndoFrom): string {
   if (undoFrom === 'unplacedDiagram') {
-    // The reopened canvas lays out tables with no place and saves that layout, an edit on top of the conversion.
+    // The reopened canvas draws tables with no place; the first layout edit saves them, an edit on top of the conversion.
     return 'To undo, use Edit > Undo with this diagram in front until every file is back, or restore from source control.';
   }
   return undoFrom

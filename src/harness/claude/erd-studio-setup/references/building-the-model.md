@@ -178,8 +178,8 @@ Project orders {
 - One table `use` line per chosen name, including <!-- dbt-only -->already-modelled ones<!-- /dbt-only --><!-- no-dbt -->tables that already had a file<!-- /no-dbt -->, with the path from the
   diagram to the table's file; then one `use *` line per relationships file holding a Ref between
   two of those tables. The `Project` block comes last.
-- Write no `erd_layout`: ERD Studio auto-arranges a new diagram the first time it opens and saves
-  the positions in its Project. Never write positions yourself.
+- Write no `erd_layout`: ERD Studio auto-arranges a new diagram when it opens, and saves the
+  positions in its Project when the user first moves, adds or removes a table. Never write positions yourself.
 <!-- dbt-only -->- Do not set `erd_stub_columns`. It hides differences, and the point of this walkthrough is to see
   them.<!-- /dbt-only -->
 
@@ -360,7 +360,7 @@ nothing else — a drafted extra column would show up as drift.
     is one entry per column pair, all sharing one `compositeKey` (e.g. `fk_sat_customer`), as the
     `/erd-studio` skill's "Composite foreign keys" shows.
 - `viewConfig: {}` (no positions) makes ERD Studio auto-arrange the diagram with its auto layout
-  the first time the domain is opened, and save the result. Do not write positions yourself;
+  when the domain opens, saved when the user first moves, adds or removes a table. Do not write positions yourself;
   the user can re-run the layout any time with **Layout** in the canvas toolbar or Shift+L.
 <!-- dbt-only -->- Do not set `stubColumns`. It hides differences, and the point of this walkthrough is to see
   them.<!-- /dbt-only -->

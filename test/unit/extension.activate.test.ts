@@ -50,7 +50,7 @@ import { StartIntentTracker } from '../../src/commands/startIntent';
 import { execFileSync } from 'child_process';
 import * as dbtProjectSearch from '../../src/services/dbtProjectSearch';
 import { resolveDbtProject } from '../../src/services/projectDiscovery';
-import { DRAFT_SCOPE_EMPTY_NOTICE } from '../../src/services/draftModel';
+import { DBT_KEEP_SELECTORS_SENTENCE, DBT_NO_SELECTORS_SENTENCE, DRAFT_SCOPE_EMPTY_NOTICE } from '../../src/services/draftModel';
 import { SHOW_RELATIONSHIPS_BUTTON } from '../../src/commands/goToTable';
 import { START_SUGGESTION_ALREADY_KEPT_MESSAGE } from '../../src/services/startSuggestion';
 import { GlassSidebarProvider } from '../../src/providers/glassSidebar/GlassSidebarProvider';
@@ -180,7 +180,7 @@ beforeEach(() => {
   vi.spyOn(console, 'log').mockImplementation(() => {});
   vi.spyOn(console, 'error').mockImplementation(() => {});
   warn = vi.spyOn(vscode.window, 'showWarningMessage').mockResolvedValue(undefined);
-  // Activation schedules debounced work (selectors.yml regeneration); keep it
+  // Activation schedules debounced work (the selectors.yml check); keep it
   // from firing against a temp dir that afterEach removes.
   vi.useFakeTimers();
 });
@@ -379,7 +379,8 @@ describe('activate() with a dbt project', () => {
   it('selectors.yml regeneration finds its unsaved tab when VS Code spells the path in another case', async () => {
     const { SelectorsService } = await import('../../src/services/selectorsService');
     let service: { hooks?: { isFileDirtyInEditor?: (filePath: string) => boolean } } | undefined;
-    vi.spyOn(SelectorsService.prototype, 'scheduleRegenerate').mockImplementation(function (this: never) { service = this; });
+    // Activation schedules the service's check (never a regenerate): the hooks are on that instance.
+    vi.spyOn(SelectorsService.prototype, 'scheduleCheck').mockImplementation(function (this: never) { service = this; });
     await activate(context);
 
     const selectorsPath = path.join(root, 'selectors.yml');
@@ -1305,29 +1306,33 @@ describe('activate() in a native DBML project (S4)', () => {
     expect(featureOnce.mock.calls.filter((c) => c[0] === 'dbmlForeignFormatWarned')).toHaveLength(1);
   });
 
-  it('"Subject area file deleted": not for a diagram whose name is back as .json (Undo of Convert), still for one really deleted', async () => {
-    // The selectors.yml prompt is for a dbt project only (below for a plain folder).
+  it('a diagram deleted outside ERD Studio in a dbt project: no prompt (a branch switch deletes too), only a check that writes nothing', async () => {
     fs.writeFileSync(path.join(ws, 'dbt_project.yml'), "name: 'dbml_native'\nversion: '1.0.0'\nprofile: 'x'\n");
+    const { SelectorsService } = await import('../../src/services/selectorsService');
+    const check = vi.spyOn(SelectorsService.prototype, 'scheduleCheck');
+    const regenerate = vi.spyOn(SelectorsService.prototype, 'regenerate');
     await activate(context);
     await vi.advanceTimersByTimeAsync(5_000);
     const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);
-    const deletedToasts = () => info.mock.calls.filter((c) => /diagram files? deleted/i.test(String(c[0])));
+    check.mockClear();
 
-    // Undo of Convert Project to DBML: the .json comes back and the .dbml goes.
+    // Undo of Convert Project to DBML: the .json comes back and the .dbml goes. Not a removal.
     const salesDbml = path.join(ws, '.erd-studio', 'gold', 'diagrams', 'sales.dbml');
     fs.writeFileSync(path.join(ws, '.erd-studio', 'gold', 'sales.json'), '{"schemaVersion": 5, "domain": "sales", "layer": "gold", "logical": {"models": []}}\n');
     fs.rmSync(salesDbml);
     semanticWatcher()._simulateDelete(vscode.Uri.file(salesDbml));
     await vi.advanceTimersByTimeAsync(1_000);
-    expect(deletedToasts()).toHaveLength(0);
+    expect(check).not.toHaveBeenCalled();
 
-    // A diagram the user deletes: the toast, as before.
+    // A diagram really deleted: its selector is now stale, which a check finds; nothing is offered or written.
     const staging = path.join(ws, '.erd-studio', 'silver', 'diagrams', 'staging.dbml');
     fs.rmSync(staging);
     semanticWatcher()._simulateDelete(vscode.Uri.file(staging));
     await vi.advanceTimersByTimeAsync(1_000);
-    expect(deletedToasts()).toHaveLength(1);
-    expect(deletedToasts()[0][0]).toBe('Diagram file deleted. Regenerate dbt selectors.yml to drop the removed diagram from the selector set.');
+    expect(check).toHaveBeenCalled();
+    expect(info.mock.calls.filter((c) => /deleted|selectors/i.test(String(c[0])))).toEqual([]);
+    expect(regenerate).not.toHaveBeenCalled();
+    expect(fs.existsSync(path.join(ws, 'selectors.yml'))).toBe(false);
   });
 
   it('a diagram deleted outside ERD Studio in a folder without dbt: no selectors.yml prompt', async () => {
@@ -2191,16 +2196,142 @@ describe('selectors.yml is a dbt file (#111)', () => {
     expect(fs.existsSync(path.join(plain, 'selectors.yml'))).toBe(false);
   });
 
-  it('activation in a dbt project still writes selectors.yml for its diagrams', async () => {
-    const dbt = path.join(root, 'dbt');
-    project(dbt, true);
+});
+
+describe('selectors.yml at activation: checked, never written', () => {
+  let dbt: string;
+  let items: Array<{ text: string; tooltip?: string; command?: unknown; shown: boolean }>;
+  const selectorsPath = () => path.join(dbt, 'selectors.yml');
+  const committed = () => fs.readFileSync(path.join(FIXTURE_ROOT, 'selectors.yml'), 'utf-8');
+  // A teammate added fct_order to showcase and never regenerated.
+  const staleText = () => committed().replace(/\n\s+- method: fqn\n\s+value: fct_order\n/, '\n');
+  const outOfSync = () => items.filter((i) => i.text.includes('selectors.yml out of sync'));
+  const selectorsWatcher = () => vscode._mockFileWatchers.find((w) => (w._pattern as vscode.RelativePattern | undefined)?.pattern === 'selectors.yml')!;
+
+  beforeEach(() => {
+    dbt = path.join(root, 'dbt');
+    fs.cpSync(FIXTURE_ROOT, dbt, { recursive: true });
     openWorkspace(dbt);
+    items = [];
+    vi.spyOn(vscode.window, 'createStatusBarItem').mockImplementation((() => {
+      const item = { text: '', tooltip: undefined, command: undefined as unknown, backgroundColor: undefined, shown: false,
+        show() { item.shown = true; }, hide() { item.shown = false; }, dispose() {} };
+      items.push(item);
+      return item;
+    }) as never);
+  });
+
+  it('a stale selectors.yml is left byte for byte, and the status item says so, running Regenerate, with no message', async () => {
+    fs.writeFileSync(selectorsPath(), staleText());
+    const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);
 
     await activate(context);
-    vi.advanceTimersByTime(1000); // past the 250 ms regenerate debounce
+    await vi.advanceTimersByTimeAsync(1000); // past the 250 ms check debounce
 
-    const written = fs.readFileSync(path.join(dbt, 'selectors.yml'), 'utf-8');
-    expect(written).toContain('Managed by ERD Studio.');
+    expect(fs.readFileSync(selectorsPath(), 'utf-8')).toBe(staleText());
+    expect(outOfSync()).toHaveLength(1);
+    expect(outOfSync()[0]).toMatchObject({ shown: true, command: 'erdStudio.syncDomainTags' });
+    expect(outOfSync()[0].tooltip).toBe("selectors.yml doesn't match your diagrams (domain_silver_showcase). Click to regenerate it.");
+    expect(warn.mock.calls.filter((c) => /selectors/i.test(String(c[0])))).toEqual([]);
+    expect(info.mock.calls.filter((c) => /selectors/i.test(String(c[0])))).toEqual([]);
+  });
+
+  it('no selectors.yml: nothing is created and no status item shows (the project never opted in)', async () => {
+    fs.rmSync(selectorsPath());
+    await activate(context);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(fs.existsSync(selectorsPath())).toBe(false);
+    expect(outOfSync().filter((i) => i.shown)).toEqual([]);
+  });
+
+  it('the status item follows the file: hidden once it is replaced by a matching one, back when stale, hidden when deleted', async () => {
+    fs.writeFileSync(selectorsPath(), staleText());
+    await activate(context);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(outOfSync()[0].shown).toBe(true);
+
+    // A branch switch brings a matching file.
+    fs.writeFileSync(selectorsPath(), committed());
+    selectorsWatcher()._simulateChange(vscode.Uri.file(selectorsPath()));
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(outOfSync()[0].shown).toBe(false);
+
+    fs.writeFileSync(selectorsPath(), staleText());
+    selectorsWatcher()._simulateChange(vscode.Uri.file(selectorsPath()));
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(outOfSync()[0].shown).toBe(true);
+
+    fs.rmSync(selectorsPath());
+    selectorsWatcher()._simulateDelete(vscode.Uri.file(selectorsPath()));
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(outOfSync()[0].shown).toBe(false);
+    expect(fs.existsSync(selectorsPath())).toBe(false);
+  });
+
+  it('the check loads the dbt data first only when a diagram has a table whose name two schema folders share', async () => {
+    // Activation itself loads no schema yml or manifest; dbtModelsOf reads only what is loaded.
+    const { SelectorsService } = await import('../../src/services/selectorsService');
+    const { SubjectAreaService } = await import('../../src/services/domainService');
+    const { YmlParserService } = await import('../../src/services/ymlParserService');
+    const { ManifestService } = await import('../../src/services/manifestService');
+    let hooks: { prepareCheck?: () => Promise<void> } | undefined;
+    vi.spyOn(SelectorsService.prototype, 'scheduleCheck').mockImplementation(function (this: { hooks?: typeof hooks }) { hooks = this.hooks; });
+    const loadYml = vi.spyOn(YmlParserService.prototype, 'loadYmlData');
+    const loadManifest = vi.spyOn(ManifestService.prototype, 'loadManifest');
+    await activate(context);
+    expect(loadYml).not.toHaveBeenCalled();
+    expect(loadManifest).not.toHaveBeenCalled();
+
+    // The fixture's diagrams share no name: nothing to load.
+    await hooks!.prepareCheck!();
+    expect(loadYml).not.toHaveBeenCalled();
+    expect(loadManifest).not.toHaveBeenCalled();
+
+    vi.spyOn(SubjectAreaService.prototype, 'hasSharedNameTable').mockReturnValue(true);
+    await hooks!.prepareCheck!();
+    expect(loadYml).toHaveBeenCalledWith(dbt);
+    expect(loadManifest).toHaveBeenCalledWith(dbt);
+  });
+
+  it('Regenerate dbt selectors.yml loads the dbt data the check reads before it writes, so the check agrees with it', async () => {
+    const { SelectorsService } = await import('../../src/services/selectorsService');
+    const { SubjectAreaService } = await import('../../src/services/domainService');
+    const { YmlParserService } = await import('../../src/services/ymlParserService');
+    vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);
+    await activate(context);
+    await vi.advanceTimersByTimeAsync(1000);
+
+    vi.spyOn(SubjectAreaService.prototype, 'hasSharedNameTable').mockReturnValue(true);
+    const order: string[] = [];
+    const load = YmlParserService.prototype.loadYmlData;
+    vi.spyOn(YmlParserService.prototype, 'loadYmlData').mockImplementation(function (this: InstanceType<typeof YmlParserService>, ...args: Parameters<typeof load>) {
+      order.push('load');
+      return load.apply(this, args);
+    });
+    const regenerate = SelectorsService.prototype.regenerate;
+    vi.spyOn(SelectorsService.prototype, 'regenerate').mockImplementation(function (this: InstanceType<typeof SelectorsService>, ...args: Parameters<typeof regenerate>) {
+      order.push('write');
+      return regenerate.apply(this, args);
+    });
+    await vscode.commands.executeCommand('erdStudio.syncDomainTags');
+    expect(order).toEqual(['load', 'write']);
+  });
+
+  it('Regenerate dbt selectors.yml creates the file and says edits now keep it up to date; not again once it exists', async () => {
+    fs.rmSync(selectorsPath());
+    const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);
+    await activate(context);
+    await vi.advanceTimersByTimeAsync(1000);
+
+    await vscode.commands.executeCommand('erdStudio.syncDomainTags');
+    expect(fs.readFileSync(selectorsPath(), 'utf-8')).toBe(committed().replace(/\n  # User-managed[\s\S]*$/, '\n'));
+    const said = info.mock.calls.map((c) => String(c[0])).filter((m) => m.startsWith('Wrote '));
+    expect(said).toEqual(['Wrote 2 selector(s) covering 7 dbt model reference(s) to selectors.yml. ERD Studio now updates it whenever you edit a diagram.']);
+
+    // Run again on the existing file: no first-time sentence.
+    await vscode.commands.executeCommand('erdStudio.syncDomainTags');
+    expect(info.mock.calls.map((c) => String(c[0])).filter((m) => m.startsWith('Wrote ')).at(-1))
+      .toBe('Wrote 2 selector(s) covering 7 dbt model reference(s) to selectors.yml.');
   });
 });
 
@@ -3025,6 +3156,27 @@ describe('erdStudio.drawFromDbt', () => {
     expect(validate('showcase')).toBe('There is already a diagram named "showcase" in this layer');
     expect(validate('Bad Name')).toBeDefined();
     expect(validate('brand-new')).toBeUndefined();
+  });
+
+  it('the draft promises a selector in selectors.yml only when the project has the file (Keep creates none)', async () => {
+    await activate(context);
+    answer('silver');
+    const detailOf = (d: unknown): string => (d as { banner?: { detail?: string } }).banner?.detail ?? '';
+
+    expect(fs.existsSync(path.join(root, 'selectors.yml'))).toBe(true);
+    const withFile = await drawToDraft();
+    expect(detailOf(withFile.draft)).toContain(DBT_KEEP_SELECTORS_SENTENCE);
+    expect(detailOf(withFile.draft)).not.toContain(DBT_NO_SELECTORS_SENTENCE);
+    closeDraft();
+    await withFile.run;
+
+    fs.rmSync(path.join(root, 'selectors.yml'));
+    const without = await drawToDraft();
+    expect(detailOf(without.draft)).toContain(DBT_NO_SELECTORS_SENTENCE);
+    expect(detailOf(without.draft)).not.toContain(DBT_KEEP_SELECTORS_SENTENCE);
+    closeDraft();
+    await without.run;
+    expect(fs.existsSync(path.join(root, 'selectors.yml'))).toBe(false);
   });
 
   it('says how to get models when dbt has none to draw', async () => {

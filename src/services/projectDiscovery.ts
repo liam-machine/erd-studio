@@ -47,6 +47,10 @@ export const DRAW_FROM_DBT_NEEDS_DBT_MESSAGE =
 export const ADD_FROM_DBT_NEEDS_DBT_MESSAGE =
   'Adding tables from dbt needs a dbt project. Open the folder that holds dbt_project.yml to compare your design with what dbt built.';
 
+/** The canvas's dbt command menu in a folder with no dbt_project.yml (logical-only mode). Copies nothing. */
+export const DBT_COMMAND_NEEDS_DBT_MESSAGE =
+  'Copying a dbt command needs a dbt project. Open the folder that holds dbt_project.yml.';
+
 export { hasDbtProjectFile };
 
 function isDirectory(dir: string): boolean {

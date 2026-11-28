@@ -19,6 +19,7 @@ import * as vscode from 'vscode';
 
 import {
   SemanticEditorProvider,
+  PENDING_REVEAL_MS,
   PHYSICAL_READ_ONLY_MESSAGE,
   MANIFEST_HINT_DISMISSED_KEY,
   describeSkippedDbtModels,
@@ -265,18 +266,18 @@ afterEach(() => {
 });
 
 // ---------------------------------------------------------------------------
-// H24 — auto-positioning only writes from the `ready` path
+// H24 — auto-positioning never writes on its own (opening a diagram included)
 // ---------------------------------------------------------------------------
 
 describe.each(DBT_FIXTURES)('auto-positioning (H24) (%s storage)', (_storage, fixture) => {
   useFixture(fixture);
 
-  it('persists missing positions once on ready', async () => {
+  it('places a missing position on ready without writing it', async () => {
     const { doc, panel, file } = await openShowcase(root, { stripPosition: 'fct_order' });
 
-    expect(applyEditSpy).toHaveBeenCalledTimes(1);
-    expect(doc.save).toHaveBeenCalledTimes(1);
-    expect(readDiagram(root, file).positions.fct_order).toBeDefined();
+    expect(applyEditSpy).not.toHaveBeenCalled();
+    expect(doc.save).not.toHaveBeenCalled();
+    expect(readDiagram(root, file).positions.fct_order).toBeUndefined();
 
     const loaded = posted(panel).find((m) => m.type === 'domainLoaded')!;
     expect(loaded.payload.viewConfig.positions.fct_order).toBeDefined();
@@ -359,11 +360,11 @@ describe.each(DBT_FIXTURES)('first-open auto layout (%s storage)', (_storage, fi
     expect((posted(panel).find((m) => m.type === 'domainLoaded') as { autoLayout?: boolean }).autoLayout).toBe(true);
   });
 
-  it('keeps today\'s behaviour for a partially positioned domain: writes, no flag', async () => {
+  it('keeps the host\'s placement for a partially positioned domain: no flag, no write', async () => {
     const { panel, file } = await openShowcase(root, { stripPosition: 'fct_order' });
 
-    expect(applyEditSpy).toHaveBeenCalledTimes(1);
-    expect(readDiagram(root, file).positions.fct_order).toBeDefined();
+    expect(applyEditSpy).not.toHaveBeenCalled();
+    expect(readDiagram(root, file).positions.fct_order).toBeUndefined();
     const loaded = posted(panel).find((m) => m.type === 'domainLoaded')!;
     expect(loaded).not.toHaveProperty('autoLayout');
   });
@@ -389,6 +390,347 @@ describe.each(DBT_FIXTURES)('first-open auto layout (%s storage)', (_storage, fi
     const loaded = posted(panel).find((m) => m.type === 'domainLoaded')!;
     expect(loaded.payload.stage).toBe('physical');
     expect(loaded).not.toHaveProperty('autoLayout');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Positions drawn but not stored: held by the panel, saved by the user's first layout edit
+// ---------------------------------------------------------------------------
+
+describe.each(DBT_FIXTURES)('positions drawn but not stored (%s storage)', (storage, fixture) => {
+  useFixture(fixture);
+
+  type Points = Record<string, { x: number; y: number }>;
+  const loadedOf = (panel: MockPanel) => posted(panel).filter((m) => m.type === 'domainLoaded').at(-1) as Posted & { autoLayout?: boolean; saveLayout?: boolean };
+  const drawnOf = (panel: MockPanel): Points => loadedOf(panel).payload.viewConfig.positions;
+
+  /** Drop the stored positions of `names` from showcase (the tables stay in the diagram). */
+  function forget(names: string[]): void {
+    const file = showcasePath(root);
+    const text = fs.readFileSync(file, 'utf-8');
+    if (storage === 'yaml') {
+      const json = JSON.parse(text);
+      for (const name of names) delete json.viewConfig.positions[name];
+      fs.writeFileSync(file, JSON.stringify(json, null, 2) + '\n');
+    } else {
+      fs.writeFileSync(file, names.reduce((t, name) => t.replace(new RegExp(`^ +${name} -?\\d+ -?\\d+\\n`, 'm'), ''), text));
+    }
+  }
+
+  /** What the webview's first-open ELK run of a fresh showcase sends back: every table, laid out. */
+  const elkOf = (panel: MockPanel): Points =>
+    Object.fromEntries(Object.keys(drawnOf(panel)).map((name, i) => [name, { x: 100 + i * 310, y: 70 + (i % 2) * 240 }]));
+
+  /** Wait until `count` edits were applied. */
+  const editsApplied = (count: number) =>
+    vi.waitFor(() => expect(applyEditSpy).toHaveBeenCalledTimes(count), { timeout: 4000, interval: 10 });
+
+  it('a partly placed diagram: dragging a neighbour stores the unstored table exactly where it was first drawn, in that one edit', async () => {
+    const { panel, doc, file } = await openShowcase(root, { stripPosition: 'fct_order' });
+    const firstPaint = drawnOf(panel).fct_order;
+    expect(applyEditSpy).not.toHaveBeenCalled();
+
+    panel._simulateMessage({ type: 'updatePositions', payload: { positions: { dim_customer: { x: 4000, y: 4000 } } } });
+    await editsApplied(1);
+    await vi.waitFor(() => expect(doc.save).toHaveBeenCalledTimes(1));
+
+    const after = readDiagram(root, file);
+    expect(after.positions.fct_order).toEqual(firstPaint);
+    expect(after.positions.dim_customer).toEqual({ x: 4000, y: 4000 });
+    expect(lastError(panel)).toBeUndefined();
+  });
+
+  it('an edit that does not touch the layout writes no unstored position', async () => {
+    const { panel, file } = await openShowcase(root, { stripPosition: 'fct_order' });
+
+    panel._simulateMessage({ type: 'updateModelDescription', payload: { modelName: 'dim_customer', description: 'Customers, described' } });
+    await vi.waitFor(() => expect(applyEditSpy.mock.calls.length).toBeGreaterThanOrEqual(1));
+    await waitForType(panel, 'domainLoaded', 2);
+
+    expect(readDiagram(root, file).positions.fct_order).toBeUndefined();
+    // The canvas still draws it where it was.
+    expect(drawnOf(panel).fct_order).toBeDefined();
+  });
+
+  it('removing a table drawn but not stored leaves no position for it; the others drawn are stored', async () => {
+    forget(['dim_date']);
+    const { panel, file } = await openShowcase(root, { stripPosition: 'fct_order' });
+    const firstPaint = drawnOf(panel);
+
+    panel._simulateMessage({ type: 'removeModel', payload: { modelName: 'fct_order' } });
+    await waitForType(panel, 'domainLoaded', 2);
+
+    const after = readDiagram(root, file);
+    expect(after.models).not.toContain('fct_order');
+    expect(Object.keys(after.positions)).not.toContain('fct_order');
+    expect(after.positions.dim_date).toEqual(firstPaint.dim_date);
+  });
+
+  it('adding a table places it beside a table drawn but not stored, never on it, and stores both', async () => {
+    const { panel, file } = await openShowcase(root, { stripPosition: 'fct_order' });
+    const firstPaint = drawnOf(panel).fct_order;
+
+    panel._simulateMessage({ type: 'addExistingModel', payload: { modelName: 'fct_sale' } });
+    await waitForType(panel, 'domainLoaded', 2);
+
+    const after = readDiagram(root, file);
+    expect(after.positions.fct_order).toEqual(firstPaint);
+    expect(after.positions.fct_sale).toBeDefined();
+    expect(after.positions.fct_sale).not.toEqual(firstPaint);
+  });
+
+  it('a fresh diagram: the unsaved first-open layout and layoutFinished write nothing; every refresh draws it again and asks for no second layout', async () => {
+    const { provider, panel, doc, file } = await openShowcase(root, { clearViewConfig: true });
+    const unopened = fs.readFileSync(file, 'utf-8');
+    expect(loadedOf(panel).autoLayout).toBe(true);
+    expect(loadedOf(panel)).not.toHaveProperty('saveLayout');
+    const elk = elkOf(panel);
+
+    await panel._simulateMessage({ type: 'updatePositions', payload: { positions: elk, unsaved: true } });
+    await panel._simulateMessage({ type: 'layoutFinished', payload: { ms: 120, ok: true, firstOpen: true } });
+    expect(applyEditSpy).not.toHaveBeenCalled();
+    expect(doc.save).not.toHaveBeenCalled();
+    expect(fs.readFileSync(file, 'utf-8')).toBe(unopened);
+
+    const loads = () => types(panel).filter((t) => t === 'domainLoaded').length;
+    const expectElkRedrawn = () => {
+      const loaded = loadedOf(panel);
+      expect(loaded).not.toHaveProperty('autoLayout');
+      expect(loaded.payload.viewConfig.positions).toEqual(elk);
+    };
+    // The manifest watcher (Refresh Manifest, a dbt run), then a table file's watcher.
+    let count = loads();
+    await provider.refreshAllOpenSubjectAreas();
+    await waitForType(panel, 'domainLoaded', ++count);
+    expectElkRedrawn();
+    await provider.refreshSubjectAreasReferencingTable('dim_customer');
+    await waitForType(panel, 'domainLoaded', ++count);
+    expectElkRedrawn();
+    // The focus check, after a table file changed with no event.
+    const tableFile = tableFilePath(root, storage, 'dim_customer')!;
+    fs.utimesSync(tableFile, new Date(), new Date(Date.now() + 60_000));
+    expect(await provider.revalidateAgainstDisk(doc.uri.toString())).toBe(true);
+    await waitForType(panel, 'domainLoaded', ++count);
+    expectElkRedrawn();
+    // A stage switch there and back.
+    await panel._simulateMessage({ type: 'switchStage', payload: { stage: 'physical', requestId: 1 } });
+    await panel._simulateMessage({ type: 'switchStage', payload: { stage: 'logical', requestId: 2 } });
+    await waitForType(panel, 'stageData', 2);
+    const stageReplies = posted(panel).filter((m) => m.type === 'stageData');
+    expect(stageReplies.at(-1)!.payload.viewConfig.positions).toEqual(elk);
+    expect(stageReplies.at(-2)!.payload.viewConfig.positions).toMatchObject(elk);
+
+    expect(applyEditSpy).not.toHaveBeenCalled();
+    expect(doc.save).not.toHaveBeenCalled();
+    expect(fs.readFileSync(file, 'utf-8')).toBe(unopened);
+  });
+
+  it('a fresh diagram whose file gains stored positions (an AI assistant, a checkout) places the rest around them, not at the held layout', async () => {
+    const { provider, panel, file } = await openShowcase(root, { clearViewConfig: true });
+    const elk = elkOf(panel);
+    await panel._simulateMessage({ type: 'updatePositions', payload: { positions: elk, unsaved: true } });
+    const names = Object.keys(elk);
+    // Two tables are stored where the held layout draws two others.
+    const stored = { [names[0]]: elk[names[2]], [names[1]]: elk[names[3]] };
+    const text = fs.readFileSync(file, 'utf-8');
+    if (storage === 'yaml') {
+      const json = JSON.parse(text);
+      json.viewConfig = { positions: stored };
+      fs.writeFileSync(file, JSON.stringify(json, null, 2) + '\n');
+    } else {
+      const lines = Object.entries(stored).map(([name, p]) => `    ${name} ${p.x} ${p.y}`).join('\n');
+      const next = text.replace(/^(Project [^\n]*\{\n)/m, `$1  erd_layout: '''\n${lines}\n  '''\n`);
+      expect(next).not.toBe(text);
+      fs.writeFileSync(file, next);
+    }
+
+    const count = types(panel).filter((t) => t === 'domainLoaded').length;
+    await provider.refreshAllOpenSubjectAreas();
+    await waitForType(panel, 'domainLoaded', count + 1);
+    const drawn = drawnOf(panel);
+    expect(drawn[names[0]]).toEqual(stored[names[0]]);
+    expect(drawn[names[1]]).toEqual(stored[names[1]]);
+    const spots = Object.values(drawn).map((p) => `${p.x},${p.y}`);
+    expect(new Set(spots).size).toBe(spots.length);
+    expect(loadedOf(panel)).not.toHaveProperty('autoLayout');
+  });
+
+  it('a fresh diagram: the first drag saves the whole layout drawn, in one edit', async () => {
+    const { panel, file } = await openShowcase(root, { clearViewConfig: true });
+    const elk = elkOf(panel);
+    await panel._simulateMessage({ type: 'updatePositions', payload: { positions: elk, unsaved: true } });
+
+    panel._simulateMessage({ type: 'updatePositions', payload: { positions: { dim_date: { x: 9, y: 9 } } } });
+    await editsApplied(1);
+    await vi.waitFor(() => expect(readDiagram(root, file).positions).toEqual({ ...elk, dim_date: { x: 9, y: 9 } }));
+  });
+
+  it('a fresh diagram: undoing the first drag draws the held layout again, with no second auto layout', async () => {
+    const { panel, doc, file } = await openShowcase(root, { clearViewConfig: true });
+    const elk = elkOf(panel);
+    await panel._simulateMessage({ type: 'updatePositions', payload: { positions: elk, unsaved: true } });
+    const unopened = fs.readFileSync(file, 'utf-8');
+
+    panel._simulateMessage({ type: 'updatePositions', payload: { positions: { dim_date: { x: 9, y: 9 } } } });
+    await editsApplied(1);
+    await vi.waitFor(() => expect(readDiagram(root, file).positions).toEqual({ ...elk, dim_date: { x: 9, y: 9 } }));
+
+    // VS Code's undo rewinds the document in memory; the flush saves it and redraws.
+    const count = types(panel).filter((t) => t === 'domainLoaded').length;
+    doc._setText(unopened);
+    await panel._simulateMessage({ type: 'undo' });
+    await waitForType(panel, 'domainLoaded', count + 1);
+    expect(fs.readFileSync(file, 'utf-8')).toBe(unopened);
+    expect(loadedOf(panel)).not.toHaveProperty('autoLayout');
+    expect(drawnOf(panel)).toEqual(elk);
+  });
+
+  it('the Layout button still saves, even when its layout is the one already drawn', async () => {
+    const { panel, file } = await openShowcase(root, { clearViewConfig: true });
+    const elk = elkOf(panel);
+    await panel._simulateMessage({ type: 'updatePositions', payload: { positions: elk, unsaved: true } });
+
+    panel._simulateMessage({ type: 'updatePositions', payload: { positions: JSON.parse(JSON.stringify(elk)) } });
+    await editsApplied(1);
+    await vi.waitFor(() => expect(readDiagram(root, file).positions).toEqual(elk));
+  });
+
+  it('a diagram the user just created in this window saves its first auto layout', async () => {
+    const { provider, panel, file } = await openShowcase(root, { clearViewConfig: true, sendReady: false });
+    provider.saveFirstLayoutWhenOpened(file);
+    panel._simulateMessage({ type: 'ready' });
+    await waitForType(panel, 'domainLoaded');
+    expect(loadedOf(panel).autoLayout).toBe(true);
+    expect(loadedOf(panel).saveLayout).toBe(true);
+    expect(applyEditSpy).not.toHaveBeenCalled();
+
+    // The webview posts that layout plainly, as the Layout button does.
+    const elk = elkOf(panel);
+    panel._simulateMessage({ type: 'updatePositions', payload: { positions: elk } });
+    await editsApplied(1);
+    await vi.waitFor(() => expect(readDiagram(root, file).positions).toEqual(elk));
+
+    // Taken by that first load: a reload of the page asks for nothing more.
+    panel._simulateMessage({ type: 'ready' });
+    await waitForType(panel, 'domainLoaded', 2);
+    expect(loadedOf(panel)).not.toHaveProperty('autoLayout');
+    expect(loadedOf(panel)).not.toHaveProperty('saveLayout');
+  });
+
+  it('a partly placed diagram the user just created here saves its placement on its first load', async () => {
+    const { provider, panel, file } = await openShowcase(root, { stripPosition: 'fct_order', sendReady: false });
+    provider.saveFirstLayoutWhenOpened(file);
+    panel._simulateMessage({ type: 'ready' });
+    await waitForType(panel, 'domainLoaded');
+    await editsApplied(1);
+    expect(readDiagram(root, file).positions.fct_order).toEqual(drawnOf(panel).fct_order);
+  });
+
+  it('the mark expires: a diagram made here but first opened after PENDING_REVEAL_MS saves nothing on open', async () => {
+    const { provider, panel, doc, file } = await openShowcase(root, { clearViewConfig: true, sendReady: false });
+    const now = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(now);
+    provider.saveFirstLayoutWhenOpened(file);
+    clock.mockReturnValue(now + PENDING_REVEAL_MS + 1);
+    const before = fs.readFileSync(file, 'utf-8');
+    panel._simulateMessage({ type: 'ready' });
+    await waitForType(panel, 'domainLoaded');
+    clock.mockRestore();
+    expect(loadedOf(panel).autoLayout).toBe(true);
+    expect(loadedOf(panel)).not.toHaveProperty('saveLayout');
+    expect(applyEditSpy).not.toHaveBeenCalled();
+    expect(doc.save).not.toHaveBeenCalled();
+    expect(fs.readFileSync(file, 'utf-8')).toBe(before);
+  });
+
+  it('the mark expires for a partly placed diagram too: its placement is not written on open', async () => {
+    const { provider, panel, file } = await openShowcase(root, { stripPosition: 'fct_order', sendReady: false });
+    const now = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(now);
+    provider.saveFirstLayoutWhenOpened(file);
+    clock.mockReturnValue(now + PENDING_REVEAL_MS + 1);
+    panel._simulateMessage({ type: 'ready' });
+    await waitForType(panel, 'domainLoaded');
+    clock.mockRestore();
+    expect(applyEditSpy).not.toHaveBeenCalled();
+    expect(readDiagram(root, file).positions.fct_order).toBeUndefined();
+  });
+
+  it('only the first load is owed: the mark does not save a later open of the diagram', async () => {
+    const { provider, panel, file } = await openShowcase(root, { clearViewConfig: true, sendReady: false });
+    provider.saveFirstLayoutWhenOpened(file);
+    panel._simulateMessage({ type: 'ready' });
+    await waitForType(panel, 'domainLoaded');
+    panel._simulateDispose();
+
+    const again = vscode.createMockWebviewPanel();
+    await provider.resolveCustomTextEditor(
+      makeDoc(file) as unknown as import('vscode').TextDocument,
+      again as unknown as import('vscode').WebviewPanel,
+      {} as import('vscode').CancellationToken,
+    );
+    again._simulateMessage({ type: 'ready' });
+    await waitForType(again, 'domainLoaded');
+    expect(loadedOf(again).autoLayout).toBe(true);
+    expect(loadedOf(again)).not.toHaveProperty('saveLayout');
+  });
+
+  it('two panels on one diagram: moves made in both survive', async () => {
+    const { provider, panel: first, doc, file } = await openShowcase(root, { stripPosition: 'fct_order' });
+    const second = vscode.createMockWebviewPanel();
+    await provider.resolveCustomTextEditor(
+      doc as unknown as import('vscode').TextDocument,
+      second as unknown as import('vscode').WebviewPanel,
+      {} as import('vscode').CancellationToken,
+    );
+    second._simulateMessage({ type: 'ready' });
+    await waitForType(second, 'domainLoaded');
+    const firstPaint = drawnOf(second).fct_order;
+
+    first._simulateMessage({ type: 'updatePositions', payload: { positions: { dim_customer: { x: 11, y: 11 } } } });
+    await editsApplied(1);
+    second._simulateMessage({ type: 'updatePositions', payload: { positions: { dim_date: { x: 22, y: 22 } } } });
+    await editsApplied(2);
+
+    await vi.waitFor(() => {
+      const after = readDiagram(root, file).positions;
+      expect(after.dim_customer).toEqual({ x: 11, y: 11 });
+      expect(after.dim_date).toEqual({ x: 22, y: 22 });
+      expect(after.fct_order).toEqual(firstPaint);
+    });
+  });
+
+  it('two panels on one diagram: closing the newer one leaves the older one holding what it draws', async () => {
+    const { provider, panel: first, doc, file } = await openShowcase(root, { stripPosition: 'fct_order' });
+    const firstPaint = drawnOf(first).fct_order;
+    const second = vscode.createMockWebviewPanel();
+    await provider.resolveCustomTextEditor(
+      doc as unknown as import('vscode').TextDocument,
+      second as unknown as import('vscode').WebviewPanel,
+      {} as import('vscode').CancellationToken,
+    );
+    second._simulateMessage({ type: 'ready' });
+    await waitForType(second, 'domainLoaded');
+    second._simulateDispose();
+
+    first._simulateMessage({ type: 'updatePositions', payload: { positions: { dim_customer: { x: 11, y: 11 } } } });
+    await editsApplied(1);
+    await vi.waitFor(() => {
+      const after = readDiagram(root, file).positions;
+      expect(after.dim_customer).toEqual({ x: 11, y: 11 });
+      expect(after.fct_order).toEqual(firstPaint);
+    });
+    // And it is still the canvas a refresh redraws.
+    const count = types(first).filter((t) => t === 'domainLoaded').length;
+    await provider.refreshAllOpenSubjectAreas();
+    await waitForType(first, 'domainLoaded', count + 1);
+  });
+
+  it('rejects an unsaved flag that is not true, writing nothing', async () => {
+    const { panel } = await openShowcase(root, { clearViewConfig: true });
+    await panel._simulateMessage({ type: 'updatePositions', payload: { positions: elkOf(panel), unsaved: 'yes' } });
+    expect(lastError(panel)).toMatch(/"unsaved" must be true/);
+    expect(applyEditSpy).not.toHaveBeenCalled();
   });
 });
 
@@ -1609,9 +1951,15 @@ describe.each(DBT_FIXTURES)('addModelsFromDbt (%s storage)', (storage, fixture) 
       'fct_sale.amount->dim_task.task_key',
       'fct_sale.sale_id->dim_project.project_key',
     ]);
-    // Still a fresh layout: no stored position, so the webview runs ELK.
+    // Still a fresh layout: no stored position, so the webview runs ELK, and
+    // saves it, because the layout is this edit's (the user's own).
     for (const name of SILVER_MODELS) expect(onDisk.positions[name]).toBeUndefined();
     expect(lastLoaded(panel).autoLayout).toBe(true);
+    expect(lastLoaded(panel).saveLayout).toBe(true);
+    const elk = Object.fromEntries(SILVER_MODELS.map((name, i) => [name, { x: i * 300, y: 40 }]));
+    panel._simulateMessage({ type: 'updatePositions', payload: { positions: elk } });
+    await vi.waitFor(() => expect(applyEditSpy.mock.calls.length).toBe(edits + 2));
+    await vi.waitFor(() => expect(readDiagram(root, doc.uri.fsPath).positions).toEqual(elk));
     // Only the model missing from the library was seeded: flat YAML library → top level;
     // DBML → the diagram's layer (gold), in its dbt schema's folder or the layer's.
     const seeded = tableFilePath(root, storage, 'fct_sale');
@@ -1619,6 +1967,27 @@ describe.each(DBT_FIXTURES)('addModelsFromDbt (%s storage)', (storage, fixture) 
     const seededRel = path.relative(path.join(root, '.erd-studio'), seeded!).split(path.sep).join('/');
     expect(seededRel).toMatch(storage === 'yaml' ? /^logical-models\/fct_sale\.yml$/ : /^gold\/tables\/[^/]+\/fct_sale\.dbml$/);
     expect(feature).toHaveBeenCalledWith('addFromDbt');
+  });
+
+  it('the saved layout an add into an empty diagram is owed is asked for once: a later refresh or stage switch asks for an unsaved one', async () => {
+    const { provider, panel, doc } = await openEmptySubjectArea('gold', 'reporting');
+    const loads = types(panel).filter((t) => t === 'domainLoaded').length;
+    pickFolder('silver');
+    panel._simulateMessage({ type: 'addModelsFromDbt' });
+    await waitForType(panel, 'domainLoaded', loads + 1);
+    expect(lastLoaded(panel)).toMatchObject({ autoLayout: true, saveLayout: true });
+    const edits = applyEditSpy.mock.calls.length;
+    const added = fs.readFileSync(doc.uri.fsPath, 'utf-8');
+
+    // The webview's layout never came back (ELK and the grid both failed). A stage switch, then a watcher refresh.
+    await panel._simulateMessage({ type: 'switchStage', payload: { stage: 'physical', requestId: 1 } });
+    await panel._simulateMessage({ type: 'switchStage', payload: { stage: 'logical', requestId: 2 } });
+    await provider.refreshAllOpenSubjectAreas();
+    await waitForType(panel, 'domainLoaded', loads + 2);
+    expect(lastLoaded(panel).autoLayout).toBe(true);
+    expect(lastLoaded(panel)).not.toHaveProperty('saveLayout');
+    expect(applyEditSpy.mock.calls.length).toBe(edits);
+    expect(fs.readFileSync(doc.uri.fsPath, 'utf-8')).toBe(added);
   });
 
   it('places new models beside existing ones in a domain that already has models', async () => {

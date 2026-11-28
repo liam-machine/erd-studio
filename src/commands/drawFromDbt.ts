@@ -133,6 +133,8 @@ export interface DrawFromDbtDeps {
   onWritten: (written: { domainPath: string; modelNames: string[]; changedModelNames: string[] }) => void;
   /** The draft preview (§5.2). Absent: the picker, layer pick and name box, then the write, as before. */
   draft?: DbtDraftOptions;
+  /** The dbt project has a selectors.yml (Keep updates it; without one, the banner names the command that creates it). */
+  selectorsFileExists?: () => boolean;
 }
 
 /** How Import from dbt shows its draft (`docs/dev/draft-first.md` §5.2). */
@@ -540,6 +542,7 @@ async function runDrawFromDbt(deps: DrawFromDbtDeps, resume: DrawFromDbtResume |
           layers: layerService.getAllLayers(),
           changedTables: routed.changed,
           modelsWithoutColumns: modelsWithoutColumns(source),
+          selectorsFileExists: deps.selectorsFileExists?.() ?? false,
           ...(redraw ? { notice: DRAFT_REDRAWN_NOTICE } : {}),
           importReportId: reportId,
         });

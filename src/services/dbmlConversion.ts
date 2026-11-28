@@ -219,9 +219,10 @@ export interface DbmlConversionPlan {
   movedRelationships: Array<{ from: string; to: string; diagrams: string[] }>;
   /**
    * Converted diagrams (their new `.dbml` paths) whose layout places every one
-   * of their tables, so opening one in the canvas writes nothing: no ELK auto
-   * layout and no auto-placed new tables. Undo of the conversion is one step
-   * from such a canvas; any other diagram's first open saves a layout on top.
+   * of their tables, so the canvas draws one as stored: no ELK auto layout and
+   * no auto-placed new tables. Opening any diagram writes nothing, but on any
+   * other the user's first layout edit also saves the positions the canvas
+   * drew, an edit on top of the conversion.
    */
   placedDiagrams: string[];
   summary: { tables: number; diagrams: number; relationshipsFiles: number; relationships: number; pending?: number };

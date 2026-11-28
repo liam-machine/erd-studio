@@ -21,7 +21,8 @@
  *                         (the "not shown" strip's file links and buttons),
  *                         canvasFrame (where the canvas sits on screen)
  *                         dropShown (a timed drop's table is on screen; timing only),
- *                         canvasPainted (the first diagram's first paint; timing only)
+ *                         canvasPainted (the first diagram's first paint; timing only),
+ *                         copyDbtCommand (the toolbar's dbt command menu; copies, runs nothing)
  *
  * All message types use a discriminated union pattern with a `type` field,
  * enabling exhaustive switch handling in message handlers.
@@ -45,6 +46,7 @@ import type { GroundTruth } from './syncPlan';
 import type { CanvasGuideStart, GuideActionPayload } from './onboardingGuide';
 import type { CrashFallbackPayload, LayoutFailureDetail, LayoutFallbackRung, WebviewErrorPayload } from './webviewError';
 import type { CanvasLineStyle } from './lineStyle';
+import type { DbtCommandVerb } from './dbtCommand';
 import type { FilesNotShownPayload } from './filesNotShown';
 import type {
   FeedbackAiProviderChoice,
@@ -193,13 +195,24 @@ export interface DomainLoadedMessage {
   /**
    * Set on a logical-stage load when the domain has at least one model and
    * NONE of them has a stored `viewConfig.positions` entry — typically a
-   * domain an AI assistant has just written with `viewConfig: {}`. The
-   * payload still carries fallback positions (so nothing paints at 0,0), but
-   * the host has not persisted them: the webview runs the ELK auto layout
-   * once and persists that through `updatePositions` instead. Absent means
-   * "do nothing" — partially positioned domains keep the host's placement.
+   * domain an AI assistant has just written with `viewConfig: {}` — and this
+   * canvas does not already hold its first-open layout. The payload still
+   * carries fallback positions (so nothing paints at 0,0), and the host has
+   * written nothing: the webview runs the ELK auto layout once and sends it
+   * back through `updatePositions`, with `unsaved` unless `saveLayout` is
+   * set. Absent means "do nothing" — partially positioned domains keep the
+   * host's placement, and a refresh of a domain whose layout the host holds
+   * carries those positions instead of asking again.
    */
   autoLayout?: boolean;
+  /**
+   * With `autoLayout`: this layout is the user's own doing (they just created
+   * the diagram in this window, or added tables to an empty one), so the
+   * webview saves it — a plain `updatePositions`, as the Layout button posts.
+   * Absent: opening a diagram writes nothing, so the layout is posted with
+   * `unsaved` and saved only by the user's first edit of the layout.
+   */
+  saveLayout?: true;
   /**
    * Logical stage only (#113): the dbt project has no `manifest.json` yet and
    * this workspace has not dismissed the hint. The webview shows the "Run dbt
@@ -464,7 +477,8 @@ export interface FilesNotShownMessage {
  * Existing Tables) that found some or all of them on the diagram already
  * (`alreadyOnDiagramMessage`, `addedWithAlreadyMessage`), and a pick in the
  * toolbar's Under name menu that a workspace setting outranks
- * (`TABLE_SUBTITLE_WORKSPACE_NOTE`). Plain words, never an error.
+ * (`TABLE_SUBTITLE_WORKSPACE_NOTE`), and what the toolbar's dbt command menu
+ * copied, or why it copied nothing (`copyDbtCommand`). Plain words, never an error.
  */
 export interface CanvasNoticeMessage {
   type: 'canvasNotice';
@@ -965,12 +979,20 @@ export interface AddModelsFromDbtMessage {
  * `annotations` carries the final positions of any annotation nodes moved in
  * the same drag so a multi-drag of models and notes is one WorkspaceEdit and
  * one undo step. Unknown annotation ids are ignored.
+ *
+ * `unsaved` (only `true`): the first-open auto layout of a load without
+ * `saveLayout` (`DomainLoadedMessage`). The host validates the positions as
+ * for any other, holds those of tables the diagram stores no position for as
+ * what the canvas draws, and writes nothing; the user's first edit of the
+ * layout saves them. Absent: a drag, the Layout button or Shift+L, or a
+ * saved first-open layout, written as before.
  */
 export interface UpdatePositionsMessage {
   type: 'updatePositions';
   payload: {
     positions: Record<string, { x: number; y: number }>;
     annotations?: Array<{ id: string; x: number; y: number }>;
+    unsaved?: true;
   };
 }
 
@@ -1572,6 +1594,7 @@ export type WebviewMessage =
   | MoveTableMessage
   | CopyTablePathMessage
   | RevealTableInLibraryMessage
+  | CopyDbtCommandMessage
   | LayoutFinishedMessage
   | WebviewErrorMessage
   | CrashFallbackMessage
@@ -1643,6 +1666,24 @@ export interface RevealTableInLibraryMessage {
   type: 'revealTableInLibrary';
   payload: {
     modelName: string;
+  };
+}
+
+/**
+ * The toolbar's **dbt command** menu (a dbt project only; GitHub #378): put
+ * `dbt <verb> --select …` for the diagram's tables on the clipboard — the
+ * `tables` named when some are selected, else every table on the diagram —
+ * and say what was copied in a `canvasNotice`. The host names each table's
+ * dbt model as selectors.yml does and leaves out tables not in dbt yet. It
+ * runs nothing and writes no file (physical allowlist). Validated by
+ * `validateCopyDbtCommandPayload`.
+ */
+export interface CopyDbtCommandMessage {
+  type: 'copyDbtCommand';
+  payload: {
+    verb: DbtCommandVerb;
+    /** The selected tables' canvas names; absent or empty means the whole diagram. */
+    tables?: string[];
   };
 }
 

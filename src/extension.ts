@@ -906,6 +906,9 @@ export const NEEDS_DBT_PROJECT_MESSAGE =
 /** Regenerate dbt selectors.yml in a folder without dbt_project.yml. */
 const NOT_DBT_SELECTORS_MESSAGE = 'This folder is not a dbt project, so there is no selectors.yml to generate.';
 
+/** Added to Regenerate dbt selectors.yml's message when it created the file: from now on edits keep it up to date. */
+export const SELECTORS_CREATED_SENTENCE = 'ERD Studio now updates it whenever you edit a diagram.';
+
 /**
  * Who is told that a guarded refresh failed ({@link guardRefresh}): the
  * editor provider, set by `activate()`, so the open canvases can say they
@@ -2226,9 +2229,29 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
   // read above; never re-read dbt_project.yml for a second consumer.
   const catalogService = new CatalogService({ dbtConfig, enabled: hasDbt, onReadFailure: () => telemetry.error('catalogUnreadable') });
   const templateService = new TemplateService();
-  // Status bar item shown while selectors.yml is out of sync (skipped writes).
-  // Hidden as soon as a regenerate succeeds.
+  // Status bar item shown while selectors.yml is out of sync: a write that
+  // was skipped (unsaved edits, malformed), or a check that found the file
+  // stale or unreadable. Hidden when a regenerate succeeds, or a check finds
+  // the file current or gone. It runs Regenerate dbt selectors.yml.
   let selectorsOutOfSyncStatus: vscode.StatusBarItem | undefined;
+  const showSelectorsOutOfSync = (tooltip: string): void => {
+    if (!selectorsOutOfSyncStatus) {
+      selectorsOutOfSyncStatus = vscode.window.createStatusBarItem(
+        vscode.StatusBarAlignment.Right,
+        0,
+      );
+      selectorsOutOfSyncStatus.command = 'erdStudio.syncDomainTags';
+      selectorsOutOfSyncStatus.backgroundColor = new vscode.ThemeColor(
+        'statusBarItem.warningBackground',
+      );
+      context.subscriptions.push(selectorsOutOfSyncStatus);
+    }
+    selectorsOutOfSyncStatus.text = '$(warning) selectors.yml out of sync';
+    selectorsOutOfSyncStatus.tooltip = tooltip;
+    selectorsOutOfSyncStatus.show();
+  };
+  const malformedSelectorsTooltip = (detail: string): string =>
+    `selectors.yml is malformed (${detail.split('\n')[0]}) — fix the YAML, then click to resync.`;
 
   const selectorsService = new SelectorsService(
     subjectAreaService,
@@ -2256,25 +2279,42 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
             }
           });
 
-        if (!selectorsOutOfSyncStatus) {
-          selectorsOutOfSyncStatus = vscode.window.createStatusBarItem(
-            vscode.StatusBarAlignment.Right,
-            0,
-          );
-          selectorsOutOfSyncStatus.command = 'erdStudio.syncDomainTags';
-          selectorsOutOfSyncStatus.backgroundColor = new vscode.ThemeColor(
-            'statusBarItem.warningBackground',
-          );
-          context.subscriptions.push(selectorsOutOfSyncStatus);
-        }
-        selectorsOutOfSyncStatus.text = '$(warning) selectors.yml out of sync';
-        selectorsOutOfSyncStatus.tooltip = info.reason === 'unsaved-edits'
+        showSelectorsOutOfSync(info.reason === 'unsaved-edits'
           ? 'selectors.yml has unsaved edits — save the file, then click to resync.'
-          : `selectors.yml is malformed (${info.detail.split('\n')[0]}) — fix the YAML, then click to resync.`;
-        selectorsOutOfSyncStatus.show();
+          : malformedSelectorsTooltip(info.detail));
       },
       onWritten: () => {
         selectorsOutOfSyncStatus?.hide();
+      },
+      // Activation loads no dbt data (a canvas, a command or the Welcome
+      // summary loads it when first needed), and dbtModelsOf above reads only
+      // what is loaded. A diagram with a table whose name two schema folders
+      // share is the only one that reads it: load it for such a diagram, so a
+      // check never reads that table as missing and a write never leaves it
+      // out (the command and the post-edit write run this too). Cached after the first load.
+      prepareCheck: async () => {
+        const needsDbtData = subjectAreaService.listSubjectAreas(workspaceRoot, semanticDir).some((summary) => {
+          try {
+            return subjectAreaService.hasSharedNameTable(subjectAreaService.getSubjectArea(summary.filePath));
+          } catch {
+            return false;
+          }
+        });
+        if (!needsDbtData) return;
+        await ymlParserService.loadYmlData(workspaceRoot);
+        await manifestService.loadManifest(workspaceRoot).catch(() => undefined);
+      },
+      // A check only ever shows or hides the status item: never a message.
+      onChecked: (result) => {
+        if (result.status === 'stale') {
+          const names = [...result.added, ...result.changed, ...result.removed];
+          const shown = names.slice(0, 3).join(', ') + (names.length > 3 ? ` and ${names.length - 3} more` : '');
+          showSelectorsOutOfSync(`selectors.yml doesn't match your diagrams (${shown}). Click to regenerate it.`);
+        } else if (result.status === 'unreadable') {
+          showSelectorsOutOfSync(malformedSelectorsTooltip(result.detail));
+        } else {
+          selectorsOutOfSyncStatus?.hide();
+        }
       },
       onNameCollision: (info) => {
         void vscode.window.showWarningMessage(
@@ -2287,14 +2327,13 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
   );
   const legacyTagCleanupService = new LegacyTagCleanupService(workspaceRoot);
 
-  // Ensure selectors.yml exists and is up to date at activation time so a
-  // fresh `git clone` with pre-existing domain files gets a valid selector
-  // set before the user makes any edits. Debounced so activation isn't
-  // blocked on disk I/O. Never in a folder without dbt_project.yml:
-  // selectors.yml is a dbt file, and activation there writes nothing. The
-  // guard is belt-and-braces: regenerate() itself returns 'not-dbt-project'
-  // for a root without dbt_project.yml, which covers every post-edit caller.
-  if (hasDbt) { selectorsService.scheduleRegenerate(); }
+  // Activation never writes selectors.yml: it checks the file against the
+  // diagrams (read-only, debounced) and shows the out-of-sync status item
+  // when they differ. No file, no item: a project that never ran Regenerate
+  // dbt selectors.yml has nothing to see. Never in a folder without
+  // dbt_project.yml (check() itself answers 'not-dbt-project' there, and
+  // regenerate() does for every post-edit caller).
+  if (hasDbt) { selectorsService.scheduleCheck(); }
 
   // The prompts activation may show, by kind. Each block only offers its
   // prompt here; the end of activate() shows the most useful one and the
@@ -2784,6 +2823,8 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
       // isMissing reflects the last load, before this change (#113).
       const wasMissing = manifestService.isMissing;
       manifestService.invalidate();
+      // As for the schema yml: a check reads the manifest a shared-name table is matched by.
+      selectorsService.scheduleCheck();
       if (!manifestAppearanceCounted) {
         let existsNow = false;
         try { existsNow = fs.existsSync(manifestService.getManifestPath(workspaceRoot)); } catch { /* treat as absent */ }
@@ -2953,6 +2994,8 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     tableLibraryProvider.refresh();
     // A pulled/created .erd-studio/ must reveal the view/title buttons without a reload
     refreshContextKeys();
+    // A diagram changed outside ERD Studio (a branch switch, a pull, an assistant): check selectors.yml, never write it.
+    selectorsService.scheduleCheck();
   }));
 
   // A .dbml saved where ERD Studio reads no file (a table outside a schema
@@ -2978,6 +3021,10 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     // not the disk's. ERD Studio's own saves are not.
     if (document.uri.scheme === 'file' && !isErdStudioSaving(document.uri) && !ownWrites.isPending(document.uri.fsPath)) {
       outsideChanges.noteHandledHere(document.uri.fsPath);
+    }
+    // selectors.yml saved by hand: the status item follows what it now says.
+    if (document.uri.scheme === 'file' && samePath(document.uri.fsPath, selectorsService.filePath)) {
+      selectorsService.scheduleCheck();
     }
   });
   // #329: a file renamed or deleted in this window (the Explorer) is the editor's too.
@@ -3147,24 +3194,14 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     refreshContextKeys();
     // A diagram whose name is back in the other format (Undo of Convert
     // Project to DBML restores each .json as it deletes the .dbml) was not
-    // removed: no selectors prompt for it.
+    // removed.
     const removed = removedSubjectAreaPaths(uris.map((u) => u.fsPath), fs.existsSync);
     for (const filePath of removed) noteOutsideChange('change', filePath);
     if (removed.length === 0) return;
-    // selectors.yml is a dbt file: a plain folder has none to regenerate, and
-    // the views above already show the diagram gone.
-    if (!hasDbt) return;
-    const subject = removed.length === 1
-      ? 'Diagram file deleted.'
-      : `${removed.length} diagram files deleted.`;
-    void vscode.window.showInformationMessage(
-      `${subject} Regenerate dbt selectors.yml to drop the removed diagram${removed.length === 1 ? '' : 's'} from the selector set.`,
-      'Regenerate Now',
-    ).then(choice => {
-      if (choice === 'Regenerate Now') {
-        void vscode.commands.executeCommand('erdStudio.syncDomainTags');
-      }
-    });
+    // The removed diagram's selector is now stale: the status item says so
+    // when the project has a selectors.yml. No prompt: a branch switch
+    // deletes files too, and nothing here writes.
+    selectorsService.scheduleCheck();
   }));
 
   // layers.json changed externally (git pull, manual edit, delete) → drop the
@@ -3179,6 +3216,8 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     decorationProvider.refresh();
     refreshContextKeys();
     warnIfLayerConfigBroken();
+    // A layer's id is part of its diagrams' selector names.
+    selectorsService.scheduleCheck();
     // The open canvases draw the layer's label and colour, and a diagram
     // opens only in a configured layer: they follow the file too. Never writes.
     await editorProvider.refreshAllOpenSubjectAreas();
@@ -3210,6 +3249,8 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     tableLibraryProvider.refresh();
     // Re-evaluate context key so the Model Library view appears if logical-models/ was just created
     refreshContextKeys();
+    // A table's name or schema is what its diagrams' selectors list: check, never write.
+    selectorsService.scheduleCheck();
   }));
 
   // Many project files changing at once (Edit > Undo of Convert Project to
@@ -3237,9 +3278,18 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
   const dbtYmlChangedSubscription = fileWatcherService.onDbtYmlChanged(guardRefresh('DbtYml',
     async () => {
       ymlParserService.invalidate();
+      // The dbt model a table whose name two schema folders share is written as comes from it.
+      selectorsService.scheduleCheck();
       await editorProvider.refreshAllOpenSubjectAreas();
     },
   ));
+
+  // selectors.yml created, changed or deleted (a branch switch, a hand edit,
+  // a teammate's regenerate pulled): the status item follows the file. Only
+  // ever a check: ERD Studio's own write fires this too, and finds it current.
+  const selectorsFileChangedSubscription = fileWatcherService.onSelectorsFileChanged(() => {
+    selectorsService.scheduleCheck();
+  });
 
   // dbt_project.yml path config changed → suggest window reload
   const projectChangedSubscription = fileWatcherService.onProjectConfigChanged(() => {
@@ -3430,6 +3480,8 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
   const refreshAfterNewSubjectArea = ({ domainPath, modelNames, changedModelNames }: {
     domainPath: string; modelNames: string[]; changedModelNames: string[];
   }): void => {
+    // The user just made this diagram: its first open's automatic layout is saved with it.
+    editorProvider.saveFirstLayoutWhenOpened(domainPath);
     layerService.invalidateCache();
     treeProvider.invalidateSubjectArea(domainPath);
     treeProvider.refresh();
@@ -3591,7 +3643,7 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
       return;
     }
 
-    // Refresh tree, regenerate selectors.yml, and auto-open the diagram.
+    // Refresh tree, update an existing selectors.yml, and auto-open the diagram.
     // The semantic dir may have just been created — reveal the title buttons.
     if (createdSemanticDir) {
       decorationProvider.refresh();
@@ -3599,6 +3651,8 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     refreshContextKeys();
     treeProvider.refresh();
     selectorsService.scheduleRegenerate();
+    // The user just made this diagram: its first open's automatic layout is saved with it.
+    editorProvider.saveFirstLayoutWhenOpened(filePath);
     await vscode.commands.executeCommand(
       'vscode.openWith',
       vscode.Uri.file(filePath),
@@ -3685,6 +3739,7 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     },
     validateDomainName: validateNewSlug,
     onWritten: refreshAfterNewSubjectArea,
+    selectorsFileExists: () => selectorsService.fileExists(),
     ...(draft ? { draft } : {}),
   });
   // Open an Example… in this folder: the coffee shop's Keep This Example writes here, as an import.
@@ -3850,6 +3905,7 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     bulkChangeStartedSubscription,
     bulkChangeSettledSubscription,
     dbtYmlChangedSubscription,
+    selectorsFileChangedSubscription,
     projectChangedSubscription,
     (() => {
       domainTreeData!.attach(treeProvider);
@@ -4897,10 +4953,9 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
         if (confirm !== 'Delete') { return; }
 
         // Close any open editors, then delete the unified domain file.
-        // Record it as an own delete so the watcher does not show the
-        // "Domain file deleted" toast — selectors regeneration is scheduled
-        // here. A file already gone is deleted; Try Again retries the delete,
-        // not the confirmation.
+        // Record it as an own delete so the watcher skips it: the selectors.yml
+        // update (an existing file only) is scheduled here. A file already
+        // gone is deleted; Try Again retries the delete, not the confirmation.
         const deleteFile = async (): Promise<void> => {
           const matchingTabs = findMatchingTabs(fileUri);
           if (matchingTabs.length > 0) {
@@ -5102,11 +5157,14 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
         },
         async () => {
           try {
-            const result = selectorsService.regenerate();
+            // The command is the one write that creates selectors.yml: how a project opts in.
+            // It loads the dbt data the next check reads first, so that check finds its own write current.
+            const result = await selectorsService.regenerateWhenReady();
             if (result.status === 'written') {
               const relPath = path.relative(workspaceRoot, result.filePath);
               void vscode.window.showInformationMessage(
-                `Wrote ${result.selectorsWritten} selector(s) covering ${result.modelsReferenced} dbt model reference(s) to ${relPath}.`,
+                `Wrote ${result.selectorsWritten} selector(s) covering ${result.modelsReferenced} dbt model reference(s) to ${relPath}.` +
+                  (result.created ? ` ${SELECTORS_CREATED_SENTENCE}` : ''),
               );
             } else if (result.status === 'noop') {
               void vscode.window.showInformationMessage(

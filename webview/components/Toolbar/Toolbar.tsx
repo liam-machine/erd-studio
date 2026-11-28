@@ -12,7 +12,8 @@
  * Stage tabs sit above the controls in a stacked two-row layout, all within
  * a single top-center Panel to avoid overlap when the sidebar narrows the editor.
  * Without a dbt project (`logicalOnly`) there is no Physical stage: the tabs,
- * Diff (and with it Sync) and the manifest refresh are not rendered at all.
+ * Diff (and with it Sync), the dbt command menu and the manifest refresh are
+ * not rendered at all.
  *
  * Uses React Flow's zoom/pan APIs and the editor store for domain data.
  */
@@ -57,6 +58,7 @@ import { ConvertInfo } from './ConvertInfo';
 import { LineStyleSwitch } from './LineStyleSwitch';
 import { ColumnFilterMenu } from './ColumnFilterMenu';
 import { TableSubtitleMenu } from './TableSubtitleMenu';
+import { DbtCommandMenu } from './DbtCommandMenu';
 import { FIT_MAX_ZOOM, fitViewPadding, measureTopInsetFrom } from '../../lib/fitViewPadding';
 import { isSingleLayerProject, matchesTableSearch } from '@erd-studio/renderer/editor';
 import type { TableFlowNode, FkFlowEdge, AnnotationFlowNode, AnnotationFlowEdge } from '@erd-studio/renderer/editor';
@@ -575,7 +577,13 @@ export function Toolbar({ nodes, edges }: ToolbarProps) {
 
   // --- Auto Layout handlers ------------------------------------------------
 
-  const runLayout = useCallback(async (firstOpen = false) => {
+  /**
+   * Lay the diagram out with ELK and send the result to the host. `save`:
+   * written (the Layout button, Shift+L, a first-open layout the host says is
+   * the user's own); otherwise the first-open layout is posted with `unsaved`
+   * and the host only holds it.
+   */
+  const runLayout = useCallback(async (firstOpen = false, save = !firstOpen) => {
     if (!domain || nodes.length === 0 || isLayouting) {
       return;
     }
@@ -648,10 +656,10 @@ export function Toolbar({ nodes, edges }: ToolbarProps) {
         fitView({ padding: fitViewPadding(measureTopInsetFrom(toolbarRowRef.current)), maxZoom: FIT_MAX_ZOOM });
       });
 
-      // Persist to extension host
+      // To the extension host: saved, or (an open's layout) held without a write.
       const message: WebviewMessage = {
         type: 'updatePositions',
-        payload: { positions },
+        payload: { positions, ...(save ? {} : { unsaved: true as const }) },
       };
       vscode.postMessage(message);
       reportLayout(true);
@@ -666,7 +674,7 @@ export function Toolbar({ nodes, edges }: ToolbarProps) {
     } catch (err) {
       reportLayout(false, err);
       console.error('[Toolbar] Auto layout failed:', err);
-      // Even the grid failed, so nothing is written and the tables stay where
+      // Even the grid failed, so nothing is sent and the tables stay where
       // they were. Plain words by the failure's class, never the error's text
       // (#294): that went to the ERD Studio log through `layoutFinished`.
       const notice = layoutFailureNotice(classifyLayoutFailure(err), false);
@@ -685,7 +693,8 @@ export function Toolbar({ nodes, edges }: ToolbarProps) {
 
   /**
    * First open of a domain with no stored positions (the host sets
-   * `domainLoaded.autoLayout`): run the same layout once, persisted the same way.
+   * `domainLoaded.autoLayout`): run the same layout once, saved only when the
+   * host says it is the user's own (`saveLayout`).
    */
   useFirstOpenAutoLayout(runLayout, domain, nodes, isLayouting);
 
@@ -1125,7 +1134,7 @@ export function Toolbar({ nodes, edges }: ToolbarProps) {
         </div>
         </div>
 
-        {(discrepancyOptions.length > 0 || !isReadOnly) && (
+        {(discrepancyOptions.length > 0 || !logicalOnly || !isReadOnly) && (
         <div className="toolbar__island toolbar__island--actions">
         {/* Discrepancy toggle */}
         {discrepancyOptions.length > 0 && (
@@ -1171,6 +1180,13 @@ export function Toolbar({ nodes, edges }: ToolbarProps) {
               </div>
             </div>
           </>
+        )}
+
+        {/* dbt command — copies a dbt build / run / test for the diagram's tables; a dbt project only, every stage */}
+        {!logicalOnly && (
+          <div className="toolbar__section">
+            <DbtCommandMenu nodes={nodes} />
+          </div>
         )}
 
         {/* Add Dropdown — hidden in read-only mode */}

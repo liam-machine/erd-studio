@@ -130,6 +130,12 @@ export interface EditorState extends CanvasState {
    * so a later payload without the flag cancels a layout that has not started.
    */
   pendingAutoLayout: boolean;
+  /**
+   * The pending first-open layout is to be saved (`domainLoaded.saveLayout`:
+   * the user just made the diagram, or added tables to an empty one). False:
+   * it is sent with `unsaved`, and the host holds it without writing.
+   */
+  pendingAutoLayoutSaves: boolean;
   /** Whether the Feedback dialog is visible. */
   feedbackDialogOpen: boolean;
   /** Prefill for the Feedback dialog (from the command palette / error screens). */
@@ -319,8 +325,8 @@ export interface EditorActions extends CanvasActions {
   registerAutoLayout: (layoutFn: (() => void) | null) => void;
   /** Trigger auto-layout (called by keyboard handler). */
   triggerAutoLayout: () => void;
-  /** Set / clear the first-open auto layout request (see `pendingAutoLayout`). */
-  setPendingAutoLayout: (pending: boolean) => void;
+  /** Set / clear the first-open auto layout request (see `pendingAutoLayout`); `saves` sets `pendingAutoLayoutSaves`. */
+  setPendingAutoLayout: (pending: boolean, saves?: boolean) => void;
   /** Open/close the Feedback dialog, optionally with prefilled fields. */
   setFeedbackDialogOpen: (
     open: boolean,
@@ -435,6 +441,7 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
   _searchFocusFn: null,
   _autoLayoutFn: null,
   pendingAutoLayout: false,
+  pendingAutoLayoutSaves: false,
   feedbackDialogOpen: false,
   feedbackPrefill: null,
   feedbackDiagnostics: null,
@@ -522,7 +529,7 @@ export const useEditorStore = create<EditorState & EditorActions>()((set) => ({
     const { _autoLayoutFn } = useEditorStore.getState();
     if (_autoLayoutFn) _autoLayoutFn();
   },
-  setPendingAutoLayout: (pending) => set({ pendingAutoLayout: pending }),
+  setPendingAutoLayout: (pending, saves = false) => set({ pendingAutoLayout: pending, pendingAutoLayoutSaves: pending && saves }),
   setFeedbackDialogOpen: (open, prefill = null) =>
     set(
       open

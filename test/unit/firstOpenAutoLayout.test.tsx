@@ -5,7 +5,11 @@
  * The host sets `domainLoaded.autoLayout` when a domain has models but not one
  * stored position (typically written by an AI assistant with `viewConfig: {}`).
  * The webview then runs the same ELK layout the Layout button / Shift+L runs,
- * exactly once, and persists it with a single `updatePositions`.
+ * exactly once. Opening a diagram writes nothing, so it sends the result as
+ * an `updatePositions` with `unsaved` (the host holds it, never writes it),
+ * unless the host says the layout is the user's own (`saveLayout`: they just
+ * made the diagram, or added tables to an empty one): then it is a plain,
+ * saved `updatePositions`, as the Layout button posts.
  *
  * Drives the real Toolbar against the real store; only the VS Code API, React
  * Flow and the ELK worker are mocked.
@@ -97,15 +101,17 @@ async function renderToolbar(nodeList: TableFlowNode[] = nodes) {
 }
 
 /** What App.tsx does on a `domainLoaded` message. */
-function deliverSubjectAreaLoaded(domain: DisplaySubjectArea, autoLayout?: boolean) {
+function deliverSubjectAreaLoaded(domain: DisplaySubjectArea, autoLayout?: boolean, saveLayout?: boolean) {
   act(() => {
     useEditorStore.getState().setDomain(domain);
-    useEditorStore.getState().setPendingAutoLayout(autoLayout === true);
+    useEditorStore.getState().setPendingAutoLayout(autoLayout === true, saveLayout === true);
   });
 }
 
 const updatePositionsPosts = () =>
   mockVsCode.postMessage.mock.calls.filter(([m]) => m?.type === 'updatePositions');
+/** The posts the host writes: an `updatePositions` without `unsaved`. */
+const writingPosts = () => updatePositionsPosts().filter(([m]) => m.payload?.unsaved !== true);
 
 beforeEach(() => {
   useEditorStore.setState(initialStoreState, true);
@@ -118,7 +124,7 @@ afterEach(() => {
 });
 
 describe('first-open auto layout (Toolbar + store)', () => {
-  it('runs the ELK layout exactly once on a flagged load and persists it once', async () => {
+  it('runs the ELK layout exactly once on a flagged load and sends it unsaved: never a writing updatePositions', async () => {
     deliverSubjectAreaLoaded(makeSubjectArea(), true);
     await renderToolbar();
 
@@ -126,16 +132,35 @@ describe('first-open auto layout (Toolbar + store)', () => {
     expect(mockRunElkLayout).toHaveBeenCalledTimes(1);
     expect(mockVsCode.postMessage.mock.calls.find(([m]) => m?.type === 'layoutFinished')?.[0].payload)
       .toMatchObject({ ok: true, firstOpen: true });
-    expect(updatePositionsPosts()[0][0].payload.positions).toEqual({
-      model_a: { x: 10, y: 20 },
-      model_b: { x: 300, y: 20 },
+    expect(updatePositionsPosts()[0][0].payload).toEqual({
+      positions: { model_a: { x: 10, y: 20 }, model_b: { x: 300, y: 20 } },
+      unsaved: true,
     });
+    expect(writingPosts()).toHaveLength(0);
     expect(useEditorStore.getState().pendingAutoLayout).toBe(false);
     expect(useEditorStore.getState().domain?.viewConfig.positions?.model_b).toEqual({ x: 300, y: 20 });
 
-    // The host's refresh after the write carries no flag; nothing runs again.
+    // The host's refresh carries the held layout and no flag; nothing runs again.
     deliverSubjectAreaLoaded(makeSubjectArea());
     expect(mockRunElkLayout).toHaveBeenCalledTimes(1);
+  });
+
+  it('saves a flagged layout the host says is the user\'s own (saveLayout) with one writing updatePositions', async () => {
+    deliverSubjectAreaLoaded(makeSubjectArea(), true, true);
+    await renderToolbar();
+
+    await vi.waitFor(() => expect(writingPosts()).toHaveLength(1));
+    expect(mockRunElkLayout).toHaveBeenCalledTimes(1);
+    expect(updatePositionsPosts()).toHaveLength(1);
+    expect(writingPosts()[0][0].payload).toEqual({ positions: { model_a: { x: 10, y: 20 }, model_b: { x: 300, y: 20 } } });
+    expect(useEditorStore.getState().pendingAutoLayoutSaves).toBe(false);
+  });
+
+  it('a later flagged load without saveLayout is not saved: the flag follows each payload', () => {
+    deliverSubjectAreaLoaded(makeSubjectArea(), true, true);
+    expect(useEditorStore.getState().pendingAutoLayoutSaves).toBe(true);
+    deliverSubjectAreaLoaded(makeSubjectArea(), true);
+    expect(useEditorStore.getState().pendingAutoLayoutSaves).toBe(false);
   });
 
   it('does nothing on an unflagged load', async () => {
@@ -164,6 +189,37 @@ describe('first-open auto layout (Toolbar + store)', () => {
     expect(finished).toHaveLength(1);
     expect(finished[0][0].payload).toMatchObject({ ok: false, firstOpen: true });
     consoleSpy.mockRestore();
+  });
+});
+
+describe('first-open auto layout writes nothing until the user acts', () => {
+  it('lays the fresh diagram out once and draws it, posting only the unsaved form', async () => {
+    deliverSubjectAreaLoaded(makeSubjectArea(), true);
+    await renderToolbar();
+
+    await vi.waitFor(() => expect(mockRunElkLayout).toHaveBeenCalledTimes(1));
+    // The canvas shows the ELK result...
+    await vi.waitFor(() => expect(useEditorStore.getState().domain?.viewConfig.positions?.model_b).toEqual({ x: 300, y: 20 }));
+    // ...but opening the diagram did not ask the host to save it.
+    await vi.waitFor(() => expect(updatePositionsPosts()).toHaveLength(1));
+    expect(writingPosts()).toHaveLength(0);
+  });
+
+  it('guard: the Layout button (a user action) still saves with one writing updatePositions', async () => {
+    deliverSubjectAreaLoaded(makeSubjectArea());
+    await renderToolbar();
+    await act(async () => { useEditorStore.getState().triggerAutoLayout(); });
+    await vi.waitFor(() => expect(writingPosts()).toHaveLength(1));
+    expect(updatePositionsPosts()).toHaveLength(1);
+  });
+
+  it('guard: the Layout button after an unsaved first-open layout saves', async () => {
+    deliverSubjectAreaLoaded(makeSubjectArea(), true);
+    await renderToolbar();
+    await vi.waitFor(() => expect(updatePositionsPosts()).toHaveLength(1));
+    await act(async () => { useEditorStore.getState().triggerAutoLayout(); });
+    await vi.waitFor(() => expect(writingPosts()).toHaveLength(1));
+    expect(mockRunElkLayout).toHaveBeenCalledTimes(2);
   });
 });
 

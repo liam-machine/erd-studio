@@ -17,8 +17,10 @@
  * - {model,seed,snapshot-paths}/**\/*.{yml,yaml,sql,py,csv} (dbt sources) →
  *   physical stage refresh (onDbtYmlChanged)
  * - dbt_project.yml (project configuration) → reload prompt only when path config changes
+ * - selectors.yml at the root (dbt selectors) → onSelectorsFileChanged, so
+ *   the extension can check it against the diagrams (a check never writes)
  *
- * The dbt-only watchers (artifacts, dbt sources, dbt_project.yml) are not
+ * The dbt-only watchers (artifacts, dbt sources, dbt_project.yml, selectors.yml) are not
  * created when the root has no dbt_project.yml (`{ dbt: false }`,
  * logical-only mode): a plain folder's `models/` or `target/` is not dbt's.
  *
@@ -187,6 +189,7 @@ export class FileWatcherService implements vscode.Disposable {
   private readonly _onUnreadFileChanged = new vscode.EventEmitter<{ uri: vscode.Uri }>();
   private readonly _onDbtYmlChanged = new vscode.EventEmitter<void>();
   private readonly _onProjectConfigChanged = new vscode.EventEmitter<void>();
+  private readonly _onSelectorsFileChanged = new vscode.EventEmitter<void>();
   private readonly _onBulkChangeStarted = new vscode.EventEmitter<void>();
   private readonly _onBulkChangeSettled = new vscode.EventEmitter<{ reported: number }>();
 
@@ -252,6 +255,12 @@ export class FileWatcherService implements vscode.Disposable {
   /** Fires when target-path or model-paths change in dbt_project.yml. */
   readonly onProjectConfigChanged = this._onProjectConfigChanged.event;
   /**
+   * Fires once per burst when the root selectors.yml is created, changed or
+   * deleted, by anyone (a branch switch, a hand save, ERD Studio's own
+   * regenerate): its listener only reads the file.
+   */
+  readonly onSelectorsFileChanged = this._onSelectorsFileChanged.event;
+  /**
    * Fires once when the project's files start changing in bulk (Edit > Undo
    * of Convert Project to DBML, a branch switch): the events for them are
    * held until the burst settles, and the listener can hold its refreshes.
@@ -302,6 +311,7 @@ export class FileWatcherService implements vscode.Disposable {
     if (watchDbt) { this.setupProjectConfigWatcher(); }
     this.setupTableWatcher();
     this.setupFieldsWatcher();
+    if (watchDbt) { this.setupSelectorsWatcher(); }
     if (watchDbt) { this.setupDbtSourceWatcher(); }
   }
 
@@ -528,6 +538,18 @@ export class FileWatcherService implements vscode.Disposable {
 
     this.subscriptions.push(watcher.onDidChange(handleChange));
     this.subscriptions.push(watcher.onDidCreate(handleChange));
+    this.watchers.push(watcher);
+  }
+
+  /** Watch the root selectors.yml: one debounced onSelectorsFileChanged per burst. */
+  private setupSelectorsWatcher(): void {
+    const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(this.workspaceRoot, 'selectors.yml'));
+    const handle = () => {
+      this.debounce('selectors', () => this.safeFireEvent(() => this._onSelectorsFileChanged.fire()));
+    };
+    this.subscriptions.push(watcher.onDidChange(handle));
+    this.subscriptions.push(watcher.onDidCreate(handle));
+    this.subscriptions.push(watcher.onDidDelete(handle));
     this.watchers.push(watcher);
   }
 
@@ -817,6 +839,7 @@ export class FileWatcherService implements vscode.Disposable {
     this._onUnreadFileChanged.dispose();
     this._onDbtYmlChanged.dispose();
     this._onProjectConfigChanged.dispose();
+    this._onSelectorsFileChanged.dispose();
     this._onBulkChangeStarted.dispose();
     this._onBulkChangeSettled.dispose();
   }
