@@ -1,0 +1,170 @@
+/* TableSubtitleMenu — the toolbar's "Under name" button and the list it
+   opens: what the line under every table's name shows. Tokens only
+   (theme.css); the button matches the Columns button beside it. */
+
+.table-subtitle {
+  position: relative;
+  display: inline-flex;
+}
+
+.table-subtitle__button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+  max-width: 220px;
+  height: var(--control-height);
+  padding: 0 var(--space-5);
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-md);
+  background: var(--control-fill);
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    color var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
+    background-color var(--duration-fast) var(--ease-standard);
+}
+
+.table-subtitle__button:hover {
+  border-color: var(--control-border-hover);
+}
+
+.table-subtitle__button:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: 1px;
+}
+
+.table-subtitle__button--open {
+  border-color: var(--control-border-selected);
+  background: var(--control-fill-selected);
+}
+
+/* What is shown now: the part of the button that changes. */
+.table-subtitle__button-value {
+  overflow: hidden;
+  color: var(--text-primary);
+  text-overflow: ellipsis;
+}
+
+.table-subtitle__button-arrow {
+  display: inline-flex;
+  flex-shrink: 0;
+}
+
+.table-subtitle__panel {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: var(--z-popover);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: 232px;
+  max-height: min(420px, 70vh);
+  margin-top: var(--space-5);
+  padding: var(--space-4);
+  overflow-y: auto;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+  background: var(--glass-surface-3);
+  -webkit-backdrop-filter: var(--glass-backdrop);
+  backdrop-filter: var(--glass-backdrop);
+  box-shadow: var(--glass-elevation-3);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  box-sizing: border-box;
+}
+
+.table-subtitle__group {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Every group after the first is set apart by a rule. */
+.table-subtitle__group + .table-subtitle__group {
+  margin-top: var(--space-2);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--glass-border);
+}
+
+.table-subtitle__heading {
+  padding: var(--space-2) var(--space-3);
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+}
+
+.table-subtitle__option {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: var(--control-height-sm);
+  padding: 0 var(--space-3);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: var(--text-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.table-subtitle__option:hover {
+  background: var(--control-fill-hover);
+}
+
+.table-subtitle__option:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: -1px;
+}
+
+.table-subtitle__option--on {
+  font-weight: var(--weight-medium);
+}
+
+.table-subtitle__tick {
+  flex-shrink: 0;
+  width: 12px;
+  color: var(--accent);
+  font-size: var(--text-xs);
+}
+
+.table-subtitle__option-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.table-subtitle__hint {
+  margin-top: var(--space-2);
+  padding: var(--space-3) var(--space-3) 0;
+  border-top: 1px solid var(--glass-border);
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+  line-height: 1.4;
+}
+
+/* Folded into the View popover (a narrow editor): as the Columns button, the
+   list opens leftwards from its button and is opaque rather than frosting
+   the popover behind it. */
+@media (max-width: 1140px) {
+  .toolbar__view-group .table-subtitle,
+  .toolbar__view-group .table-subtitle__button {
+    width: 100%;
+    max-width: none;
+    justify-content: center;
+  }
+
+  .toolbar__view-group .table-subtitle__panel {
+    right: 0;
+    left: auto;
+    background: var(--editor-bg);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}

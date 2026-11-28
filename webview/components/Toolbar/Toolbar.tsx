@@ -55,6 +55,7 @@ import { StageTabs } from './StageTabs';
 import { ConvertInfo } from './ConvertInfo';
 import { LineStyleSwitch } from './LineStyleSwitch';
 import { ColumnFilterMenu } from './ColumnFilterMenu';
+import { TableSubtitleMenu } from './TableSubtitleMenu';
 import { FIT_MAX_ZOOM, fitViewPadding, measureTopInsetFrom } from '../../lib/fitViewPadding';
 import { isSingleLayerProject, matchesTableSearch } from '@erd-studio/renderer/editor';
 import type { TableFlowNode, FkFlowEdge, AnnotationFlowNode, AnnotationFlowEdge } from '@erd-studio/renderer/editor';
@@ -1080,7 +1081,7 @@ export function Toolbar({ nodes, edges }: ToolbarProps) {
           type="button"
           className={`toolbar__button toolbar__view-toggle${viewMenuOpen ? ' toolbar__button--active' : ''}`}
           onClick={() => setViewMenuOpen((open) => !open)}
-          title="View options: columns, line style, select mode"
+          title="View options: columns, the line under table names, line style, select mode"
           aria-label="View options"
           aria-haspopup="true"
           aria-expanded={viewMenuOpen}
@@ -1094,6 +1095,11 @@ export function Toolbar({ nodes, edges }: ToolbarProps) {
         {/* Which columns the tables show — a view preference, on every stage and read-only diagram too */}
         <div className="toolbar__section">
           <ColumnFilterMenu />
+        </div>
+
+        {/* What the line under every table's name shows — a view preference too */}
+        <div className="toolbar__section">
+          <TableSubtitleMenu />
         </div>
 
         {/* Line style — a view preference, so on every stage and read-only diagram too */}

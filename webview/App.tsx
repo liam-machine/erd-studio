@@ -409,6 +409,11 @@ function EditorCanvas() {
           // The reader's erdStudio.canvas.lineStyle, on ready and whenever it changes.
           if (isCanvasLineStyle(msg.payload?.lineStyle)) useEditorStore.getState().setLineStyle(msg.payload.lineStyle);
           break;
+        case 'tableSubtitle':
+          // The reader's erdStudio.canvas.tableSubtitle, on ready and whenever it changes
+          // (the store reads anything that is not a choice as the grain).
+          if (typeof msg.payload?.tableSubtitle === 'string') useEditorStore.getState().setTableSubtitle(msg.payload.tableSubtitle);
+          break;
         case 'guideStart':
           if (isCanvasGuideStart(msg.payload)) setGuide({ dbml: msg.payload.dbml, semanticDir: msg.payload.semanticDir });
           break;

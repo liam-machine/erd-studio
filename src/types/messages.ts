@@ -617,6 +617,21 @@ export interface LineStyleMessage {
 }
 
 /**
+ * What the one line under each table's name shows: the
+ * `erdStudio.canvas.tableSubtitle` setting, as core's `tableSubtitle.ts`
+ * spells it (`field:<key>`, `description` or `none`). Posted when the
+ * webview says `ready` (before the diagram is read, so the first layout
+ * sizes the tables as they will be drawn) and to every open canvas whenever
+ * the setting changes.
+ */
+export interface TableSubtitleMessage {
+  type: 'tableSubtitle';
+  payload: {
+    tableSubtitle: string;
+  };
+}
+
+/**
  * Whether the canvas's tab is on screen, sent whenever that changes
  * (`onDidChangeViewState`). A webview behind another tab keeps running at a
  * stand-in size, so a gentle reveal (`RevealTableMessage.gentle`,
@@ -667,6 +682,7 @@ export type ExtensionMessage =
   | GuideStartMessage
   | CanvasVisibilityMessage
   | LineStyleMessage
+  | TableSubtitleMessage
   | ConvertOfferMessage
   | LoadingMessage
   | ExistingTablesMessage
@@ -1449,6 +1465,21 @@ export interface SetLineStyleMessage {
 }
 
 /**
+ * The toolbar's menu for the line under each table's name: write
+ * `erdStudio.canvas.tableSubtitle` (in the workspace when the workspace sets
+ * it, else at user scope). The webview has already switched; the host's
+ * `tableSubtitle` broadcast that follows the setting change keeps every open
+ * canvas in step. A view preference that writes no project file, so it is on
+ * the physical-stage allowlist (`NON_MUTATION_TYPES`).
+ */
+export interface SetTableSubtitleMessage {
+  type: 'setTableSubtitle';
+  payload: {
+    tableSubtitle: string;
+  };
+}
+
+/**
  * The canvas's information button's **Convert to DBML…** (it shows while the
  * host's `convertOffer` says so): run Convert Project to DBML, the same hook
  * as the Convert offer's **Convert…**, whose panel lists every change before
@@ -1464,6 +1495,7 @@ export interface ConvertProjectToDbmlMessage {
 export type WebviewMessage =
   | ReadyMessage
   | SetLineStyleMessage
+  | SetTableSubtitleMessage
   | ConvertProjectToDbmlMessage
   | GuideMessage
   | RequestExistingTablesMessage

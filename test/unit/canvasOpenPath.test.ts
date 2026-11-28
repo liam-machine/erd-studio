@@ -97,13 +97,14 @@ afterEach(() => {
 });
 
 describe('the ready handler answers with loading first', () => {
-  it('posts loading, then loading with the table count, then the line style and the diagram', async () => {
+  it('posts loading, then loading with the table count, then the reader\'s view settings and the diagram', async () => {
     const h = buildProvider(root);
     const { panel } = await open(h, 'gold/diagrams/sales.dbml');
     await panel._simulateMessage({ type: 'ready' });
     const types = posted(panel).map((m) => m.type);
-    // The reader's line style comes before the diagram, so its first routing pass uses it.
-    expect(types.slice(0, 4)).toEqual(['loading', 'loading', 'lineStyle', 'domainLoaded']);
+    // The reader's line style comes before the diagram, so its first routing pass uses it;
+    // and what the line under each name shows, so its first layout sizes the tables with it.
+    expect(types.slice(0, 5)).toEqual(['loading', 'loading', 'lineStyle', 'tableSubtitle', 'domainLoaded']);
     expect(posted(panel)[0].payload).toEqual({});
     expect(posted(panel)[1].payload).toEqual({ tables: 6 });
   });

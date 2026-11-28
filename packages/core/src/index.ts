@@ -41,6 +41,7 @@ export * from './layers.js';
 export * from './meta.js';
 export * from './fields.js';
 export * from './fieldsFile.js';
+export * from './tableSubtitle.js';
 export * from './displayDomain.js';
 export * from './loadDisplayDomain.js';
 export * from './exportDiagram.js';

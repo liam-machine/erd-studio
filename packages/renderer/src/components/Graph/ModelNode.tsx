@@ -36,6 +36,7 @@ import { STAGE_HEX } from '../../lib/stageColors';
 import { getDataTypeColor } from '../../lib/dataTypeColors';
 import { layerAbbreviation } from '../../lib/layerCues';
 import { headerName } from '../../lib/modelLabels';
+import { nodeSubtitle, nodeSubtitleIsChosen } from '../../lib/tableSubtitle';
 import { offDiagramChipTip, offDiagramRows } from '../../lib/canvasContext';
 import {
   SOURCE_LABEL,
@@ -573,8 +574,10 @@ function describeLoadWarning(warning: TableLoadWarning): string {
 }
 
 function TableNodeComponent({ id, data, selected }: NodeProps<TableFlowNode>) {
-  const { modelName, tableName, label, stage, layer, layerConfig, schema, tableLayer, tableLayerConfig, otherLayer, shownSchema, singleLayer, alias, columns, grain, meta, dimmed, readOnly, isGhost, ghostReason, provenance, loadError, loadWarning, isStub, isExpanded = false, tableDetail, columnFilter, onToggleExpansion, discrepancy, discrepancySourceStage, discrepancyTargetStage } = data;
+  const { modelName, tableName, label, stage, layer, layerConfig, schema, tableLayer, tableLayerConfig, otherLayer, shownSchema, singleLayer, alias, columns, meta, dimmed, readOnly, isGhost, ghostReason, provenance, loadError, loadWarning, isStub, isExpanded = false, tableDetail, columnFilter, onToggleExpansion, discrepancy, discrepancySourceStage, discrepancyTargetStage } = data;
   const openNodeContextMenu = useEditorStore((s) => s.openNodeContextMenu);
+  // The line under the name: the grain, or what the reader chose to show there.
+  const subtitle = nodeSubtitle(data);
   // Hover preview (useHoverFocus): the hovered table and its related tables
   // stay bright. A primitive, so a table outside the focus never re-renders.
   const focusRole = useEditorStore((s) => tableFocusRole(s.hoverFocus, id));
@@ -775,10 +778,10 @@ function TableNodeComponent({ id, data, selected }: NodeProps<TableFlowNode>) {
         {showBadge && badgeTip.tip}
       </div>
 
-      {/* Grain subtitle */}
-      {grain && (
-        <div className="model-node__grain" title={grain}>
-          {grain}
+      {/* The line under the name: the grain, or what the reader chose to show there */}
+      {subtitle && (
+        <div className={`model-node__grain${nodeSubtitleIsChosen(data) ? ' model-node__grain--clipped' : ''}`} title={subtitle}>
+          {subtitle}
         </div>
       )}
 

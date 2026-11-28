@@ -152,6 +152,7 @@ import type {
   ViewFileMessage,
   SetFeedbackProviderMessage,
   SetLineStyleMessage,
+  SetTableSubtitleMessage,
   OpenFeedbackMessage,
   RelationshipKey,
   RequestFeedbackContextMessage,
@@ -696,11 +697,13 @@ import {
   validateRequestFeedbackContextPayload,
   validateSetFeedbackProviderPayload,
   validateSetLineStylePayload,
+  validateSetTableSubtitlePayload,
   validateSubmitFeedbackPayload,
   type AnnotationPositionPayload,
 } from './payloadValidation';
 import { sameName } from '../types/naming';
 import { affectsLineStyle, readLineStyle, writeLineStyle } from './lineStyleSetting';
+import { affectsTableSubtitle, readTableSubtitle, writeTableSubtitle } from './tableSubtitleSetting';
 import { dropGridPositions, tableFilesOfDroppedUris, tablesOfDroppedUris } from '../services/tableDrop';
 
 /** A parsed domain file's `logical.relationships`, as a list the rename helpers can rewrite in place. */
@@ -1322,6 +1325,11 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   /** Tell a canvas how to draw its lines (`erdStudio.canvas.lineStyle`). */
   private postLineStyle(webview: vscode.Webview): void {
     this.post(webview, { type: 'lineStyle', payload: { lineStyle: readLineStyle() } });
+  }
+
+  /** Tell a canvas what the line under each table's name shows (`erdStudio.canvas.tableSubtitle`). */
+  private postTableSubtitle(webview: vscode.Webview): void {
+    this.post(webview, { type: 'tableSubtitle', payload: { tableSubtitle: readTableSubtitle() } });
   }
 
   private post(webview: vscode.Webview, message: unknown): void {
@@ -2604,6 +2612,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           // The toolbar's Curved / Hops switch: a view preference (a user setting), not a schema
           // mutation; it writes no project file, and the physical stage draws lines too.
           'setLineStyle',
+          // The toolbar's menu for the line under each table's name: the same kind of view
+          // preference (a setting, no project file); physical tables carry the same values.
+          'setTableSubtitle',
           // The "not shown" strip: open a file it names, or read every file again. Neither writes.
           'openNotedFile', 'reloadFromDisk',
           // Where the canvas sits on screen (numbers, kept in memory): writes nothing.
@@ -2650,6 +2661,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
               await this.postLoading(document, webviewPanel.webview);
               // How to draw the lines, before the diagram: the first routing pass uses the reader's style.
               this.postLineStyle(webviewPanel.webview);
+              // And what the line under each name shows: the first layout sizes the tables with it.
+              this.postTableSubtitle(webviewPanel.webview);
               // The initial load is the one refresh path allowed to persist
               // auto-computed positions for models that lack them.
               const posted = await this.sendSubjectAreaData(document, webviewPanel.webview, panelKey, { persistPositions: true });
@@ -3294,6 +3307,31 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
             }
             break;
           }
+          case 'setTableSubtitle': {
+            const payload = (message as SetTableSubtitleMessage).payload;
+            const validationError = validateSetTableSubtitlePayload(payload);
+            if (validationError) {
+              this.post(webviewPanel.webview, {
+                type: 'error',
+                payload: { message: `Failed to change the line under the table names: ${validationError}` },
+              });
+              break;
+            }
+            // As `setLineStyle`: the webview has already switched, the
+            // configuration listener tells every open canvas the value in
+            // force once the write lands, and a failed write puts it back.
+            try {
+              await writeTableSubtitle(payload.tableSubtitle);
+            } catch (err) {
+              hostErrorLog.record('setTableSubtitle', err);
+              this.postTableSubtitle(webviewPanel.webview);
+              this.post(webviewPanel.webview, {
+                type: 'error',
+                payload: { message: 'ERD Studio could not save the line under the table names in your settings.' },
+              });
+            }
+            break;
+          }
           case 'setFeedbackProvider': {
             const payload = (message as SetFeedbackProviderMessage).payload;
             const validationError = validateSetFeedbackProviderPayload(payload);
@@ -3673,6 +3711,7 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     // The line style is the reader's setting: every open canvas follows a change, wherever it was made.
     const lineStyleSubscription = vscode.workspace.onDidChangeConfiguration((e) => {
       if (affectsLineStyle(e)) this.postLineStyle(webviewPanel.webview);
+      if (affectsTableSubtitle(e)) this.postTableSubtitle(webviewPanel.webview);
       // erdStudio.dbml.offerConvert turned on or off: the Convert information button follows.
       if (e.affectsConfiguration(`erdStudio.${DBML_OFFER_CONVERT_SETTING}`)) void this.sendConvertOffer(panelKey);
     });
