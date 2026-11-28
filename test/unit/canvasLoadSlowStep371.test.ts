@@ -262,6 +262,45 @@ describe('#371 which step held a slow open', () => {
     expect(recordedSlowKeys(canvasLoad)).toEqual(['canvasLoadSlowManifest']);
   });
 
+  it('two opens at once (a window restored with both): one open\'s yml walk is never blamed on the other\'s manifest', async () => {
+    // Steps are timed by wall clock across awaits. Both opens wait on the same
+    // manifest read; when it resolves, the first runs the schema yml walk
+    // (synchronous, 6 s here) and the second's continuation waits behind it,
+    // so its manifest step would hold those 6 s. Overlapping loads blame each
+    // other's work, so each records `other` instead of a step.
+    const { provider, manifestService, ymlParserService } = build();
+    const release = gateManifest(manifestService);
+    const walk = (ymlParserService as unknown as { findProjectFiles: (p: string) => unknown });
+    const findProjectFiles = walk.findProjectFiles.bind(ymlParserService);
+    vi.spyOn(walk, 'findProjectFiles').mockImplementation((p: string) => { offset += 6000; return findProjectFiles(p); });
+    const canvasLoad = vi.spyOn(telemetry, 'canvasLoad');
+
+    const a = await resolve(provider, SHOWCASE());
+    const b = await resolve(provider, diagramPath(root, 'yaml', 'silver', 'ncr'));
+    const readyA = a._simulateMessage({ type: 'ready' });
+    const readyB = b._simulateMessage({ type: 'ready' });
+    await settle();
+    release();
+    await Promise.all([readyA, readyB]);
+
+    expect(canvasLoad).toHaveBeenCalledTimes(2);
+    for (const [ms] of canvasLoad.mock.calls) expect(ms).toBeGreaterThan(5000);
+    expect(canvasLoad.mock.calls.map((c) => c[2])).toEqual(['other', 'other']);
+    expect(recordedSlowKeys(canvasLoad)).toEqual(['canvasLoadSlowOther']);
+  });
+
+  it('an open that overlapped nothing keeps its step after an earlier load finished', async () => {
+    const { provider, ymlParserService } = build();
+    const first = await resolve(provider, SHOWCASE());
+    await first._simulateMessage({ type: 'ready' });
+    ymlParserService.invalidate();
+    slow(ymlParserService, 'loadYmlData', 7000);
+    const canvasLoad = vi.spyOn(telemetry, 'canvasLoad');
+    const second = await resolve(provider, diagramPath(root, 'yaml', 'silver', 'ncr'));
+    await second._simulateMessage({ type: 'ready' });
+    expect(canvasLoad.mock.calls[0][2]).toBe('yml');
+  });
+
   it('a fast open still passes its step, and the reducer records no slow key for it', async () => {
     const { provider } = build();
     const canvasLoad = vi.spyOn(telemetry, 'canvasLoad');

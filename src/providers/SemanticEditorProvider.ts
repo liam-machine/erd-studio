@@ -1022,6 +1022,15 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   private readonly lastLoadError = new Map<string, string>();
 
   /**
+   * The `sendSubjectAreaData` calls running now, any panel, open or refresh
+   * (#371). Each is marked `overlapped` when another ran beside it at any
+   * point: a step is timed by wall clock across its awaits, so overlapping
+   * loads charge each other's work (one's synchronous schema yml walk) to
+   * whatever step the other was awaiting, and their step times are dropped.
+   */
+  private readonly loadsInFlight = new Set<{ overlapped: boolean }>();
+
+  /**
    * logical-models/*.yml file paths this provider wrote through a
    * WorkspaceEdit, keyed by domain document URI. An undo/redo flushes ONLY
    * these documents — a model file the user is hand-editing in another tab is
@@ -1407,7 +1416,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * diagram's own text, no table read — each followed by a turn of the
    * event loop so the message leaves the host before the read blocks it.
    * In a dbt project whose schema yml is not read yet (the window's first
-   * open, or after dbt or an edit changed them), the count also carries
+   * open, or after a schema yml change or Refresh Manifest; a manifest-only
+   * change after a dbt run leaves the yml warm, so it is not said), the count also carries
    * `reading: 'dbt'`: the open reads dbt's files before the diagram (#371).
    */
   private async postLoading(document: vscode.TextDocument, webview: vscode.Webview): Promise<void> {
@@ -6563,6 +6573,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       }
       step = next;
     };
+    const flight = { overlapped: this.loadsInFlight.size > 0 };
+    for (const other of this.loadsInFlight) other.overlapped = true;
+    this.loadsInFlight.add(flight);
     try {
       const key = panelKey ?? document.uri.toString();
       const panel = this.openPanels.get(key);
@@ -6695,6 +6708,13 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
         return undefined;
       }
       this.postLoadError(webview, errorKey, this.subjectAreaLoadFailurePayload(err, document.uri.fsPath), err, classifySubjectAreaLoadFailure(err), step, reshow);
+    } finally {
+      this.loadsInFlight.delete(flight);
+      // Another load ran beside this one: no step's time is this load's own,
+      // so leave none, and the caller's slowestLoadStep counts the span as `other`.
+      if (timing && flight.overlapped) {
+        for (const s of Object.keys(timing) as SubjectAreaLoadStep[]) delete timing[s];
+      }
     }
     return undefined;
   }

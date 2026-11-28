@@ -1310,7 +1310,7 @@ mistake in it, a save VS Code refused) records no error code: only the
 
 **B17 — big diagrams: slow loads, layout failures and the draft layout.**
 
-- `canvasLoadOver20s` — a canvas took more than 20 s to load (once a day). Since #333 (added after 2.0.7) it is the top of the `canvasLoad*` ranges under "Keys added after 2.0.0": a day carries at most one of them, the slowest open's, so a day with this key carries no faster one. Its meaning is unchanged.
+- `canvasLoadOver20s` — a canvas took more than 20 s to load (once a day). Since #333 (added after 2.0.7) it is the top of the `canvasLoad*` ranges (`canvasLoadUnder1s` / `1to5s` / `5to20s` / `Over20s`) under "Keys added after 2.0.0": a day carries at most one of them, the slowest open's, so a day with this key carries no faster one. Its meaning is unchanged.
 - `layoutStackFallback` — an auto layout ran out of stack and was laid out again with the stack-safe placement.
 - `firstLayoutOver5s` — the first-open layout of a fresh diagram took more than 5 s.
 - `draftLayoutOver5s` — a draft page layout took more than 5 s.
@@ -1871,7 +1871,9 @@ keys that saw a slow open fired past fixed limits (`canvasLoadOver20s` at
 20 s, `readySlowOver10s` at 10 s), so an open of 2 to 15 s, what a 500-table
 diagram takes on a slow machine, left no trace, and nothing said whether the
 open had to read the table files from disk. These keys say it, once a day
-for the **slowest** open of that day: one `canvasLoad*` key and at most one
+for the **slowest** open of that day: one `canvasLoad*` range key (`canvasLoadUnder1s`,
+`canvasLoad1to5s`, `canvasLoad5to20s` or `canvasLoadOver20s`; `canvasLoadCold` and
+the `canvasLoadSlow*` keys of #371 sit beside it, they are not ranges) and at most one
 `canvasPaint*` key per install-day (a later interim copy replaces the earlier
 one, so the stored row has only the slowest), never a time. Off the
 onboarding trail, except the first `canvasLoadOver20s` of a day, which keeps
@@ -1894,7 +1896,7 @@ the size guard (`trimHeartbeat`) never drops them.
 ```bash
 # How long the slowest open took, per OS and diagram size, over the last 28 days (install-days with each range; for a load range, how many were cold)
 npx wrangler d1 execute erd-studio-telemetry --remote --command \
-  "SELECT h.os, h.model_count, j.key, COUNT(*) AS install_days, COUNT(DISTINCT h.install_id) AS installs, SUM(j.key LIKE 'canvasLoad%' AND json_extract(h.features,'$.canvasLoadCold') IS NOT NULL) AS cold_loads FROM heartbeats h, json_each(h.features) j WHERE COALESCE(h.dev, 0) = 0 AND h.day >= date('now','-28 days') AND (j.key LIKE 'canvasLoad%' OR j.key LIKE 'canvasPaint%') AND j.key <> 'canvasLoadCold' GROUP BY 1, 2, 3 ORDER BY 1, 2, 3"
+  "SELECT h.os, h.model_count, j.key, COUNT(*) AS install_days, COUNT(DISTINCT h.install_id) AS installs, SUM(j.key LIKE 'canvasLoad%' AND json_extract(h.features,'$.canvasLoadCold') IS NOT NULL) AS cold_loads FROM heartbeats h, json_each(h.features) j WHERE COALESCE(h.dev, 0) = 0 AND h.day >= date('now','-28 days') AND (j.key LIKE 'canvasLoad%' OR j.key LIKE 'canvasPaint%') AND j.key <> 'canvasLoadCold' AND j.key NOT LIKE 'canvasLoadSlow%' GROUP BY 1, 2, 3 ORDER BY 1, 2, 3"
 ```
 
 **The one look at the open folder** (added after 2.0.9, #347). Up to 2.0.9 a
@@ -1947,19 +1949,24 @@ runs on the extension host thread: about 6 s for 3,000 files on a fast Mac).
 one of these keys. Recorded only with the day's `canvasLoad5to20s` or
 `canvasLoadOver20s`, by `canvasLoadCold`'s rule: a slower range replaces the
 step keys with this open's, the same range adds this open's beside them, a
-faster or under-5 s open changes nothing. So a day carries one key per slow
-open of its slowest range, usually one. Never a time; off the onboarding
+faster or under-5 s open changes nothing. So a day carries the distinct steps
+that held the slow opens of its slowest range, usually one key (two slow opens
+held by the schema yml leave one `canvasLoadSlowYml`: never count keys as
+opens). A step's time is wall clock while it ran or awaited, so a load that
+overlapped another diagram load or refresh in the same window (two diagrams
+restored at once) would charge one's work to the other's step; such an open
+records `canvasLoadSlowOther` instead of a step. Never a time; off the onboarding
 trail; the size guard (`trimHeartbeat`) never drops them. A tie goes to the
 earlier step.
 
-- `canvasLoadSlowManifest` — the step that held the day's slowest open (over 5 s) was reading dbt's `target/manifest.json` (parsed in a worker thread, with a 120 s limit). Cold on a window's first open, and again after dbt writes `target/` or Refresh Manifest: read beside `canvasLoadCold`, whose absence says nothing about dbt.
+- `canvasLoadSlowManifest` — the step that held the day's slowest open (over 5 s) was reading dbt's `target/manifest.json` (parsed in a worker thread, with a 120 s limit), with no other diagram loading in the window meanwhile. Cold on a window's first open, and again after dbt writes `target/` or Refresh Manifest: read beside `canvasLoadCold`, whose absence says nothing about dbt.
 - `canvasLoadSlowYml` — it was reading the dbt project's schema yml files (`model-paths`, `seed-paths`, `snapshot-paths`), synchronously on the extension host. Cold on a window's first open and after any schema yml changes.
 - `canvasLoadSlowCatalog` — it was reading `target/catalog.json` (skipped over 64 MB).
 - `canvasLoadSlowRead` — it was reading the diagram and its table files (with the dbt key index built from what dbt's files held).
 - `canvasLoadSlowPositions` — it was placing tables that had no position, including saving them to the diagram.
 - `canvasLoadSlowPhysical` — it was building the Physical stage's canvas.
 - `canvasLoadSlowDisplay` — it was building the Logical stage's canvas.
-- `canvasLoadSlowOther` — no step above: the time went before the first one (the `loading` posts and their yields, the line style, an extension host already busy with another window's or extension's work) or after the diagram went out. The whole span less the steps above, so a host that was busy when `ready` arrived lands here, not on the manifest.
+- `canvasLoadSlowOther` — no step above: the time went before the first one (the `loading` posts and their yields, the line style, an extension host already busy with another extension's work) or after the diagram went out, or the open overlapped another diagram load or refresh in the window, so no step's time was its own. The whole span less the steps above, so a host that was busy when `ready` arrived lands here, not on the manifest. Host work that starts after an open's first step and is not a diagram load (a sidebar listing during activation) still lands on the step that open was awaiting.
 
 A day with no slow open has none of these. A pre-#371 client sends none at
 all: read them only from the release after 2.0.12 (`ext_version`).
