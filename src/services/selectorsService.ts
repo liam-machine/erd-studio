@@ -58,9 +58,10 @@ import { Document, parseDocument, isSeq, isMap } from 'yaml';
 import type { YAMLMap, YAMLSeq, Node, Scalar } from 'yaml';
 
 import type { SubjectAreaService } from './domainService';
-import { tableNameOf } from '@erd-studio/core';
 import type { UnifiedSubjectArea } from '../types/semantic';
 import { hasDbtProjectFile } from './projectDiscovery';
+import { dbtModelNameOf } from './dbtModelName';
+import { pathKey } from './pathKey';
 import { log } from './logger';
 
 const SELECTORS_FILENAME = 'selectors.yml';
@@ -79,6 +80,8 @@ interface SelectorDef {
   };
   /** `{layer}/{domain}` this selector was generated from (not written to YAML). */
   source: string;
+  /** The diagram file it was generated from (not written to YAML). */
+  diagramPath: string;
 }
 
 export type SkipReason = 'malformed' | 'unsaved-edits';
@@ -338,6 +341,22 @@ export class SelectorsService {
   }
 
   /**
+   * The name of the ERD Studio selector selectors.yml has for the diagram at
+   * `diagramPath`, only while the file is current (`check()`): undefined when
+   * there is no file, it is stale or unreadable, or the diagram has no
+   * selector (no table with a dbt model). Read-only, like `check()`. For the
+   * canvas's dbt command, which copies `dbt build --selector <name>` in place
+   * of a command too long to paste.
+   */
+  currentSelectorFor(diagramPath: string): string | undefined {
+    if (this.check().status !== 'current') return undefined;
+    const plan = this.plan(this.filePath);
+    if (plan.status !== 'ok') return undefined;
+    const key = pathKey(diagramPath);
+    return plan.generated.find((g) => pathKey(g.diagramPath) === key)?.name;
+  }
+
+  /**
    * Read every domain file, merge with any user-managed selectors already in
    * `selectors.yml`, and write the file at the dbt project root.
    *
@@ -438,7 +457,7 @@ export class SelectorsService {
     // above the first generated selector on the next round-trip).
     seq.commentBefore = null;
     for (const gen of generated) {
-      const { source: _source, ...selector } = gen;
+      const { source: _source, diagramPath: _diagramPath, ...selector } = gen;
       seq.add(doc.createNode(selector));
     }
     for (const item of preservedItems) {
@@ -522,8 +541,8 @@ export class SelectorsService {
       const seen = new Set<string>();
       const members: Array<{ method: 'fqn'; value: string }> = [];
       for (const model of models) {
-        const found = dbtModels?.get(model.name.toLowerCase());
-        const value = found !== undefined ? found : tableNameOf(model) !== undefined ? null : model.name;
+        // The one resolver, shared with the canvas's dbt command.
+        const value = dbtModelNameOf(model, dbtModels);
         if (value === null || seen.has(value)) { continue; }
         seen.add(value);
         members.push({ method: 'fqn', value });
@@ -539,6 +558,7 @@ export class SelectorsService {
         description: `All models in the ${summary.domain} domain (${summary.layer} layer). ${MANAGED_MARKER}`,
         definition: { union: members },
         source: `${summary.layer}/${summary.domain}`,
+        diagramPath: summary.filePath,
       });
     }
 

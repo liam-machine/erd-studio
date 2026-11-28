@@ -21,7 +21,8 @@
  *                         (the "not shown" strip's file links and buttons),
  *                         canvasFrame (where the canvas sits on screen)
  *                         dropShown (a timed drop's table is on screen; timing only),
- *                         canvasPainted (the first diagram's first paint; timing only)
+ *                         canvasPainted (the first diagram's first paint; timing only),
+ *                         copyDbtCommand (the toolbar's dbt command menu; copies, runs nothing)
  *
  * All message types use a discriminated union pattern with a `type` field,
  * enabling exhaustive switch handling in message handlers.
@@ -45,6 +46,7 @@ import type { GroundTruth } from './syncPlan';
 import type { CanvasGuideStart, GuideActionPayload } from './onboardingGuide';
 import type { CrashFallbackPayload, LayoutFailureDetail, LayoutFallbackRung, WebviewErrorPayload } from './webviewError';
 import type { CanvasLineStyle } from './lineStyle';
+import type { DbtCommandVerb } from './dbtCommand';
 import type { FilesNotShownPayload } from './filesNotShown';
 import type {
   FeedbackAiProviderChoice,
@@ -468,7 +470,8 @@ export interface FilesNotShownMessage {
  * Existing Tables) that found some or all of them on the diagram already
  * (`alreadyOnDiagramMessage`, `addedWithAlreadyMessage`), and a pick in the
  * toolbar's Under name menu that a workspace setting outranks
- * (`TABLE_SUBTITLE_WORKSPACE_NOTE`). Plain words, never an error.
+ * (`TABLE_SUBTITLE_WORKSPACE_NOTE`), and what the toolbar's dbt command menu
+ * copied, or why it copied nothing (`copyDbtCommand`). Plain words, never an error.
  */
 export interface CanvasNoticeMessage {
   type: 'canvasNotice';
@@ -1584,6 +1587,7 @@ export type WebviewMessage =
   | MoveTableMessage
   | CopyTablePathMessage
   | RevealTableInLibraryMessage
+  | CopyDbtCommandMessage
   | LayoutFinishedMessage
   | WebviewErrorMessage
   | CrashFallbackMessage
@@ -1655,6 +1659,24 @@ export interface RevealTableInLibraryMessage {
   type: 'revealTableInLibrary';
   payload: {
     modelName: string;
+  };
+}
+
+/**
+ * The toolbar's **dbt command** menu (a dbt project only; GitHub #378): put
+ * `dbt <verb> --select …` for the diagram's tables on the clipboard — the
+ * `tables` named when some are selected, else every table on the diagram —
+ * and say what was copied in a `canvasNotice`. The host names each table's
+ * dbt model as selectors.yml does and leaves out tables not in dbt yet. It
+ * runs nothing and writes no file (physical allowlist). Validated by
+ * `validateCopyDbtCommandPayload`.
+ */
+export interface CopyDbtCommandMessage {
+  type: 'copyDbtCommand';
+  payload: {
+    verb: DbtCommandVerb;
+    /** The selected tables' canvas names; absent or empty means the whole diagram. */
+    tables?: string[];
   };
 }
 

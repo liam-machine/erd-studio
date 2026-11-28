@@ -75,6 +75,8 @@ import {
   subjectAreaTableNames,
 } from '../services/domainService';
 import { computeSubjectAreaDiff } from '../services/stageDiff';
+import { buildDbtCommand, type DbtCommandTable } from '../services/dbtCommand';
+import { dbtModelNameOf } from '../services/dbtModelName';
 import { buildSyncPlan, countSyncPlanActions, syncPlanLibraryLookups } from '../services/syncPlanBuilder';
 import { findVenvDir } from '../services/dbtEnv';
 import { claudeTerminalLaunch } from './GettingStartedPanel';
@@ -141,7 +143,7 @@ import type { ReportTrackingService } from '../services/reportTrackingService';
 import type { CatalogService } from '../services/catalogService';
 import type { CatalogData } from '../types/catalog';
 import { OwnWriteTracker, ownWrites } from '../services/ownWriteTracker';
-import { ADD_FROM_DBT_NEEDS_DBT_MESSAGE, findOwningDbtProject, hasDbtProjectFile, samePath } from '../services/projectDiscovery';
+import { ADD_FROM_DBT_NEEDS_DBT_MESSAGE, DBT_COMMAND_NEEDS_DBT_MESSAGE, findOwningDbtProject, hasDbtProjectFile, samePath } from '../services/projectDiscovery';
 import type {
   AddModelMessage,
   AddRelationshipMessage,
@@ -166,7 +168,7 @@ import type { YmlData } from '../types/ymlData';
 import type { DiscrepancyReport } from '../types/discrepancy';
 import type { DisplaySubjectArea, DisplayRelationship } from '../types/display';
 import type { Rationale, Cardinality, ColumnDef, DesignTable, Meta, Stage } from '../types/semantic';
-import type { CanvasFrame, CanvasNoticeMessage, CanvasVisibilityMessage, DropTablesMessage, LibraryDragEndedMessage, LibraryDragRelease, LibraryDragReleasedMessage, LibraryDragStartedMessage, RevealRelationshipMessage, RevealTableMessage, SelectTablesMessage, UpdateColumnPayloadColumn, UpdateMetaMessage } from '../types/messages';
+import type { CanvasFrame, CanvasNoticeMessage, CanvasVisibilityMessage, CopyDbtCommandMessage, DropTablesMessage, LibraryDragEndedMessage, LibraryDragRelease, LibraryDragReleasedMessage, LibraryDragStartedMessage, RevealRelationshipMessage, RevealTableMessage, SelectTablesMessage, UpdateColumnPayloadColumn, UpdateMetaMessage } from '../types/messages';
 import { GO_TO_TABLE_COMMAND, REVEAL_IN_TABLE_LIBRARY_COMMAND, projectRelativePath } from '../commands/goToTable';
 import { MOVE_TABLE_COMMAND } from '../commands/moveDbml';
 import type { GroundTruth } from '../types/syncPlan';
@@ -786,6 +788,7 @@ import {
   validateOpenModelFilePayload,
   validateGoToTablePayload,
   validateTableActionPayload,
+  validateCopyDbtCommandPayload,
   validateLayoutFinishedPayload,
   validateWebviewErrorPayload,
   validateCrashFallbackPayload,
@@ -2743,6 +2746,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           'openModelFile', 'layoutFinished', 'exportDiagram', 'requestExistingTables', 'requestNewRelationshipFiles',
           // Finding a table elsewhere: they open, select or copy, never write.
           'goToTable', 'showTableOnOtherDiagrams', 'copyTablePath', 'revealTableInLibrary',
+          // The toolbar's dbt command menu: puts a command on the clipboard; runs nothing, writes no file.
+          'copyDbtCommand',
           // The onboarding guide: fixed action ids mapped to fixed commands and a fixed URL; writes no file.
           'guide',
           // Usage telemetry only (2.0 B13): a crash's kind and area.
@@ -3362,6 +3367,17 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
               break;
             }
             await this.handleTableAction(message.type, (payload as { modelName: string }).modelName.trim(), document, webviewPanel.webview);
+            break;
+          }
+          case 'copyDbtCommand': {
+            // The toolbar's dbt command menu. Copies; runs nothing, writes nothing (physical allowlist).
+            const payload = (message as { payload?: unknown }).payload;
+            const payloadError = validateCopyDbtCommandPayload(payload);
+            if (payloadError) {
+              this.post(webviewPanel.webview, { type: 'error', payload: { message: payloadError } });
+              break;
+            }
+            await this.handleCopyDbtCommand(document, webviewPanel.webview, payload as CopyDbtCommandMessage['payload']);
             break;
           }
           // --- Feedback dialog -------------------------------------------
@@ -4055,6 +4071,57 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       await vscode.commands.executeCommand(REVEAL_IN_TABLE_LIBRARY_COMMAND, table.name, table.filePath);
     } else {
       await vscode.commands.executeCommand(REVEAL_IN_TABLE_LIBRARY_COMMAND, table.name);
+    }
+  }
+
+  /**
+   * The toolbar's dbt command menu (`copyDbtCommand`, GitHub #378): put
+   * `dbt <verb> --select …` on the clipboard for the selected tables, or for
+   * every table on the diagram, and say what was copied (`canvasNotice`).
+   * Each table's dbt model is `dbtModelNameOf` over `dbtModelNamesOf`, the
+   * names selectors.yml writes; whether it is in dbt is the physical stage's
+   * answer (`buildPhysicalSubjectArea`'s `existsInProject`), as the Physical
+   * tab draws it. Past `DBT_COMMAND_MAX_LENGTH`, with nothing selected, the
+   * diagram's selector is copied while selectors.yml is current. Runs
+   * nothing and writes no file, on either stage; in a folder without dbt it
+   * says so and copies nothing.
+   */
+  private async handleCopyDbtCommand(
+    document: vscode.TextDocument,
+    webview: vscode.Webview,
+    payload: CopyDbtCommandMessage['payload'],
+  ): Promise<void> {
+    const notice = (message: string): void => {
+      this.post(webview, { type: 'canvasNotice', payload: { message } } satisfies CanvasNoticeMessage);
+    };
+    if (this.logicalOnly) {
+      notice(DBT_COMMAND_NEEDS_DBT_MESSAGE);
+      return;
+    }
+    try {
+      const manifest = await this.manifestService.loadManifest(this.workspaceRoot);
+      const ymlData = await this.ymlParserService.loadYmlData(this.workspaceRoot, undefined);
+      const catalog = await this.loadCatalog();
+      const unified = this.subjectAreaService.getSubjectArea(document.uri.fsPath, { dbtKeyIndex: dbtKeyIndexOf(ymlData, manifest) });
+      const physical = this.subjectAreaService.buildPhysicalSubjectArea(unified, ymlData, manifest, catalog);
+      const dbtModels = this.subjectAreaService.dbtModelNamesOf(unified, ymlData, manifest);
+      const inDbt = new Set(physical.models.filter((m) => m.existsInProject !== false).map((m) => normaliseName(m.name)));
+      const tables: DbtCommandTable[] = unified.logical.models.map((model) => ({
+        name: model.name,
+        dbtModel: inDbt.has(normaliseName(model.name)) ? dbtModelNameOf(model, dbtModels) : null,
+      }));
+      const result = buildDbtCommand({
+        verb: payload.verb,
+        tables,
+        selected: payload.tables?.map((name) => name.trim()),
+        currentSelector: () => this.selectorsService.currentSelectorFor(document.uri.fsPath),
+      });
+      if (result.kind === 'copy') await vscode.env.clipboard.writeText(result.text);
+      notice(result.message);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      logHandlerFailure(`[SemanticEditorProvider] Copying a dbt command failed: ${message}`, err);
+      this.post(webview, { type: 'error', payload: { message: `Failed to copy a dbt command: ${message}` } });
     }
   }
 

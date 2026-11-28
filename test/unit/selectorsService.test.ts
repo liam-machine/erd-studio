@@ -1076,6 +1076,23 @@ describe('SelectorsService: who may write, and the read-only check', () => {
     expect(fs.existsSync(file())).toBe(false);
   });
 
+  it('currentSelectorFor names a diagram\'s selector only while the file is current, and writes nothing (#378)', () => {
+    const svc = new SelectorsService(fakeSubjectAreaService(domains), tmpDir, '.erd-studio');
+    // No file: no selector to copy.
+    expect(svc.currentSelectorFor('/dummy/silver/customer-360.json')).toBeUndefined();
+    expect(fs.existsSync(file())).toBe(false);
+    svc.regenerate();
+    expect(svc.currentSelectorFor('/dummy/silver/customer-360.json')).toBe('domain_silver_customer_360');
+    expect(svc.currentSelectorFor('/dummy/gold/reporting.json')).toBe('domain_gold_reporting');
+    expect(svc.currentSelectorFor('/dummy/gold/elsewhere.json')).toBeUndefined();
+    // Stale: the diagrams moved on, so the file's selector is not what the diagram holds.
+    const before = fs.readFileSync(file(), 'utf-8');
+    fs.writeFileSync(file(), before.replace('value: fct_orders', 'value: fct_order_lines'), 'utf-8');
+    const stale = fs.readFileSync(file(), 'utf-8');
+    expect(svc.currentSelectorFor('/dummy/silver/customer-360.json')).toBeUndefined();
+    expect(fs.readFileSync(file(), 'utf-8')).toBe(stale);
+  });
+
   it('check() of a freshly regenerated file is current', () => {
     const svc = new SelectorsService(fakeSubjectAreaService(domains), tmpDir, '.erd-studio');
     svc.regenerate();

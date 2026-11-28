@@ -17,6 +17,7 @@ import { ADD_EXISTING_TABLES_LIMIT, DROP_TABLES_URI_LIMIT, DROP_TABLES_URI_MAX_L
 import { SCHEMA_FOLDER_RULE, isSchemaFolderName } from '../types/schemaFolder';
 import { parseGuideAction } from '../types/onboardingGuide';
 import { isCanvasLineStyle } from '../types/lineStyle';
+import { DBT_COMMAND_TABLES_LIMIT, isDbtCommandVerb } from '../types/dbtCommand';
 import { isTableSubtitle } from '@erd-studio/core';
 import {
   CRASH_DETAIL_MAX,
@@ -1280,4 +1281,27 @@ export function validateTableActionPayload(value: unknown): string | null {
     return 'This action needs a table name.';
   }
   return validateTableNameSafety((value as { modelName?: unknown }).modelName);
+}
+
+/**
+ * The toolbar's dbt command menu (`copyDbtCommand`): `{ verb, tables? }`,
+ * `verb` one of build / run / test, `tables` (optional) a list of at most
+ * `DBT_COMMAND_TABLES_LIMIT` table names, each held to the path-safety rule.
+ * Whether each name is on the diagram is the handler's check
+ * (`buildDbtCommand` answers "not on this diagram").
+ */
+export function validateCopyDbtCommandPayload(value: unknown): string | null {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return 'Copying a dbt command needs build, run or test.';
+  }
+  const { verb, tables } = value as { verb?: unknown; tables?: unknown };
+  if (!isDbtCommandVerb(verb)) return 'Copying a dbt command needs build, run or test.';
+  if (tables === undefined) return null;
+  if (!Array.isArray(tables)) return 'The selected tables must be a list of table names.';
+  if (tables.length > DBT_COMMAND_TABLES_LIMIT) return `At most ${DBT_COMMAND_TABLES_LIMIT} tables can be in one dbt command.`;
+  for (const name of tables) {
+    const error = validateTableNameSafety(name);
+    if (error) return error;
+  }
+  return null;
 }

@@ -229,6 +229,7 @@ export const HANDLER_GROUP: Record<WebviewMessageType, HandlerGroup> = {
   moveTable: 'model',
   copyTablePath: 'other',
   revealTableInLibrary: 'other',
+  copyDbtCommand: 'other',
   layoutFinished: 'layout',
   webviewError: 'other',
   crashFallback: 'other',
