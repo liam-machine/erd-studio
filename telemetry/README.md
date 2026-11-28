@@ -1935,6 +1935,26 @@ npx wrangler d1 execute erd-studio-telemetry --remote --command \
   "SELECT h.os, h.ext_version, j.key, COUNT(DISTINCT h.install_id) AS installs FROM heartbeats h, json_each(h.features) j WHERE h.day >= date('now','-28 days') AND h.day < date('now') AND COALESCE(h.dev, 0) = 0 AND (j.key LIKE 'startLook%' OR j.key IN ('dbtSearchFromIndex', 'dbtSearchSkipped', 'dbtSearchTimedOut', 'activationOver10s')) GROUP BY 1, 2, 3 ORDER BY 1, 2, installs DESC"
 ```
 
+**What a projectPath that is not a folder was like** (added after 2.0.12,
+#370). `projectPathInvalid` counts every start whose `erdStudio.projectPath`
+(or the deprecated `dbtSemantic.projectPath`) named no folder. Since 2.0 ERD
+Studio starts in any folder with a `.sql` or `.dbml` file, so a relative path
+saved in User settings for one project misses in every other folder: the
+warning now says so, and is shown once per workspace for that case, but the
+total is still counted on every start. These say which case it was, decided
+on the device from `inspect()` and `path.isAbsolute`, never the path itself.
+At most one scope and exactly one form are counted beside each
+`projectPathInvalid`; a start whose setting changed while the window started
+gets the form only, so the scope keys can sum to a little less than the total.
+
+- `projectPathInvalidUser` (error) — the value is in User settings, so it applies to every folder the user opens.
+- `projectPathInvalidWorkspace` (error) — the value is in the workspace's settings (or one folder's): a fault in that window.
+- `projectPathInvalidRelative` (error) — a relative path. A Windows path (`C:\…`) read on macOS or Linux is not absolute there, so it counts here.
+- `projectPathInvalidAbsolute` (error) — an absolute path, which names no folder on this computer.
+
+`projectPathInvalidUser` with `projectPathInvalidRelative` is the case #370
+was about: a setting written for another project, not a mistake in this one.
+
 ## The local archive
 
 Because D1 keeps raw rows for only 90 days, the operator's machine keeps

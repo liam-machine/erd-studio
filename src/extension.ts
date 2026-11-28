@@ -55,7 +55,7 @@ import {
 import { YmlParserService, emptyYmlData } from './services/ymlParserService';
 import { dbtKeyIndexOf } from './services/stageDisplay';
 import { CatalogService } from './services/catalogService';
-import { getErdStudioSetting } from './services/configService';
+import { erdStudioSettingSource, getErdStudioSetting } from './services/configService';
 import { LAYER_DEFINITION, WHICH_LAYER_FOR_DIAGRAM, defaultDiagramLayer } from './services/layerWording';
 import { manifestDisplayPath, readDbtProjectConfig, resolveManifestPath, type DbtProjectConfig } from './services/dbtProjectConfig';
 import { detectPhysicalTooling, toolingExclude, type ToolingProbe } from './services/physicalTooling';
@@ -101,6 +101,7 @@ import {
   dbtSearchFailureCodes,
   harnessFailureKeys,
   loggedErrorCodes,
+  projectPathInvalidDetailCodes,
   slowActivationFeature,
   startLookFoldersFeature,
   type ActivationPhase,
@@ -126,6 +127,7 @@ import {
   diagramNameTakenMessage,
   feedbackPrefill,
   oursMessage,
+  projectPathInvalidMessage,
   reportNotOpenedMessage,
   showErrorWithActions,
 } from './services/commandErrors';
@@ -932,6 +934,59 @@ async function countThrow<T>(code: TelemetryErrorCode, fn: () => Promise<T>): Pr
     telemetry.error(code);
     throw err;
   }
+}
+
+/**
+ * workspaceState key: the User-settings projectPath this workspace was last
+ * warned about (#370), as `settingKey|scope|value`, so the warning is shown
+ * once per workspace and comes back when any of the three changes.
+ */
+const PROJECT_PATH_INVALID_SHOWN_KEY = 'erdStudio.projectPathInvalidShown';
+
+/**
+ * Report a projectPath that names no folder (`invalidSetting`, from the
+ * resolver). `opened` is the folder ERD Studio opened instead, or undefined
+ * in an empty window. `projectPathInvalid` is counted on every start, before
+ * any gate, with its scope and form beside it. The warning names the key and
+ * the scope that hold the value (#370):
+ *
+ * - a relative value in an empty window gets none: there is no folder to
+ *   resolve it against, so it is not wrong there;
+ * - a relative value in User settings is said once per workspace (it applies
+ *   to every folder, so it misses in every folder it was not written for);
+ * - anything else (a value in the workspace's settings, an absolute path) is
+ *   a fault in this window and is said on every start.
+ *
+ * Never writes a setting: the button only opens the settings that hold it.
+ */
+function reportInvalidProjectPath(context: vscode.ExtensionContext, invalidSetting: string, opened: string | undefined): void {
+  const found = erdStudioSettingSource<string>('projectPath');
+  // The resolver's read and this one disagree only if the setting changed while
+  // the window started: then where it is set is unknown, and the plain words say it.
+  const source = found && found.value === invalidSetting ? found : undefined;
+  const absolute = path.isAbsolute(invalidSetting);
+  telemetry.error('projectPathInvalid');
+  for (const code of projectPathInvalidDetailCodes(source?.scope, absolute)) telemetry.error(code);
+
+  if (opened === undefined && !absolute && !vscode.workspace.workspaceFolders?.length) return;
+  if (source?.scope === 'user' && !absolute && opened !== undefined) {
+    const shown = `${source.settingKey}|${source.scope}|${source.value}`;
+    if (context.workspaceState.get<string>(PROJECT_PATH_INVALID_SHOWN_KEY) === shown) return;
+    void context.workspaceState.update(PROJECT_PATH_INVALID_SHOWN_KEY, shown);
+  }
+  const warning = projectPathInvalidMessage({
+    value: invalidSetting,
+    settingKey: source?.settingKey ?? 'erdStudio.projectPath',
+    scope: source?.scope,
+    absolute,
+    opened,
+  });
+  showErrorWithActions(
+    (message, ...items) => vscode.window.showWarningMessage(message, ...items),
+    warning.message,
+    { [warning.button]: () => vscode.commands.executeCommand(warning.command, ...warning.args) },
+    (choice, err) => log.warn(`ERD Studio: ${choice} did not open:`, err),
+  );
 }
 
 /** "Open a folder first", with a button for each way out (#205). */
@@ -1884,17 +1939,10 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     // extension activates on any of its commands), and the sidebar's welcome
     // view already says how to open a folder. An explicit
     // erdStudio.projectPath that points nowhere is a mistake, though, and is
-    // still reported.
+    // still reported (an absolute one; a relative one has nothing to miss in
+    // an empty window, #370).
     if (projectResolution.invalidSetting !== undefined) {
-      telemetry.error('projectPathInvalid');
-      void vscode.window.showWarningMessage(
-        `ERD Studio: erdStudio.projectPath "${projectResolution.invalidSetting}" is not a folder.`,
-        'Open Settings',
-      ).then(choice => {
-        if (choice === 'Open Settings') {
-          void vscode.commands.executeCommand('workbench.action.openSettings', 'erdStudio.projectPath');
-        }
-      });
+      reportInvalidProjectPath(context, projectResolution.invalidSetting, undefined);
     }
     return;
   }
@@ -1927,18 +1975,9 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
   void vscode.commands.executeCommand('setContext', 'erdStudio.hasMultipleDbtProjects', hasMultipleProjects);
 
   if (projectResolution.invalidSetting !== undefined) {
-    telemetry.error('projectPathInvalid');
     // Visible, not just a console line: a projectPath copied from someone
     // else's machine otherwise looks like the setting being ignored.
-    void vscode.window.showWarningMessage(
-      `ERD Studio: erdStudio.projectPath "${projectResolution.invalidSetting}" is not a folder, ` +
-        `so ERD Studio opened ${path.basename(workspaceRoot)} instead.`,
-      'Open Settings',
-    ).then(choice => {
-      if (choice === 'Open Settings') {
-        void vscode.commands.executeCommand('workbench.action.openSettings', 'erdStudio.projectPath');
-      }
-    });
+    reportInvalidProjectPath(context, projectResolution.invalidSetting, path.basename(workspaceRoot));
   }
 
   // v0.6.44 moved the default data directory from erd-studio/ to .erd-studio/.

@@ -1217,6 +1217,11 @@ const ERROR_CODES = [
   'handlerFailedAtOther',
   'handlerFailedDbml',
   'handlerFailedJson',
+  // #370: an erdStudio.projectPath that is not a folder, beside projectPathInvalid: its scope and its form.
+  'projectPathInvalidUser',
+  'projectPathInvalidWorkspace',
+  'projectPathInvalidRelative',
+  'projectPathInvalidAbsolute',
 ];
 
 /** Every event the trail may carry: a marker, a feature key, or an error code written `!code`. */

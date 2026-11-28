@@ -231,9 +231,11 @@ describe('activate() with no folder open (empty window)', () => {
   it('still reports an erdStudio.projectPath that points at no dbt project', async () => {
     vscode._setMockConfiguration('erdStudio', 'projectPath', { workspaceValue: '/nowhere/analytics' });
     await activate(context);
+    // #370: worded for the scope that holds it; no folder was opened, so none is named.
     expect(warn).toHaveBeenCalledWith(
-      'ERD Studio: erdStudio.projectPath "/nowhere/analytics" is not a folder.',
-      'Open Settings',
+      'ERD Studio: erdStudio.projectPath ("/nowhere/analytics") in this workspace\'s settings is not a folder. ' +
+        'Correct the path, or clear it to let ERD Studio find the project.',
+      'Open Workspace Settings',
     );
   });
 
@@ -2322,8 +2324,9 @@ describe('Select dbt Project… (#82)', () => {
     await activate(context);
 
     expect(warn).toHaveBeenCalledWith(
-      'ERD Studio: erdStudio.projectPath "/Users/someone-else/datamodels" is not a folder, so ERD Studio opened a instead.',
-      'Open Settings',
+      'ERD Studio: erdStudio.projectPath ("/Users/someone-else/datamodels") in this workspace\'s settings is not a folder, ' +
+        'so ERD Studio opened a instead. Correct the path, or clear it to let ERD Studio find the project.',
+      'Open Workspace Settings',
     );
   });
 });

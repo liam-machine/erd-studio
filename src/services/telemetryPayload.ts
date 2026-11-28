@@ -911,7 +911,7 @@ export const ERROR_CODES = [
   'copilotChatOpenFailed',
   // A Welcome panel message handler or status check threw.
   'welcomePanelFailed',
-  // erdStudio.projectPath names a folder with no dbt_project.yml.
+  // erdStudio.projectPath (or the deprecated dbtSemantic.projectPath) is not a folder.
   'projectPathInvalid',
   // Why a canvas failed to load, recorded beside `domainLoad`, which stays the
   // total. One per SubjectAreaLoadFailure, via subjectAreaLoadErrorCode().
@@ -1174,6 +1174,14 @@ export const ERROR_CODES = [
   'handlerFailedAtOther',
   'handlerFailedDbml',
   'handlerFailedJson',
+  // #370: what an erdStudio.projectPath that is not a folder was like, beside
+  // projectPathInvalid (the total): one scope (a folder's own settings count
+  // as Workspace; none when the setting changed while the window started) and
+  // one form. A Windows path read on macOS or Linux counts as relative.
+  'projectPathInvalidUser',
+  'projectPathInvalidWorkspace',
+  'projectPathInvalidRelative',
+  'projectPathInvalidAbsolute',
 ] as const;
 export type TelemetryErrorCode = (typeof ERROR_CODES)[number];
 
