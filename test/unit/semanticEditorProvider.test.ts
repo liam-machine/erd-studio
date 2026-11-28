@@ -564,6 +564,26 @@ describe.each(DBT_FIXTURES)('positions drawn but not stored (%s storage)', (stor
     await vi.waitFor(() => expect(readDiagram(root, file).positions).toEqual({ ...elk, dim_date: { x: 9, y: 9 } }));
   });
 
+  it('a fresh diagram: undoing the first drag draws the held layout again, with no second auto layout', async () => {
+    const { panel, doc, file } = await openShowcase(root, { clearViewConfig: true });
+    const elk = elkOf(panel);
+    await panel._simulateMessage({ type: 'updatePositions', payload: { positions: elk, unsaved: true } });
+    const unopened = fs.readFileSync(file, 'utf-8');
+
+    panel._simulateMessage({ type: 'updatePositions', payload: { positions: { dim_date: { x: 9, y: 9 } } } });
+    await editsApplied(1);
+    await vi.waitFor(() => expect(readDiagram(root, file).positions).toEqual({ ...elk, dim_date: { x: 9, y: 9 } }));
+
+    // VS Code's undo rewinds the document in memory; the flush saves it and redraws.
+    const count = types(panel).filter((t) => t === 'domainLoaded').length;
+    doc._setText(unopened);
+    await panel._simulateMessage({ type: 'undo' });
+    await waitForType(panel, 'domainLoaded', count + 1);
+    expect(fs.readFileSync(file, 'utf-8')).toBe(unopened);
+    expect(loadedOf(panel)).not.toHaveProperty('autoLayout');
+    expect(drawnOf(panel)).toEqual(elk);
+  });
+
   it('the Layout button still saves, even when its layout is the one already drawn', async () => {
     const { panel, file } = await openShowcase(root, { clearViewConfig: true });
     const elk = elkOf(panel);

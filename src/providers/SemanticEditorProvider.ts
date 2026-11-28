@@ -5543,10 +5543,9 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     at.stage = 'mutate';
     // Positions this canvas draws but the file does not store ride along when the edit writes the layout.
     const unstored = this.openPanels.get(panelKey)?.unstoredPositions;
-    let folded: string[] = [];
     try {
       if (unstored && !this.holdsBackUnstoredPositions(file)) {
-        folded = foldUnstoredPositions(file.snapshot, parsed, unstored.positions, () => mutator(section, parsed), file.storage === 'dbml');
+        foldUnstoredPositions(file.snapshot, parsed, unstored.positions, () => mutator(section, parsed), file.storage === 'dbml');
       } else {
         mutator(section, parsed);
       }
@@ -5554,10 +5553,11 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       if (err instanceof EditAborted) return false;
       throw err;
     }
-    const written = await this.writeSubjectAreaEdit(document, file, text, options, at);
-    // Stored now: no longer this canvas's to hold.
-    if (written && folded.length > 0) this.forgetUnstoredPositions(panelKey, folded);
-    return written;
+    // The panel keeps holding what it drew: the fold never overrides a stored
+    // position, the next payload replaces or clears the hold
+    // (`placeUnstoredTables`), and the undo of this edit draws it again
+    // instead of laying a fresh diagram out a second time.
+    return this.writeSubjectAreaEdit(document, file, text, options, at);
   }
 
   /** {@link runSubjectAreaEdit} once the mutator has run: the write, in the storage's own way. */
@@ -7346,16 +7346,6 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       if (own) laidOut[own] = { x: p.x, y: p.y };
     }
     entry.unstoredPositions = { positions: laidOut, members: held.members, laidOut: true };
-  }
-
-  /** `names` were saved: the panel no longer holds them as unstored. */
-  private forgetUnstoredPositions(panelKey: string, names: readonly string[]): void {
-    const entry = this.openPanels.get(panelKey);
-    const held = entry?.unstoredPositions;
-    if (!entry || !held) return;
-    const positions = { ...held.positions };
-    for (const name of names) delete positions[name];
-    entry.unstoredPositions = Object.keys(positions).length > 0 ? { ...held, positions } : undefined;
   }
 
   /**
