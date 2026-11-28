@@ -2377,9 +2377,18 @@ export const MODEL_SHARE_FEATURES = [
  * so the trim would take them first, and an oversized day is most likely a
  * large project's.
  */
+/**
+ * #364: what a `webviewNoReady*` met. Kept by the trim: an oversized day is most
+ * likely a large project's, which is the held-host case these keys tell apart,
+ * and the `webviewNoReady*` code they are read beside is an error code, trimmed
+ * last, so without them a trimmed day would read as an idle host (H2).
+ */
+export const NO_READY_FEATURES = ['noReadyHostHeld', 'noReadyClosed30to60s', 'noReadyClosedOver60s'] as const;
+
 const UNTRIMMED_FEATURES: ReadonlySet<string> = new Set<string>([
   'heartbeatProvisional',
   'heartbeatTrimmed',
+  ...NO_READY_FEATURES,
   ...LIBRARY_TABLE_FEATURES,
   ...LARGE_DIAGRAM_FEATURES,
   ...OUTSIDE_CHANGE_SOURCE_FEATURES,

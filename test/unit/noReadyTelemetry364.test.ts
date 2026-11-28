@@ -22,7 +22,16 @@ import { DraftPreviewPanel } from '../../src/providers/DraftPreviewPanel';
 import { GettingStartedPanel, type GettingStartedDeps } from '../../src/providers/GettingStartedPanel';
 import { READY_TIMEOUT_MS } from '../../src/services/readyWatch';
 import { draftPreviewEvents } from '../../src/providers/draftWiring';
-import { FEATURES } from '../../src/services/telemetryPayload';
+import {
+  FEATURES,
+  HEARTBEAT_SOFT_LIMIT,
+  NO_READY_FEATURES,
+  buildHeartbeat,
+  emptyCounters,
+  heartbeatBytes,
+  provisionalBody,
+  trimHeartbeat,
+} from '../../src/services/telemetryPayload';
 import { SubjectAreaService } from '../../src/services/domainService';
 import { LayerService } from '../../src/services/layerService';
 import { TableLibraryService } from '../../src/services/logicalModelService';
@@ -174,6 +183,22 @@ describe('#364 the three keys exist on both sides of the contract', () => {
     const missing = NEW_KEYS.filter((k) => !(FEATURES as readonly string[]).includes(k) || !worker.includes(`'${k}'`));
     expect(missing).toEqual([]);
     expect(FEATURES.slice(FEATURES.indexOf('noReadyHostHeld'), FEATURES.indexOf('noReadyHostHeld') + 3)).toEqual(NEW_KEYS);
+  });
+});
+
+describe('#364 the keys survive an oversized day', () => {
+  it('trimHeartbeat keeps the three keys beside the webviewNoReady* code, which is what an H1/H2 reading needs', () => {
+    expect([...NO_READY_FEATURES]).toEqual(NEW_KEYS);
+    const all = Object.fromEntries(FEATURES.map((f) => [f, 1]));
+    const s = { ...emptyCounters('2026-11-28'), features: all, errors: { webviewNoReadyCanvas: 1 } };
+    const env = { installId: '3b241101-e2bb-4255-8caf-4136c566a962', extVersion: '2.0.12', vscodeVersion: '1.104.2', platform: 'darwin', firstSeenDay: '2026-09-01' };
+    const body = provisionalBody(buildHeartbeat(s, env));
+    expect(heartbeatBytes(body)).toBeGreaterThan(HEARTBEAT_SOFT_LIMIT);
+    const trimmed = trimHeartbeat(body);
+    expect(heartbeatBytes(trimmed)).toBeLessThanOrEqual(HEARTBEAT_SOFT_LIMIT);
+    expect(trimmed.features.heartbeatTrimmed).toBe(1);
+    for (const key of NEW_KEYS) expect(trimmed.features[key as keyof typeof trimmed.features], key).toBe(1);
+    expect(trimmed.errors.webviewNoReadyCanvas).toBe(1);
   });
 });
 

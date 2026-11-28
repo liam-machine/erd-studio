@@ -1959,7 +1959,7 @@ How to read them:
 - **Read them per install over a window, never as a per-day subtraction.** A blank tab left open past midnight UTC and closed then lands its closed key on a day with no `webviewNoReady*`.
 - **A Welcome panel hidden after its 30 s is never counted as closed blank**: it does not keep its page while hidden, so the page reported was replaced. One shown blank again after that is not judged a second time.
 - **The ledger**, per install over a window: `webviewNoReady*` = `readyAfterNoReady` + Reload on the notification (`crashFallbackReload`; for Welcome, a hide) + `noReadyClosed30to60s` + `noReadyClosedOver60s` + the tabs still blank when the window closed.
-- An oversized body's trim (`trimHeartbeat`) takes these first, as the newest keys: they are not on its keep list, and an oversized day is most likely a large project's. `heartbeatTrimmed` marks such a day.
+- **An oversized body's trim (`trimHeartbeat`) keeps all three** (`NO_READY_FEATURES`, on its keep list like the #331 and #333 size keys): an oversized day is most likely a large project's, the held-host case, and the `webviewNoReady*` code beside them is an error code, trimmed last. Without them a trimmed day would read as an idle host.
 
 ```bash
 # What each webviewNoReadyCanvas met, per version (installs, last 28 days): a late ready, a held host, a blank tab closed, a Reload
@@ -2039,6 +2039,7 @@ How to read them:
 - **One code can cover several sites**: `loggedErrorAtRedraw` two, `loggedErrorAtFeedbackSend` two, `loggedErrorAtFailureAction` 22.
 - **Every canvas load failure also lights `loggedErrorOther`.** It writes two error lines, `hostErrorLog.record('sendDomainData', …)` (listed as `Other`, as it always counted) and `[SemanticEditorProvider] Failed to load domain…` (`Canvas`), so `loggedError` counts twice and `loggedErrorOther` sits beside `loggedErrorCanvas` and a `domainLoad*` code. The feedback dialog's own sources (`feedbackAnalysis.*`, `submitFeedback*`, `setLineStyle`, …) are listed as `Other` too. Only "`loggedErrorOther` with no other code beside it" is a clean reading.
 - **Not given a site code**: `src/services/recoveryService.ts` (Save All threw, Show Files failed), `src/providers/ConvertToDbmlPanel.ts` (the Convert review panel's handler, opening a file from it), Migrate to v5 itself failing (`src/extension.ts`, `${MIGRATE_V5_TITLE} failed:`; its buttons are covered above), and the SQL and semantic-model imports' `could not read a file` lines (`src/commands/importSqlDdl.ts`, `src/commands/importSemanticModel.ts`). Each runs only after the user started it, so none can explain a day with no canvas; they stay `loggedErrorOther` alone. Convert to DBML's own button line (`convertProjectToDbml.ts`) is scoped `Convert to DBML`, also `Other`, and has no code either; the canvas's Turn Round and Suggest Relationships buttons log as `Canvas`.
+- **An oversized body's trim (`trimHeartbeat`) drops error codes only after every feature it may drop**, newest first, so these codes, the newest, would go first among the errors; such a day keeps `heartbeatTrimmed`, and is very unlikely to lose an error code at all.
 - **No area changed meaning.** Every source listed for #354 is `Other`, which it already counted as while unlisted, and every earlier entry kept its area.
 
 ```bash
