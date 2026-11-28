@@ -1452,6 +1452,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     } catch {
       // Recording must never replace the activation error.
     }
+    // The Diagrams view can exist before the look for dbt projects (#357):
+    // a failure from there on would leave its "Loading diagrams…" up for good.
+    try {
+      void vscode.commands.executeCommand('setContext', 'erdStudio.diagramsLoading', false);
+      void vscode.commands.executeCommand('setContext', 'erdStudio.tablesLoading', false);
+    } catch {
+      // Best effort: never replace the activation error.
+    }
     throw err;
   }
 }

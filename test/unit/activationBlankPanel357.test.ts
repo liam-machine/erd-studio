@@ -265,6 +265,19 @@ describe('#357: the side panel while activation waits for the dbt walk', () => {
   });
 });
 
+describe('#357: an activation that fails after the early view', () => {
+  it('does not leave "Loading diagrams…" up for good', async () => {
+    const exec = vi.spyOn(vscode.commands, 'executeCommand');
+    vi.spyOn(FolderLooks.prototype, 'indexed').mockRejectedValue(new Error('index read failed'));
+    await expect(activate(context)).rejects.toThrow('index read failed');
+    // The early view did set them; the failure clears them again.
+    expect(exec.mock.calls.some((c) => c[0] === 'setContext' && c[1] === 'erdStudio.diagramsLoading' && c[2] === true)).toBe(true);
+    expect(lastContext(exec, 'erdStudio.diagramsLoading')).toBe(false);
+    expect(lastContext(exec, 'erdStudio.tablesLoading')).toBe(false);
+    expect(nativeWelcome()).not.toContain('Loading diagrams…');
+  });
+});
+
 describe('#357: the early step and the resolver read one rule', () => {
   it('firstOpenFolder is defined exactly when a resolution with nothing found still has a root', () => {
     const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'erd-357-rule-'));
