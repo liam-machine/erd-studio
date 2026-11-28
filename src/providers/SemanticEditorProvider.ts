@@ -4078,11 +4078,12 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * The toolbar's dbt command menu (`copyDbtCommand`, GitHub #378): put
    * `dbt <verb> --select …` on the clipboard for the selected tables, or for
    * every table on the diagram, and say what was copied (`canvasNotice`).
-   * Each table's dbt model is `dbtModelNameOf` over `dbtModelNamesOf`, the
-   * names selectors.yml writes; whether it is in dbt is the physical stage's
-   * answer (`buildPhysicalSubjectArea`'s `existsInProject`), as the Physical
-   * tab draws it. Past `DBT_COMMAND_MAX_LENGTH`, with nothing selected, the
-   * diagram's selector is copied while selectors.yml is current. Runs
+   * Each table's dbt model, and whether it is in dbt at all, is the node the
+   * physical stage finds it as (`dbtNodeNamesOf`, the lookup
+   * `buildPhysicalSubjectArea` uses), in dbt's own spelling: `--select`
+   * compares names exactly. Past `DBT_COMMAND_MAX_LENGTH`, with nothing
+   * selected, the diagram's selector is copied while selectors.yml is current
+   * and names every table the same way. Runs
    * nothing and writes no file, on either stage; in a folder without dbt it
    * says so and copies nothing.
    */
@@ -4103,18 +4104,22 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       const ymlData = await this.ymlParserService.loadYmlData(this.workspaceRoot, undefined);
       const catalog = await this.loadCatalog();
       const unified = this.subjectAreaService.getSubjectArea(document.uri.fsPath, { dbtKeyIndex: dbtKeyIndexOf(ymlData, manifest) });
-      const physical = this.subjectAreaService.buildPhysicalSubjectArea(unified, ymlData, manifest, catalog);
-      const dbtModels = this.subjectAreaService.dbtModelNamesOf(unified, ymlData, manifest);
-      const inDbt = new Set(physical.models.filter((m) => m.existsInProject !== false).map((m) => normaliseName(m.name)));
+      const dbtNodes = this.subjectAreaService.dbtNodeNamesOf(unified, ymlData, manifest, catalog);
       const tables: DbtCommandTable[] = unified.logical.models.map((model) => ({
         name: model.name,
-        dbtModel: inDbt.has(normaliseName(model.name)) ? dbtModelNameOf(model, dbtModels) : null,
+        dbtModel: dbtNodes.get(model.name.toLowerCase()) ?? null,
       }));
+      // selectors.yml names a table as `dbtModelNameOf` does, which is its own
+      // name unless two schema folders share it: its selector stands in for the
+      // list only when it names every table as dbt does.
+      const dbtModels = this.subjectAreaService.dbtModelNamesOf(unified, ymlData, manifest);
+      const selectorNamesTheSame = unified.logical.models.every((model, i) =>
+        tables[i].dbtModel === null || dbtModelNameOf(model, dbtModels) === tables[i].dbtModel);
       const result = buildDbtCommand({
         verb: payload.verb,
         tables,
         selected: payload.tables?.map((name) => name.trim()),
-        currentSelector: () => this.selectorsService.currentSelectorFor(document.uri.fsPath),
+        currentSelector: () => selectorNamesTheSame ? this.selectorsService.currentSelectorFor(document.uri.fsPath) : undefined,
       });
       if (result.kind === 'copy') await vscode.env.clipboard.writeText(result.text);
       notice(result.message);

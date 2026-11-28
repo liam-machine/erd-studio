@@ -5,10 +5,10 @@
  * text on the clipboard, so the developer decides when a warehouse job starts.
  *
  * Pure: the host (`SemanticEditorProvider.handleCopyDbtCommand`) supplies
- * each table's dbt model (`dbtModelNameOf`, the resolver selectors.yml uses)
- * and whether the physical stage finds it in dbt (`buildPhysicalSubjectArea`'s
- * `existsInProject`); this module only chooses the tables and words the
- * command and its confirmation. No `vscode` import.
+ * each table's dbt model, the node the physical stage finds it as
+ * (`SubjectAreaService.dbtNodeNamesOf`, in dbt's spelling), or null when it
+ * is not in dbt; this module only chooses the tables and words the command
+ * and its confirmation. No `vscode` import.
  */
 
 import { normaliseName } from './nameUtils';
