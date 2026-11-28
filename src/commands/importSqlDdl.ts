@@ -1190,7 +1190,6 @@ async function sqlDdlScriptsOf(
 export async function quickImportSqlDdl(deps: ImportSqlDdlDeps): Promise<ImportDbmlResult | undefined> {
   const ui = sqlUiOf(deps);
   const quiet = deps.draft?.quiet === true;
-  const { ours, gatherMessage, stoppedBeforeATable } = sqlRun(ui, quiet, deps.draft);
   const found = await findSqlDdlScripts(deps.workspaceRoot, deps.semanticDir, ui, deps.listImportFiles)
     .catch(() => ({ files: [] as string[], truncated: false }));
   if (found.truncated && found.files.length > 0) {
@@ -1207,11 +1206,23 @@ export async function quickImportSqlDdl(deps: ImportSqlDdlDeps): Promise<ImportD
     telemetry.feature('quickImportFellBack');
     return importSqlDdl(deps);
   }
-  const gathered = await gatherSqlFiles({ files: found.files, root: deps.workspaceRoot }, ui);
+  return quickImportScripts(deps, found.files);
+}
+
+/**
+ * The quick path from the scripts it found: read them, pick the dialect, and
+ * on. A script that does not read offers Try Again, which reads these same
+ * scripts again (#355): never the folder search again, which would drop a
+ * file that still does not read and fall back to the picker.
+ */
+async function quickImportScripts(deps: ImportSqlDdlDeps, foundFiles: readonly string[]): Promise<ImportDbmlResult | undefined> {
+  const ui = sqlUiOf(deps);
+  const quiet = deps.draft?.quiet === true;
+  const { ours, gatherMessage, stoppedBeforeATable } = sqlRun(ui, quiet, deps.draft);
+  const gathered = await gatherSqlFiles({ files: [...foundFiles], root: deps.workspaceRoot }, ui);
   if ('message' in gathered) {
     if (quiet) dropQuietly(deps.draft, 'unreadable');
-    // Try Again runs the quick path again: it finds the scripts itself, so no picker.
-    return gatherMessage(gathered, () => quickImportSqlDdl(deps));
+    return gatherMessage(gathered, () => quickImportScripts(deps, foundFiles));
   }
 
   // The dialect: the one that reads the most tables (the detected one first; every dialect
@@ -1280,7 +1291,7 @@ export async function quickImportSqlDdl(deps: ImportSqlDdlDeps): Promise<ImportD
     }
   }
   return importConvertedSql(deps, gathered, chosenDialect, best.result, { quick: true },
-    ({ layer, name }) => changeSqlOptions(deps, found.files, { dialect: chosenDialect, layer, name, partitions: 'fold' }));
+    ({ layer, name }) => changeSqlOptions(deps, foundFiles, { dialect: chosenDialect, layer, name, partitions: 'fold' }));
 }
 
 /**

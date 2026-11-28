@@ -419,7 +419,7 @@ describe('Import SQL DDL… — a script it cannot read (#355)', () => {
     expect(sql.errors[0].items).toEqual([TRY_AGAIN_BUTTON]);
   });
 
-  it('the quick path: Try Again runs it again (it finds the scripts itself, so no file dialog)', async () => {
+  it('the quick path: Try Again reads the scripts it found again (no file dialog) and the import goes on', async () => {
     const file = path.join(tmp, 'shop.sql');
     fs.copyFileSync(SHOP, file);
     const ui = unreadableUi(file, undefined);
@@ -435,6 +435,30 @@ describe('Import SQL DDL… — a script it cannot read (#355)', () => {
     expect(ui.sql.errors[0].items).toEqual([SHOW_FILE_BUTTON, TRY_AGAIN_BUTTON]);
     await vi.waitFor(() => expect(importer.confirms).toHaveLength(1));
     expect(ui.picks()).toBe(0);
+  });
+
+  it('the quick path: Try Again on a script that still does not read says so again, never the file dialog', async () => {
+    const feature = vi.spyOn(telemetry, 'feature');
+    const file = path.join(tmp, 'shop.sql');
+    fs.copyFileSync(SHOP, file);
+    const ui = unreadableUi(file, undefined);
+    // The folder search's first look reads it; after that it does not read at all.
+    let sniffs = 0;
+    ui.sql.readFileStart = async (p, chars) => {
+      if (p === file && sniffs++ > 0) throw new Error(`EACCES: permission denied, open '${p}'`);
+      return fs.readFileSync(p, 'utf-8').slice(0, chars);
+    };
+    let tries = 0;
+    ui.sql.showErrorMessage = async (message, ...items) => {
+      ui.sql.errors.push({ message, items });
+      return items.includes(TRY_AGAIN_BUTTON) && tries++ === 0 ? TRY_AGAIN_BUTTON : undefined;
+    };
+    await quickImportSqlDdl(deps(ui.sql, importUi()));
+    await vi.waitFor(() => expect(ui.sql.errors).toHaveLength(2));
+    expect(ui.sql.errors[1].message).toBe(ui.sql.errors[0].message);
+    expect(ui.sql.errors[1].items).toEqual([SHOW_FILE_BUTTON, TRY_AGAIN_BUTTON]);
+    expect(ui.picks()).toBe(0);
+    expect(feature.mock.calls.map((c) => c[0])).not.toContain('quickImportFellBack');
   });
 
   it('the automatic draft (quiet) shows nothing and offers nothing', async () => {

@@ -473,7 +473,9 @@ function showUnsavedUpdate(deps: Pick<ExplorerMoveDeps, 'workspaceRoot' | 'saveF
     const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(filePath));
     await vscode.window.showTextDocument(doc, { preview: false });
   };
-  const failed = (choice: string, err: unknown): void => log.error(`[ERD Studio] Explorer move: "${choice}" failed:`, err);
+  // A warning, as reportInvalidProjectPath logs a button that did not run: a bare
+  // [ERD Studio] log.error would count as loggedErrorOther.
+  const failed = (choice: string, err: unknown): void => log.warn(`[ERD Studio] Explorer move: "${choice}" failed:`, err);
   const saveAll = async (): Promise<void> => {
     const still: string[] = [];
     for (const filePath of unsaved) if (!(await deps.saveFile(filePath))) still.push(filePath);
