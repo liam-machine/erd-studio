@@ -68,7 +68,11 @@ Click **Compare with dbt** on the toolbar. Missing columns, type differences and
 
 ## Run a whole diagram together
 
-ERD Studio keeps a dbt selector for each diagram in `selectors.yml`, so you can build every dbt model in a diagram with one command, for example `dbt build --selector domain_silver_customer_360`. Run **ERD Studio: Regenerate dbt selectors.yml** to refresh them. ERD Studio only touches the `domain_*` selectors it manages; everything else in the file is left alone.
+ERD Studio can keep a dbt selector for each diagram in `selectors.yml`, so you can build every dbt model in a diagram with one command, for example `dbt build --selector domain_silver_customer_360`.
+
+Run **ERD Studio: Regenerate dbt selectors.yml** once to create the file. After that, ERD Studio updates it whenever you edit a diagram. Opening VS Code or switching branch never changes it. After a pull, a merge or an edit by your AI assistant, the status bar shows **selectors.yml out of sync** when the file no longer matches your diagrams; click it to update the file. Commit `selectors.yml` with the diagram change that updated it.
+
+ERD Studio only touches the `domain_*` selectors it manages; everything else in the file is left alone.
 
 ## More than one dbt project
 
