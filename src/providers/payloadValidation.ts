@@ -17,6 +17,7 @@ import { ADD_EXISTING_TABLES_LIMIT, DROP_TABLES_URI_LIMIT, DROP_TABLES_URI_MAX_L
 import { SCHEMA_FOLDER_RULE, isSchemaFolderName } from '../types/schemaFolder';
 import { parseGuideAction } from '../types/onboardingGuide';
 import { isCanvasLineStyle } from '../types/lineStyle';
+import { isTableSubtitle } from '@erd-studio/core';
 import {
   CRASH_DETAIL_MAX,
   isCrashFallbackAction,
@@ -680,6 +681,21 @@ export function validateSetLineStylePayload(value: unknown): string | null {
   const payload = value as { lineStyle?: unknown };
   if (!isCanvasLineStyle(payload.lineStyle)) {
     return 'Line style must be "curved" or "hops".';
+  }
+  return null;
+}
+
+/**
+ * Validate a `setTableSubtitle` payload: `{ tableSubtitle }`, a choice as
+ * core's `isTableSubtitle` reads one (`field:<key>`, `description`, `none`).
+ */
+export function validateSetTableSubtitlePayload(value: unknown): string | null {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return 'The line under the name must be an object.';
+  }
+  const payload = value as { tableSubtitle?: unknown };
+  if (!isTableSubtitle(payload.tableSubtitle)) {
+    return 'The line under the name must be "field:<key>", "description" or "none".';
   }
   return null;
 }
