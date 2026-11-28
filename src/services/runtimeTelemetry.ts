@@ -465,6 +465,7 @@ export const LOGGED_ERROR_AREAS: Readonly<Record<string, LoggedErrorArea>> = {
   setFeedbackApiKey: 'Other',
   setFeedbackProvider: 'Other',
   setLineStyle: 'Other',
+  setTableSubtitle: 'Other',
   submitFeedback: 'Other',
   'submitFeedback.recordPending': 'Other',
 };
