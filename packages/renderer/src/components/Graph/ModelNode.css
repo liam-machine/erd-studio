@@ -302,6 +302,16 @@
   border-bottom: 1px solid var(--glass-divider);
 }
 
+/* A line that is not the grain (a description, a purpose) takes the width
+   the name and columns give the card and ends in an ellipsis: it adds
+   nothing to the card's own max-content width, so choosing a long field
+   never widens a table. The box is border-box, so its padding stays inside. */
+.model-node__grain--clipped {
+  box-sizing: border-box;
+  width: 0;
+  min-width: 100%;
+}
+
 /* -----------------------------------------------------------------------
    Columns
    Inset rows with rounded hover, in the iOS list manner. Each row is 25px.

@@ -15,6 +15,7 @@
 
 import { createContext, createElement, useContext, type ReactNode } from 'react';
 import { createStore, useStore, type StoreApi } from 'zustand';
+import { DEFAULT_TABLE_SUBTITLE, normaliseTableSubtitle } from '@erd-studio/core';
 import type { CanvasContext, DisplaySubjectArea, ExistingTablePreview } from '@erd-studio/core';
 import type { TableFlowNode, FkFlowEdge, FkEdgeData, AnnotationFlowNode, AnnotationFlowEdge } from '../types/graph';
 import { sameFocus, type CanvasFocus } from '../lib/canvasFocus';
@@ -174,6 +175,15 @@ export interface CanvasState {
    */
   lineStyle: LineStyle;
   /**
+   * What the one line under each table's name shows: `field:<key>`,
+   * `description` or `none` (core's `tableSubtitle.ts`). A reader's view
+   * preference: the extension's store sets it from the host's
+   * `tableSubtitle` message (the `erdStudio.canvas.tableSubtitle` setting);
+   * ErdCanvas from its `tableSubtitle` prop. Optional, so a host that builds
+   * its own state need not set it: absent is the grain.
+   */
+  tableSubtitle?: string;
+  /**
    * The routed FK lines by edge id, from `EdgeRouter`'s last pass. Null (or
    * a line missing from it) means `FkEdge` draws its smooth-step fallback.
    */
@@ -271,6 +281,8 @@ export interface CanvasActions {
   setCanvasContext: (context: CanvasContext | null) => void;
   /** Change how FK lines are drawn. */
   setLineStyle: (lineStyle: LineStyle) => void;
+  /** Change what the line under each table's name shows (anything that is not a choice is the grain). */
+  setTableSubtitle: (tableSubtitle: string) => void;
   /** Store the router's latest routes (null: every line on the fallback). */
   setEdgeRoutes: (routes: Map<string, RoutedEdge> | null) => void;
 }
@@ -320,6 +332,7 @@ export function createCanvasSlice(set: CanvasSet): CanvasStore {
     logicalOnly: false,
     canvasContext: null,
     lineStyle: DEFAULT_LINE_STYLE,
+    tableSubtitle: DEFAULT_TABLE_SUBTITLE,
     edgeRoutes: null,
 
     // Actions
@@ -469,6 +482,10 @@ export function createCanvasSlice(set: CanvasSet): CanvasStore {
 
     // Line routing (EdgeRouter writes the routes; FkEdge and EdgeOverlay read them)
     setLineStyle: (lineStyle) => set((s) => (s.lineStyle === lineStyle ? s : { lineStyle })),
+    setTableSubtitle: (value) => set((s) => {
+      const tableSubtitle = normaliseTableSubtitle(value);
+      return s.tableSubtitle === tableSubtitle ? s : { tableSubtitle };
+    }),
     setEdgeRoutes: (routes) => set((s) => (s.edgeRoutes === routes ? s : { edgeRoutes: routes })),
   };
 }

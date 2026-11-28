@@ -92,6 +92,9 @@ export function useCanvasGraph({
   const { isExpanded, toggleExpansion } = useColumnExpansion();
   const tableDetail = useEditorStore((s) => s.tableDetail ?? null);
   const columnFilter = useEditorStore((s) => s.columnFilter ?? null);
+  // What the line under each name shows. A dependency of the transform (not
+  // the overlay pass): it changes each node's text and estimated height.
+  const tableSubtitle = useEditorStore((s) => s.tableSubtitle);
 
   // Latest callback without re-running the transform when it changes.
   const onTransformedRef = useRef(onTransformed);
@@ -132,6 +135,7 @@ export function useCanvasGraph({
         isExpanded: isExpandedNow,
         ...(tableDetailNow ? { tableDetail: tableDetailNow } : {}),
         ...(state.columnFilter ? { columnFilter: state.columnFilter } : {}),
+        ...(tableSubtitle !== undefined ? { tableSubtitle } : {}),
       };
       let { nodes: newNodes, edges: newEdges } = transformSubjectArea(domain, transformOptions);
 
@@ -195,7 +199,7 @@ export function useCanvasGraph({
     // storeApi is stable for the lifetime of the provider (upstream read the
     // module singleton here), so it is left out like upstream's dependencies.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [domain, setNodes, setEdges, setSelectedEdges, setSelectedEdge, toggleExpansion, discrepancyVisible, discrepancyReport]);
+  }, [domain, setNodes, setEdges, setSelectedEdges, setSelectedEdge, toggleExpansion, discrepancyVisible, discrepancyReport, tableSubtitle]);
 
   // Lightweight overlay pass: update only the `dimmed` / `isExpanded` flags on
   // the nodes and edges already in the store when selection, search or column

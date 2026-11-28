@@ -51,6 +51,7 @@ import type {
 } from '@erd-studio/core';
 import { useIsViewer, useSend } from '../../host/canvasEnvironment';
 import { roleLabel } from '../../lib/roleOptions';
+import { fieldValueText } from '../../lib/tableSubtitle';
 import { IconChevron, IconClose, IconPencil } from './panelIcons';
 import './FieldsSection.css';
 
@@ -110,16 +111,8 @@ export function tableFieldsShown(table: FieldsTable, list: FieldList = STARTING_
   return fieldRows(table, undefined, list).some(rowHasValue) || dbmlImportValue(table) !== undefined;
 }
 
-/** The text a row's value reads as: Yes / No, a role's label, or the value as written. */
-function valueText(row: FieldRow): string {
-  const def = row.definition;
-  if (row.choice !== undefined) {
-    if (def.type === 'yes-no') return row.choice === 'true' ? 'Yes' : 'No';
-    if (homeKind(row) === 'role') return roleLabel(row.choice);
-    return row.choice;
-  }
-  return row.value === undefined ? '' : formatMetaValue(row.value);
-}
+/** The text a row's value reads as (shared with the line under a table's name). */
+const valueText = fieldValueText;
 
 /** The value as the text an editor starts from. */
 function editText(row: FieldRow): string {

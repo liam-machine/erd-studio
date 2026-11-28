@@ -200,6 +200,7 @@ export const HANDLER_GROUP: Record<WebviewMessageType, HandlerGroup> = {
   analyzeFeedback: 'other',
   setFeedbackProvider: 'other',
   setLineStyle: 'other',
+  setTableSubtitle: 'other',
   convertProjectToDbml: 'other',
   submitFeedback: 'other',
   copyFeedbackReport: 'other',
