@@ -1423,6 +1423,14 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   private readonly layoutOwed = new Map<string, number>();
 
   /**
+   * Canvases of a file that a later canvas of the same file (opened to the
+   * side) replaced in `openPanels`, oldest first, by panel key. When the
+   * canvas in the entry closes, the newest of these takes it back, so what
+   * it holds (its `unstoredPositions` among them) is not lost.
+   */
+  private readonly displacedPanels = new Map<string, Array<NonNullable<ReturnType<SemanticEditorProvider['openPanels']['get']>>>>();
+
+  /**
    * Relationship reveals asked for before their canvas had loaded (Open in
    * Diagram on a diagram that is still opening), by diagram path. The `ready`
    * handler posts one once the diagram is on the canvas; one older than
@@ -2692,6 +2700,11 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     // Kept for the dispose handler: VS Code marks the panel disposed before it fires
     // onDidDispose, and a disposed panel throws "Webview is disposed" on `webview`.
     const panelWebview = webviewPanel.webview;
+    // A second canvas of the same file (opened to the side) takes the entry; the first comes back when it closes.
+    const displaced = this.openPanels.get(panelKey);
+    if (displaced && displaced.webview !== panelWebview && !this.disposedWebviews.has(displaced.webview)) {
+      this.displacedPanels.set(panelKey, [...(this.displacedPanels.get(panelKey) ?? []), displaced]);
+    }
     this.openPanels.set(panelKey, { document, webview: panelWebview, activeStage: 'logical', panel: webviewPanel });
     this.lastActivePanelKey = panelKey;
     // Usage telemetry (2.0 B13): a canvas that stays blank, timed only while it is visible.
@@ -7552,8 +7565,11 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   closeCanvasesOf(fsPaths: readonly string[]): void {
     for (const [panelKey, entry] of Array.from(this.openPanels.entries())) {
       if (!fsPaths.some((p) => samePath(entry.document.uri.fsPath, p))) continue;
-      try { entry.panel?.dispose(); } catch { /* already disposed */ }
-      this.forgetPanel(panelKey, entry.webview);
+      // Every canvas of the file: the one in the entry and any it replaced.
+      for (const canvas of [...(this.displacedPanels.get(panelKey) ?? []), entry]) {
+        try { canvas.panel?.dispose(); } catch { /* already disposed */ }
+        this.forgetPanel(panelKey, canvas.webview);
+      }
     }
   }
 
@@ -8010,8 +8026,16 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
   /** Drop everything kept for one canvas (on its dispose, or when it is found gone). */
   private forgetPanel(panelKey: string, webview: vscode.Webview): void {
     this.disposedWebviews.add(webview);
+    const displaced = (this.displacedPanels.get(panelKey) ?? []).filter((e) => e.webview !== webview && !this.disposedWebviews.has(e.webview));
     // Only this panel's entry: another canvas of the same file may have replaced it.
-    if (this.openPanels.get(panelKey)?.webview === webview) this.openPanels.delete(panelKey);
+    if (this.openPanels.get(panelKey)?.webview === webview) {
+      this.openPanels.delete(panelKey);
+      // The canvas it replaced is still open: it is the file's canvas again, with what it holds (`unstoredPositions`).
+      const back = displaced.pop();
+      if (back) this.openPanels.set(panelKey, back);
+    }
+    if (displaced.length > 0) this.displacedPanels.set(panelKey, displaced);
+    else this.displacedPanels.delete(panelKey);
     if (this.lastActivePanelKey === panelKey && !this.openPanels.has(panelKey)) this.lastActivePanelKey = undefined;
     this.editedTablePaths.delete(panelKey);
     this.deletedTablePaths.delete(panelKey);

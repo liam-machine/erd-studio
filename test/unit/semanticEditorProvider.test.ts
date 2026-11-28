@@ -649,6 +649,32 @@ describe.each(DBT_FIXTURES)('positions drawn but not stored (%s storage)', (stor
     });
   });
 
+  it('two panels on one diagram: closing the newer one leaves the older one holding what it draws', async () => {
+    const { provider, panel: first, doc, file } = await openShowcase(root, { stripPosition: 'fct_order' });
+    const firstPaint = drawnOf(first).fct_order;
+    const second = vscode.createMockWebviewPanel();
+    await provider.resolveCustomTextEditor(
+      doc as unknown as import('vscode').TextDocument,
+      second as unknown as import('vscode').WebviewPanel,
+      {} as import('vscode').CancellationToken,
+    );
+    second._simulateMessage({ type: 'ready' });
+    await waitForType(second, 'domainLoaded');
+    second._simulateDispose();
+
+    first._simulateMessage({ type: 'updatePositions', payload: { positions: { dim_customer: { x: 11, y: 11 } } } });
+    await editsApplied(1);
+    await vi.waitFor(() => {
+      const after = readDiagram(root, file).positions;
+      expect(after.dim_customer).toEqual({ x: 11, y: 11 });
+      expect(after.fct_order).toEqual(firstPaint);
+    });
+    // And it is still the canvas a refresh redraws.
+    const count = types(first).filter((t) => t === 'domainLoaded').length;
+    await provider.refreshAllOpenSubjectAreas();
+    await waitForType(first, 'domainLoaded', count + 1);
+  });
+
   it('rejects an unsaved flag that is not true, writing nothing', async () => {
     const { panel } = await openShowcase(root, { clearViewConfig: true });
     await panel._simulateMessage({ type: 'updatePositions', payload: { positions: elkOf(panel), unsaved: 'yes' } });
