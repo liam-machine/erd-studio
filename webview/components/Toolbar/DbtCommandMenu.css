@@ -1,0 +1,28 @@
+/* DbtCommandMenu — the toolbar's "dbt command" menu: build, run or test,
+   copied for the selected tables or the whole diagram. The trigger and the
+   items are the toolbar's own dropdown classes; tokens only (theme.css). */
+
+.dbt-command__menu {
+  min-width: 220px;
+}
+
+.dbt-command__title {
+  padding: var(--space-2) var(--space-3) var(--space-3);
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+}
+
+.dbt-command__verb {
+  font-family: var(--font-mono);
+}
+
+.dbt-command__hint {
+  margin-top: var(--space-2);
+  padding: var(--space-3) var(--space-3) var(--space-1);
+  border-top: 1px solid var(--glass-border);
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+  line-height: 1.4;
+  white-space: normal;
+}

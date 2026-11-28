@@ -37,9 +37,19 @@
  *
  * Not-a-dbt-project policy: `selectors.yml` is a dbt file, so when the
  * workspace root has no `dbt_project.yml` (a plain folder opened through
- * `erdStudio.projectPath`, #111) the service never writes — not on
- * activation, not after an edit, not from the manual command. It returns a
- * `'not-dbt-project'` result and the host explains instead of writing.
+ * `erdStudio.projectPath`, #111) the service never writes — not after an
+ * edit, not from the manual command. It returns a `'not-dbt-project'` result
+ * and the host explains instead of writing.
+ *
+ * When it writes: only as the direct result of something the user did.
+ *   - The command (Regenerate dbt selectors.yml) calls `regenerate()`, which
+ *     creates the file when there is none: it is how a project opts in.
+ *   - After a canvas edit, `scheduleRegenerate()` updates the file only when
+ *     it already exists (`createIfMissing: false`): a project that never ran
+ *     the command never gets one.
+ *   - Opening the window, a branch switch or any other file change only runs
+ *     `check()` / `scheduleCheck()`, which read the file, compare its
+ *     ERD Studio selectors with the diagrams and never write.
  */
 
 import * as fs from 'fs';
@@ -48,9 +58,10 @@ import { Document, parseDocument, isSeq, isMap } from 'yaml';
 import type { YAMLMap, YAMLSeq, Node, Scalar } from 'yaml';
 
 import type { SubjectAreaService } from './domainService';
-import { tableNameOf } from '@erd-studio/core';
 import type { UnifiedSubjectArea } from '../types/semantic';
 import { hasDbtProjectFile } from './projectDiscovery';
+import { dbtModelNameOf } from './dbtModelName';
+import { pathKey } from './pathKey';
 import { log } from './logger';
 
 const SELECTORS_FILENAME = 'selectors.yml';
@@ -69,6 +80,8 @@ interface SelectorDef {
   };
   /** `{layer}/{domain}` this selector was generated from (not written to YAML). */
   source: string;
+  /** The diagram file it was generated from (not written to YAML). */
+  diagramPath: string;
 }
 
 export type SkipReason = 'malformed' | 'unsaved-edits';
@@ -81,12 +94,40 @@ export interface SkipInfo {
 }
 
 export type RegenerateResult =
-  | { status: 'written'; selectorsWritten: number; modelsReferenced: number; filePath: string }
+  /** `created`: there was no selectors.yml before this write. */
+  | { status: 'written'; selectorsWritten: number; modelsReferenced: number; filePath: string; created: boolean }
   | { status: 'skipped'; reason: SkipReason; filePath: string; detail: string }
   /** Nothing to write and no file on disk — the workspace was left untouched. */
   | { status: 'noop'; filePath: string }
+  /** `createIfMissing: false` and there is no selectors.yml: nothing was written (the project never opted in). */
+  | { status: 'absent'; filePath: string }
   /** The workspace root has no `dbt_project.yml`, so there is no dbt project to write a selectors.yml for. Nothing was touched. */
   | { status: 'not-dbt-project'; filePath: string };
+
+export interface RegenerateOptions {
+  /**
+   * Create selectors.yml when there is none. Default true (the command).
+   * False is the post-edit path: an existing file is updated, a missing one
+   * stays missing (`'absent'`).
+   */
+  createIfMissing?: boolean;
+}
+
+/** What `check()` found; it never writes. */
+export type CheckResult =
+  /** The workspace root has no `dbt_project.yml`. */
+  | { status: 'not-dbt-project'; filePath: string }
+  /** There is no selectors.yml: the project never opted in, nothing to say. */
+  | { status: 'absent'; filePath: string }
+  /** Its ERD Studio selectors mean what the diagrams give (wording and formatting aside). */
+  | { status: 'current'; filePath: string }
+  /**
+   * Its ERD Studio selectors differ from the diagrams': the selector names a
+   * regenerate would add, remove or change the members of.
+   */
+  | { status: 'stale'; filePath: string; added: string[]; removed: string[]; changed: string[] }
+  /** It cannot be read as selectors (malformed YAML, no `selectors:` list). */
+  | { status: 'unreadable'; filePath: string; detail: string };
 
 export interface SelectorsServiceHooks {
   /**
@@ -119,6 +160,15 @@ export interface SelectorsServiceHooks {
    * reference.
    */
   dbtModelsOf?: (unified: UnifiedSubjectArea) => ReadonlyMap<string, string | null>;
+  /**
+   * Run before a scheduled check (`scheduleCheck`) and before a write
+   * (`regenerateWhenReady`, `scheduleRegenerate`), only in a dbt project
+   * with a selectors.yml to compare or to write: load whatever `dbtModelsOf`
+   * reads, so the writer and the check see the same dbt data, never none.
+   */
+  prepareCheck?: () => Promise<void>;
+  /** The result of a scheduled check, and `'absent'` from a scheduled write that found no file. */
+  onChecked?: (result: CheckResult) => void;
 }
 
 export interface NameCollisionInfo {
@@ -132,13 +182,51 @@ export interface NameCollisionInfo {
   conflictsWith: string;
 }
 
-/** `raw`: the file's current text, or null when there is no file. */
-type LoadOk = { status: 'ok'; doc: Document; preservedItems: Node[]; preservedNames: string[]; raw: string | null };
+/** One ERD Studio selector as the file has it: its name and what its definition means. */
+interface ManagedEntry { name: string; meaning: string }
+
+/**
+ * `raw`: the file's current text, or null when there is no file.
+ * `managed`: the ERD Studio selectors in it (the ones a regenerate replaces).
+ */
+type LoadOk = { status: 'ok'; doc: Document; preservedItems: Node[]; preservedNames: string[]; managed: ManagedEntry[]; raw: string | null };
 type LoadMalformed = { status: 'malformed'; detail: string };
 type LoadResult = LoadOk | LoadMalformed;
 
+/** What a regenerate would write, worked out without writing (`plan()`). */
+type Plan =
+  | { status: 'none' }
+  | { status: 'malformed'; detail: string }
+  | { status: 'ok'; generated: SelectorDef[]; modelsReferenced: number; collisions: NameCollisionInfo[]; loaded: LoadOk };
+
+/**
+ * What a selector's definition means, as one comparable string: the union of
+ * `method: value` members in any order (dbt's union has none), else the
+ * definition itself. Quoting, key order and line endings do not change it.
+ */
+function definitionMeaning(definition: unknown): string {
+  if (definition && typeof definition === 'object' && !Array.isArray(definition)) {
+    const keys = Object.keys(definition);
+    const union = (definition as { union?: unknown }).union;
+    if (keys.length === 1 && Array.isArray(union)) {
+      const members = union.map((m) => {
+        if (!m || typeof m !== 'object' || Array.isArray(m)) return undefined;
+        const { method, value, ...rest } = m as Record<string, unknown>;
+        if (typeof method !== 'string' || typeof value !== 'string' || Object.keys(rest).length > 0) return undefined;
+        return `${method}:${value}`;
+      });
+      if (members.every((m): m is string => m !== undefined)) return `union ${[...members].sort().join('\n')}`;
+    }
+  }
+  return `definition ${JSON.stringify(definition ?? null)}`;
+}
+
 export class SelectorsService {
   private debounceTimer: ReturnType<typeof setTimeout> | undefined;
+  /** A scheduled write waiting for `hooks.prepareCheck`: a check due meanwhile is dropped, as while its timer runs. */
+  private writing = false;
+  /** The scheduled check's own timer: a check never cancels or delays a scheduled write. */
+  private checkTimer: ReturnType<typeof setTimeout> | undefined;
 
   constructor(
     private readonly subjectAreaService: SubjectAreaService,
@@ -147,9 +235,22 @@ export class SelectorsService {
     private readonly hooks?: SelectorsServiceHooks,
   ) {}
 
+  /** The absolute path of the project's selectors.yml. */
+  get filePath(): string {
+    return path.join(this.workspaceRoot, SELECTORS_FILENAME);
+  }
+
+  /** Whether the project has a selectors.yml (it opted in). */
+  fileExists(): boolean {
+    return fs.existsSync(this.filePath);
+  }
+
   /**
-   * Debounced regenerate — coalesces bursts of mutations (e.g. bulk add) into
-   * one write. Safe to call from any mutation handler.
+   * The post-edit path: debounced, so a burst of mutations (e.g. bulk add) is
+   * one write, and update-only (`createIfMissing: false`): an existing
+   * selectors.yml is rebuilt from every diagram, a missing one is not
+   * created. Safe to call from any mutation handler. When the file exists,
+   * `hooks.prepareCheck` runs first, as before a check.
    */
   scheduleRegenerate(delayMs = 250): void {
     if (this.debounceTimer) {
@@ -157,35 +258,175 @@ export class SelectorsService {
     }
     this.debounceTimer = setTimeout(() => {
       this.debounceTimer = undefined;
-      try {
-        this.regenerate();
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        log.error(`[SelectorsService] Regenerate failed: ${msg}`);
+      if (!this.needsPrepare({ createIfMissing: false })) {
+        this.runScheduledRegenerate();
+        return;
       }
+      this.writing = true;
+      void this.hooks!.prepareCheck!()
+        .catch((err) => log.warn(`[SelectorsService] Loading dbt data before the write failed: ${err instanceof Error ? err.message : String(err)}`))
+        .finally(() => {
+          this.writing = false;
+          // A newer write was scheduled meanwhile: it writes instead.
+          if (!this.debounceTimer) this.runScheduledRegenerate();
+        });
     }, delayMs);
   }
 
   /**
+   * The scheduled write itself. A write that throws (a locked file, no
+   * permission) leaves the file as it was and reports a fresh check, since
+   * a check due meanwhile was dropped for it.
+   */
+  private runScheduledRegenerate(): void {
+    try {
+      const result = this.regenerate({ createIfMissing: false });
+      // The file is gone: whatever a check last said about it no longer holds.
+      if (result.status === 'absent') this.hooks?.onChecked?.(result);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      log.error(`[SelectorsService] Regenerate failed: ${msg}`);
+      try {
+        this.hooks?.onChecked?.(this.check());
+      } catch (checkErr) {
+        log.error(`[SelectorsService] Check failed: ${checkErr instanceof Error ? checkErr.message : String(checkErr)}`);
+      }
+    }
+  }
+
+  /** Whether a write with `options` has a file to compare or write, so `hooks.prepareCheck` must run first. */
+  private needsPrepare(options: RegenerateOptions): boolean {
+    return !!this.hooks?.prepareCheck && hasDbtProjectFile(this.workspaceRoot)
+      && (options.createIfMissing !== false || this.fileExists());
+  }
+
+  /**
+   * `regenerate(options)` once `hooks.prepareCheck` has loaded the dbt data
+   * `dbtModelsOf` reads, so what is written is what the next check expects
+   * (the command's path: a fresh window has loaded none).
+   */
+  async regenerateWhenReady(options: RegenerateOptions = {}): Promise<RegenerateResult> {
+    if (this.needsPrepare(options)) await this.hooks!.prepareCheck!();
+    return this.regenerate(options);
+  }
+
+  /**
+   * Debounced, read-only `check()` (activation and the watchers), on its own
+   * timer: it never cancels a scheduled write, and one scheduled write makes
+   * it redundant (the write reports its own outcome through the hooks), so
+   * it is dropped while a write is pending. Calls `hooks.prepareCheck` first
+   * when there is a file to compare, then `hooks.onChecked` with the result.
+   */
+  scheduleCheck(delayMs = 250): void {
+    if (this.checkTimer) {
+      clearTimeout(this.checkTimer);
+    }
+    this.checkTimer = setTimeout(() => {
+      this.checkTimer = undefined;
+      if (this.debounceTimer || this.writing) return;
+      void this.runScheduledCheck();
+    }, delayMs);
+  }
+
+  private async runScheduledCheck(): Promise<void> {
+    try {
+      if (this.hooks?.prepareCheck && hasDbtProjectFile(this.workspaceRoot) && this.fileExists()) {
+        await this.hooks.prepareCheck();
+      }
+      // A write scheduled meanwhile reports its own outcome.
+      if (this.debounceTimer || this.writing) return;
+      this.hooks?.onChecked?.(this.check());
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      log.error(`[SelectorsService] Check failed: ${msg}`);
+    }
+  }
+
+  /**
+   * Whether selectors.yml matches the diagrams, without writing anything
+   * (no write, no temp file, no hook). Compares meaning, never bytes: the
+   * names of the ERD Studio selectors and their members, so a CRLF checkout,
+   * a formatter or a different header or description reads as current.
+   * User-managed selectors are not compared. An open editor's unsaved edits
+   * are not looked at: it reads the file on disk.
+   */
+  check(): CheckResult {
+    const filePath = this.filePath;
+    if (!hasDbtProjectFile(this.workspaceRoot)) {
+      return { status: 'not-dbt-project', filePath };
+    }
+    if (!fs.existsSync(filePath)) {
+      return { status: 'absent', filePath };
+    }
+    const plan = this.plan(filePath);
+    if (plan.status === 'none') {
+      // Only when the file went away between the two looks.
+      return { status: 'absent', filePath };
+    }
+    if (plan.status === 'malformed') {
+      return { status: 'unreadable', filePath, detail: plan.detail };
+    }
+    const wanted = new Map(plan.generated.map((g) => [g.name, definitionMeaning(g.definition)]));
+    const have = new Map<string, string>();
+    const changed = new Set<string>();
+    for (const entry of plan.loaded.managed) {
+      // The same managed name twice: dbt keeps the last one; a regenerate writes it once.
+      if (have.has(entry.name)) changed.add(entry.name);
+      have.set(entry.name, entry.meaning);
+    }
+    const added = [...wanted.keys()].filter((name) => !have.has(name));
+    const removed = [...have.keys()].filter((name) => !wanted.has(name));
+    for (const [name, meaning] of wanted) {
+      if (have.has(name) && have.get(name) !== meaning) changed.add(name);
+    }
+    if (added.length === 0 && removed.length === 0 && changed.size === 0) {
+      return { status: 'current', filePath };
+    }
+    return { status: 'stale', filePath, added, removed, changed: [...changed] };
+  }
+
+  /**
+   * The name of the ERD Studio selector selectors.yml has for the diagram at
+   * `diagramPath`, only while the file is current (`check()`): undefined when
+   * there is no file, it is stale or unreadable, or the diagram has no
+   * selector (no table with a dbt model). Read-only, like `check()`. For the
+   * canvas's dbt command, which copies `dbt build --selector <name>` in place
+   * of a command too long to paste.
+   */
+  currentSelectorFor(diagramPath: string): string | undefined {
+    if (this.check().status !== 'current') return undefined;
+    const plan = this.plan(this.filePath);
+    if (plan.status !== 'ok') return undefined;
+    const key = pathKey(diagramPath);
+    return plan.generated.find((g) => pathKey(g.diagramPath) === key)?.name;
+  }
+
+  /**
    * Read every domain file, merge with any user-managed selectors already in
-   * `selectors.yml`, and write a fresh file at the dbt project root.
+   * `selectors.yml`, and write the file at the dbt project root.
    *
-   * Selectors with names starting with `domain_` are owned by ERD Studio and
-   * fully replaced on each regenerate (so renamed/deleted domains don't
-   * leave stale entries). Selectors with any other name are preserved as
-   * AST nodes — comments and formatting round-trip across regenerates.
+   * Selectors with names starting with `domain_` (and the managed marker)
+   * are owned by ERD Studio and fully replaced on each regenerate (so
+   * renamed/deleted domains don't leave stale entries). Every other selector
+   * is preserved as AST nodes — comments and formatting round-trip across
+   * regenerates.
+   *
+   * `options.createIfMissing` (default true) is false on the post-edit path
+   * (`scheduleRegenerate`): with no selectors.yml it returns `'absent'` and
+   * writes nothing. Only the command creates the file.
    *
    * Returns a discriminated union:
-   *   - `'written'`: the file now matches the diagrams. Includes counts. It
-   *     is rewritten only when its text changes: an up-to-date file is left
-   *     untouched (same bytes, same mtime).
+   *   - `'written'`: the file now matches the diagrams. Includes counts, and
+   *     `created` when there was no file before. It is rewritten only when
+   *     its text changes: an up-to-date file is left untouched (same bytes,
+   *     same mtime).
    *   - `'skipped'`: file was NOT touched. Includes reason and detail. The
    *     host should surface a notification telling the user what to fix and
    *     offering a re-sync action.
    *   - `'noop'`: there are no domains with models AND `selectors.yml` does
-   *     not exist. Nothing is written so merely opening a dbt repo with the
-   *     extension installed never dirties its git status. (An existing file
-   *     is still regenerated so stale `domain_*` selectors get removed.)
+   *     not exist, so the command does not create an empty one. (An existing
+   *     file is still regenerated so stale `domain_*` selectors get removed.)
+   *   - `'absent'`: `createIfMissing: false` and there is no selectors.yml.
    *   - `'not-dbt-project'`: the workspace root has no `dbt_project.yml`.
    *     Nothing is read or written (not even an existing selectors.yml);
    *     checked on every call, so adding a dbt project later just works.
@@ -196,12 +437,17 @@ export class SelectorsService {
    *   - `parseDocument` reports any error (malformed YAML).
    *   - `selectors:` key is missing or its value isn't a list.
    */
-  regenerate(): RegenerateResult {
-    const filePath = path.join(this.workspaceRoot, SELECTORS_FILENAME);
+  regenerate(options: RegenerateOptions = {}): RegenerateResult {
+    const filePath = this.filePath;
 
     // selectors.yml belongs to a dbt project: a plain folder never gets one.
     if (!hasDbtProjectFile(this.workspaceRoot)) {
       return { status: 'not-dbt-project', filePath };
+    }
+
+    // After an edit, only a project that has the file gets it updated.
+    if (options.createIfMissing === false && !fs.existsSync(filePath)) {
+      return { status: 'absent', filePath };
     }
 
     // Skip #1: open with unsaved edits.
@@ -216,6 +462,99 @@ export class SelectorsService {
       return result;
     }
 
+    const plan = this.plan(filePath);
+
+    // Nothing to write and nothing on disk: leave the workspace untouched.
+    if (plan.status === 'none') {
+      return { status: 'noop', filePath };
+    }
+
+    // Skip #2: malformed file.
+    if (plan.status === 'malformed') {
+      const result: RegenerateResult = {
+        status: 'skipped',
+        reason: 'malformed',
+        filePath,
+        detail: plan.detail,
+      };
+      this.hooks?.onSkipped?.(result);
+      return result;
+    }
+
+    const { generated, modelsReferenced, collisions, loaded } = plan;
+    for (const collision of collisions) {
+      log.warn(
+        `[SelectorsService] Selector name "${collision.requestedName}" for domain ${collision.domain} collides with ` +
+        `${collision.conflictsWith}; wrote "${collision.assignedName}" instead.`,
+      );
+      this.hooks?.onNameCollision?.(collision);
+    }
+
+    const { doc, preservedItems, raw } = loaded;
+
+    // Replace the selectors seq's items with [generated, ...preservedItems].
+    // Mutating the same doc keeps anchor/alias references resolvable.
+    const seq = doc.get('selectors') as YAMLSeq;
+    seq.items.length = 0;
+    seq.flow = false;
+    // Any leading comment was promoted onto a specific item during extraction,
+    // so the seq itself should no longer carry it (else it would re-attach
+    // above the first generated selector on the next round-trip).
+    seq.commentBefore = null;
+    for (const gen of generated) {
+      const { source: _source, diagramPath: _diagramPath, ...selector } = gen;
+      seq.add(doc.createNode(selector));
+    }
+    for (const item of preservedItems) {
+      seq.add(item);
+    }
+
+    // The whole region above `selectors:` is ERD-Studio-owned. The yaml lib
+    // parks comments differently depending on whitespace: a header written
+    // without a trailing blank line attaches to the `selectors:` key node,
+    // not to the document. Wipe every slot above the seq so HEADER_COMMENT
+    // is the only thing that survives there.
+    const root = doc.contents;
+    if (root && isMap(root)) {
+      (root as YAMLMap).commentBefore = null;
+      for (const pair of (root as YAMLMap).items) {
+        const keyValue = (pair.key as Scalar | undefined)?.value;
+        if (keyValue !== 'selectors') { continue; }
+        if (pair.key && typeof pair.key === 'object') {
+          (pair.key as Scalar).commentBefore = null;
+        }
+        break;
+      }
+    }
+    doc.commentBefore = HEADER_COMMENT;
+
+    const content = doc.toString({ lineWidth: 0 });
+    // Already up to date (an edit that changed no diagram's tables, or the
+    // command run twice): rewriting the same bytes would only change the
+    // mtime and fire every watcher on the file.
+    if (content !== raw) {
+      this.atomicWrite(filePath, content);
+    }
+
+    this.hooks?.onWritten?.();
+
+    return {
+      status: 'written',
+      selectorsWritten: generated.length,
+      modelsReferenced,
+      filePath,
+      created: raw === null,
+    };
+  }
+
+  /**
+   * What a regenerate would write, shared by `regenerate()` and `check()`:
+   * the selectors the diagrams give (named, de-duplicated) and the file as it
+   * is. Pure: reads, never writes, calls no hook but `dbtModelsOf`.
+   *   - `'none'`: no diagram gives a selector and there is no file.
+   *   - `'malformed'`: the file cannot be read as selectors.
+   */
+  private plan(filePath: string): Plan {
     const summaries = this.subjectAreaService.listSubjectAreas(this.workspaceRoot, this.semanticDir);
 
     const generated: SelectorDef[] = [];
@@ -247,8 +586,8 @@ export class SelectorsService {
       const seen = new Set<string>();
       const members: Array<{ method: 'fqn'; value: string }> = [];
       for (const model of models) {
-        const found = dbtModels?.get(model.name.toLowerCase());
-        const value = found !== undefined ? found : tableNameOf(model) !== undefined ? null : model.name;
+        // The one resolver, shared with the canvas's dbt command.
+        const value = dbtModelNameOf(model, dbtModels);
         if (value === null || seen.has(value)) { continue; }
         seen.add(value);
         members.push({ method: 'fqn', value });
@@ -264,93 +603,32 @@ export class SelectorsService {
         description: `All models in the ${summary.domain} domain (${summary.layer} layer). ${MANAGED_MARKER}`,
         definition: { union: members },
         source: `${summary.layer}/${summary.domain}`,
+        diagramPath: summary.filePath,
       });
     }
 
-    // Nothing to write and nothing on disk: leave the workspace untouched.
     if (generated.length === 0 && !fs.existsSync(filePath)) {
-      return { status: 'noop', filePath };
+      return { status: 'none' };
     }
 
     const loaded = this.loadDocAndExtractUserItems(filePath);
-
-    // Skip #2: malformed file.
     if (loaded.status === 'malformed') {
-      const result: RegenerateResult = {
-        status: 'skipped',
-        reason: 'malformed',
-        filePath,
-        detail: loaded.detail,
-      };
-      this.hooks?.onSkipped?.(result);
-      return result;
+      return loaded;
     }
 
-    const { doc, preservedItems, preservedNames, raw } = loaded;
-
-    this.dedupeSelectorNames(generated, preservedNames);
-
-    // Replace the selectors seq's items with [generated, ...preservedItems].
-    // Mutating the same doc keeps anchor/alias references resolvable.
-    const seq = doc.get('selectors') as YAMLSeq;
-    seq.items.length = 0;
-    seq.flow = false;
-    // Any leading comment was promoted onto a specific item during extraction,
-    // so the seq itself should no longer carry it (else it would re-attach
-    // above the first generated selector on the next round-trip).
-    seq.commentBefore = null;
-    for (const gen of generated) {
-      const { source: _source, ...selector } = gen;
-      seq.add(doc.createNode(selector));
-    }
-    for (const item of preservedItems) {
-      seq.add(item);
-    }
-
-    // The whole region above `selectors:` is ERD-Studio-owned. The yaml lib
-    // parks comments differently depending on whitespace: a header written
-    // without a trailing blank line attaches to the `selectors:` key node,
-    // not to the document. Wipe every slot above the seq so HEADER_COMMENT
-    // is the only thing that survives there.
-    const root = doc.contents;
-    if (root && isMap(root)) {
-      (root as YAMLMap).commentBefore = null;
-      for (const pair of (root as YAMLMap).items) {
-        const keyValue = (pair.key as Scalar | undefined)?.value;
-        if (keyValue !== 'selectors') { continue; }
-        if (pair.key && typeof pair.key === 'object') {
-          (pair.key as Scalar).commentBefore = null;
-        }
-        break;
-      }
-    }
-    doc.commentBefore = HEADER_COMMENT;
-
-    const content = doc.toString({ lineWidth: 0 });
-    // Already up to date (every activation regenerates): rewriting the same
-    // bytes would only change the mtime and fire every watcher on the file.
-    if (content !== raw) {
-      this.atomicWrite(filePath, content);
-    }
-
-    this.hooks?.onWritten?.();
-
-    return {
-      status: 'written',
-      selectorsWritten: generated.length,
-      modelsReferenced,
-      filePath,
-    };
+    const collisions = this.dedupeSelectorNames(generated, loaded.preservedNames);
+    return { status: 'ok', generated, modelsReferenced, collisions, loaded };
   }
 
   /**
    * Ensure every generated selector name is unique — both among the
    * generated set and against user-managed selectors that are preserved.
    * Lossy sanitisation means `customer-360` and `customer_360` collide;
-   * the later (sorted) domain gets a `_2`, `_3`, ... suffix and the host
-   * is notified via `hooks.onNameCollision`.
+   * the later (sorted) domain gets a `_2`, `_3`, ... suffix. Returns each
+   * collision; `regenerate()` logs them and notifies `hooks.onNameCollision`.
    */
-  private dedupeSelectorNames(generated: SelectorDef[], preservedNames: string[]): void {
+  private dedupeSelectorNames(generated: SelectorDef[], preservedNames: string[]): NameCollisionInfo[] {
+    const collisions: NameCollisionInfo[] = [];
     const owners = new Map<string, string>();
     for (const name of preservedNames) {
       owners.set(name, 'a user-managed selector');
@@ -369,21 +647,19 @@ export class SelectorsService {
       const conflictsWith = owners.get(requested) ?? 'unknown';
       owners.set(assigned, gen.source);
       gen.name = assigned;
-      log.warn(
-        `[SelectorsService] Selector name "${requested}" for domain ${gen.source} collides with ` +
-        `${conflictsWith}; wrote "${assigned}" instead.`,
-      );
-      this.hooks?.onNameCollision?.({ requestedName: requested, assignedName: assigned, domain: gen.source, conflictsWith });
+      collisions.push({ requestedName: requested, assignedName: assigned, domain: gen.source, conflictsWith });
     }
+    return collisions;
   }
 
   /**
    * Parse the existing `selectors.yml` and return either:
-   *   - `{ status: 'ok', doc, preservedItems, preservedNames }` — clean parse
-   *     with usable selectors seq. `preservedItems` are the AST nodes for
-   *     every user-managed selector (anything not carrying both the
+   *   - `{ status: 'ok', doc, preservedItems, preservedNames, managed }` —
+   *     clean parse with usable selectors seq. `preservedItems` are the AST
+   *     nodes for every user-managed selector (anything not carrying both the
    *     `domain_` prefix and the `Managed by ERD Studio.` description marker);
-   *     `preservedNames` are their `name` values.
+   *     `preservedNames` are their `name` values; `managed` is every other
+   *     one's name and meaning (`definitionMeaning`).
    *   - `{ status: 'malformed', detail }` — anything else: parse error,
    *     missing `selectors:` key, or non-list `selectors:` value.
    *
@@ -395,13 +671,13 @@ export class SelectorsService {
       raw = fs.readFileSync(filePath, 'utf-8');
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
-        return { status: 'ok', doc: new Document({ selectors: [] }), preservedItems: [], preservedNames: [], raw: null };
+        return { status: 'ok', doc: new Document({ selectors: [] }), preservedItems: [], preservedNames: [], managed: [], raw: null };
       }
       throw err;
     }
 
     if (raw.trim() === '') {
-      return { status: 'ok', doc: new Document({ selectors: [] }), preservedItems: [], preservedNames: [], raw };
+      return { status: 'ok', doc: new Document({ selectors: [] }), preservedItems: [], preservedNames: [], managed: [], raw };
     }
 
     const doc = parseDocument(raw);
@@ -436,7 +712,10 @@ export class SelectorsService {
 
     const preserved: Node[] = [];
     const preservedNames: string[] = [];
-    for (const item of seq.items) {
+    const managed: ManagedEntry[] = [];
+    // Plain values, aliases resolved, read before a regenerate mutates the doc: what each item means.
+    const plain = (doc.toJS({ maxAliasCount: -1 }) as { selectors?: unknown[] } | null)?.selectors ?? [];
+    for (const [index, item] of seq.items.entries()) {
       // Non-map items (bare strings, numbers, etc.) cannot be ours by shape
       // — preserve verbatim. Better to keep something we don't understand
       // than to delete user data.
@@ -460,10 +739,12 @@ export class SelectorsService {
         if (nameStr) {
           preservedNames.push(nameStr);
         }
+      } else {
+        managed.push({ name: nameStr, meaning: definitionMeaning((plain[index] as { definition?: unknown } | undefined)?.definition) });
       }
     }
 
-    return { status: 'ok', doc, preservedItems: preserved, preservedNames, raw };
+    return { status: 'ok', doc, preservedItems: preserved, preservedNames, managed, raw };
   }
 
   /**
@@ -485,7 +766,13 @@ export class SelectorsService {
   /** Write via temp file + rename so a crash never leaves a partial selectors.yml. */
   private atomicWrite(filePath: string, content: string): void {
     const tmpPath = `${filePath}.tmp-${process.pid}`;
-    fs.writeFileSync(tmpPath, content, 'utf-8');
-    fs.renameSync(tmpPath, filePath);
+    try {
+      fs.writeFileSync(tmpPath, content, 'utf-8');
+      fs.renameSync(tmpPath, filePath);
+    } catch (err) {
+      // Never leave the temporary file in the user's project.
+      try { fs.rmSync(tmpPath, { force: true }); } catch { /* nothing more to do */ }
+      throw err;
+    }
   }
 }

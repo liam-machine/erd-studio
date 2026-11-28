@@ -14,6 +14,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 
 import { activate, _resetFirstRunGuardForTests } from '../../src/extension';
+import { SemanticEditorProvider } from '../../src/providers/SemanticEditorProvider';
 import { compileDbmlProject, parseSubjectAreaDbml, type DbmlParserModule } from '@erd-studio/core/dbml';
 import * as v9 from 'dbml-parse-v9';
 import * as v10 from 'dbml-parse-v10';
@@ -180,6 +181,7 @@ describe('in a new, empty folder (§9.7 check 5, automated)', () => {
     const inbox = path.join(root, 'inbox');
     fs.mkdirSync(inbox);
     fs.writeFileSync(path.join(inbox, 'shop.dbml'), 'Table customers {\n  id int [pk]\n}\nTable orders {\n  id int [pk]\n  customer_id int [ref: > customers.id]\n}\n');
+    const owed = vi.spyOn(SemanticEditorProvider.prototype, 'saveFirstLayoutWhenOpened');
     await activate(context);
     importFrom(path.join(inbox, 'shop.dbml'));
     const draft = await importAndKeep();
@@ -187,8 +189,10 @@ describe('in a new, empty folder (§9.7 check 5, automated)', () => {
     expect(draft.banner.detail).toContain('(.erd-studio/main/diagrams/shop.dbml)');
     expect(draft.autoLayout).toBe(true);
     expect(draft.summary).toMatchObject({ tables: 2, relationships: 1, newTables: 2 });
-    // The import itself writes no positions: the first open's auto layout does, as a JSON diagram's first open writes its positions.
+    // The import itself writes no positions: the first open's auto layout does, because the user just made
+    // the diagram (Keep marks it for the canvas), as it does for a JSON diagram made here.
     expect(fs.readFileSync(erd('main', 'diagrams', 'shop.dbml'), 'utf-8')).not.toContain('erd_layout');
+    expect(owed).toHaveBeenCalledWith(erd('main', 'diagrams', 'shop.dbml'));
     expect(files()).toEqual(IMPORTED);
   });
 
@@ -327,7 +331,7 @@ describe('in a native DBML project', () => {
       type: 'domain', summary: { domain: 'sales', layer: 'gold', filePath: salesPath(), storage: 'dbml' },
     });
     expect(errors).toHaveBeenCalledTimes(1);
-    expect(errors).toHaveBeenCalledWith(expect.stringMatching(/could not put back .*Restore these from source control\.$/), { modal: true });
+    expect(errors).toHaveBeenCalledWith(expect.stringMatching(/left part-changed: .*Restore them from source control/), { modal: true }, 'Show Files', 'Send Feedback');
   });
 
   it('Delete Subject Area deletes the one .dbml (its positions are in it), recorded as an own delete', async () => {

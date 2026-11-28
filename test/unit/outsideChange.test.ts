@@ -197,7 +197,7 @@ describe('classifyOutsideChange: the rule', () => {
     });
   });
 
-  it('the seven keys are appended to FEATURES after #331\'s, and only #332\'s, #333\'s and #347\'s follow them', () => {
+  it('the seven keys are appended to FEATURES after #331\'s, and only #332\'s, #333\'s, #347\'s, #364\'s, #358\'s, #371\'s and #357\'s follow them', () => {
     expect(FEATURES.slice(FEATURES.indexOf('diagramTables500Plus') + 1)).toEqual([
       'domainCreatedExternalGit', 'domainCreatedExternalLocal', 'domainCreatedExternalNoGit',
       'modelChangedExternalGit', 'modelChangedExternalNoGit', 'modelChangedExternalEditor', 'modelChangedExternalDisk',
@@ -208,6 +208,15 @@ describe('classifyOutsideChange: the rule', () => {
       'startLookFromIndex', 'startLookIndexFallback',
       'startLookFoldersUnder200', 'startLookFolders200to2000', 'startLookFoldersOver2000',
       'startLookFoundAfterDeadline', 'dbtSearchFromIndex',
+      // #364: what a panel that never said ready met.
+      'noReadyHostHeld', 'noReadyClosed30to60s', 'noReadyClosedOver60s',
+      // #358: what a SQL import's tables defined twice were.
+      'importDuplicateSame', 'importDuplicateDiffers', 'importDuplicateDiffersDefaultSchema', 'importPartialDuplicateOnly',
+      // #371: which step held a slow open.
+      'canvasLoadSlowManifest', 'canvasLoadSlowYml', 'canvasLoadSlowCatalog', 'canvasLoadSlowRead',
+      'canvasLoadSlowPositions', 'canvasLoadSlowPhysical', 'canvasLoadSlowDisplay', 'canvasLoadSlowOther',
+      // #357: a look that stopped early, and looking for longer.
+      'dbtLookStopped', 'dbtLookLonger', 'dbtLookLongerFound',
     ]);
     // The total stays where it was, and is still a 1.x key.
     expect(FEATURES.indexOf('domainCreatedExternal')).toBeLessThan(FEATURES.indexOf('heartbeatProvisional'));

@@ -182,6 +182,7 @@ class MoveStopped extends Error {
 function showErrorWithActions(message: string, actions: ErrorActions): void {
   showErrorWith((m, ...items) => vscode.window.showErrorMessage(m, ...items), message, actions, (choice, err) => {
     log.error(`[ERD Studio] ${TITLE}: "${choice}" failed:`, err);
+    telemetry.error('loggedErrorAtFailureAction');
     const doing = `while running ${choice}`;
     showErrorWithActions(oursMessage(TITLE, doing, 'nothing was changed'), { [SEND_FEEDBACK_BUTTON]: sendFeedback(doing, err) });
   });

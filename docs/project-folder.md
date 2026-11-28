@@ -2,7 +2,7 @@
 
 ERD Studio keeps your data model in a `.erd-studio` folder inside the project it has open. Most of the time there is nothing to choose: open a folder in VS Code and ERD Studio uses it. If that folder, a folder below it, or the folder it sits in is a dbt project, ERD Studio also reads dbt for the Physical stage.
 
-Opening a folder without dbt writes nothing (apart from renaming a folder called `erd-studio/`, from an old release, to `.erd-studio/`). In a dbt project that has diagrams, ERD Studio also keeps the dbt `selectors.yml` up to date. ERD Studio creates `.erd-studio/` only when you ask for something that needs it, such as **New Diagram**, **Import DBML…** or **Open an Example…**.
+Opening a folder writes nothing (apart from renaming a folder called `erd-studio/`, from an old release, to `.erd-studio/`), and neither does opening a diagram. In a dbt project, ERD Studio writes `selectors.yml` only after you run **ERD Studio: Regenerate dbt selectors.yml** once, and then updates it when you edit a diagram (see [Run a whole diagram together](dbt.md#run-a-whole-diagram-together)). ERD Studio creates `.erd-studio/` only when you ask for something that needs it, such as **New Diagram**, **Import DBML…** or **Open an Example…**.
 
 ## Which folder ERD Studio opens
 
@@ -28,7 +28,7 @@ A VS Code window shows one dbt project at a time. In a multi-root workspace or a
 
 To choose another project, click that row, or run **ERD Studio: Select dbt Project…**. VS Code then reloads the window to open the project you picked. Your choice is saved for that workspace on your machine only, so it never ends up in a settings file your team commits. **Auto-detect**, at the top of the list, clears your choice.
 
-To choose the project for everyone who opens the workspace, set `erdStudio.projectPath` in the workspace settings. That is the `settings` block of the `.code-workspace` file, or `.vscode/settings.json` for a single folder. Use a relative path so the setting works on every machine. ERD Studio tries it against each workspace folder in turn, so in a multi-root workspace whose folders sit side by side, `../datamodels` points at the `datamodels` folder. The setting takes priority over the picker. In a multi-root workspace ERD Studio reads it from the workspace level only: a value in one folder's own `.vscode/settings.json` is ignored.
+To choose the project for everyone who opens the workspace, set `erdStudio.projectPath` in the workspace settings. That is the `settings` block of the `.code-workspace` file, or `.vscode/settings.json` for a single folder. Set it there rather than in your User settings: a value in User settings applies to every folder you open, so a relative path written for one project names a folder the others don't have, and ERD Studio says so when it opens them. Use a relative path so the setting works on every machine. ERD Studio tries it against each workspace folder in turn, so in a multi-root workspace whose folders sit side by side, `../datamodels` points at the `datamodels` folder. The setting takes priority over the picker. In a multi-root workspace ERD Studio reads it from the workspace level only: a value in one folder's own `.vscode/settings.json` is ignored.
 
 ## A diagram from another project
 

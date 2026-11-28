@@ -2,7 +2,8 @@
 /**
  * The webview keeps the host's `canvasContext` in the editor store while the
  * logical stage shows, and drops it on the physical stage (the host sends
- * none there; a late one for the logical stage is ignored).
+ * none there; a late one for the logical stage is ignored). Also: App hands
+ * `domainLoaded`'s first-open layout flags (`autoLayout`, `saveLayout`) to the store.
  */
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
 import { act, cleanup, render } from '@testing-library/react';
@@ -77,5 +78,29 @@ describe('canvasContext in the webview', () => {
     expect(useEditorStore.getState().canvasContext).toBeNull();
     postFromHost({ type: 'canvasContext', payload: CONTEXT });
     expect(useEditorStore.getState().canvasContext).toBeNull();
+  });
+});
+
+// The host says whether a first-open layout is the user's own (`saveLayout`):
+// App hands both flags to the store, whose `pendingAutoLayoutSaves` decides
+// whether the layout is posted saved or `unsaved` (firstOpenAutoLayout.test.tsx).
+describe('domainLoaded: the first-open layout flags reach the store', () => {
+  it('saveLayout makes the pending layout a saved one; without it, the layout is unsaved; a payload with neither cancels it', () => {
+    const setPendingAutoLayout = vi.fn();
+    render(<App />);
+    useEditorStore.setState({ setPendingAutoLayout });
+    postFromHost({ type: 'domainLoaded', payload: subjectArea('logical'), autoLayout: true, saveLayout: true });
+    expect(setPendingAutoLayout).toHaveBeenLastCalledWith(true, true);
+    postFromHost({ type: 'domainLoaded', payload: subjectArea('logical'), autoLayout: true });
+    expect(setPendingAutoLayout).toHaveBeenLastCalledWith(true, false);
+    postFromHost({ type: 'domainLoaded', payload: subjectArea('logical') });
+    expect(setPendingAutoLayout).toHaveBeenLastCalledWith(false, false);
+  });
+
+  it('the store keeps saveLayout as pendingAutoLayoutSaves', () => {
+    useEditorStore.getState().setPendingAutoLayout(true, true);
+    expect(useEditorStore.getState()).toMatchObject({ pendingAutoLayout: true, pendingAutoLayoutSaves: true });
+    useEditorStore.getState().setPendingAutoLayout(true, false);
+    expect(useEditorStore.getState()).toMatchObject({ pendingAutoLayout: true, pendingAutoLayoutSaves: false });
   });
 });

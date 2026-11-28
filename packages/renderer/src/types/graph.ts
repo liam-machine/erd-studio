@@ -115,8 +115,16 @@ export type TableNodeData = {
   onToggleExpansion?: (modelName: string) => void;
   /** Whether this model has design rationale metadata. */
   hasRationale?: boolean;
-  /** Grain statement — "One row per ___". Shown as subtitle on node. */
+  /** Grain statement — "One row per ___". The line under the name, unless `subtitle` says otherwise. */
   grain?: string;
+  /**
+   * Set only when the reader chose to show something other than the grain on
+   * the line under the name (`lib/tableSubtitle.ts`): that value's text, or
+   * null when this table has none (no line, and no height reserved for one).
+   * Such a line never widens its card. Absent: the line is the grain, drawn
+   * exactly as it always was. Read both through `nodeSubtitle()`.
+   */
+  subtitle?: string | null;
   /** Model's role in the data warehouse architecture. Shown as badge on node. */
   modelRole?: TableRole;
   /** Structured metadata (`meta:`) — shown in the name's hover tip. Absent when empty. */

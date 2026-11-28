@@ -669,10 +669,18 @@ export interface DbtDraftInput {
    * no folder offers them, and Not drawn says why in one line.
    */
   modelsWithoutColumns?: readonly string[];
+  /**
+   * The dbt project has a selectors.yml. Keep then updates it (the post-edit
+   * regenerate) and the banner says so; without one, Keep creates none and
+   * the banner names the command that does. Default false.
+   */
+  selectorsFileExists?: boolean;
 }
 
-/** What Keep writes beyond the diagram and its tables: Import from dbt regenerates the project's selectors (SelectorsService). */
+/** What Keep writes beyond the diagram and its tables, when the project has a selectors.yml: the post-edit regenerate updates it (SelectorsService). */
 export const DBT_KEEP_SELECTORS_SENTENCE = "Keep also adds a selector for it to selectors.yml at your dbt project's root.";
+/** The banner's selectors sentence when the project has no selectors.yml: Keep creates none, the command does. */
+export const DBT_NO_SELECTORS_SENTENCE = 'Running ERD Studio: Regenerate dbt selectors.yml once makes a dbt selector for each diagram.';
 
 /** A few names, the rest counted: `a, b, c and 4 more`. */
 function someNames(names: readonly string[], shown = 3): string {
@@ -872,7 +880,7 @@ export function draftFromDbt(input: DbtDraftInput): Draft {
     reusedTables: summary.reusedTables,
     changedTables: summary.changedTables,
     ...(available !== undefined ? { cap: { drawn: draft.modelNames.length, available } } : {}),
-  }), DBT_KEEP_SELECTORS_SENTENCE].filter(Boolean).join(' ');
+  }), input.selectorsFileExists ? DBT_KEEP_SELECTORS_SENTENCE : DBT_NO_SELECTORS_SENTENCE].filter(Boolean).join(' ');
   const reused = new Set(draft.reusedModels.map(lc));
   const changedNames = new Set(changed.map((t) => lc(t.name)));
   const undrawnFks = new Map<string, number>();

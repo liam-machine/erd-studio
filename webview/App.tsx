@@ -259,9 +259,10 @@ function EditorCanvas() {
   const setManifestStale = useEditorStore((s) => s.setManifestStale);
   const setSyncPlanGenerated = useEditorStore((s) => s.setSyncPlanGenerated);
 
-  // The host's `loading` answer (and the table count it carries) until the
-  // diagram or an error arrives: proof the host is connected.
-  const [hostLoading, setHostLoading] = useState<{ tables?: number } | null>(null);
+  // The host's `loading` answer (and the table count it carries, and whether
+  // it is reading the dbt project's files first) until the diagram or an
+  // error arrives: proof the host is connected.
+  const [hostLoading, setHostLoading] = useState<{ tables?: number; reading?: 'dbt' } | null>(null);
 
   // A brief note from the host about something it did by itself (`canvasNotice`): an info toast that hides by itself.
   const [notice, setNotice] = useState<string | null>(null);
@@ -282,7 +283,10 @@ function EditorCanvas() {
     (msg: ExtensionMessage) => {
       switch (msg.type) {
         case 'loading':
-          setHostLoading({ ...(typeof msg.payload?.tables === 'number' ? { tables: msg.payload.tables } : {}) });
+          setHostLoading({
+            ...(typeof msg.payload?.tables === 'number' ? { tables: msg.payload.tables } : {}),
+            ...(msg.payload?.reading === 'dbt' ? { reading: 'dbt' as const } : {}),
+          });
           break;
         case 'existingTables':
           useEditorStore.getState().setManifestModels(msg.payload.manifestModels);
@@ -296,7 +300,8 @@ function EditorCanvas() {
           applySubjectAreaPayload(msg.payload);
           // Set on a fresh domain (no stored positions), cleared by every other
           // payload — a later load without the flag cancels a pending layout.
-          useEditorStore.getState().setPendingAutoLayout(msg.autoLayout === true);
+          // `saveLayout`: the layout is the user's own (saved); else it is sent unsaved.
+          useEditorStore.getState().setPendingAutoLayout(msg.autoLayout === true, msg.saveLayout === true);
           // Follows every payload: one without the flag (dbt has since run)
           // hides the logical "Run dbt parse" hint.
           useEditorStore.getState().setManifestMissing(msg.manifestMissing === true);
@@ -408,6 +413,11 @@ function EditorCanvas() {
         case 'lineStyle':
           // The reader's erdStudio.canvas.lineStyle, on ready and whenever it changes.
           if (isCanvasLineStyle(msg.payload?.lineStyle)) useEditorStore.getState().setLineStyle(msg.payload.lineStyle);
+          break;
+        case 'tableSubtitle':
+          // The reader's erdStudio.canvas.tableSubtitle, on ready and whenever it changes
+          // (the store reads anything that is not a choice as the grain).
+          if (typeof msg.payload?.tableSubtitle === 'string') useEditorStore.getState().setTableSubtitle(msg.payload.tableSubtitle);
           break;
         case 'guideStart':
           if (isCanvasGuideStart(msg.payload)) setGuide({ dbml: msg.payload.dbml, semanticDir: msg.payload.semanticDir });
@@ -871,6 +881,7 @@ function EditorCanvas() {
         <div className={`editor-message${hostLoading ? ' editor-message--loading' : ''}`} role="status" aria-live="polite">
           {hostLoading && <span className="editor-message__spinner" aria-hidden="true" />}
           <p>{tables !== undefined && tables > 0 ? `Loading ${tables.toLocaleString()} ${tables === 1 ? 'table' : 'tables'}…` : 'Loading diagram…'}</p>
+          {hostLoading?.reading === 'dbt' && <p className="editor-message__loading-detail">Reading your dbt project's files…</p>}
         </div>
         {showReconnectOverlay && <ReconnectOverlay onReload={handleReconnect} onShowLogs={handleShowLogs} />}
       </>

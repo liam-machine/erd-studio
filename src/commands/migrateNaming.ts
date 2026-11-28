@@ -131,6 +131,7 @@ function showErrorWithActions(
 ): void {
   showErrorWith(show, message, actions, (choice, err) => {
     log.error(`[ERD Studio] ${MIGRATE_NAMING_TITLE}: "${choice}" failed:`, err);
+    telemetry.error('loggedErrorAtFailureAction');
     const doing = `while running ${choice}`;
     showErrorWithActions(oursMessage(MIGRATE_NAMING_TITLE, doing, 'nothing more was changed'), { [SEND_FEEDBACK_BUTTON]: sendFeedback(doing, err) });
   });

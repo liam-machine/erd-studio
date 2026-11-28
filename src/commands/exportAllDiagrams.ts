@@ -135,6 +135,7 @@ function oursFailure(err: unknown, ui: ExportAllDiagramsUi, doing = 'while expor
 function showFailure(ui: ExportAllDiagramsUi, failure: ShownFailure): void {
   showErrorWithActions((m, ...items) => ui.showErrorMessage(m, ...items), failure.message, failure.actions, (choice, err) => {
     log.error(`[ERD Studio] ${COMMAND_NAME}: "${choice}" failed:`, err);
+    telemetry.error('loggedErrorAtFailureAction');
     showFailure(ui, oursFailure(err, ui, `while running ${choice}`));
   });
 }
@@ -357,7 +358,10 @@ function reportDone(
     (m, ...items) => ui.showWarningMessage(m, ...items),
     message,
     actions,
-    (choice, err) => log.error(`[ERD Studio] ${EXPORT_ALL_TITLE}: "${choice}" failed:`, err),
+    (choice, err) => {
+      log.error(`[ERD Studio] ${EXPORT_ALL_TITLE}: "${choice}" failed:`, err);
+      telemetry.error('loggedErrorAtFailureAction');
+    },
   );
 }
 

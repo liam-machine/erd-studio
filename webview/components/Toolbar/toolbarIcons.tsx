@@ -108,6 +108,14 @@ export const IconCompare = (p: IconProps) => (
   </Svg>
 );
 
+/** Terminal: a prompt chevron and a cursor line in a window (the dbt command menu). */
+export const IconTerminal = (p: IconProps) => (
+  <Svg {...p} name="terminal">
+    <rect x="2.25" y="3" width="11.5" height="10" rx="2" />
+    <path d="M4.75 6.5L6.75 8.25 4.75 10M8.25 10h3" />
+  </Svg>
+);
+
 /** Export: an arrow down into a tray. */
 export const IconExport = (p: IconProps) => (
   <Svg {...p} name="export">

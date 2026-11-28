@@ -74,6 +74,7 @@ import {
   type DailyCounters,
   type HeartbeatBody,
   type ManifestState,
+  type SubjectAreaLoadStep,
   type TelemetryErrorCode,
   type TelemetryFeature,
   type TelemetrySchemaFormat,
@@ -717,14 +718,16 @@ export const telemetry = {
    * when it read at least one table file from disk. Recorded as one range
    * key (the day's slowest) and the cold flag, never the time. Off the
    * onboarding trail, except the day's first `canvasLoadOver20s`, which kept
-   * its trail event from 2.0.0 (it was a `featureOnce`).
+   * its trail event from 2.0.0 (it was a `featureOnce`). #371: `slowStep`,
+   * the step that held the open, adds its `canvasLoadSlow*` key when the
+   * open took over 5 s (recordCanvasLoad's rule), also off the trail.
    */
-  canvasLoad(ms: number, cold: boolean): void {
+  canvasLoad(ms: number, cold: boolean, slowStep?: SubjectAreaLoadStep): void {
     const key = canvasLoadFeature(ms);
     const service = active;
     if (!key || !service) return;
     service.update((s) => {
-      const next = recordCanvasLoad(s, key, cold);
+      const next = recordCanvasLoad(s, key, cold, slowStep);
       return key === 'canvasLoadOver20s' && !s.features.canvasLoadOver20s ? service.withTrail(next, key, Date.now()) : next;
     });
   },

@@ -677,6 +677,17 @@ describe('opening a diagram is never a write', () => {
     const r = await canvas.send({ type: 'updateModelDescription', payload: { modelName: 'ccc.addresse', description: 'CCC' } });
     expect(r.errors).toEqual([]);
   });
+
+  it('on that version-7 diagram a drag stores only what was dragged: the positions it drew but does not store stay unwritten, and it says nothing new', async () => {
+    const canvas = await open('bronze/diagrams/kunden-bare.dbml');
+    const r = await canvas.send({ type: 'updatePositions', payload: { positions: { 'bqs.kunde': { x: 420, y: 60 } } } });
+    expect(r.errors).toEqual([]);
+    const after = read('bronze/diagrams/kunden-bare.dbml');
+    // The drag is the user's own edit, which moves it to version 8 as doctor says (D-17), with or without the
+    // canvas's unstored positions: those are held back, so the tables drawn without a stored place get none.
+    expect(after).toMatch(/\n {4}bqs\.kunde 420 60\n/);
+    expect(after).not.toMatch(/ccc\.(addresse|kunde) -?\d+ -?\d+/);
+  });
 });
 
 describe('Delete Table File for one table of a pair', () => {

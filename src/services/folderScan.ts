@@ -699,6 +699,12 @@ export class FolderScan {
     this.walkingSince = undefined;
   }
 
+  /** Milliseconds of `maxMs` left, never below 0 (undefined: no limit): what a countdown shows. A pause uses none. */
+  timeLeftMs(): number | undefined {
+    const left = this.msLeft();
+    return left === undefined ? undefined : Math.max(0, left);
+  }
+
   /** Milliseconds of `maxMs` left (undefined: no limit). A pause, waiting for somebody to ask for more, uses none. */
   private msLeft(): number | undefined {
     if (this.maxMs === undefined) return undefined;

@@ -110,7 +110,8 @@ describe('package.json storage wording (native DBML storage, 2.0)', () => {
   it('the ERD Studio view says "Loading diagrams…" while it loads, "Looking at your folder…" while the folder is looked at, and "No diagrams yet." only once loaded', () => {
     const diagrams = (pkg.contributes.viewsWelcome as Array<{ view: string; contents: string; when?: string }>)
       .filter((w) => w.view === 'erdStudio.domainTree');
-    expect(diagrams.find((w) => w.contents === 'Loading diagrams…')?.when).toBe('erdStudio.hasProject && erdStudio.diagramsLoading');
+    // diagramsLoading alone: it is set as soon as a folder is open, before the look for dbt projects and hasProject (#357).
+    expect(diagrams.find((w) => w.contents === 'Loading diagrams…')?.when).toBe('erdStudio.diagramsLoading');
     // A folder without dbt waiting for its suggested start (#328; test/unit/startActions.test.ts, firstLookFinishes.test.ts).
     expect(diagrams.find((w) => w.contents === 'Looking at your folder…')?.when).toBe(
       'erdStudio.hasProject && !erdStudio.diagramsLoading && !erdStudio.hasDbtProject && erdStudio.storage != yaml && erdStudio.storage != mixed && !erdStudio.startIntent',

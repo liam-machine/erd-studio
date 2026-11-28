@@ -8,8 +8,9 @@
  *   (scoped reads give each table the relationships the whole library does);
  * - on a library with many unread files, the Add Existing Table rows go out
  *   by name (`detailsPending`) and `requestExistingTables` answers in full;
- * - positions computed for a partly placed diagram are written as a layout
- *   and the diagram is not read a second time.
+ * - positions computed for a partly placed diagram go out in the payload,
+ *   nothing is written and the diagram is read once; the first drag writes
+ *   them, as a layout.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -97,13 +98,14 @@ afterEach(() => {
 });
 
 describe('the ready handler answers with loading first', () => {
-  it('posts loading, then loading with the table count, then the line style and the diagram', async () => {
+  it('posts loading, then loading with the table count, then the reader\'s view settings and the diagram', async () => {
     const h = buildProvider(root);
     const { panel } = await open(h, 'gold/diagrams/sales.dbml');
     await panel._simulateMessage({ type: 'ready' });
     const types = posted(panel).map((m) => m.type);
-    // The reader's line style comes before the diagram, so its first routing pass uses it.
-    expect(types.slice(0, 4)).toEqual(['loading', 'loading', 'lineStyle', 'domainLoaded']);
+    // The reader's line style comes before the diagram, so its first routing pass uses it;
+    // and what the line under each name shows, so its first layout sizes the tables with it.
+    expect(types.slice(0, 5)).toEqual(['loading', 'loading', 'lineStyle', 'tableSubtitle', 'domainLoaded']);
     expect(posted(panel)[0].payload).toEqual({});
     expect(posted(panel)[1].payload).toEqual({ tables: 6 });
   });
@@ -250,7 +252,7 @@ describe('Add Existing Table rows on a large library', () => {
 });
 
 describe('a partly placed diagram', () => {
-  it('DBML: the computed positions are written to erd_layout and the diagram is read once', async () => {
+  it('DBML: the computed positions go out unwritten, the diagram is read once, and the first drag writes them to erd_layout', async () => {
     // fct_order loses its position; the other five keep theirs.
     const diagramPath = at('gold/diagrams/sales.dbml');
     fs.writeFileSync(diagramPath, fs.readFileSync(diagramPath, 'utf-8').replace('    fct_order 400 200\n', ''));
@@ -260,26 +262,36 @@ describe('a partly placed diagram', () => {
     const before = _appliedEdits.length;
     await panel._simulateMessage({ type: 'ready' });
     expect(reads).toHaveBeenCalledTimes(1);
+    expect(_appliedEdits.length).toBe(before);
+    expect(doc.getText()).not.toMatch(/\n {4}fct_order /);
+    const drawn = loadedPayload(panel).viewConfig.positions.fct_order;
+    expect(drawn).toBeDefined();
+
+    await panel._simulateMessage({ type: 'updatePositions', payload: { positions: { dim_date: { x: 7, y: 7 } } } });
     expect(_appliedEdits.length).toBe(before + 1);
     const placed = /\n {4}fct_order (-?[\d.]+) (-?[\d.]+)\n/.exec(doc.getText());
     expect(placed).not.toBeNull();
-    expect(loadedPayload(panel).viewConfig.positions.fct_order).toEqual({ x: Number(placed![1]), y: Number(placed![2]) });
+    expect(drawn).toEqual({ x: Number(placed![1]), y: Number(placed![2]) });
   });
 
-  it('JSON: the same, written to the diagram file', async () => {
+  it('JSON: the same, written to the diagram file by the first drag', async () => {
     fs.mkdirSync(at('silver'), { recursive: true });
     fs.writeFileSync(at('silver/plain.json'), JSON.stringify({
       schemaVersion: 5, domain: 'plain', layer: 'silver', description: '',
       logical: { models: ['dim_date', 'fct_order'], relationships: [] },
       viewConfig: { positions: { dim_date: { x: 0, y: 0 } } },
     }, null, 2) + '\n');
+    const unopened = fs.readFileSync(at('silver/plain.json'), 'utf-8');
     const h = buildProvider(root);
     const { panel } = await open(h, 'silver/plain.json');
     const reads = vi.spyOn(h.subjectAreaService, 'getSubjectArea');
     await panel._simulateMessage({ type: 'ready' });
     expect(reads).toHaveBeenCalledTimes(1);
+    expect(fs.readFileSync(at('silver/plain.json'), 'utf-8')).toBe(unopened);
+
+    await panel._simulateMessage({ type: 'updatePositions', payload: { positions: { dim_date: { x: 7, y: 7 } } } });
     const saved = JSON.parse(fs.readFileSync(at('silver/plain.json'), 'utf-8'));
-    expect(saved.viewConfig.positions.fct_order).toBeDefined();
+    expect(saved.viewConfig.positions.dim_date).toEqual({ x: 7, y: 7 });
     expect(loadedPayload(panel).viewConfig.positions.fct_order).toEqual(saved.viewConfig.positions.fct_order);
   });
 });

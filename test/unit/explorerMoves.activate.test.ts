@@ -16,6 +16,9 @@ import * as vscode from 'vscode';
 
 import { activate, _resetFirstRunGuardForTests } from '../../src/extension';
 import { OWN_FILE_OPERATION_GRACE_MS, OwnFileOperations } from '../../src/services/ownFileOperations';
+import { ownWrites } from '../../src/services/ownWriteTracker';
+import { SAVE_ALL_BUTTON, SHOW_FILES_BUTTON } from '../../src/services/commandErrors';
+import { _failMockSave, _unfailMockSave, createMockTextDocument } from '../__mocks__/vscode';
 import { compileDbmlProject, type DbmlParserModule } from '@erd-studio/core/dbml';
 import * as v9 from 'dbml-parse-v9';
 import * as v10 from 'dbml-parse-v10';
@@ -273,6 +276,75 @@ describe('a table file moved to another schema folder', () => {
     expect(tries).toBe(1);
     expect(read('silver/diagrams/staging.dbml')).toMatch(/^use \{ table calendar\.fct_order \} +from '\.\.\/tables\/calendar\/fct_order\.dbml'$/m);
     compilesClean();
+  });
+});
+
+describe('an update whose files did not save (#355)', () => {
+  const STAGING = 'silver/diagrams/staging.dbml';
+  const UNSAVED_MESSAGE = "ERD Studio updated .erd-studio/silver/diagrams/staging.dbml for the move but couldn't save it. It has unsaved changes in VS Code.";
+  beforeEach(() => {
+    vscode._setMockConfiguration('erdStudio', 'dbml.updateReferencesOnMove', { globalValue: 'always' });
+  });
+  const unsavedToasts = (): unknown[][] => errors.mock.calls.filter((c) => String(c[0]).includes("couldn't save"));
+
+  it('says the update was made and the file has unsaved changes, with Save All and Show Files (the status line still names the update)', async () => {
+    await activate(context);
+    _failMockSave(at(STAGING));
+    await explorerMove(['gold/tables/gold/fct_order.dbml', 'silver/tables/calendar/fct_order.dbml']);
+    await vi.waitFor(() => expect(unsavedToasts()).toHaveLength(1));
+    expect(unsavedToasts()[0]).toEqual([UNSAVED_MESSAGE, SAVE_ALL_BUTTON, SHOW_FILES_BUTTON]);
+    expect(errors.mock.calls.map((c) => c[0]).join('\n')).not.toContain('Save the file from its tab');
+    expect(status.mock.calls.map((c) => c[0]).join('\n')).toContain('fct_order.dbml');
+  });
+
+  it('Save All saves only the files the update left unsaved, records each as an own write, and never runs VS Code\'s Save All', async () => {
+    await activate(context);
+    // Another file with unsaved edits of the user's own: Save All must leave it alone.
+    const draft = createMockTextDocument(path.join(ws, 'notes.md'), 'draft\n', { persist: true });
+    (vscode.workspace.textDocuments as unknown[]).push(draft);
+    draft._setText('draft, unsaved\n');
+    const saveAll = vi.fn(async () => true);
+    (vscode.workspace as unknown as { saveAll?: unknown }).saveAll = saveAll;
+    const exec = vi.spyOn(vscode.commands, 'executeCommand');
+    const recorded = vi.spyOn(ownWrites, 'recordWrite');
+    _failMockSave(at(STAGING));
+    errors.mockImplementation((async (message: string) => {
+      if (message !== UNSAVED_MESSAGE) return undefined;
+      _unfailMockSave(at(STAGING));
+      return SAVE_ALL_BUTTON;
+    }) as never);
+    await explorerMove(['gold/tables/gold/fct_order.dbml', 'silver/tables/calendar/fct_order.dbml']);
+    await vi.waitFor(() => expect(recorded).toHaveBeenCalledWith(at(STAGING)));
+    const staging = vscode.workspace.textDocuments.find((d) => d.uri.fsPath === at(STAGING))!;
+    expect(staging.isDirty).toBe(false);
+    expect(read(STAGING)).toMatch(/from '\.\.\/tables\/calendar\/fct_order\.dbml'$/m);
+    expect(draft.isDirty).toBe(true);
+    expect(saveAll).not.toHaveBeenCalled();
+    expect(exec).not.toHaveBeenCalledWith('workbench.action.files.saveAll');
+    expect(unsavedToasts()).toHaveLength(1);
+    delete (vscode.workspace as unknown as { saveAll?: unknown }).saveAll;
+  });
+
+  it('Save All that still fails says so in a second toast, naming the file, with Show Files', async () => {
+    await activate(context);
+    _failMockSave(at(STAGING));
+    errors.mockImplementation((async (message: string) => (message === UNSAVED_MESSAGE ? SAVE_ALL_BUTTON : undefined)) as never);
+    await explorerMove(['gold/tables/gold/fct_order.dbml', 'silver/tables/calendar/fct_order.dbml']);
+    await vi.waitFor(() => expect(unsavedToasts()).toHaveLength(2));
+    expect(unsavedToasts()[1]).toEqual([
+      "ERD Studio still couldn't save .erd-studio/silver/diagrams/staging.dbml. Save it from its tab, or revert.",
+      SHOW_FILES_BUTTON,
+    ]);
+  });
+
+  it('Show Files opens the unsaved file', async () => {
+    await activate(context);
+    _failMockSave(at(STAGING));
+    const shown = vi.spyOn(vscode.window, 'showTextDocument');
+    errors.mockImplementation((async (message: string) => (message === UNSAVED_MESSAGE ? SHOW_FILES_BUTTON : undefined)) as never);
+    await explorerMove(['gold/tables/gold/fct_order.dbml', 'silver/tables/calendar/fct_order.dbml']);
+    await vi.waitFor(() => expect(shown).toHaveBeenCalled());
+    expect((shown.mock.calls[0][0] as unknown as vscode.TextDocument).uri.fsPath).toBe(at(STAGING));
   });
 });
 

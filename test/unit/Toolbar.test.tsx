@@ -452,6 +452,56 @@ describe('logical-only mode (no dbt project)', () => {
   });
 });
 
+describe('the dbt command menu (#378)', () => {
+  const dbtButton = () => screen.queryByRole('button', { name: 'dbt command' });
+  const selectedNode = (id: string): TableFlowNode => ({ ...makeNode(id), selected: true });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockStoreState.logicalOnly = false;
+    mockStoreState.domain = mockSubjectArea;
+  });
+
+  afterEach(() => {
+    mockStoreState.logicalOnly = false;
+    mockStoreState.domain = mockSubjectArea;
+  });
+
+  it('is shown in a dbt project, and not without one', () => {
+    render(<Toolbar {...defaultProps} />);
+    expect(dbtButton()).toBeTruthy();
+    cleanup();
+    mockStoreState.logicalOnly = true;
+    render(<Toolbar {...defaultProps} />);
+    expect(dbtButton()).toBeNull();
+    expect(screen.queryByText(/dbt/)).toBeNull();
+  });
+
+  it('is on the physical tab of a read-only diagram too', () => {
+    mockStoreState.domain = { ...mockSubjectArea, stage: 'physical' as const, readOnly: true };
+    render(<Toolbar {...defaultProps} />);
+    expect(dbtButton()).toBeTruthy();
+  });
+
+  it('offers build, run and test for the whole diagram, and copies with no tables named', () => {
+    render(<Toolbar nodes={[makeNode('dim_a'), makeNode('fct_b')]} edges={[]} />);
+    fireEvent.click(dbtButton()!);
+    expect(screen.getByText('For the 2 tables on this diagram')).toBeTruthy();
+    expect(screen.getAllByRole('menuitem').map((b) => b.textContent)).toEqual(['dbt build', 'dbt run', 'dbt test']);
+    fireEvent.click(screen.getByRole('menuitem', { name: 'dbt run' }));
+    expect(mockPostMessage).toHaveBeenCalledWith({ type: 'copyDbtCommand', payload: { verb: 'run' } });
+    expect(screen.queryByRole('menu')).toBeNull();
+  });
+
+  it('names the selected tables only', () => {
+    render(<Toolbar nodes={[selectedNode('dim_a'), makeNode('fct_b'), selectedNode('fct_c')]} edges={[]} />);
+    fireEvent.click(dbtButton()!);
+    expect(screen.getByText('For the 2 selected tables')).toBeTruthy();
+    fireEvent.click(screen.getByRole('menuitem', { name: 'dbt build' }));
+    expect(mockPostMessage).toHaveBeenCalledWith({ type: 'copyDbtCommand', payload: { verb: 'build', tables: ['dim_a', 'fct_c'] } });
+  });
+});
+
 describe('the top-right corner actions', () => {
   /** Width of the corner in its labelled form, as a real browser reports it. */
   const EXPANDED_WIDTH = 200;

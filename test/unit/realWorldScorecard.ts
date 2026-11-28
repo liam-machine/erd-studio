@@ -363,6 +363,8 @@ async function runDbt(sample: TruthSample, root: string): Promise<ImportRun> {
     target: { layer: layer.id, layerLabel: layer.label, name, diagramFile: `.erd-studio/${layer.id}/diagrams/${name}.dbml` },
     libraryTable: () => undefined,
     layers: DEFAULT_LAYERS,
+    // As Import from dbt fills it: whether the project has a selectors.yml for Keep to update.
+    selectorsFileExists: fs.existsSync(path.join(projectRoot, 'selectors.yml')),
   });
   return {
     ok: draft.modelNames.length > 0,

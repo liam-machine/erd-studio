@@ -606,7 +606,7 @@
       {
         "view": "erdStudio.domainTree",
         "contents": "Loading diagrams…",
-        "when": "erdStudio.hasProject && erdStudio.diagramsLoading"
+        "when": "erdStudio.diagramsLoading"
       },
       {
         "view": "erdStudio.domainTree",
@@ -1535,7 +1535,7 @@
         "erdStudio.projectPath": {
           "type": "string",
           "default": "",
-          "markdownDescription": "Folder that holds your ERD Studio data (`erdStudio.semanticDir` is created inside it). Usually a dbt project root, and auto-detected from the workspace when empty — but any folder works, with or without `dbt_project.yml`; without one there is no dbt manifest to compare against. Absolute, or relative to a workspace folder. Changing this requires a window reload."
+          "markdownDescription": "Folder that holds your ERD Studio data (`erdStudio.semanticDir` is created inside it). Usually a dbt project root, and auto-detected from the workspace when empty — but any folder works, with or without `dbt_project.yml`; without one there is no dbt manifest to compare against. Absolute, or relative to a workspace folder. Set it in Workspace settings: a value in User settings applies to every folder you open. Changing this requires a window reload."
         },
         "erdStudio.semanticDir": {
           "type": "string",
@@ -1677,6 +1677,13 @@
           ],
           "default": "curved",
           "markdownDescription": "How diagrams draw their relationship lines. **Curved** and **Hops**, in the diagram's toolbar, switch it for every diagram."
+        },
+        "erdStudio.canvas.tableSubtitle": {
+          "type": "string",
+          "default": "field:grain",
+          "pattern": "^(none|description|field:\\S(.{0,126}\\S)?)$",
+          "patternErrorMessage": "Use field:<key> (for example field:grain or field:owner), description or none.",
+          "markdownDescription": "What the one line under each table's name shows on every diagram. `field:<key>` shows a table field: a built-in such as `field:grain` or `field:purpose`, or one of your own such as `field:owner`. `description` shows the table's description, and `none` hides the line. A table with nothing written for it shows no line. **Under name**, the table icon beside **Columns** in the diagram's toolbar, sets it."
         },
         "dbtSemantic.projectPath": {
           "type": "string",
