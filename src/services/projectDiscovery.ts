@@ -238,8 +238,19 @@ export function resolveDbtProject(
   if (withData) {
     return { root: withData, source: 'erdData', hasDbt: false, candidates, autoRoot, invalidSetting };
   }
-  const first = folderPaths.find(isDirectory);
+  const first = firstOpenFolder(folderPaths);
   return { root: first, source: first ? 'folder' : 'auto', hasDbt: false, candidates, autoRoot, invalidSetting };
+}
+
+/**
+ * The first workspace folder that is a directory: where
+ * {@link resolveDbtProject} lands when nothing else decides. While it is
+ * defined, every resolution has a root, whatever a search finds below, so
+ * activation shows the Diagrams view's loading text before the search
+ * answers (#357). Both read this one function, so they cannot drift.
+ */
+export function firstOpenFolder(folderPaths: readonly string[]): string | undefined {
+  return folderPaths.find(isDirectory);
 }
 
 /**

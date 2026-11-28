@@ -45,6 +45,7 @@ import { ownFileOperations } from './services/ownFileOperations';
 import { MigrationFailed, MigrationService, migrateLegacySemanticDir } from './services/migrationService';
 import {
   DRAW_FROM_DBT_NEEDS_DBT_MESSAGE,
+  firstOpenFolder,
   hasErdStudioData,
   hostSearchCannotChangeRoot,
   resolveDbtProject,
@@ -1766,6 +1767,38 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     looks.dispose();
     if (folderLooks === looks) folderLooks = undefined;
   } });
+
+  // The ERD Studio view gets its provider now, before the look below and the
+  // services it lists from: it answers with no rows, so the view shows
+  // "Loading diagrams…" (viewsWelcome needs a registered provider that
+  // returned nothing, and that entry needs only `erdStudio.diagramsLoading`)
+  // rather than a blank pane while the look walks the folder, which on a
+  // slow disk is many seconds (#357), and while the first listing runs. The
+  // real provider is attached below; the view then lists once.
+  // `erdStudio.diagramsLoading` and `erdStudio.tablesLoading` are set first,
+  // before either view can show, and each is cleared only by a listing of
+  // its view that finds no rows: "No diagrams yet" / "No tables yet" never
+  // flash while activation runs ahead of the views, nor over a project whose
+  // rows VS Code has not drawn yet. It happens only when a folder is open:
+  // then the project resolved below always has a root (firstOpenFolder).
+  // `erdStudio.hasProject` is still set after the look, so the `+` menu, Help
+  // & Feedback and the palette entries it gates never show before their
+  // commands exist.
+  const createDiagramsView = (): { data: DeferredTreeDataProvider<TreeElement>; view: vscode.TreeView<TreeElement> } => {
+    void vscode.commands.executeCommand('setContext', 'erdStudio.diagramsLoading', true);
+    void vscode.commands.executeCommand('setContext', 'erdStudio.tablesLoading', true);
+    const data = new DeferredTreeDataProvider<TreeElement>(DIAGRAMS_DROP_MIME_TYPES, [LAYER_DRAG_MIME_TYPE]);
+    const view = vscode.window.createTreeView('erdStudio.domainTree', {
+      treeDataProvider: data,
+      dragAndDropController: data,
+      canSelectMany: false,
+      // Collapse All folds every layer to its row, as in the Table Library and Relationships.
+      showCollapseAll: true,
+    });
+    context.subscriptions.push(view, data);
+    return { data, view };
+  };
+  const earlyDiagramsView = firstOpenFolder(workspaceFolderPaths()) !== undefined ? createDiagramsView() : undefined;
   const dbtSearchStart = Date.now();
   // Undefined when activation did not wait for the search (dbtSearchSkipped).
   let hostDbtSearch: DbtSearchResult | undefined;
@@ -1824,36 +1857,25 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
   const hasDbt = projectResolution.hasDbt;
   // Pick which sidebar welcome text shows (package.json viewsWelcome):
   // hasProject = a folder is open; hasDbtProject = it holds dbt_project.yml.
-  // `erdStudio.diagramsLoading` and `erdStudio.tablesLoading` are set first,
-  // before either view can show, and each is cleared only by a listing of
-  // its view that finds no rows: "No diagrams yet" / "No tables yet" never
-  // flash while activation runs ahead of the views, nor over a project whose
-  // rows VS Code has not drawn yet.
-  if (workspaceRoot) {
-    void vscode.commands.executeCommand('setContext', 'erdStudio.diagramsLoading', true);
-    void vscode.commands.executeCommand('setContext', 'erdStudio.tablesLoading', true);
-  }
+  // The ERD Studio view and its loading keys were set up before the look
+  // (createDiagramsView, above). A root that the look's start could not
+  // promise (an absolute erdStudio.projectPath beside folders that are not
+  // directories) gets them here instead, still before hasProject, so the
+  // view always exists once there is a root.
+  const diagramsView = earlyDiagramsView ?? (workspaceRoot ? createDiagramsView() : undefined);
   void vscode.commands.executeCommand('setContext', 'erdStudio.hasProject', Boolean(workspaceRoot));
-  // The ERD Studio view gets its provider now, before the services it lists
-  // from exist: it answers with no rows, so the view shows "Loading
-  // diagrams…" (viewsWelcome needs a registered provider that returned
-  // nothing) rather than VS Code's "There is no data provider registered"
-  // and then a blank pane while activation and the first listing run. The
-  // real provider is attached below; the view then lists once.
-  const domainTreeData = workspaceRoot
-    ? new DeferredTreeDataProvider<TreeElement>(DIAGRAMS_DROP_MIME_TYPES, [LAYER_DRAG_MIME_TYPE])
-    : undefined;
-  const domainTreeView = domainTreeData
-    ? vscode.window.createTreeView('erdStudio.domainTree', {
-      treeDataProvider: domainTreeData,
-      dragAndDropController: domainTreeData,
-      canSelectMany: false,
-      // Collapse All folds every layer to its row, as in the Table Library and Relationships.
-      showCollapseAll: true,
-    })
-    : undefined;
+  const domainTreeData = diagramsView?.data;
+  const domainTreeView = diagramsView?.view;
   void vscode.commands.executeCommand('setContext', 'erdStudio.hasDbtProject', hasDbt);
   if (!workspaceRoot) {
+    // The only folder stopped being a directory while the look ran: the
+    // view made before it goes, and its loading text with it.
+    if (diagramsView) {
+      void vscode.commands.executeCommand('setContext', 'erdStudio.diagramsLoading', false);
+      void vscode.commands.executeCommand('setContext', 'erdStudio.tablesLoading', false);
+      diagramsView.view.dispose();
+      diagramsView.data.dispose();
+    }
     telemetry.activation('no_project', false, 0);
     // Every window's outcome, not only the day's last (`activation`).
     telemetry.feature('activatedNoFolder');
@@ -3689,7 +3711,8 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
           showProjectName();
         });
       });
-      return vscode.Disposable.from(domainTreeView!, domainTreeData!, foldersChanged, { dispose: () => { lateSearchSettled = true; folderCount++; } });
+      // The view and its deferred provider are already subscriptions (createDiagramsView).
+      return vscode.Disposable.from(foldersChanged, { dispose: () => { lateSearchSettled = true; folderCount++; } });
     })(),
     vscode.window.registerCustomEditorProvider(SUBJECT_AREA_EDITOR_VIEW_TYPE, editorProvider, {
       // Keep the webview (React tree, ELK worker, in-progress discrepancy /
