@@ -1407,7 +1407,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
        * This canvas's next first-open auto layout is the user's own doing (they
        * just created the diagram in this window, or added tables to an empty
        * one): the payload carries `saveLayout`, so the webview saves it.
-       * Cleared by a saved `updatePositions`, or a load that is not fresh.
+       * Single-use: cleared once a payload has carried it, by a saved
+       * `updatePositions`, or by a load that is not fresh.
        */
       saveAutoLayout?: true;
     }
@@ -6946,6 +6947,10 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
           ...this.manifestHintFlag(),
           ...this.logicalOnlyFlag(),
         });
+        // Asked once: the webview saves the layout this payload asks for. A
+        // later load (a watcher, a branch switch) is not the user's doing, so
+        // if this layout never comes back it is held, not saved.
+        if (saveLayout && panel) panel.saveAutoLayout = undefined;
         step = 'other';
         // What the canvas knows beyond the diagram, once the diagram has gone out.
         void this.sendCanvasContext(webview, displayDomain.models.map((m) => m.name), unifiedDomain.layer, document);

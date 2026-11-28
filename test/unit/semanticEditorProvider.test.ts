@@ -1862,6 +1862,27 @@ describe.each(DBT_FIXTURES)('addModelsFromDbt (%s storage)', (storage, fixture) 
     expect(feature).toHaveBeenCalledWith('addFromDbt');
   });
 
+  it('the saved layout an add into an empty diagram is owed is asked for once: a later refresh or stage switch asks for an unsaved one', async () => {
+    const { provider, panel, doc } = await openEmptySubjectArea('gold', 'reporting');
+    const loads = types(panel).filter((t) => t === 'domainLoaded').length;
+    pickFolder('silver');
+    panel._simulateMessage({ type: 'addModelsFromDbt' });
+    await waitForType(panel, 'domainLoaded', loads + 1);
+    expect(lastLoaded(panel)).toMatchObject({ autoLayout: true, saveLayout: true });
+    const edits = applyEditSpy.mock.calls.length;
+    const added = fs.readFileSync(doc.uri.fsPath, 'utf-8');
+
+    // The webview's layout never came back (ELK and the grid both failed). A stage switch, then a watcher refresh.
+    await panel._simulateMessage({ type: 'switchStage', payload: { stage: 'physical', requestId: 1 } });
+    await panel._simulateMessage({ type: 'switchStage', payload: { stage: 'logical', requestId: 2 } });
+    await provider.refreshAllOpenSubjectAreas();
+    await waitForType(panel, 'domainLoaded', loads + 2);
+    expect(lastLoaded(panel).autoLayout).toBe(true);
+    expect(lastLoaded(panel)).not.toHaveProperty('saveLayout');
+    expect(applyEditSpy.mock.calls.length).toBe(edits);
+    expect(fs.readFileSync(doc.uri.fsPath, 'utf-8')).toBe(added);
+  });
+
   it('places new models beside existing ones in a domain that already has models', async () => {
     const { panel, doc } = await openShowcase(root);
     const edits = applyEditSpy.mock.calls.length;
