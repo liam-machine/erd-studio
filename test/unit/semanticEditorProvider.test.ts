@@ -524,6 +524,36 @@ describe.each(DBT_FIXTURES)('positions drawn but not stored (%s storage)', (stor
     expect(fs.readFileSync(file, 'utf-8')).toBe(unopened);
   });
 
+  it('a fresh diagram whose file gains stored positions (an AI assistant, a checkout) places the rest around them, not at the held layout', async () => {
+    const { provider, panel, file } = await openShowcase(root, { clearViewConfig: true });
+    const elk = elkOf(panel);
+    await panel._simulateMessage({ type: 'updatePositions', payload: { positions: elk, unsaved: true } });
+    const names = Object.keys(elk);
+    // Two tables are stored where the held layout draws two others.
+    const stored = { [names[0]]: elk[names[2]], [names[1]]: elk[names[3]] };
+    const text = fs.readFileSync(file, 'utf-8');
+    if (storage === 'yaml') {
+      const json = JSON.parse(text);
+      json.viewConfig = { positions: stored };
+      fs.writeFileSync(file, JSON.stringify(json, null, 2) + '\n');
+    } else {
+      const lines = Object.entries(stored).map(([name, p]) => `    ${name} ${p.x} ${p.y}`).join('\n');
+      const next = text.replace(/^(Project [^\n]*\{\n)/m, `$1  erd_layout: '''\n${lines}\n  '''\n`);
+      expect(next).not.toBe(text);
+      fs.writeFileSync(file, next);
+    }
+
+    const count = types(panel).filter((t) => t === 'domainLoaded').length;
+    await provider.refreshAllOpenSubjectAreas();
+    await waitForType(panel, 'domainLoaded', count + 1);
+    const drawn = drawnOf(panel);
+    expect(drawn[names[0]]).toEqual(stored[names[0]]);
+    expect(drawn[names[1]]).toEqual(stored[names[1]]);
+    const spots = Object.values(drawn).map((p) => `${p.x},${p.y}`);
+    expect(new Set(spots).size).toBe(spots.length);
+    expect(loadedOf(panel)).not.toHaveProperty('autoLayout');
+  });
+
   it('a fresh diagram: the first drag saves the whole layout drawn, in one edit', async () => {
     const { panel, file } = await openShowcase(root, { clearViewConfig: true });
     const elk = elkOf(panel);

@@ -7284,9 +7284,11 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
    * for, remembered as the panel's `unstoredPositions` (replaced, never
    * merged, so a branch switch drops what no longer applies). Pure but for
    * that: nothing is written. While the panel holds the webview's own
-   * first-open ELK layout for these same tables, those positions are drawn
-   * again (`laidOut`), so a refresh never re-runs the layout or jumps the
-   * tables back to the host's placement; otherwise they are computed
+   * first-open ELK layout for these same tables and the file still stores no
+   * position, those positions are drawn again (`laidOut`), so a refresh
+   * never re-runs the layout or jumps the tables back to the host's
+   * placement; otherwise (a stored position may sit where the held layout
+   * draws another table) they are computed
    * ({@link computeMissingPositions}). Null when every table has a position.
    */
   private placeUnstoredTables(
@@ -7301,7 +7303,10 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     }
     const members = membersKeyOf(unifiedDomain.logical.models.map((m) => m.name));
     const held = entry?.unstoredPositions;
-    if (held?.laidOut && held.members === members && Object.keys(computed).every((name) => held.positions[name])) {
+    // Only while the file still stores no position: the held layout was drawn for an empty one, and a stored
+    // position (an AI assistant's, a checkout's) may sit where it draws another table.
+    if (held?.laidOut && held.members === members && isFreshLayout(unifiedDomain)
+      && Object.keys(computed).every((name) => held.positions[name])) {
       const positions = Object.fromEntries(Object.keys(computed).map((name) => [name, held.positions[name]]));
       entry!.unstoredPositions = { positions, members, laidOut: true };
       return { positions, laidOut: true };
