@@ -5,12 +5,23 @@ import * as os from 'os';
 import { parse as yamlParse } from 'yaml';
 
 import { SelectorsService } from '../../src/services/selectorsService';
-import type { SelectorsServiceHooks, SkipInfo } from '../../src/services/selectorsService';
+import type { CheckResult, SelectorsServiceHooks, SkipInfo } from '../../src/services/selectorsService';
 import type { SubjectAreaService } from '../../src/services/domainService';
 import { SubjectAreaService as RealSubjectAreaService } from '../../src/services/domainService';
 import { LayerService } from '../../src/services/layerService';
 import { TableLibraryService } from '../../src/services/logicalModelService';
 import { DBT_FIXTURES, copyDbtFixture, diagramPath } from './helpers/dbtFixtures';
+
+// Pass-through wrappers, so a test can see that check() never writes.
+vi.mock('fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('fs')>();
+  return {
+    ...actual,
+    default: actual,
+    renameSync: vi.fn(actual.renameSync),
+    writeFileSync: vi.fn(actual.writeFileSync),
+  };
+});
 
 interface FakeSubjectArea {
   domain: string;
@@ -940,7 +951,7 @@ describe('SelectorsService in a folder that is not a dbt project (#111)', () => 
     expect(onSkipped).not.toHaveBeenCalled();
   });
 
-  it('scheduleRegenerate (activation and post-edit path) writes nothing', () => {
+  it('scheduleRegenerate (the post-edit path) writes nothing', () => {
     vi.useFakeTimers();
     const svc = new SelectorsService(fakeSubjectAreaService(domains), tmpDir, '.erd-studio');
 
@@ -948,6 +959,12 @@ describe('SelectorsService in a folder that is not a dbt project (#111)', () => 
     vi.runAllTimers();
 
     expect(fs.existsSync(path.join(tmpDir, 'selectors.yml'))).toBe(false);
+  });
+
+  it('check() reads nothing and answers not-dbt-project, even with a selectors.yml', () => {
+    writeSelectors(tmpDir, 'selectors: []\n');
+    const svc = new SelectorsService(fakeSubjectAreaService(domains), tmpDir, '.erd-studio');
+    expect(svc.check()).toEqual({ status: 'not-dbt-project', filePath: path.join(tmpDir, 'selectors.yml') });
   });
 
   it('a dbt_project.yml directory does not count as a dbt project', () => {
@@ -967,6 +984,172 @@ describe('SelectorsService in a folder that is not a dbt project (#111)', () => 
     const result = svc.regenerate();
     expect(result.status).toBe('written');
     expect(readSelectors(tmpDir).selectors.map((s) => s.name)).toEqual(['domain_silver_customer_360']);
+  });
+});
+
+// Writes only as the user's own action (the command creates; an edit updates
+// an existing file), and check() never writes (activation, the watchers).
+describe('SelectorsService: who may write, and the read-only check', () => {
+  let tmpDir: string;
+  const file = () => path.join(tmpDir, 'selectors.yml');
+  const domains: FakeSubjectArea[] = [
+    { domain: 'customer-360', layer: 'silver', filePath: '/dummy/silver/customer-360.json', models: ['dim_customer', 'fct_orders'] },
+    { domain: 'reporting', layer: 'gold', filePath: '/dummy/gold/reporting.json', models: ['fct_revenue'] },
+  ];
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'selectors-check-'));
+    fs.writeFileSync(path.join(tmpDir, 'dbt_project.yml'), 'name: test_project\n', 'utf-8');
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('the post-edit path with no file answers absent and creates nothing', () => {
+    const onWritten = vi.fn();
+    const svc = new SelectorsService(fakeSubjectAreaService(domains), tmpDir, '.erd-studio', { onWritten });
+    expect(svc.regenerate({ createIfMissing: false })).toEqual({ status: 'absent', filePath: file() });
+    expect(fs.existsSync(file())).toBe(false);
+    expect(fs.readdirSync(tmpDir)).toEqual(['dbt_project.yml']);
+    expect(onWritten).not.toHaveBeenCalled();
+  });
+
+  it('the post-edit path with a file rebuilds every diagram\'s selector, and keeps the user\'s', () => {
+    writeSelectors(tmpDir, 'selectors:\n  - name: mine\n    definition: { method: tag, value: nightly }\n');
+    const svc = new SelectorsService(fakeSubjectAreaService(domains), tmpDir, '.erd-studio');
+    expect(svc.regenerate({ createIfMissing: false })).toMatchObject({ status: 'written', selectorsWritten: 2, created: false });
+    expect(readSelectors(tmpDir).selectors.map((s) => s.name)).toEqual(['domain_gold_reporting', 'domain_silver_customer_360', 'mine']);
+  });
+
+  it('the command path (regenerate()) still creates the file, and says it did once', () => {
+    const svc = new SelectorsService(fakeSubjectAreaService(domains), tmpDir, '.erd-studio');
+    expect(svc.regenerate()).toMatchObject({ status: 'written', created: true });
+    expect(readSelectors(tmpDir).selectors.map((s) => s.name)).toEqual(['domain_gold_reporting', 'domain_silver_customer_360']);
+    expect(svc.regenerate()).toMatchObject({ status: 'written', created: false });
+  });
+
+  it('scheduleRegenerate creates no file, updates an existing one, and reports a missing one as absent', () => {
+    vi.useFakeTimers();
+    const onChecked = vi.fn();
+    const svc = new SelectorsService(fakeSubjectAreaService(domains), tmpDir, '.erd-studio', { onChecked });
+    svc.scheduleRegenerate();
+    vi.runAllTimers();
+    expect(fs.existsSync(file())).toBe(false);
+    expect(onChecked).toHaveBeenCalledWith({ status: 'absent', filePath: file() });
+
+    writeSelectors(tmpDir, 'selectors: []\n');
+    svc.scheduleRegenerate();
+    vi.runAllTimers();
+    expect(readSelectors(tmpDir).selectors.map((s) => s.name)).toEqual(['domain_gold_reporting', 'domain_silver_customer_360']);
+  });
+
+  it('check() never writes: no write, no rename, no temp file, mtime unchanged, no hook', () => {
+    writeSelectors(tmpDir, 'selectors: []\n');
+    const past = new Date('2026-01-01T00:00:00Z');
+    fs.utimesSync(file(), past, past);
+    const writeFileSync = vi.mocked(fs.writeFileSync);
+    const renameSync = vi.mocked(fs.renameSync);
+    writeFileSync.mockClear();
+    renameSync.mockClear();
+    const hooks = { onWritten: vi.fn(), onSkipped: vi.fn(), onNameCollision: vi.fn(), onChecked: vi.fn(), isFileDirtyInEditor: vi.fn(() => true) };
+    const svc = new SelectorsService(fakeSubjectAreaService(domains), tmpDir, '.erd-studio', hooks);
+
+    expect(svc.check()).toMatchObject({ status: 'stale', added: ['domain_gold_reporting', 'domain_silver_customer_360'], removed: [], changed: [] });
+
+    expect(writeFileSync).not.toHaveBeenCalled();
+    expect(renameSync).not.toHaveBeenCalled();
+    expect(fs.statSync(file()).mtimeMs).toBe(past.getTime());
+    expect(fs.readdirSync(tmpDir).sort()).toEqual(['dbt_project.yml', 'selectors.yml']);
+    for (const hook of Object.values(hooks)) expect(hook).not.toHaveBeenCalled();
+    // The spies do see the service's writes: a regenerate is one.
+    hooks.isFileDirtyInEditor.mockReturnValue(false);
+    svc.regenerate();
+    expect(writeFileSync).toHaveBeenCalled();
+    expect(renameSync).toHaveBeenCalled();
+  });
+
+  it('check() with no file is absent (never stale: the project never opted in)', () => {
+    const svc = new SelectorsService(fakeSubjectAreaService(domains), tmpDir, '.erd-studio');
+    expect(svc.check()).toEqual({ status: 'absent', filePath: file() });
+    expect(fs.existsSync(file())).toBe(false);
+  });
+
+  it('check() of a freshly regenerated file is current', () => {
+    const svc = new SelectorsService(fakeSubjectAreaService(domains), tmpDir, '.erd-studio');
+    svc.regenerate();
+    expect(svc.check()).toEqual({ status: 'current', filePath: file() });
+  });
+
+  it('check() names the selectors a regenerate would add, remove and change', () => {
+    const svc = new SelectorsService(fakeSubjectAreaService(domains), tmpDir, '.erd-studio');
+    svc.regenerate();
+    const text = fs.readFileSync(file(), 'utf-8')
+      .replace('domain_gold_reporting', 'domain_gold_old')
+      .replace('value: fct_orders', 'value: fct_order_lines');
+    writeSelectors(tmpDir, text);
+    expect(svc.check()).toEqual({
+      status: 'stale', filePath: file(),
+      added: ['domain_gold_reporting'], removed: ['domain_gold_old'], changed: ['domain_silver_customer_360'],
+    });
+  });
+
+  it('check() ignores user selectors, and a user domain_* selector without the marker', () => {
+    const svc = new SelectorsService(fakeSubjectAreaService(domains), tmpDir, '.erd-studio');
+    svc.regenerate();
+    fs.appendFileSync(file(), '  - name: domain_mine\n    definition: { method: tag, value: x }\n  - name: other\n    definition: { method: tag, value: y }\n');
+    expect(svc.check().status).toBe('current');
+  });
+
+  it('check() of a malformed file is unreadable, with the parse detail', () => {
+    writeSelectors(tmpDir, 'selectors: [unclosed\n');
+    const svc = new SelectorsService(fakeSubjectAreaService(domains), tmpDir, '.erd-studio');
+    const result = svc.check();
+    expect(result.status).toBe('unreadable');
+    expect((result as Extract<CheckResult, { status: 'unreadable' }>).detail).not.toBe('');
+  });
+
+  it('scheduleCheck runs prepareCheck when there is a file, then reports the check', async () => {
+    vi.useFakeTimers();
+    const order: string[] = [];
+    const prepareCheck = vi.fn(async () => { order.push('prepare'); });
+    const onChecked = vi.fn((r: CheckResult) => { order.push(r.status); });
+    const svc = new SelectorsService(fakeSubjectAreaService(domains), tmpDir, '.erd-studio', { prepareCheck, onChecked });
+
+    svc.scheduleCheck();
+    await vi.runAllTimersAsync();
+    // No file: nothing to prepare for.
+    expect(order).toEqual(['absent']);
+
+    writeSelectors(tmpDir, 'selectors: []\n');
+    svc.scheduleCheck();
+    await vi.runAllTimersAsync();
+    expect(order).toEqual(['absent', 'prepare', 'stale']);
+    expect(fs.readFileSync(file(), 'utf-8')).toBe('selectors: []\n');
+  });
+
+  it('a write scheduled before a check still writes; the check never cancels it', async () => {
+    vi.useFakeTimers();
+    writeSelectors(tmpDir, 'selectors: []\n');
+    const onChecked = vi.fn();
+    const svc = new SelectorsService(fakeSubjectAreaService(domains), tmpDir, '.erd-studio', { onChecked });
+
+    svc.scheduleRegenerate(250);
+    svc.scheduleCheck(50);
+    await vi.advanceTimersByTimeAsync(100);
+    // The check fell due while the write was pending: dropped, not run against the old file.
+    expect(onChecked).not.toHaveBeenCalled();
+    await vi.runAllTimersAsync();
+    expect(readSelectors(tmpDir).selectors.map((s) => s.name)).toEqual(['domain_gold_reporting', 'domain_silver_customer_360']);
+
+    // And a check scheduled right after a write, due at the same time, follows the write.
+    writeSelectors(tmpDir, 'selectors: []\n');
+    svc.scheduleRegenerate();
+    svc.scheduleCheck();
+    await vi.runAllTimersAsync();
+    expect(readSelectors(tmpDir).selectors).toHaveLength(2);
+    expect(onChecked).toHaveBeenLastCalledWith({ status: 'current', filePath: file() });
   });
 });
 
@@ -1045,6 +1228,39 @@ describe.each(DBT_FIXTURES)('SelectorsService on the dbt fixture (%s storage)', 
     expect(parsed.selectors.map((s) => s.name)).toEqual(['domain_gold_reporting', 'domain_silver_scroll_test', 'domain_silver_showcase', 'incremental_critical']);
     const text = fs.readFileSync(path.join(root, 'selectors.yml'), 'utf-8');
     expect(text).toContain('# Keep in sync with airflow DAG `incrementals_v2`');
+  });
+
+  it('check() of the committed file is current, and of its CRLF copy too', () => {
+    const svc = new SelectorsService(realService(), root, '.erd-studio');
+    expect(svc.check().status).toBe('current');
+    const file = path.join(root, 'selectors.yml');
+    fs.writeFileSync(file, fs.readFileSync(file, 'utf-8').replace(/\n/g, '\r\n'));
+    expect(svc.check().status).toBe('current');
+  });
+
+  it('check() reads a different header, description wording, quoting, flow style or member order as current', () => {
+    const file = path.join(root, 'selectors.yml');
+    const committed = fs.readFileSync(file, 'utf-8');
+    const reworded = committed
+      .replace(/^# ERD Studio manages.*$/m, '# An older ERD Studio wrote this header.')
+      .replace('All models in the showcase domain (silver layer). Managed by ERD Studio.', '"Showcase tables. Managed by ERD Studio."')
+      .replace('      union:\n        - method: fqn\n          value: fct_large_table\n', "      union: [{ method: fqn, value: 'fct_large_table' }]\n")
+      .replace('value: fct_task_event\n        - method: fqn\n          value: dim_task\n', 'value: dim_task\n        - method: fqn\n          value: fct_task_event\n');
+    for (const piece of ['older ERD Studio', 'Showcase tables', "value: 'fct_large_table'", 'value: dim_task\n        - method: fqn\n          value: fct_task_event']) {
+      expect(reworded).toContain(piece);
+    }
+    fs.writeFileSync(file, reworded);
+    expect(new SelectorsService(realService(), root, '.erd-studio').check().status).toBe('current');
+  });
+
+  it('check() reads a real member difference as stale and names the selector, writing nothing', () => {
+    const file = path.join(root, 'selectors.yml');
+    // A teammate added fct_order to showcase and never regenerated.
+    const stale = fs.readFileSync(file, 'utf-8').replace(/\n\s+- method: fqn\n\s+value: fct_order\n/, '\n');
+    fs.writeFileSync(file, stale);
+    expect(new SelectorsService(realService(), root, '.erd-studio').check())
+      .toMatchObject({ status: 'stale', added: [], removed: [], changed: ['domain_silver_showcase'] });
+    expect(fs.readFileSync(file, 'utf-8')).toBe(stale);
   });
 
   it('a deleted diagram loses its selector', () => {

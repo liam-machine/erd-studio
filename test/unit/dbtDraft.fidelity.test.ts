@@ -26,7 +26,7 @@ import {
   seedTableFromDbt,
   type DbtDraft,
 } from '../../src/services/dbtDraft';
-import { DBT_KEEP_SELECTORS_SENTENCE, dbtLayerSchemaNote, draftFromDbt } from '../../src/services/draftModel';
+import { DBT_KEEP_SELECTORS_SENTENCE, DBT_NO_SELECTORS_SENTENCE, dbtLayerSchemaNote, draftFromDbt } from '../../src/services/draftModel';
 import { describeImportTable } from '../../src/services/importReview';
 import { YmlParserService } from '../../src/services/ymlParserService';
 import type { Draft, DraftTarget } from '../../src/types/draft';
@@ -314,11 +314,21 @@ describe('the dbt draft says what Keep writes and what it cannot draw', () => {
     expect(dbtLayerSchemaNote({ newModels: [{ name: 'z', configuredSchema: 'finance' }] }, 'gold')).toBe('');
   });
 
-  it('the banner says Keep also writes selectors.yml at the dbt root (I1)', async () => {
+  it('with a selectors.yml, the banner says Keep also adds a selector to it at the dbt root (I1)', async () => {
     const data = await load(PEOPLE);
-    const d = view(buildDbtDraft({ modelNames: ['person'], ymlData: data, libraryHas: () => false }), data);
+    const d = view(buildDbtDraft({ modelNames: ['person'], ymlData: data, libraryHas: () => false }), data, { selectorsFileExists: true });
     expect(d.banner.detail.endsWith(DBT_KEEP_SELECTORS_SENTENCE)).toBe(true);
     expect(d.banner.detail).toContain('selectors.yml');
+  });
+
+  it('without one, Keep creates none: the banner names the command that makes a selector for each diagram', async () => {
+    const data = await load(PEOPLE);
+    const draft = buildDbtDraft({ modelNames: ['person'], ymlData: data, libraryHas: () => false });
+    for (const d of [view(draft, data), view(draft, data, { selectorsFileExists: false })]) {
+      expect(d.banner.detail.endsWith(DBT_NO_SELECTORS_SENTENCE)).toBe(true);
+      expect(d.banner.detail).not.toContain(DBT_KEEP_SELECTORS_SENTENCE);
+    }
+    expect(DBT_NO_SELECTORS_SENTENCE).toBe('Running ERD Studio: Regenerate dbt selectors.yml once makes a dbt selector for each diagram.');
   });
 
   it('describeImportTable counts FKs to tables not drawn in its line', () => {

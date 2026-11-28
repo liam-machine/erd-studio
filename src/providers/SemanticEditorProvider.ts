@@ -5152,6 +5152,8 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
     this.tableLibraryService.invalidateIndex();
     await this.sendSubjectAreaData(document, webview, panelKey);
     this._onDidWriteSubjectArea.fire({ uri: document.uri, modelLibraryChanged: true });
+    // The step can add or remove a table, as the edit it rewinds did: update an existing selectors.yml (never creates one).
+    this.selectorsService.scheduleRegenerate();
   }
 
   /** What `filePath` holds on disk, or undefined when it cannot be read. */

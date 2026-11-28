@@ -1081,6 +1081,20 @@ describe('SemanticEditorProvider (v5 model library integrity)', () => {
       expect(h.tableLibraryService.getTable('fct_order')!.columns!.map((c) => c.name)).toEqual(['order_key', 'customer_key', 'amount']);
     });
 
+    it('an undo / redo that rewinds a diagram edit updates selectors.yml like the edit did (scheduleRegenerate, update-only)', async () => {
+      const selectors = (h.provider as unknown as { selectorsService: SelectorsService }).selectorsService;
+      const schedule = vi.mocked(selectors.scheduleRegenerate);
+      await h.send({ type: 'removeModels', payload: { modelNames: ['dim_task'] } });
+      expect(JSON.parse(fs.readFileSync(h.domainPath, 'utf-8')).logical.models).toEqual(['fct_order']);
+      expect(schedule).toHaveBeenCalledTimes(1);
+      schedule.mockClear();
+
+      await h.send({ type: 'undo' });
+      expect(schedule).toHaveBeenCalledTimes(1);
+      await h.send({ type: 'redo' });
+      expect(schedule).toHaveBeenCalledTimes(2);
+    });
+
     it('never force-saves a dirty model buffer the provider did not edit', async () => {
       // The user is hand-editing dim_customer.yml in a normal editor tab and
       // has NOT saved. The provider never touched that file.

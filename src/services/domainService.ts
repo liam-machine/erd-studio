@@ -1010,14 +1010,21 @@ export class SubjectAreaService {
   dbtModelNamesOf(unified: UnifiedSubjectArea, ymlData: YmlData, manifest?: ManifestData): Map<string, string | null> {
     const out = new Map<string, string | null>();
     // Nothing is indexed for a diagram with no such table (every diagram of a project with no shared name).
-    const isShared = this.sharedNameRule();
-    if (!unified.logical.models.some(isShared)) return out;
+    if (!this.hasSharedNameTable(unified)) return out;
     const match = this.dbtMatcher(unified, ymlData, manifest);
     for (const model of unified.logical.models) {
       const found = match(model);
       if (found.schemas) out.set(model.name.toLowerCase(), found.dbtName ?? null);
     }
     return out;
+  }
+
+  /**
+   * Whether `unified` has a table whose name two schema folders share: the
+   * only tables `dbtModelNamesOf` reads the dbt data for.
+   */
+  hasSharedNameTable(unified: UnifiedSubjectArea): boolean {
+    return unified.logical.models.some(this.sharedNameRule());
   }
 
   /** Whether a table's name is shared by two schema folders: two members of its diagram, or two tables of the library. */
