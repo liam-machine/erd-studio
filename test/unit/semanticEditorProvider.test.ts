@@ -19,6 +19,7 @@ import * as vscode from 'vscode';
 
 import {
   SemanticEditorProvider,
+  PENDING_REVEAL_MS,
   PHYSICAL_READ_ONLY_MESSAGE,
   MANIFEST_HINT_DISMISSED_KEY,
   describeSkippedDbtModels,
@@ -623,6 +624,36 @@ describe.each(DBT_FIXTURES)('positions drawn but not stored (%s storage)', (stor
     await waitForType(panel, 'domainLoaded');
     await editsApplied(1);
     expect(readDiagram(root, file).positions.fct_order).toEqual(drawnOf(panel).fct_order);
+  });
+
+  it('the mark expires: a diagram made here but first opened after PENDING_REVEAL_MS saves nothing on open', async () => {
+    const { provider, panel, doc, file } = await openShowcase(root, { clearViewConfig: true, sendReady: false });
+    const now = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(now);
+    provider.saveFirstLayoutWhenOpened(file);
+    clock.mockReturnValue(now + PENDING_REVEAL_MS + 1);
+    const before = fs.readFileSync(file, 'utf-8');
+    panel._simulateMessage({ type: 'ready' });
+    await waitForType(panel, 'domainLoaded');
+    clock.mockRestore();
+    expect(loadedOf(panel).autoLayout).toBe(true);
+    expect(loadedOf(panel)).not.toHaveProperty('saveLayout');
+    expect(applyEditSpy).not.toHaveBeenCalled();
+    expect(doc.save).not.toHaveBeenCalled();
+    expect(fs.readFileSync(file, 'utf-8')).toBe(before);
+  });
+
+  it('the mark expires for a partly placed diagram too: its placement is not written on open', async () => {
+    const { provider, panel, file } = await openShowcase(root, { stripPosition: 'fct_order', sendReady: false });
+    const now = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(now);
+    provider.saveFirstLayoutWhenOpened(file);
+    clock.mockReturnValue(now + PENDING_REVEAL_MS + 1);
+    panel._simulateMessage({ type: 'ready' });
+    await waitForType(panel, 'domainLoaded');
+    clock.mockRestore();
+    expect(applyEditSpy).not.toHaveBeenCalled();
+    expect(readDiagram(root, file).positions.fct_order).toBeUndefined();
   });
 
   it('only the first load is owed: the mark does not save a later open of the diagram', async () => {
