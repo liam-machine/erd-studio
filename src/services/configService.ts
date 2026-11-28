@@ -66,3 +66,36 @@ export function getErdStudioSetting<T>(key: string, defaultValue: T): T {
     defaultValue
   );
 }
+
+/** Where a setting's value was found: User settings, the workspace, or one folder's settings. */
+export type ErdStudioSettingScope = 'user' | 'workspace' | 'folder';
+
+/** The value {@link getErdStudioSetting} returns, with the key and the scope that held it. */
+export interface ErdStudioSettingSource<T> {
+  value: T;
+  settingKey: `erdStudio.${string}` | `dbtSemantic.${string}`;
+  scope: ErdStudioSettingScope;
+}
+
+/**
+ * Where {@link getErdStudioSetting}'s value comes from (#370): the same value,
+ * found by the same steps in the same order, plus which key held it (the
+ * current `erdStudio.*` or the deprecated `dbtSemantic.*`) and in which
+ * scope, so a message about the setting can name the one the user has to
+ * open. Undefined when nothing is set, where getErdStudioSetting returns its
+ * default. An explicit `""` counts as set, exactly as `??` counts it there.
+ */
+export function erdStudioSettingSource<T>(key: string): ErdStudioSettingSource<T> | undefined {
+  const steps: ReadonlyArray<readonly [ErdStudioSettingScope, 'workspaceFolderValue' | 'workspaceValue' | 'globalValue']> =
+    USER_SCOPED_SETTINGS.has(key)
+      ? [['user', 'globalValue']]
+      : [['folder', 'workspaceFolderValue'], ['workspace', 'workspaceValue'], ['user', 'globalValue']];
+  for (const section of ['erdStudio', 'dbtSemantic'] as const) {
+    const inspected = vscode.workspace.getConfiguration(section).inspect<T>(key);
+    for (const [scope, field] of steps) {
+      const value = inspected?.[field];
+      if (value !== undefined && value !== null) return { value, settingKey: `${section}.${key}`, scope };
+    }
+  }
+  return undefined;
+}

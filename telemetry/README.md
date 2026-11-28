@@ -1310,7 +1310,7 @@ mistake in it, a save VS Code refused) records no error code: only the
 
 **B17 — big diagrams: slow loads, layout failures and the draft layout.**
 
-- `canvasLoadOver20s` — a canvas took more than 20 s to load (once a day). Since #333 (added after 2.0.7) it is the top of the `canvasLoad*` ranges under "Keys added after 2.0.0": a day carries at most one of them, the slowest open's, so a day with this key carries no faster one. Its meaning is unchanged.
+- `canvasLoadOver20s` — a canvas took more than 20 s to load (once a day). Since #333 (added after 2.0.7) it is the top of the `canvasLoad*` ranges (`canvasLoadUnder1s` / `1to5s` / `5to20s` / `Over20s`) under "Keys added after 2.0.0": a day carries at most one of them, the slowest open's, so a day with this key carries no faster one. Its meaning is unchanged.
 - `layoutStackFallback` — an auto layout ran out of stack and was laid out again with the stack-safe placement.
 - `firstLayoutOver5s` — the first-open layout of a fresh diagram took more than 5 s.
 - `draftLayoutOver5s` — a draft page layout took more than 5 s.
@@ -1355,7 +1355,7 @@ The rest of a failed layout's codes (its other classes, size buckets, duration a
 - `loggedErrorDbt` (error) — a logged error from the dbt integration.
 - `loggedErrorOther` (error) — a logged error from anywhere else.
 
-The area comes from the `[tag]` the error line starts with (a `createLogger` scope, or the literal tag of an unscoped line), through a fixed table in `src/services/runtimeTelemetry.ts`; the hook is never handed the rest of the line. Lines tagged `[ERD Studio]` (most commands, the imports included) count as `loggedErrorOther`. `loggedErrorImport` and `loggedErrorHarness` therefore stay near 0 until those commands get their own scoped loggers. A `loggedError*` code never starts the known-fixes check (`knownFixesService.ts` skips them), so it never downloads the registry by itself, and never asks for an interim copy on its own (`provisionalTrigger` skips them; a failure of ours records its own code beside it). A canvas handler logs a refusal the user was told about, and a diagram file the user broke, as a warning, so neither is counted here.
+The area comes from the `[tag]` the error line starts with (a `createLogger` scope, the literal tag of an unscoped line, or a `hostErrorLog.record` source), through a fixed table in `src/services/runtimeTelemetry.ts`, looked up exactly and then by the tag's part before the first `.`; the hook is never handed the rest of the line. Lines tagged `[ERD Studio]` (most commands, the imports included) count as `loggedErrorOther`. After 2.0.12 the sites of ours that log such a line with no code of their own record a `loggedErrorAt*` code beside it, and a tag the table does not list also records `loggedErrorUnlistedTag` (#354, under Keys added after 2.0.0). `loggedErrorImport` and `loggedErrorHarness` therefore stay near 0 until those commands get their own scoped loggers. A `loggedError*` code never starts the known-fixes check (`knownFixesService.ts` skips them), so it never downloads the registry by itself, and never asks for an interim copy on its own (`provisionalTrigger` skips them; a failure of ours records its own code beside it). A canvas handler logs a refusal the user was told about, and a diagram file the user broke, as a warning, so neither is counted here.
 
 **#262 — which canvas load step threw, when the load failed for a reason of ours.**
 
@@ -1468,7 +1468,8 @@ Appended to `FEATURES` after the 2.0.0 list above (in
 the same terms: fixed keys, never a name, a path, a message or a count of
 tables (a size is one of a few fixed ranges: a failed layout's, below, and the
 project's, #331, near the end; a time is a fixed range too, #333, and so is how
-far a folder walk had got, #347, at the end). Deploy the
+far a folder walk had got, #347, and how long a blank tab stayed open, #364,
+at the end). Deploy the
 Worker before the extension release that records them, or their counts are
 dropped. The failed-layout codes, the dbt search failure reasons and the canvas
 handler failure steps in this section are appended to `ERROR_CODES` in the
@@ -1871,7 +1872,9 @@ keys that saw a slow open fired past fixed limits (`canvasLoadOver20s` at
 20 s, `readySlowOver10s` at 10 s), so an open of 2 to 15 s, what a 500-table
 diagram takes on a slow machine, left no trace, and nothing said whether the
 open had to read the table files from disk. These keys say it, once a day
-for the **slowest** open of that day: one `canvasLoad*` key and at most one
+for the **slowest** open of that day: one `canvasLoad*` range key (`canvasLoadUnder1s`,
+`canvasLoad1to5s`, `canvasLoad5to20s` or `canvasLoadOver20s`; `canvasLoadCold` and
+the `canvasLoadSlow*` keys of #371 sit beside it, they are not ranges) and at most one
 `canvasPaint*` key per install-day (a later interim copy replaces the earlier
 one, so the stored row has only the slowest), never a time. Off the
 onboarding trail, except the first `canvasLoadOver20s` of a day, which keeps
@@ -1894,7 +1897,7 @@ the size guard (`trimHeartbeat`) never drops them.
 ```bash
 # How long the slowest open took, per OS and diagram size, over the last 28 days (install-days with each range; for a load range, how many were cold)
 npx wrangler d1 execute erd-studio-telemetry --remote --command \
-  "SELECT h.os, h.model_count, j.key, COUNT(*) AS install_days, COUNT(DISTINCT h.install_id) AS installs, SUM(j.key LIKE 'canvasLoad%' AND json_extract(h.features,'$.canvasLoadCold') IS NOT NULL) AS cold_loads FROM heartbeats h, json_each(h.features) j WHERE COALESCE(h.dev, 0) = 0 AND h.day >= date('now','-28 days') AND (j.key LIKE 'canvasLoad%' OR j.key LIKE 'canvasPaint%') AND j.key <> 'canvasLoadCold' GROUP BY 1, 2, 3 ORDER BY 1, 2, 3"
+  "SELECT h.os, h.model_count, j.key, COUNT(*) AS install_days, COUNT(DISTINCT h.install_id) AS installs, SUM(j.key LIKE 'canvasLoad%' AND json_extract(h.features,'$.canvasLoadCold') IS NOT NULL) AS cold_loads FROM heartbeats h, json_each(h.features) j WHERE COALESCE(h.dev, 0) = 0 AND h.day >= date('now','-28 days') AND (j.key LIKE 'canvasLoad%' OR j.key LIKE 'canvasPaint%') AND j.key <> 'canvasLoadCold' AND j.key NOT LIKE 'canvasLoadSlow%' GROUP BY 1, 2, 3 ORDER BY 1, 2, 3"
 ```
 
 **The one look at the open folder** (added after 2.0.9, #347). Up to 2.0.9 a
@@ -1933,6 +1936,219 @@ How to read them, per `os`:
 # The folder look per OS and version: index used or not, late looks and how far the walk had got, give-ups and what they would have cost (installs, last 28 days)
 npx wrangler d1 execute erd-studio-telemetry --remote --command \
   "SELECT h.os, h.ext_version, j.key, COUNT(DISTINCT h.install_id) AS installs FROM heartbeats h, json_each(h.features) j WHERE h.day >= date('now','-28 days') AND h.day < date('now') AND COALESCE(h.dev, 0) = 0 AND (j.key LIKE 'startLook%' OR j.key IN ('dbtSearchFromIndex', 'dbtSearchSkipped', 'dbtSearchTimedOut', 'activationOver10s')) GROUP BY 1, 2, 3 ORDER BY 1, 2, installs DESC"
+```
+
+**Reading `webviewNoReady*`** (added after 2.0.12, #364). A
+`webviewNoReady*` code says a visible panel had not said ready after 30 s.
+`readyAfterNoReady` (#320, above) counts the ones that came up late; on its
+own the code could not say whether the extension host was too busy to hear
+the page, whether the page never loaded, or whether the user gave up on the
+blank tab. `ReadyWatch` (`src/services/readyWatch.ts`), shared by the canvas,
+the draft page and the Welcome panel, now records beside it:
+
+- `noReadyHostHeld` — the 30 s no-ready timer ran 5 s or more late (35 s or more after it was armed): the extension host's one thread was not running timers, so it was busy at 30 s. Timed on a monotonic clock (`performance.now()`), which does not jump with the wall clock and, on macOS and Linux, does not run while the machine sleeps, so a laptop that slept through the 30 s is not counted (on Windows that is unverified). Recorded right after the `webviewNoReady*` code, as often.
+- `noReadyClosed30to60s` — the panel went away after its `webviewNoReady*` with no ready and no Reload since, under 60 s after it was shown (by the clock from the show whose 30 s ran out, as `readyLate*`): the user most likely gave up on the blank tab. At most once per panel.
+- `noReadyClosedOver60s` — the same, 60 s or more after it was shown.
+
+How to read them:
+
+- **Compare each with the sum of the `webviewNoReady*` codes.** The keys are shared by the three panels; read them beside which `webviewNoReadyCanvas`, `webviewNoReadyDraft` or `webviewNoReadyWelcome` the row carries.
+- **`noReadyHostHeld` says how busy the host was at 30 s, not whether the page mounted.** A page that mounted behind a held host either has its queued ready handled before the overdue timer (then nothing is recorded at all) or after it (then `readyAfterNoReady` follows). So a `webviewNoReady*` with neither `readyAfterNoReady` nor Reload means no ready reached the host while the tab was open, held host or not. With `noReadyHostHeld`, read it beside `diagramTables*`, `libraryTables*` and `canvasLoad*`: the fix is in how large projects are read (#333, #357). Without it, on an idle host, the page did not load (the bundle, the CSP, a webview restored without a live page): a bug of ours.
+- **A missing `noReadyHostHeld` does not prove an idle host.** A host held in many short stretches can still run the 30 s timer within 5 s of time.
+- **The closed keys are a lower bound.** A window closed or reloaded with the blank tab open may not dispose the panel, and the write at shutdown is best effort, so such a tab usually sends neither. On a held host the close is timed when the host gets to it, not when the user clicked: a close at 35 s on a host held until 75 s reads `noReadyClosedOver60s`, and a close the host handles before the overdue timer records no `webviewNoReady*` and no closed key at all. Read the closed range beside `noReadyHostHeld`, and treat the split as a lower bound for quick closes on a held host.
+- **ERD Studio's own closes count too.** Move (`moveDbml.ts`), Convert to DBML (`convertProjectToDbml.ts`), Reopen With → Text and `workbench.editor.limit` close a canvas, and a blank one counts as closed blank. The draft page's own closes (Keep, discard, another way to start) all follow its ready, so they never count.
+- **A crash screen is not a blank tab, but can count as one.** A canvas or draft page that crashed before it said ready shows its crash screen and still has no ready; closed without Reload, it counts here. Read the closed keys beside `webviewCrash*` the same day.
+- **Read them per install over a window, never as a per-day subtraction.** A blank tab left open past midnight UTC and closed then lands its closed key on a day with no `webviewNoReady*`.
+- **A Welcome panel shown again after a hide is never counted as closed blank**: it does not keep its page while hidden, so the page shown next replaced the one reported. One shown blank again after that is not judged a second time. A panel closed while hidden, never shown again, does count (VS Code may hide a tab as it closes it).
+- **The ledger**, per install over a window: `webviewNoReady*` = `readyAfterNoReady` + Reload on the notification (`crashFallbackReload`; for Welcome, a hide) + `noReadyClosed30to60s` + `noReadyClosedOver60s` + the tabs still blank when the window closed.
+- **An oversized body's trim (`trimHeartbeat`) keeps all three** (`NO_READY_FEATURES`, on its keep list like the #331 and #333 size keys): an oversized day is most likely a large project's, the held-host case, and the `webviewNoReady*` code beside them is an error code, trimmed last. Without them a trimmed day would read as an idle host.
+
+```bash
+# What each webviewNoReadyCanvas met, per version (installs, last 28 days): a late ready, a held host, a blank tab closed, a Reload
+npx wrangler d1 execute erd-studio-telemetry --remote --command \
+  "SELECT h.ext_version, COUNT(DISTINCT h.install_id) AS no_ready, COUNT(DISTINCT CASE WHEN json_extract(h.features,'$.readyAfterNoReady') IS NOT NULL THEN h.install_id END) AS late_ready, COUNT(DISTINCT CASE WHEN json_extract(h.features,'$.noReadyHostHeld') IS NOT NULL THEN h.install_id END) AS host_held, COUNT(DISTINCT CASE WHEN json_extract(h.features,'$.noReadyClosed30to60s') IS NOT NULL THEN h.install_id END) AS closed_fast, COUNT(DISTINCT CASE WHEN json_extract(h.features,'$.noReadyClosedOver60s') IS NOT NULL THEN h.install_id END) AS closed_later, COUNT(DISTINCT CASE WHEN json_extract(h.features,'$.crashFallbackReload') IS NOT NULL THEN h.install_id END) AS reloaded FROM heartbeats h WHERE COALESCE(h.dev, 0) = 0 AND h.day >= date('now','-28 days') AND h.day < date('now') AND json_extract(h.features,'$.versionMixed') IS NULL AND json_extract(h.errors,'$.webviewNoReadyCanvas') IS NOT NULL GROUP BY 1 ORDER BY 1"
+```
+
+`host_held` on most `no_ready` installs points at a busy host (H1 in #364);
+`no_ready` without `host_held` at a page that did not load on an idle host
+(H2, raise it as a bug); `closed_fast` and `closed_later` at users who gave up
+(H3). The query counts closes on `webviewNoReadyCanvas` days only, so a close
+after midnight UTC is missed: for the ledger, count each key per install over
+the window without that filter.
+
+**Reading `importCauseDuplicate`** (added after 2.0.12, #358). A SQL import
+that meets a second plain `CREATE TABLE` of a table it already read keeps the
+first definition and reports the second (a `problem`, so the import counts
+`Partial`). On its own, `importCauseDuplicate` could not say whether that was a
+harmless copy, a different version of the table, or a second database's table
+of the same name. The converter decides it where both definitions are in hand
+(`sqlDdlImport.ts`, `sameColumns` in `sqlDdlModel.ts`), and the import's
+outcome keys (`importOutcomeTelemetry.ts`) record beside `importCauseDuplicate`,
+each at most once per import, with `featureQuiet` (off the trail), including
+the automatic draft:
+
+- `importDuplicateSame` — a second definition had the kept one's columns: the same names, type text (case and spaces aside), primary key and NOT NULL (a key column counts as NOT NULL), in any order.
+- `importDuplicateDiffers` — a second definition did not have the kept one's columns.
+- `importDuplicateDiffersDefaultSchema` — one that differed, with both definitions in the dialect's default schema (no schema, or `public`, `dbo`, `main`…), where a second database's table of the same name lands too.
+- `importPartialDuplicateOnly` — the import was `Partial` and every `problem` it had was a table defined twice: every table read, and the only loss is the second definitions.
+
+How to read them:
+
+- **Presence flags per import.** No name, file, path, column or count of duplicates is sent: an import with five copies and one with one both count `importDuplicateSame` once.
+- **They do not add up to `importCauseDuplicate`.** That cause also comes from `CREATE OR REPLACE` (a `changed` entry), a catalog CSV's repeated column and Power BI, none of which counts these keys.
+- **`Same` compares each definition as its own `CREATE TABLE` left it.** An `ALTER TABLE` after either one does not count, so an identical copy of a script that alters its tables (a backup of a migration) still reads `Same`; a note or default that differs does not count either. A `CREATE TABLE` that already holds a column the other one only gains by `ALTER` reads `Differs`.
+- **`Differs` is an upper bound.** Type text is compared, not types: `int4` and `integer`, or `int` and `integer`, read as different. A key column with and without an explicit `NOT NULL` does not.
+- **`DiffersDefaultSchema` is the one key for "two different tables merged"** (H3 in #358), so it cannot be paired with the wrong duplicate over a day. For SQL Server and Snowflake, a `USE <database>` picks a database, not a schema, so two dumps of two databases (`USE db1` / `USE db2`, each with `[dbo].[orders]`) land here; for MySQL a `USE db` is the schema, and both tables are kept with no duplicate at all. A three-part name drops its database part the same way. pg_dump's `public.orders` in two dumps is the default schema too.
+- **Not counted:** a `CREATE TABLE IF NOT EXISTS` of a table already read is skipped silently (no problem, no key), and a stopped reading (`Cancelled`, `TimedOut`) carries no problems, so its `importCauseDuplicate` has no class key beside it.
+- **`importPartialDuplicateOnly` sets duplicate-only `Partial` imports apart** from ones that left something unread. What `Partial` means does not change.
+
+```bash
+# What the tables defined twice were, on releases that carry the keys (installs and imports, finished final days)
+npx wrangler d1 execute erd-studio-telemetry --remote --command \
+  "SELECT f.key, COUNT(DISTINCT h.install_id) AS installs, SUM(f.value) AS imports FROM heartbeats h, json_each(h.features) f WHERE COALESCE(h.dev, 0) = 0 AND h.day < date('now','-1 day') AND json_extract(h.features,'$.heartbeatProvisional') IS NULL AND json_extract(h.features,'$.versionMixed') IS NULL AND f.key IN ('importCauseDuplicate', 'importDuplicateSame', 'importDuplicateDiffers', 'importDuplicateDiffersDefaultSchema', 'importPartialDuplicateOnly', 'importOutcomeSqlDdlPartial', 'draftSourceSqlDdl') GROUP BY 1 ORDER BY 1"
+```
+
+Filter `h.ext_version` to the first release that carries the keys (compare it
+numerically). Mostly `importDuplicateSame`: copies (H1), so a copy could be a
+note rather than a `problem`. `importDuplicateDiffers` without
+`importDuplicateDiffersDefaultSchema` on 2 or more installs: versions (H2),
+a product question about which definition to keep.
+`importDuplicateDiffersDefaultSchema` on 2 or more installs: two different
+tables merged into one (H3), a bug, already confirmed for SQL Server's
+`USE db1` / `USE db2`.
+
+**Which site a `loggedErrorOther` came from** (added after 2.0.12, #354).
+`loggedErrorOther` is the catch-all for every error line whose tag is not the
+canvas, the sidebar, a draft, dbt or the AI helper. Most of its sites record a
+narrower code of their own beside the line; these did not, so on their own
+they sent `loggedError` + `loggedErrorOther` and nothing else. Each now
+records one fixed code right beside its existing log line, once per line,
+never with the tag or the text:
+
+- `loggedErrorAtWatcher` (error) — a listener of a file-change event threw (`src/watchers/FileWatcherService.ts`, `safeFireEvent`). Probably reads 0 in a real host: VS Code's own event emitter catches a listener's error before it reaches this catch (unverified; the test mock rethrows, so the unit test proves only the catch).
+- `loggedErrorAtLegacyRename` (error) — renaming a legacy `erd-studio/` folder to `.erd-studio/` at start failed (`src/extension.ts`).
+- `loggedErrorAtRedraw` (error) — redrawing an open diagram from its file after an outside change, or after a `fields.yml` change, failed (two sites in `src/extension.ts`).
+- `loggedErrorAtExplorerMove` (error) — following a move made in the Explorer failed (`src/extension.ts`, `onDidRenameFiles`).
+- `loggedErrorAtFeedbackSend` (error) — Send Feedback without a canvas could not record the report it opened, or copy what the user typed after a failure of ours (two sites in `src/extension.ts`).
+- `loggedErrorAtFailureAction` (error) — a button on one of our messages threw (Try Again, Send Feedback, Open It, Show Import Report, …): every line of the form `[ERD Studio] <title>: "<button>" failed:`. That is Send Feedback's, Migrate to v5's (two) and Refresh Manifest's (`src/extension.ts`), every diagram or layer command's (`src/commands/commandFailure.ts`, where `commandFailedOurs` follows too), and the buttons the imports, the exports, Move Diagram, Move Relationships to Library, Migrate to Table Naming, Draw from dbt, Open Example Project, a refused model write and a move in the Explorer whose files did not save (#355) show (`src/commands/`): 23 sites in all. `test/unit/issue354.loggedErrorSites.test.ts` finds them by scanning `src/`, so a new site without the code fails the build. All of them run only after the user pressed a button.
+- `loggedErrorAtTrackingSession` (error) — My Reports' **silent** GitHub session lookup threw, for example no GitHub sign-in provider (`src/services/reportTrackingService.ts`, `getHandle`).
+- `loggedErrorAtTrackingRefresh` (error) — My Reports' search of GitHub failed: a 403 rate limit, offline, a proxy (`reportTrackingService.ts`, `refresh`). It runs in the background at every start when the user is signed in to GitHub, `erdStudio.feedback.trackReports` is on (the default) and the cache is over 6 hours old, with no canvas needed: the strongest fit for the "at start, no diagram opened" shape #354 reported.
+- `loggedErrorUnlistedTag` (error) — the line's tag is in no entry of the fixed area table, exactly or by its part before the first `.`. It reads 0 in a correct build: every literal `createLogger` scope, `log.error('[Tag]…')` tag and `hostErrorLog.record('…')` source is listed, which `test/unit/runtimeTelemetry.test.ts` checks, so above 0 means a tag built at run time or a hole in that test. An untagged line (`''`) stays plain `loggedErrorOther`.
+
+How to read them:
+
+- **Every new code starts with `loggedError`**, so like the rest of B19 none starts the known-fixes check (`knownFixesService.ts`) or asks for an interim copy (`provisionalTrigger`). A background poll failing on every offline start costs nothing extra.
+- **One code can cover several sites**: `loggedErrorAtRedraw` two, `loggedErrorAtFeedbackSend` two, `loggedErrorAtFailureAction` 23.
+- **Every canvas load failure also lights `loggedErrorOther`.** It writes two error lines, `hostErrorLog.record('sendDomainData', …)` (listed as `Other`, as it always counted) and `[SemanticEditorProvider] Failed to load domain…` (`Canvas`), so `loggedError` counts twice and `loggedErrorOther` sits beside `loggedErrorCanvas` and a `domainLoad*` code. The feedback dialog's own sources (`feedbackAnalysis.*`, `submitFeedback*`, `setLineStyle`, …) are listed as `Other` too. Only "`loggedErrorOther` with no other code beside it" is a clean reading.
+- **Not given a site code**: `src/services/recoveryService.ts` (Save All threw, Show Files failed), `src/providers/ConvertToDbmlPanel.ts` (the Convert review panel's handler, opening a file from it), Migrate to v5 itself failing (`src/extension.ts`, `${MIGRATE_V5_TITLE} failed:`; its buttons are covered above), and the SQL and semantic-model imports' `could not read a file` lines (`src/commands/importSqlDdl.ts`, `src/commands/importSemanticModel.ts`). Each runs only after the user started it, so none can explain a day with no canvas; they stay `loggedErrorOther` alone. Convert to DBML's own button line (`convertProjectToDbml.ts`) is scoped `Convert to DBML`, also `Other`, and has no code either; the canvas's Turn Round and Suggest Relationships buttons log as `Canvas`.
+- **An oversized body's trim (`trimHeartbeat`) drops error codes only after every feature it may drop**, newest first, so these codes, the newest, would go first among the errors; such a day keeps `heartbeatTrimmed`, and is very unlikely to lose an error code at all.
+- **No area changed meaning.** Every source listed for #354 is `Other`, which it already counted as while unlisted, and every earlier entry kept its area.
+
+```bash
+# What sits beside loggedErrorOther, on releases that carry the #354 keys (installs and install-days)
+npx wrangler d1 execute erd-studio-telemetry --remote --command \
+  "SELECT e.key, COUNT(DISTINCT h.install_id) AS installs, COUNT(*) AS install_days FROM heartbeats h, json_each(h.errors) e WHERE COALESCE(h.dev, 0) = 0 AND json_extract(h.features,'$.versionMixed') IS NULL AND json_extract(h.errors,'$.loggedErrorOther') IS NOT NULL GROUP BY 1 ORDER BY 2 DESC"
+# loggedErrorOther still alone: no other code but loggedError beside it (no site code, no unlisted tag, no table-file or load code)
+npx wrangler d1 execute erd-studio-telemetry --remote --command \
+  "SELECT h.ext_version, COUNT(DISTINCT h.install_id) AS installs, COUNT(*) AS install_days, SUM(h.canvas_opens > 0) AS with_canvas FROM heartbeats h WHERE COALESCE(h.dev, 0) = 0 AND json_extract(h.errors,'$.loggedErrorOther') IS NOT NULL AND NOT EXISTS (SELECT 1 FROM json_each(h.errors) e WHERE e.key NOT IN ('loggedError', 'loggedErrorOther')) GROUP BY 1 ORDER BY 1"
+```
+
+Filter `h.ext_version` to the first release that carries the keys (compare it
+numerically). `loggedErrorAtTrackingRefresh` or `loggedErrorAtTrackingSession`
+beside it: My Reports' background check (expected offline or rate-limited;
+raise it only if it is most of them). `loggedErrorAtWatcher`: a listener bug of
+ours. `loggedErrorAtLegacyRename`: a `ux` question (is the user told?).
+`loggedErrorAtRedraw` or `loggedErrorAtExplorerMove`: a bug. With
+`loggedErrorUnlistedTag`: find the line whose tag is built at run time. Still
+alone on the new release (the second query): a site this list missed, or
+one of the "Not given a site code" lines above; list the `Other` sites again.
+
+**What a projectPath that is not a folder was like** (added after 2.0.12,
+#370). `projectPathInvalid` counts every start whose `erdStudio.projectPath`
+(or the deprecated `dbtSemantic.projectPath`) named no folder. Since 2.0 ERD
+Studio starts in any folder with a `.sql` or `.dbml` file, so a relative path
+saved in User settings for one project misses in every other folder: the
+warning now says so, and is shown once per workspace for that case, but the
+total is still counted on every start. These say which case it was, decided
+on the device from `inspect()` and `path.isAbsolute`, never the path itself.
+At most one scope and exactly one form are counted beside each
+`projectPathInvalid`; a start whose setting changed while the window started
+gets the form only, so the scope keys can sum to a little less than the total.
+
+- `projectPathInvalidUser` (error) — the value is in User settings, so it applies to every folder the user opens.
+- `projectPathInvalidWorkspace` (error) — the value is in the workspace's settings (or one folder's): a fault in that window.
+- `projectPathInvalidRelative` (error) — a relative path. A Windows path (`C:\…`) read on macOS or Linux is not absolute there, so it counts here.
+- `projectPathInvalidAbsolute` (error) — an absolute path, which names no folder on this computer.
+
+`projectPathInvalidUser` with `projectPathInvalidRelative` is the case #370
+was about: a setting written for another project, not a mistake in this one.
+
+**Which step held a slow open** (added after 2.0.12, #371). `canvasLoad*`
+says how long the day's slowest open took, not where the time went: an
+install on 2.0.11 recorded `canvasLoadOver20s` with an ordinary YAML project
+and a dbt project, and nothing could say whether dbt's files, the diagram or
+something else held it. In a dbt project an open reads manifest.json, every
+schema yml and catalog.json before it reads the diagram (the schema yml walk
+runs on the extension host thread: about 6 s for 3,000 files on a fast Mac).
+`sendSubjectAreaData` now times the steps it already names for a failure
+(`domainLoadInternal*`, #262), and the `ready` handler records the longest as
+one of these keys. Recorded only with the day's `canvasLoad5to20s` or
+`canvasLoadOver20s`, by `canvasLoadCold`'s rule: a slower range replaces the
+step keys with this open's, the same range adds this open's beside them, a
+faster or under-5 s open changes nothing. So a day carries the distinct steps
+that held the slow opens of its slowest range, usually one key (two slow opens
+held by the schema yml leave one `canvasLoadSlowYml`: never count keys as
+opens). A step's time is wall clock while it ran or awaited, so a load that
+overlapped another diagram load or refresh in the same window (two diagrams
+restored at once) would charge one's work to the other's step; such an open
+records `canvasLoadSlowOther` instead of a step. Never a time; off the onboarding
+trail; the size guard (`trimHeartbeat`) never drops them. A tie goes to the
+earlier step.
+
+- `canvasLoadSlowManifest` — the step that held the day's slowest open (over 5 s) was reading dbt's `target/manifest.json` (parsed in a worker thread, with a 120 s limit), with no other diagram loading in the window meanwhile. Cold on a window's first open, and again after dbt writes `target/` or Refresh Manifest: read beside `canvasLoadCold`, whose absence says nothing about dbt.
+- `canvasLoadSlowYml` — it was reading the dbt project's schema yml files (`model-paths`, `seed-paths`, `snapshot-paths`), synchronously on the extension host. Cold on a window's first open and after any schema yml changes.
+- `canvasLoadSlowCatalog` — it was reading `target/catalog.json` (skipped over 64 MB).
+- `canvasLoadSlowRead` — it was reading the diagram and its table files (with the dbt key index built from what dbt's files held).
+- `canvasLoadSlowPositions` — it was placing tables that had no position, including saving them to the diagram.
+- `canvasLoadSlowPhysical` — it was building the Physical stage's canvas.
+- `canvasLoadSlowDisplay` — it was building the Logical stage's canvas.
+- `canvasLoadSlowOther` — no step above: the time went before the first one (the `loading` posts and their yields, the line style, an extension host already busy with another extension's work) or after the diagram went out, or the open overlapped another diagram load or refresh in the window, so no step's time was its own. The whole span less the steps above, so a host that was busy when `ready` arrived lands here, not on the manifest. Host work that starts after an open's first step and is not a diagram load (a sidebar listing during activation) still lands on the step that open was awaiting.
+
+A day with no slow open has none of these. A pre-#371 client sends none at
+all: read them only from the release after 2.0.12 (`ext_version`).
+
+```bash
+# Which step held the slow opens, per OS, by the slowest range (installs, last 28 days)
+npx wrangler d1 execute erd-studio-telemetry --remote --command \
+  "SELECT h.os, CASE WHEN json_extract(h.features,'$.canvasLoadOver20s') IS NOT NULL THEN 'over20s' ELSE '5to20s' END AS range, j.key, COUNT(DISTINCT h.install_id) AS installs, SUM(json_extract(h.features,'$.canvasLoadCold') IS NOT NULL) AS cold_days FROM heartbeats h, json_each(h.features) j WHERE h.day >= date('now','-28 days') AND h.day < date('now') AND COALESCE(h.dev, 0) = 0 AND j.key LIKE 'canvasLoadSlow%' GROUP BY 1, 2, 3 ORDER BY 1, 2, installs DESC"
+```
+
+**A look that stopped early, and looking for longer** (added after 2.0.12,
+#357). Activation waits on one look per open folder for the project to open
+(`folderLook.ts`): at most 60 s of walking, 5,000 folders for the dbt search,
+then 10 s of asking the folders it did not list by name. `activationOver10s`
+and `activationSlowWalk` say the wait was long; nothing said whether the look
+gave up with folders left, or what the user did then. The glass sidebar now
+says what the look is doing while it runs and, when it stopped early with no
+answer from the host's own search either (so a project may have been missed),
+shows a notice with **Look for Longer** (`dbtLookNotice.ts`).
+
+- `dbtLookStopped` — the notice's condition held at activation: the look stopped at a limit before every folder it goes to was listed, and `workspace.findFiles` had not answered. Counted with `featureQuiet` (off the onboarding trail), once per window, whether or not the notice was drawn: a workspace that dismissed it before still counts, and so does a window with the native sidebar, where there is no notice.
+- `dbtLookLonger` — the user pressed **Look for Longer** (each press: a second press after a second stop counts again).
+- `dbtLookLongerFound` — a longer look found a dbt project the window did not know.
+
+How to read them: `dbtLookStopped` against the installs of a version says how
+often the limits are met (compare with `activationSlowWalk`, which counts a
+slow walk whether or not it stopped). `dbtLookLonger` over `dbtLookStopped`
+is how many cared to look further, a lower bound (a dismissed workspace still
+counts `dbtLookStopped`). `dbtLookLongerFound` over `dbtLookLonger` is how often
+the limits cost someone a project: if it is most of them, raise the limits.
+Never a path, a folder count or a time.
+
+```bash
+# How often the look stops early, and what users do then, per OS (installs, last 28 days)
+npx wrangler d1 execute erd-studio-telemetry --remote --command \
+  "SELECT h.os, COUNT(DISTINCT h.install_id) AS installs, COUNT(DISTINCT CASE WHEN json_extract(h.features,'$.dbtLookStopped') IS NOT NULL THEN h.install_id END) AS stopped, COUNT(DISTINCT CASE WHEN json_extract(h.features,'$.dbtLookLonger') IS NOT NULL THEN h.install_id END) AS looked_longer, COUNT(DISTINCT CASE WHEN json_extract(h.features,'$.dbtLookLongerFound') IS NOT NULL THEN h.install_id END) AS found FROM heartbeats h WHERE COALESCE(h.dev, 0) = 0 AND h.day >= date('now','-28 day') AND json_extract(h.features,'$.versionMixed') IS NULL GROUP BY h.os"
 ```
 
 ## The local archive

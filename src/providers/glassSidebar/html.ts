@@ -1137,6 +1137,62 @@ body.vscode-high-contrast-light .gs-welcome__glyph {
 .gs-link:hover { text-decoration: underline; color: var(--vscode-textLink-activeForeground, var(--vscode-textLink-foreground)); }
 .gs-link:focus-visible { outline: var(--focus-outline); outline-offset: 1px; border-radius: 2px; }
 
+/* What ERD Studio is doing in the section (#357: the look through the open
+   folders), above its rows or its empty state: a title, how far it has got,
+   the time left, and its buttons. */
+.gs-status {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: var(--space-1) var(--space-3) var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  background: var(--control-fill);
+}
+
+.gs-status__said {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.gs-status__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.gs-status__title {
+  min-width: 0;
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  line-height: var(--leading-normal);
+  overflow-wrap: anywhere;
+}
+
+.gs-status p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
+  overflow-wrap: anywhere;
+}
+
+/* The time left: figures of one width, so the line does not shift as it counts. */
+.gs-status .gs-status__clock { font-variant-numeric: tabular-nums; }
+
+.gs-status__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  margin-top: var(--space-1);
+}
+
+.gs-status__actions .gs-button { flex: none; padding-left: var(--space-4); padding-right: var(--space-4); }
+
 /* Loading: shimmering placeholder rows instead of a line of text. */
 .gs-skeleton {
   display: flex;
@@ -1462,6 +1518,8 @@ export const GLASS_SIDEBAR_SCRIPT = String.raw`
   var rendered = false;
   var introActive = false; // the first render's cards rise in, staggered
   var lastStateJson = null; // the sections of the last 'state' drawn: an identical one is a no-op
+  var statusStamps = {};    // section -> when (performance.now) its status's countdown was received
+  var statusTimer = 0;      // the one-second tick while a status counts down
 
   var sectionsEl = document.querySelector('.gs-sections');
   var noResultsEl = document.querySelector('.gs-noresults');
@@ -1992,6 +2050,87 @@ export const GLASS_SIDEBAR_SCRIPT = String.raw`
     b.dataset.link = String(link);
   }
 
+  // ---- A section's status block (#357) ----
+
+  function nowMs() {
+    return window.performance && typeof window.performance.now === 'function' ? window.performance.now() : Date.now();
+  }
+
+  /** A time left as the clock shows it: 48 s, 1 min, 4 min 12 s. Rounded up, so it reads 1 s until it is over. */
+  function shortDuration(ms) {
+    var s = Math.max(0, Math.ceil(ms / 1000));
+    if (s < 60) return s + ' s';
+    var m = Math.floor(s / 60), rest = s % 60;
+    return m + ' min' + (rest ? ' ' + rest + ' s' : '');
+  }
+
+  /** The countdown's line now: its text with {time} replaced by what is left by this page's clock. */
+  function clockText(section) {
+    var c = section.status && section.status.countdown;
+    if (!c || typeof c.text !== 'string') return '';
+    var at = statusStamps[section.key];
+    var left = Math.max(0, (Number(c.msLeft) || 0) - (at === undefined ? 0 : nowMs() - at));
+    return c.text.split('{time}').join(shortDuration(left));
+  }
+
+  function renderStatus(section) {
+    var st = section.status;
+    var wrap = el('div', 'gs-status' + (st.working ? ' gs-status--working' : ''));
+    // Said once to a screen reader when it changes; the clock below is not (a line a second).
+    var said = el('div', 'gs-status__said');
+    said.setAttribute('role', 'status');
+    var head = el('div', 'gs-status__head');
+    if (st.working) {
+      var spin = el('span', 'gs-spinner');
+      spin.setAttribute('aria-hidden', 'true');
+      head.appendChild(spin);
+    }
+    head.appendChild(el('span', 'gs-status__title', String(st.title || '')));
+    said.appendChild(head);
+    if (st.detail) said.appendChild(el('p', 'gs-status__detail', String(st.detail)));
+    wrap.appendChild(said);
+    if (st.countdown) {
+      var clock = el('p', 'gs-status__clock', clockText(section));
+      clock.setAttribute('aria-live', 'off');
+      wrap.appendChild(clock);
+    }
+    var actions = Array.isArray(st.actions) ? st.actions : [];
+    if (actions.length) {
+      var row = el('div', 'gs-status__actions');
+      actions.forEach(function (label, i) {
+        var b = el('button', i === 0 ? 'gs-button gs-button--primary' : 'gs-link', String(label));
+        b.type = 'button';
+        b.dataset.act = 'status';
+        b.dataset.i = String(i);
+        row.appendChild(b);
+      });
+      wrap.appendChild(row);
+    }
+    return wrap;
+  }
+
+  /** Count every shown status's clock down, once a second, for as long as one is shown. */
+  function tickStatus() {
+    var any = false;
+    model.sections.forEach(function (section) {
+      if (!section.status || !section.status.countdown) return;
+      any = true;
+      var card = cardEl(section.key);
+      var clock = card && card.querySelector('.gs-status__clock');
+      if (!clock) return;
+      var text = clockText(section);
+      if (clock.textContent !== text) clock.textContent = text;
+    });
+    if (!any && statusTimer) { clearInterval(statusTimer); statusTimer = 0; }
+  }
+
+  /** Start or stop the tick to match the state just received. */
+  function syncStatusTimer() {
+    var any = model.sections.some(function (s) { return !!(s.status && s.status.countdown); });
+    if (any && !statusTimer) statusTimer = setInterval(tickStatus, 1000);
+    else if (!any && statusTimer) { clearInterval(statusTimer); statusTimer = 0; }
+  }
+
   var WELCOME_GLYPH = { diagrams: 'layers', tables: 'symbol-class', relationships: 'references', help: 'question' };
 
   function renderWelcome(section) {
@@ -2219,6 +2358,7 @@ export const GLASS_SIDEBAR_SCRIPT = String.raw`
       id: row ? row.dataset.id : null,
       onRow: a === row,
       act: a.getAttribute('data-act'),
+      i: a.getAttribute('data-i'),
       slot: a.getAttribute('data-slot'),
       entry: a.getAttribute('data-entry'),
       link: a.getAttribute('data-link')
@@ -2235,6 +2375,7 @@ export const GLASS_SIDEBAR_SCRIPT = String.raw`
     }
     if (k.act === 'toggle') return document.getElementById('gs-head-' + k.section);
     if (k.slot) return card.querySelector('.gs-section__actions [data-slot="' + k.slot + '"]');
+    if (k.act === 'status') return card.querySelector('[data-act="status"][data-i="' + k.i + '"]') || card.querySelector('[data-act="status"]');
     if (k.act === 'welcome') {
       var links = card.querySelectorAll('[data-act="welcome"]');
       for (var i = 0; i < links.length; i++) {
@@ -2301,6 +2442,7 @@ export const GLASS_SIDEBAR_SCRIPT = String.raw`
       body.id = 'gs-body-' + section.key;
       var inner = el('div', 'gs-section__inner');
       var content = el('div', 'gs-section__content');
+      if (section.status && !searching) content.appendChild(renderStatus(section));
       if (x.none) {
         content.appendChild(renderNone(section));
       } else if (vis.rows.length === 0) {
@@ -2639,6 +2781,8 @@ export const GLASS_SIDEBAR_SCRIPT = String.raw`
       setSectionCollapsed(card, !card.classList.contains('gs-section--collapsed'));
     } else if (act === 'welcome') {
       post({ type: 'welcomeLink', section: section.key, entry: Number(b.getAttribute('data-entry')), link: Number(b.getAttribute('data-link')) });
+    } else if (act === 'status') {
+      if (section.status && Array.isArray(section.status.actions) && i >= 0 && i < section.status.actions.length) post({ type: 'statusAction', section: section.key, index: i });
     } else if (act === 'title') {
       var a = (section.actions.navigation || [])[i];
       if (!a) return;
@@ -3714,6 +3858,10 @@ export const GLASS_SIDEBAR_SCRIPT = String.raw`
       var hostChanged = said !== hostSearch;
       hostSearch = said;
       if (hostChanged && !searchPending()) adoptSearch(said === null ? '' : said);
+      // A countdown's time left is as of now: the page counts on from here by its own clock.
+      var stamps = {};
+      sections.forEach(function (s) { if (s && s.status && s.status.countdown) stamps[s.key] = nowMs(); });
+      statusStamps = stamps;
       // The same state again (a refresh that changed nothing): nothing to draw.
       var json = JSON.stringify([sections, hostSearch]);
       if (rendered && json === lastStateJson) {
@@ -3734,6 +3882,8 @@ export const GLASS_SIDEBAR_SCRIPT = String.raw`
         render();
         restoreScroll();
       }
+      syncStatusTimer();
+      tickStatus();
       if (answered && !searchPending()) {
         announceFound();
         if (search.focusFirst) { search.focusFirst = false; focusFirstRow(); }

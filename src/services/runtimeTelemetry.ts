@@ -130,6 +130,25 @@ export function dbtSearchFailureCodes(reason: DbtSearchFailure): TelemetryErrorC
   return ['dbtSearchFailed', DBT_SEARCH_FAILED[reason]];
 }
 
+/**
+ * What an `erdStudio.projectPath` that is not a folder was like (#370),
+ * counted beside `projectPathInvalid` (the total, which the caller records
+ * first): the scope that held it (a folder's own settings count as the
+ * workspace's; none when that could not be told) and the path's form. Only
+ * the two facts, never the path. A Windows path read on macOS or Linux is
+ * not absolute there, so it counts as relative.
+ */
+export function projectPathInvalidDetailCodes(
+  scope: 'user' | 'workspace' | 'folder' | undefined,
+  absolute: boolean,
+): TelemetryErrorCode[] {
+  const codes: TelemetryErrorCode[] = [];
+  if (scope === 'user') codes.push('projectPathInvalidUser');
+  else if (scope !== undefined) codes.push('projectPathInvalidWorkspace');
+  codes.push(absolute ? 'projectPathInvalidAbsolute' : 'projectPathInvalidRelative');
+  return codes;
+}
+
 // ---------------------------------------------------------------------------
 // B10 and B16: a write the environment refused
 // ---------------------------------------------------------------------------
@@ -407,9 +426,9 @@ const LOGGED_ERROR_CODES: Record<LoggedErrorArea, TelemetryErrorCode> = {
 /**
  * The area of each source an error line can start with: a `createLogger`
  * scope, or the `[Tag]` an unscoped `log.error` line (or the feedback error
- * buffer) starts with. Every such literal in `src/` is listed
- * (`test/unit/loggedErrorAreas.test.ts`); one not listed is `Other`. Only
- * the area's fixed code is ever recorded.
+ * buffer, `hostErrorLog.record`) starts with. Every such literal in `src/`
+ * is listed (`test/unit/runtimeTelemetry.test.ts`); one not listed is `Other`.
+ * Only the area's fixed code is ever recorded.
  */
 export const LOGGED_ERROR_AREAS: Readonly<Record<string, LoggedErrorArea>> = {
   // createLogger scopes
@@ -430,6 +449,10 @@ export const LOGGED_ERROR_AREAS: Readonly<Record<string, LoggedErrorArea>> = {
   RefreshGate: 'Canvas',
   ConvertToDbmlPanel: 'Other',
   DomainTreeProvider: 'Sidebar',
+  // A Table Library drop the canvas missed (#355): the Diagrams view drop's twin.
+  MissedCanvasDrop: 'Sidebar',
+  // A half-applied edit that could not be put back (#355): the edit pipeline.
+  ApplyFileWrites: 'Canvas',
   FileWatcherService: 'Other',
   GettingStarted: 'Other',
   LayerService: 'Other',
@@ -440,10 +463,52 @@ export const LOGGED_ERROR_AREAS: Readonly<Record<string, LoggedErrorArea>> = {
   moveRelationshipsToLibrary: 'Other',
   SelectorsService: 'Dbt',
   CliLauncher: 'Harness',
+  // #354: the feedback error buffer's sources (`hostErrorLog.record`), all
+  // `Other` as they always counted. A template source (`submitFeedback.${choice}`,
+  // `feedbackApiKey.${choice}`) is found by its part before the first '.'.
+  analyzeFeedback: 'Other',
+  clearFeedbackApiKey: 'Other',
+  copyFeedbackReport: 'Other',
+  'feedbackAnalysis.endpoint': 'Other',
+  'feedbackAnalysis.endpointUrl': 'Other',
+  'feedbackAnalysis.issues': 'Other',
+  'feedbackAnalysis.languageModel': 'Other',
+  'feedbackAnalysis.parse': 'Other',
+  'feedbackAnalysis.primed': 'Other',
+  'feedbackAnalysis.readApiKey': 'Other',
+  'feedbackAnalysis.request': 'Other',
+  'feedbackAnalysis.selectChatModels': 'Other',
+  feedbackApiKey: 'Other',
+  openFeedbackLink: 'Other',
+  openFixedLink: 'Other',
+  'ReportTrackingService.getHandle': 'Other',
+  'ReportTrackingService.refresh': 'Other',
+  requestFeedbackContext: 'Other',
+  sendDomainData: 'Other',
+  'sendFeedbackContext.getSession': 'Other',
+  setFeedbackApiKey: 'Other',
+  setFeedbackProvider: 'Other',
+  setLineStyle: 'Other',
+  setTableSubtitle: 'Other',
+  submitFeedback: 'Other',
+  'submitFeedback.recordPending': 'Other',
 };
 
-/** `loggedError` and the area of `source` (unknown or empty: `Other`). */
+function isListedSource(source: string): boolean {
+  return Object.prototype.hasOwnProperty.call(LOGGED_ERROR_AREAS, source);
+}
+
+/**
+ * `loggedError` and the area of `source`: listed exactly, else by its part
+ * before the first '.'. An empty source is plain `Other`; any other source
+ * not listed is `Other` plus `loggedErrorUnlistedTag` (#354), which reads 0
+ * while every literal source is listed.
+ */
 export function loggedErrorCodes(source: string): TelemetryErrorCode[] {
-  const area = Object.prototype.hasOwnProperty.call(LOGGED_ERROR_AREAS, source) ? LOGGED_ERROR_AREAS[source] : 'Other';
-  return ['loggedError', LOGGED_ERROR_CODES[area]];
+  if (isListedSource(source)) return ['loggedError', LOGGED_ERROR_CODES[LOGGED_ERROR_AREAS[source]]];
+  const dot = source.indexOf('.');
+  const prefix = dot > 0 ? source.slice(0, dot) : '';
+  if (prefix && isListedSource(prefix)) return ['loggedError', LOGGED_ERROR_CODES[LOGGED_ERROR_AREAS[prefix]]];
+  if (source === '') return ['loggedError', LOGGED_ERROR_CODES.Other];
+  return ['loggedError', LOGGED_ERROR_CODES.Other, 'loggedErrorUnlistedTag'];
 }

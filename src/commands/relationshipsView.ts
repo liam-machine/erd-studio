@@ -38,6 +38,8 @@ import type { RevealRelationshipMessage } from '../types/messages';
 import type { SubjectAreaSummary } from '../types/semantic';
 import type { RelationshipsNode } from '../providers/RelationshipsTreeProvider';
 import type { TableLibraryTableNode } from '../providers/ModelLibraryTreeProvider';
+import { RELOAD_DIAGRAMS_BUTTON, showErrorWithActions } from '../services/commandErrors';
+import { log } from '../services/logger';
 import { normaliseName } from '../services/nameUtils';
 import { tableUsageByName, type SidebarTable, type TableUsageKeys } from '../services/sidebarTables';
 import { chooseDiagram } from './sidebarRowClick';
@@ -152,7 +154,14 @@ export async function openRelationshipSource(node: RelationshipsNode | undefined
   const owner = entry.source.table;
   const file = deps.findTableFile(owner);
   if (!file) {
-    void vscode.window.showWarningMessage(`ERD Studio: The table "${owner}" has no file in the table library, so this relationship can't be opened.`);
+    // Usually a view that has not caught up with a file moved, renamed or deleted outside ERD Studio (#355): reloading is the next step.
+    showErrorWithActions(
+      (m, ...items) => vscode.window.showWarningMessage(m, ...items),
+      `ERD Studio: The table "${owner}" has no file in the Table Library, so this relationship has nowhere to open. ` +
+        'The file may have been moved, renamed or deleted outside ERD Studio.',
+      { [RELOAD_DIAGRAMS_BUTTON]: () => vscode.commands.executeCommand('erdStudio.reloadFromDisk') },
+      (choice, err) => log.error(`[Relationships] "${choice}" failed:`, err),
+    );
     return;
   }
   let line: number | undefined;

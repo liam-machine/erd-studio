@@ -134,6 +134,13 @@ export interface LoadingMessage {
   payload: {
     /** How many tables the diagram shows, when known. */
     tables?: number;
+    /**
+     * `'dbt'`: the open reads the dbt project's files (manifest, schema yml,
+     * catalog) before the diagram, which can take a while (#371). Sent only
+     * with `tables`, in a dbt project whose schema yml was not read yet.
+     * Host to webview only.
+     */
+    reading?: 'dbt';
   };
 }
 

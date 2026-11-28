@@ -149,6 +149,7 @@ export async function importSemanticModel(
   const showError = (message: string, actions: ErrorActions = {}): void => {
     showErrorWithActions((m, ...items) => ui.showErrorMessage(m, ...items), message, actions, (choice, err) => {
       log.error(`[ERD Studio] ${TITLE}: "${choice}" failed:`, err);
+      telemetry.error('loggedErrorAtFailureAction');
       const doing = `while running ${choice}`;
       showError(oursMessage(TITLE, doing, 'nothing was changed'), { [SEND_FEEDBACK_BUTTON]: () => ui.sendFeedback(feedbackPrefill(TITLE, doing, err)) });
     });

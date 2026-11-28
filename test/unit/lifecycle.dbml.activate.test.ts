@@ -331,7 +331,7 @@ describe('in a native DBML project', () => {
       type: 'domain', summary: { domain: 'sales', layer: 'gold', filePath: salesPath(), storage: 'dbml' },
     });
     expect(errors).toHaveBeenCalledTimes(1);
-    expect(errors).toHaveBeenCalledWith(expect.stringMatching(/could not put back .*Restore these from source control\.$/), { modal: true });
+    expect(errors).toHaveBeenCalledWith(expect.stringMatching(/left part-changed: .*Restore them from source control/), { modal: true }, 'Show Files', 'Send Feedback');
   });
 
   it('Delete Subject Area deletes the one .dbml (its positions are in it), recorded as an own delete', async () => {

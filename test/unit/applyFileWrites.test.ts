@@ -16,6 +16,7 @@ import * as vscode from 'vscode';
 
 import { _appliedEdits, _mockWorkspaceState, _resetMockWorkspace, createMockTextDocument } from '../__mocks__/vscode';
 import { applyFileWrites } from '../../src/providers/applyFileWrites';
+import { SEND_FEEDBACK_BUTTON, SHOW_FILES_BUTTON } from '../../src/services/commandErrors';
 import type { FileWrite } from '../../src/services/fileWrites';
 
 let root: string;
@@ -157,7 +158,7 @@ describe('a partial apply (D23)', () => {
     expect(disk()).toEqual(beforeDisk);
   });
 
-  it('a reconcile that fails too names every file it could not put back in a modal', async () => {
+  it('a reconcile that fails too names every file it could not put back in a modal: still modal, neutral words, how to restore, Show Files and Send Feedback (#355)', async () => {
     const doc = primary();
     const error = vi.spyOn(vscode.window, 'showErrorMessage').mockImplementation((async () => undefined) as never);
     _mockWorkspaceState.applyEditPrefixes.push(4, 0);
@@ -167,10 +168,84 @@ describe('a partial apply (D23)', () => {
       'gold/diagrams/sales.dbml', 'gold/notes.md', 'gold/relationships/gold.dbml', 'gold/tables/gold/new.dbml',
     ]);
     expect(error).toHaveBeenCalledTimes(1);
-    const [message, options] = error.mock.calls[0] as unknown as [string, { modal?: boolean }];
-    expect(message).toContain('Restore these from source control');
-    expect(message).toContain('gold/relationships/gold.dbml');
+    const [message, options, ...items] = error.mock.calls[0] as unknown as [string, { modal?: boolean }, ...string[]];
     expect(options).toEqual({ modal: true });
+    expect(items).toEqual([SHOW_FILES_BUTTON, SEND_FEEDBACK_BUTTON]);
+    expect(message).toMatch(/^ERD Studio couldn't finish this change, and VS Code didn't accept putting back the part already made\. /);
+    // The usual cause is the environment (a file another program has open), so it never blames ERD Studio.
+    expect(message).not.toMatch(/problem in ERD Studio/);
+    expect(message).toContain("This is usually a file another program has open or a folder you can't write to.");
+    expect(message).toContain('These files are left part-changed: ');
+    expect(message).toContain('gold/relationships/gold.dbml');
+    expect(message).toContain('Restore them from source control (for example, Discard Changes in the Source Control view), then try again.');
+    expect(message).not.toContain('applyEdit');
+  });
+
+  it('when the files could not be told apart (every planned file listed), says they may be left part-changed', async () => {
+    const doc = primary();
+    const error = vi.spyOn(vscode.window, 'showErrorMessage').mockImplementation((async () => undefined) as never);
+    // The edit lands part way; the put-back lands in full but VS Code still says it failed.
+    const real = vscode.workspace.applyEdit.bind(vscode.workspace);
+    let call = 0;
+    vi.spyOn(vscode.workspace, 'applyEdit').mockImplementation(async (edit) => {
+      call++;
+      if (call === 1) {
+        _mockWorkspaceState.applyEditPrefixes.push(4);
+        return real(edit);
+      }
+      await real(edit);
+      return false;
+    });
+    const result = await applyFileWrites(plannedWrites(), { primary: { document: doc as unknown as vscode.TextDocument, text: 'Project sales {}\n' } });
+    expect(result.ok).toBe(false);
+    const [message] = error.mock.calls[0] as unknown as [string];
+    expect(message).toContain('These files may be left part-changed: ');
+  });
+
+  it('Show Files opens a renamed file where it is now (and the modal says so); Send Feedback\'s report holds counts only, no file name', async () => {
+    fs.mkdirSync(at('logical-models'), { recursive: true });
+    fs.writeFileSync(at('logical-models/dim.yml'), 'name: dim\n');
+    const renames = [{ from: at('logical-models/dim.yml'), to: at('logical-models/gold/dim.yml') }];
+    const error = vi.spyOn(vscode.window, 'showErrorMessage')
+      .mockResolvedValueOnce(SHOW_FILES_BUTTON as never)
+      .mockResolvedValueOnce(SEND_FEEDBACK_BUTTON as never);
+    const shown = vi.spyOn(vscode.window, 'showTextDocument');
+    const exec = vi.spyOn(vscode.commands, 'executeCommand').mockResolvedValue(undefined);
+    // The rename lands, the delete after it fails; the move back fails too.
+    _mockWorkspaceState.applyEditPrefixes.push(1, 0);
+    const first = await applyFileWrites([{ kind: 'delete', path: at('gold/tables/gold/older.dbml') }], { renames });
+    expect(first.unrestored).toEqual([at('logical-models/dim.yml')]);
+    const [message] = error.mock.calls[0] as unknown as [string];
+    expect(message).toContain('logical-models/dim.yml (now at ');
+    expect(message).toContain('logical-models/gold/dim.yml)');
+    await vi.waitFor(() => expect(shown).toHaveBeenCalled());
+    const opened = shown.mock.calls[0][0] as unknown as { uri: { fsPath: string } };
+    expect(opened.uri.fsPath).toBe(at('logical-models/gold/dim.yml'));
+
+    // Send Feedback (the same modal, a second time): the report never carries a name or a path.
+    _mockWorkspaceState.applyEditPrefixes.push(1, 0);
+    fs.renameSync(at('logical-models/gold/dim.yml'), at('logical-models/dim.yml'));
+    await applyFileWrites([{ kind: 'delete', path: at('gold/tables/gold/older.dbml') }], { renames });
+    await vi.waitFor(() => expect(exec).toHaveBeenCalledWith('erdStudio.reportBug', expect.anything()));
+    const prefill = exec.mock.calls.find((c) => c[0] === 'erdStudio.reportBug')![1] as { kind: string; title: string; description: string };
+    expect(prefill.kind).toBe('bug');
+    expect(prefill.description).toContain('1 file not put back');
+    for (const leak of ['dim.yml', 'dim', 'logical-models', 'older', root]) expect(prefill.description).not.toContain(leak);
+  });
+
+  it('Show Files on a file that is gone (a delete not put back) shows its folder', async () => {
+    vi.spyOn(vscode.window, 'showErrorMessage').mockResolvedValueOnce(SHOW_FILES_BUTTON as never);
+    const exec = vi.spyOn(vscode.commands, 'executeCommand').mockResolvedValue(undefined);
+    _mockWorkspaceState.applyEditPrefixes.push(1, 0);
+    // The first delete lands, the second does not; putting the first back fails.
+    const result = await applyFileWrites([
+      { kind: 'delete', path: at('gold/tables/gold/old.dbml') },
+      { kind: 'delete', path: at('gold/tables/gold/older.dbml') },
+    ]);
+    expect(result.unrestored).toEqual([at('gold/tables/gold/old.dbml')]);
+    await vi.waitFor(() => expect(exec).toHaveBeenCalledWith('revealFileInOS', expect.anything()));
+    const revealed = exec.mock.calls.find((c) => c[0] === 'revealFileInOS')![1] as { fsPath: string };
+    expect(revealed.fsPath).toBe(at('gold/tables/gold'));
   });
 
   it('a create that failed because its file was already there leaves that file alone (only what the edit made is undone)', async () => {

@@ -15,6 +15,7 @@
  * providers apply it to their rows (`setFilter`).
  */
 import * as vscode from 'vscode';
+import { registerCommand } from '../commands/heldCommands';
 
 import {
   DIAGRAMS_FILTER,
@@ -313,10 +314,10 @@ export function registerSidebarFilters(
   const disposables: vscode.Disposable[] = [
     ...Object.values(filters),
     ...names.flatMap((name) => [
-      vscode.commands.registerCommand(FILTER_COMMANDS[name].filter, () => filters[name].open()),
-      vscode.commands.registerCommand(FILTER_COMMANDS[name].clear, () => filters[name].clear()),
+      registerCommand(FILTER_COMMANDS[name].filter, () => filters[name].open()),
+      registerCommand(FILTER_COMMANDS[name].clear, () => filters[name].clear()),
     ]),
-    vscode.commands.registerCommand(CANCEL_FILTER_COMMAND, cancelOpenFilter),
+    registerCommand(CANCEL_FILTER_COMMAND, cancelOpenFilter),
   ];
   return { filters, disposables };
 }

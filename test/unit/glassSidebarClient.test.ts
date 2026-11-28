@@ -1456,3 +1456,103 @@ describe('the empty project: Import Your Data Model… first', () => {
     expect([...primary].map((b) => b.textContent)).toEqual(['New Diagram…']);
   });
 });
+
+// ── #357: a section's status block ──────────────────────────────────────────
+
+describe('#357: what ERD Studio is doing in a section', () => {
+  const loadingWelcome = [{ entry: 0, paragraphs: [{ button: false, parts: [{ kind: 'text' as const, text: 'Loading diagrams…' }] }] }];
+  const diagramsWith = (status: GlassSection['status'], nodes: SerialisedNode[] = []): GlassSection[] => [
+    { key: 'diagrams', title: 'Diagrams', visible: true, defaultCollapsed: false, actions: { navigation: [], groups: [] }, welcome: nodes.length ? [] : loadingWelcome, nodes, ...(status ? { status } : {}) },
+  ];
+  const looking = (msLeft: number, folders = '1,240 folders checked so far.'): NonNullable<GlassSection['status']> => ({
+    title: 'Looking through shop…', detail: folders, working: true, countdown: { msLeft, text: 'Stops in {time} if it has not finished.' },
+  });
+  const text = (win: Win, selector: string): string | null | undefined => win.document.querySelector(selector)?.textContent;
+
+  it('says what it is doing above the loading rows: a title with a spinner, how far, and the time left', () => {
+    const { win } = load();
+    sendState(win, diagramsWith(looking(48_000)));
+    const status = win.document.querySelector('.gs-status')!;
+    expect(status).not.toBeNull();
+    expect(status.classList.contains('gs-status--working')).toBe(true);
+    expect(text(win, '.gs-status__title')).toBe('Looking through shop…');
+    expect(status.querySelector('.gs-status__head .gs-spinner')).not.toBeNull();
+    expect(text(win, '.gs-status__detail')).toBe('1,240 folders checked so far.');
+    expect(text(win, '.gs-status__clock')).toBe('Stops in 48 s if it has not finished.');
+    // The loading rows are still under it, in the same section.
+    const content = status.parentElement!;
+    expect([...content.children].map((c) => c.className.split(' ')[0])).toEqual(['gs-status', 'gs-skeleton']);
+    // Said to a screen reader when it changes; the clock is not (a line a second).
+    expect(status.querySelector('.gs-status__said')!.getAttribute('role')).toBe('status');
+    expect(status.querySelector('.gs-status__clock')!.getAttribute('aria-live')).toBe('off');
+    expect(status.querySelector('.gs-status__clock')!.closest('[role="status"]')).toBeNull();
+  });
+
+  it('counts the time left down by its own clock, with no new state from the host', async () => {
+    const { win } = load();
+    let now = 50_000;
+    win.performance.now = () => now;
+    sendState(win, diagramsWith(looking(125_000)));
+    expect(text(win, '.gs-status__clock')).toBe('Stops in 2 min 5 s if it has not finished.');
+    const clock = win.document.querySelector('.gs-status__clock')!;
+    now += 6_000;
+    await new Promise((r) => setTimeout(r, 1100));
+    expect(clock.isConnected).toBe(true);
+    expect(clock.textContent).toBe('Stops in 1 min 59 s if it has not finished.');
+    // Past the end it reads 0 s, never a negative time.
+    now += 500_000;
+    await new Promise((r) => setTimeout(r, 1100));
+    expect(clock.textContent).toBe('Stops in 0 s if it has not finished.');
+  }, 10_000);
+
+  it('a new state restarts the clock from what the host says is left, and updates in place', async () => {
+    const { win } = load();
+    let now = 1_000;
+    win.performance.now = () => now;
+    sendState(win, diagramsWith(looking(60_000, '10 folders checked so far.')));
+    const title = win.document.querySelector('.gs-status__title')!;
+    now += 30_000;
+    sendState(win, diagramsWith(looking(58_000, '2,400 folders checked so far.')));
+    expect(text(win, '.gs-status__clock')).toBe('Stops in 58 s if it has not finished.');
+    expect(text(win, '.gs-status__detail')).toBe('2,400 folders checked so far.');
+    // The same elements, patched: nothing flashes while it counts.
+    expect(win.document.querySelector('.gs-status__title')).toBe(title);
+  });
+
+  it('a notice has no spinner or clock, and its buttons send only their index', () => {
+    const { win, posted } = load();
+    sendState(win, diagramsWith({ title: 'Stopped looking after 1 minute.', detail: 'It opened shop.', actions: ['Look for Longer', 'Dismiss'] }, [row('diagrams:a', 'sales')]));
+    const status = win.document.querySelector('.gs-status')!;
+    expect(status.querySelector('.gs-spinner')).toBeNull();
+    expect(status.querySelector('.gs-status__clock')).toBeNull();
+    // Above the rows, which are still drawn.
+    expect(rowEl(win, 'diagrams:a')).toBeDefined();
+    const buttons = [...status.querySelectorAll<HTMLButtonElement>('.gs-status__actions button')];
+    expect(buttons.map((b) => [b.textContent, b.className])).toEqual([['Look for Longer', 'gs-button gs-button--primary'], ['Dismiss', 'gs-link']]);
+    posted.length = 0;
+    buttons[0].click();
+    buttons[1].click();
+    expect(posted).toEqual([
+      { type: 'statusAction', section: 'diagrams', index: 0 },
+      { type: 'statusAction', section: 'diagrams', index: 1 },
+    ]);
+  });
+
+  it('host text is drawn as text, never as markup', () => {
+    const { win } = load();
+    sendState(win, diagramsWith({ title: '<img src=x onerror=alert(1)>', detail: '<b>bold</b>', actions: ['<i>x</i>'] }));
+    const status = win.document.querySelector('.gs-status')!;
+    expect(status.querySelector('img, b, i')).toBeNull();
+    expect(text(win, '.gs-status__title')).toBe('<img src=x onerror=alert(1)>');
+  });
+
+  it('goes when the host takes it away', () => {
+    const { win } = load();
+    sendState(win, diagramsWith(looking(48_000)));
+    expect(win.document.querySelector('.gs-status')).not.toBeNull();
+    sendState(win, diagramsWith(undefined));
+    expect(win.document.querySelector('.gs-status')).toBeNull();
+    expect(win.document.querySelector('.gs-skeleton')).not.toBeNull();
+  });
+});
+

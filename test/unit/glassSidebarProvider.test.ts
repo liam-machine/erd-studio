@@ -1008,6 +1008,57 @@ describe('the search field drives the sidebar filter (the Filter… commands\' o
     expect(v.posted.filter((m) => m.type === 'focusSearch')).toHaveLength(1);
   });
 
+  it('#357: a section\'s status is sent with its state, its buttons run only what the host registered, and taking it away sends it gone', async () => {
+    const { provider, posted, send } = await setUp();
+    expect(section(posted, 'diagrams').status).toBeUndefined();
+    const pressed: number[] = [];
+    const looking = { title: 'Looking through shop…', detail: '1,240 folders checked so far.', working: true, countdown: { msLeft: 48_000, text: 'Stops in {time} if it has not finished.' } };
+    provider.setSectionStatus('diagrams', looking);
+    await new Promise((r) => setTimeout(r, 80));
+    expect(section(posted, 'diagrams').status).toEqual(looking);
+    // The other sections say nothing, and the rows are still there under it.
+    expect(section(posted, 'tables').status).toBeUndefined();
+    expect(section(posted, 'diagrams').nodes.length).toBeGreaterThan(0);
+    // A status with no buttons runs nothing, whatever index the page sends.
+    send({ type: 'statusAction', section: 'diagrams', index: 0 });
+    await flush();
+    expect(pressed).toEqual([]);
+
+    const stopped = { title: 'Stopped looking after 1 minute.', detail: 'It opened shop.', actions: ['Look for Longer', 'Dismiss'] };
+    provider.setSectionStatus('diagrams', stopped, (index) => pressed.push(index));
+    await new Promise((r) => setTimeout(r, 80));
+    expect(section(posted, 'diagrams').status).toEqual(stopped);
+    send({ type: 'statusAction', section: 'diagrams', index: 1 });
+    // An index past the buttons, or a section with no status, runs nothing. No command is ever taken from the page.
+    send({ type: 'statusAction', section: 'diagrams', index: 2 });
+    send({ type: 'statusAction', section: 'tables', index: 0 });
+    send({ type: 'statusAction', section: 'diagrams', index: 0, command: 'workbench.action.terminal.new' });
+    await flush();
+    expect(pressed).toEqual([1, 0]);
+    expect(exec.mock.calls.filter((c) => c[0] !== 'setContext')).toEqual([]);
+
+    const before = posted.length;
+    provider.setSectionStatus('diagrams', undefined);
+    await new Promise((r) => setTimeout(r, 80));
+    expect(posted.length).toBe(before + 1);
+    expect(section(posted, 'diagrams').status).toBeUndefined();
+    // Taking away what is not there sends nothing.
+    provider.setSectionStatus('diagrams', undefined);
+    await new Promise((r) => setTimeout(r, 80));
+    expect(posted.length).toBe(before + 1);
+    send({ type: 'statusAction', section: 'diagrams', index: 0 });
+    await flush();
+    expect(pressed).toEqual([1, 0]);
+  });
+
+  it('#357: reads statusAction as a section and a whole index only', () => {
+    expect(GLASS_WEBVIEW_MESSAGE_TYPES).toContain('statusAction');
+    expect(parseGlassInbound({ type: 'statusAction', section: 'diagrams', index: 1, command: 'x', label: 'Look for Longer' })).toEqual({ type: 'statusAction', section: 'diagrams', index: 1 });
+    for (const bad of [{ index: -1 }, { index: 1.5 }, { index: '1' }, {}, { index: 1, section: 'nowhere' }]) {
+      expect(parseGlassInbound({ type: 'statusAction', section: 'diagrams', ...bad }), JSON.stringify(bad)).toBeUndefined();
+    }
+  });
+
   it('reads a search as bounded plain text only: no command, no other field, nothing too long', () => {
     expect(GLASS_WEBVIEW_MESSAGE_TYPES).toContain('search');
     expect(parseGlassInbound({ type: 'search', text: 'layer:gold', seq: 3, command: 'workbench.action.terminal.new', section: 'tables' })).toEqual({ type: 'search', text: 'layer:gold', seq: 3 });

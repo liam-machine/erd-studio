@@ -16,7 +16,7 @@ import type * as vscode from 'vscode';
 import { _resetMockWorkspace } from '../__mocks__/vscode';
 import { fakeDraftPreview } from './helpers/draftDriver';
 import { importDbml, type ImportDbmlDeps, type ImportDbmlUi } from '../../src/commands/importDbml';
-import { TRY_ANOTHER_DIALECT_BUTTON, importSqlDdl, type ImportSqlDdlDeps, type ImportSqlDdlUi, type SqlPreset, type SqlSources } from '../../src/commands/importSqlDdl';
+import { TRY_ANOTHER_DIALECT_BUTTON, importSqlDdl, quickImportSqlDdl, type ImportSqlDdlDeps, type ImportSqlDdlUi, type SqlPreset, type SqlSources } from '../../src/commands/importSqlDdl';
 import { importSemanticModel, type ImportSemanticModelUi } from '../../src/commands/importSemanticModel';
 import { SubjectAreaService } from '../../src/services/domainService';
 import { LayerService } from '../../src/services/layerService';
@@ -121,6 +121,26 @@ describe('Import SQL DDL… — its outcome', () => {
     const file = writeFile('b.sql', 'CREATE TABLE a (id int primary key);\nCREATE TABLE b (id int,, x int);\n');
     await importSqlDdl(sqlDeps(sqlUi({ files: [file] }, 'mysql')));
     expect(outcomes().slice(0, 2)).toEqual(['importOutcomeSqlDdlPartial', 'importSqlOutcomeMysqlPartial']);
+  });
+
+  it('a table defined twice (#358): partial, its cause, and what the second definition was, off the trail', async () => {
+    const a = writeFile('a.sql', 'CREATE TABLE orders (id int PRIMARY KEY);\n');
+    const b = writeFile('b.sql', 'CREATE TABLE orders (id int PRIMARY KEY, total int);\n');
+    await importSqlDdl(sqlDeps(sqlUi({ files: [a, b] }, 'postgres')));
+    expect(outcomes()).toEqual([
+      'importOutcomeSqlDdlPartial', 'importSqlOutcomePostgresPartial', 'importCauseDuplicate',
+      'importDuplicateDiffers', 'importDuplicateDiffersDefaultSchema', 'importPartialDuplicateOnly',
+    ]);
+    expect(feature.mock.calls.map((c: unknown[]) => String(c[0])).filter((k) => /^import(Duplicate|PartialDuplicate)/.test(k))).toEqual([]);
+  });
+
+  it('the automatic draft (quiet) counts the same #358 keys, once, through featureQuiet', async () => {
+    writeFile('a.sql', 'CREATE TABLE orders (id int PRIMARY KEY);\n');
+    writeFile('b.sql', 'CREATE TABLE orders (id int PRIMARY KEY);\n');
+    const preview = fakeDraftPreview(['discard']);
+    await quickImportSqlDdl(sqlDeps(sqlUi(undefined), { draft: { preview, trigger: 'sidebar', quiet: true, quietDrop: () => {} } }));
+    expect(preview.drafts).toHaveLength(1);
+    expect(outcomes().filter((k) => /^import(Cause|Duplicate|PartialDuplicate)/.test(k))).toEqual(['importCauseDuplicate', 'importDuplicateSame', 'importPartialDuplicateOnly']);
   });
 
   it('no table reads: failed, by dialect, with the ledger\'s cause classes', async () => {

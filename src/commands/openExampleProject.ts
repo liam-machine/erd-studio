@@ -121,6 +121,7 @@ export async function openExampleProject(deps: OpenExampleProjectDeps, resume?: 
   const showError = (message: string, actions: ErrorActions = {}): void => {
     showErrorWithActions((m, ...items) => ui.showErrorMessage(m, ...items), message, actions, (choice, err) => {
       log.error(`[ERD Studio] ${OPEN_EXAMPLE_PROJECT_TITLE}: "${choice}" failed:`, err);
+      telemetry.error('loggedErrorAtFailureAction');
     });
   };
   const cancelled = (): undefined => {

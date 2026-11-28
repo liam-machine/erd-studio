@@ -5,7 +5,9 @@
  * name, path, statement, message or size: a cause key says only that the
  * import met that cause at least once (an event count, never how many
  * tables or columns), and the outcome is decided here from the ledger's
- * outcomes, so only fixed keys leave.
+ * outcomes, so only fixed keys leave. A SQL import that met a table defined
+ * twice also says what the second definition was (#358,
+ * {@link SQL_DUPLICATE_FEATURES}), as fixed flags the converter decided.
  *
  * The outcomes:
  *
@@ -63,7 +65,7 @@
  */
 
 import type { LedgerCause, LedgerEntry } from './importLedger';
-import type { SqlDialect } from './sqlDdlModel';
+import type { SqlDialect, SqlDuplicateClass } from './sqlDdlModel';
 import { FEATURES, type TelemetryFeature } from './telemetryPayload';
 
 /** The importers counted: SQL DDL, a Power BI / Fabric semantic model, a DBML file, a dbt project. */
@@ -251,6 +253,24 @@ export function ledgerImportOutcome(entries: readonly LedgerEntry[]): ImportRead
   return cancelled ? 'cancelled' : partial ? 'partial' : repaired ? 'repaired' : 'clean';
 }
 
+/**
+ * What a SQL import's tables defined twice were (#358), beside
+ * `importCauseDuplicate`: each key at most once per import, in this order.
+ * `Same` / `Differs`: a second definition with the kept one's columns, or not
+ * (`sameColumns` in `sqlDdlModel.ts`). `DiffersDefaultSchema`: one that
+ * differed with both definitions in the dialect's default schema, where a
+ * second database's table of the same name lands too (one key, so it cannot
+ * be paired with the wrong duplicate across a day). `PartialDuplicateOnly`: a
+ * partial import whose every `problem` was a table defined twice, so every
+ * table read.
+ */
+export const SQL_DUPLICATE_FEATURES = {
+  same: 'importDuplicateSame',
+  differs: 'importDuplicateDiffers',
+  differsDefaultSchema: 'importDuplicateDiffersDefaultSchema',
+  partialDuplicateOnly: 'importPartialDuplicateOnly',
+} as const satisfies Readonly<Record<string, TelemetryFeature>>;
+
 /** What one import reports: the importer, how it ended (else read from the ledger), its SQL dialect and its ledger. */
 export interface ImportOutcomeReport {
   importer: ImportOutcomeImporter;
@@ -262,13 +282,20 @@ export interface ImportOutcomeReport {
   guideSource?: ImportGuideSource;
   /** The import's loss ledger, conversion and plan together; its cause classes are counted once each. */
   ledger?: readonly LedgerEntry[];
+  /**
+   * SQL only: one class per table defined twice (the conversion's `duplicateTable`
+   * problems), counted as {@link SQL_DUPLICATE_FEATURES} once the ledger holds the
+   * `duplicate` cause. Absent for a stopped reading (it carries no problems).
+   */
+  duplicates?: readonly SqlDuplicateClass[];
 }
 
 /**
  * The keys one import records: its importer and outcome, its dialect and
  * outcome (SQL with a dialect), its guide source and outcome (SQL started
  * from the guide's Fabric card), then one key per cause class its ledger holds,
- * in {@link LEDGER_CAUSE_FEATURES}' order. Each key at most once.
+ * in {@link LEDGER_CAUSE_FEATURES}' order, then what its tables defined twice
+ * were ({@link SQL_DUPLICATE_FEATURES}). Each key at most once.
  */
 export function importOutcomeFeatures(report: ImportOutcomeReport): TelemetryFeature[] {
   const ledger = report.ledger ?? [];
@@ -289,6 +316,16 @@ export function importOutcomeFeatures(report: ImportOutcomeReport): TelemetryFea
   for (const e of ledger) if (e.count > 0) met.add(e.cause);
   for (const [cause, key] of Object.entries(LEDGER_CAUSE_FEATURES) as Array<[LedgerCause, TelemetryFeature]>) {
     if (met.has(cause)) keys.push(key);
+  }
+  // Only beside importCauseDuplicate, so a class key always reads with it.
+  const duplicates = (report.importer === 'sql' && met.has('duplicate') && Array.isArray(report.duplicates) ? report.duplicates : [])
+    .filter((d): d is SqlDuplicateClass => typeof d === 'object' && d !== null);
+  if (duplicates.length > 0) {
+    if (duplicates.some((d) => d.same === true)) keys.push(SQL_DUPLICATE_FEATURES.same);
+    if (duplicates.some((d) => d.same !== true)) keys.push(SQL_DUPLICATE_FEATURES.differs);
+    if (duplicates.some((d) => d.same !== true && d.defaultSchema === true)) keys.push(SQL_DUPLICATE_FEATURES.differsDefaultSchema);
+    const problems = ledger.filter((e) => e.outcome === 'problem' && e.count > 0);
+    if (outcome === 'partial' && problems.every((e) => e.cause === 'duplicate')) keys.push(SQL_DUPLICATE_FEATURES.partialDuplicateOnly);
   }
   return keys;
 }

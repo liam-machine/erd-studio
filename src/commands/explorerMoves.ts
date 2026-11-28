@@ -30,12 +30,21 @@ import * as vscode from 'vscode';
 import { isReservedLayerName, type ProjectStorage } from '@erd-studio/core';
 
 import { getErdStudioSetting } from '../services/configService';
-import { SEND_FEEDBACK_BUTTON, classifyWriteFailure, projectRelative } from '../services/commandErrors';
+import {
+  SAVE_ALL_BUTTON,
+  SEND_FEEDBACK_BUTTON,
+  SHOW_FILES_BUTTON,
+  classifyWriteFailure,
+  projectRelative,
+  showErrorWithActions,
+  unsavedAfterUpdateMessage,
+} from '../services/commandErrors';
 import { editNotAccepted, editNotAppliedError, knownCauseOrOurs, type CommandFailure } from '../services/diagramCommandErrors';
 import type { FileWrite } from '../services/fileWrites';
 import type { TableLibraryService } from '../services/logicalModelService';
 import { isRefusedWrite } from '../services/newSubjectAreaWriter';
 import { log } from '../services/logger';
+import { telemetry } from '../services/telemetryService';
 import { TABLE_NAME_RULE } from '../types/naming';
 import { firstUnwritable, showCommandFailure } from './commandFailure';
 import { planDbmlExplorerMoves, type DbmlExplorerMovesPlan, type MovedDbmlFile } from './dbmlLifecycle';
@@ -73,6 +82,8 @@ export interface ExplorerMoveDeps {
   applyWrites(writes: readonly FileWrite[], renames?: ReadonlyArray<{ from: string; to: string }>): Promise<{ ok: boolean; unsaved: string[]; unrestored: string[] }>;
   /** After an update or a move back landed (own writes, which the watchers skip): the views and open canvases refresh. */
   afterUpdated(files: ReadonlyArray<{ path: string }>): Promise<void>;
+  /** Save one file the update left unsaved (`saveDocumentByUri`), recording the own write once it lands; false when it still did not save. */
+  saveFile(filePath: string): Promise<boolean>;
 }
 
 /** The setting's value, `prompt` for anything else. */
@@ -443,12 +454,47 @@ async function applyExplorerUpdate(
     return;
   }
   await deps.afterUpdated(plan.writes);
-  if (result.unsaved.length > 0) {
-    void vscode.window.showErrorMessage(`Could not save ${result.unsaved.map((p) => projectRelative(deps.workspaceRoot, p)).join(', ')}. Save the file from its tab, or revert it.`);
-  }
+  if (result.unsaved.length > 0) showUnsavedUpdate(deps, result.unsaved, 'the move');
   const done = describeExplorerUpdate(plan).done;
   // A layer folder renamed: layers.json still lists the old layer (it is not edited here).
   if (note) void vscode.window.showInformationMessage(`${done} ${note}`);
   else vscode.window.setStatusBarMessage(`ERD Studio: ${done}`, 5000);
   log.info(`[ERD Studio] ${done}`);
+}
+
+/**
+ * The update landed but some files did not save (#355): say so, so the user
+ * saves them rather than redoes the move. Save All saves only these files
+ * (never VS Code's Save All, which would save the user's other drafts) and
+ * says which still won't; Show Files opens the first.
+ */
+function showUnsavedUpdate(deps: Pick<ExplorerMoveDeps, 'workspaceRoot' | 'saveFile'>, unsaved: readonly string[], what: string): void {
+  const shown = (files: readonly string[]): string[] => files.map((p) => projectRelative(deps.workspaceRoot, p));
+  const showFile = (filePath: string) => async (): Promise<void> => {
+    const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(filePath));
+    await vscode.window.showTextDocument(doc, { preview: false });
+  };
+  // A button of ours that threw: an error line with its site code beside it (#354),
+  // so it is never a bare loggedErrorOther.
+  const failed = (choice: string, err: unknown): void => {
+    log.error(`[ERD Studio] Explorer move: "${choice}" failed:`, err);
+    telemetry.error('loggedErrorAtFailureAction');
+  };
+  const saveAll = async (): Promise<void> => {
+    const still: string[] = [];
+    for (const filePath of unsaved) if (!(await deps.saveFile(filePath))) still.push(filePath);
+    if (still.length === 0) return;
+    showErrorWithActions(
+      (m, ...items) => vscode.window.showErrorMessage(m, ...items),
+      `ERD Studio still couldn't save ${shown(still).join(', ')}. Save ${still.length === 1 ? 'it' : 'them'} from ${still.length === 1 ? 'its tab' : 'their tabs'}, or revert.`,
+      { [SHOW_FILES_BUTTON]: showFile(still[0]) },
+      failed,
+    );
+  };
+  showErrorWithActions(
+    (m, ...items) => vscode.window.showErrorMessage(m, ...items),
+    unsavedAfterUpdateMessage(shown(unsaved), what),
+    { [SAVE_ALL_BUTTON]: saveAll, [SHOW_FILES_BUTTON]: showFile(unsaved[0]) },
+    failed,
+  );
 }

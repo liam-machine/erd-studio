@@ -217,6 +217,7 @@ function showErrorWithActions(message: string, actions: ErrorActions): void {
   // A button that fails (a re-run whose dbt read throws) still says so, rather than seeming to do nothing.
   showErrorWith((m, ...items) => vscode.window.showErrorMessage(m, ...items), message, actions, (choice, err) => {
     log.error(`[ERD Studio] ${TITLE}: "${choice}" failed:`, err);
+    telemetry.error('loggedErrorAtFailureAction');
     const doing = `while running ${choice}`;
     showErrorWithActions(oursMessage(TITLE, doing, 'nothing was changed'), { [SEND_FEEDBACK_BUTTON]: sendFeedback(doing, err) });
   });
@@ -372,7 +373,10 @@ async function runDrawFromDbt(deps: DrawFromDbtDeps, resume: DrawFromDbtResume |
     for (const line of ledgerLogLines(failedLedger, TITLE, { everySkipped: true })) log.info(`[ERD Studio] ${line}`);
     void Promise.resolve(vscode.window.showWarningMessage(`${TITLE}: none of the chosen models could be drawn. ${describeSkipped(draft.skipped)}`, SHOW_IMPORT_REPORT_LABEL))
       .then((choice) => (choice === SHOW_IMPORT_REPORT_LABEL ? vscode.commands.executeCommand(SHOW_IMPORT_REPORT_COMMAND, failedReportId) : undefined))
-      .then(undefined, (err: unknown) => log.error(`[ERD Studio] ${TITLE}: "${SHOW_IMPORT_REPORT_LABEL}" failed:`, err));
+      .then(undefined, (err: unknown) => {
+        log.error(`[ERD Studio] ${TITLE}: "${SHOW_IMPORT_REPORT_LABEL}" failed:`, err);
+        telemetry.error('loggedErrorAtFailureAction');
+      });
     return undefined;
   }
 
@@ -657,7 +661,10 @@ async function runDrawFromDbt(deps: DrawFromDbtDeps, resume: DrawFromDbtResume |
       // What was left out, with the report that lists every one.
       void Promise.resolve(vscode.window.showInformationMessage(notice, SHOW_IMPORT_REPORT_LABEL))
         .then((choice) => (choice === SHOW_IMPORT_REPORT_LABEL ? vscode.commands.executeCommand(SHOW_IMPORT_REPORT_COMMAND, reportId) : undefined))
-        .then(undefined, (err: unknown) => log.error(`[ERD Studio] ${TITLE}: "${SHOW_IMPORT_REPORT_LABEL}" failed:`, err));
+        .then(undefined, (err: unknown) => {
+          log.error(`[ERD Studio] ${TITLE}: "${SHOW_IMPORT_REPORT_LABEL}" failed:`, err);
+          telemetry.error('loggedErrorAtFailureAction');
+        });
     }
     return { domainPath, draft };
   }

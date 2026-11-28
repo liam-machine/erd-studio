@@ -231,9 +231,11 @@ describe('activate() with no folder open (empty window)', () => {
   it('still reports an erdStudio.projectPath that points at no dbt project', async () => {
     vscode._setMockConfiguration('erdStudio', 'projectPath', { workspaceValue: '/nowhere/analytics' });
     await activate(context);
+    // #370: worded for the scope that holds it; no folder was opened, so none is named.
     expect(warn).toHaveBeenCalledWith(
-      'ERD Studio: erdStudio.projectPath "/nowhere/analytics" is not a folder.',
-      'Open Settings',
+      'ERD Studio: erdStudio.projectPath ("/nowhere/analytics") in this workspace\'s settings is not a folder. ' +
+        'Correct the path, or clear it to let ERD Studio find the project.',
+      'Open Workspace Settings',
     );
   });
 
@@ -598,7 +600,7 @@ describe('activate() with a dbt project', () => {
     expect(refreshes).toBeGreaterThanOrEqual(2);
   });
 
-  it('the ERD Studio view has a provider from where hasProject is set and shows "Loading diagrams…" (no rows) until the real listing, so neither "no data provider" nor "No diagrams yet" shows', async () => {
+  it('the ERD Studio view has a provider before the folder look and hasProject (#357) and shows "Loading diagrams…" (no rows) until the real listing, so neither "no data provider" nor "No diagrams yet" shows', async () => {
     const order: string[] = [];
     const exec = vi.spyOn(vscode.commands, 'executeCommand');
     exec.mockImplementation((async (command: string, ...args: unknown[]) => {
@@ -611,12 +613,14 @@ describe('activate() with a dbt project', () => {
     }) as never);
     const registerEditor = vi.spyOn(vscode.window, 'registerCustomEditorProvider');
     await activate(context);
-    // Registered once, right where hasProject is set: before any service,
-    // the canvas's editor provider or any other view.
+    // Registered once, before the look for dbt projects and hasProject (#357:
+    // the walk can take seconds, and the panel was blank for all of it), and
+    // before any service, the canvas's editor provider or any other view.
+    // The walk itself is held open in test/unit/activationBlankPanel357.test.ts.
     expect(createTreeView.mock.calls.filter((c) => c[0] === 'erdStudio.domainTree')).toHaveLength(1);
     const at = (entry: string): number => order.indexOf(entry);
     expect(at('erdStudio.diagramsLoading=true')).toBeLessThan(at('createTreeView:erdStudio.domainTree'));
-    expect(at('erdStudio.hasProject=true')).toBeLessThan(at('createTreeView:erdStudio.domainTree'));
+    expect(at('createTreeView:erdStudio.domainTree')).toBeLessThan(at('erdStudio.hasProject=true'));
     expect(at('createTreeView:erdStudio.domainTree')).toBeLessThan(at('erdStudio.hasMultipleDbtProjects=false'));
     // Both views' loading keys are set before hasProject, so neither empty state can show first.
     expect(at('erdStudio.tablesLoading=true')).toBeLessThan(at('erdStudio.hasProject=true'));
@@ -2025,7 +2029,7 @@ describe('erdStudio.resolveDuplicateModel (issue #76: same table name in two lay
     await vscode.commands.executeCommand('erdStudio.resolveDuplicateModel', ignored());
 
     expect(error).toHaveBeenCalledTimes(1);
-    expect(error).toHaveBeenCalledWith(expect.stringMatching(/could not put back .*silver_date\.yml.*Restore these from source control\.$/), { modal: true });
+    expect(error).toHaveBeenCalledWith(expect.stringMatching(/left part-changed: .*silver_date\.yml.*Restore them from source control/), { modal: true }, 'Show Files', 'Send Feedback');
   });
 
   it('reports and counts a repointed diagram it could not save as a rename save failure', async () => {
@@ -2126,7 +2130,7 @@ describe('erdStudio.renameDomain on a JSON diagram (D23: one edit through applyF
     vscode._mockWorkspaceState.applyEditPrefixes.push(1, 0);
     await vscode.commands.executeCommand('erdStudio.renameDomain', element());
     expect(error).toHaveBeenCalledTimes(1);
-    expect(error).toHaveBeenCalledWith(expect.stringMatching(/could not put back .*robert\.json.*Restore these from source control\.$/), { modal: true });
+    expect(error).toHaveBeenCalledWith(expect.stringMatching(/left part-changed: .*robert\.json.*Restore them from source control/), { modal: true }, 'Show Files', 'Send Feedback');
   });
 });
 
@@ -2453,8 +2457,9 @@ describe('Select dbt Project… (#82)', () => {
     await activate(context);
 
     expect(warn).toHaveBeenCalledWith(
-      'ERD Studio: erdStudio.projectPath "/Users/someone-else/datamodels" is not a folder, so ERD Studio opened a instead.',
-      'Open Settings',
+      'ERD Studio: erdStudio.projectPath ("/Users/someone-else/datamodels") in this workspace\'s settings is not a folder, ' +
+        'so ERD Studio opened a instead. Correct the path, or clear it to let ERD Studio find the project.',
+      'Open Workspace Settings',
     );
   });
 });

@@ -221,6 +221,8 @@ export class DraftPreviewPanel {
     this.readyWatch = new ReadyWatch(panel.visible !== false, {
       ready: (slow) => this.events.pageReady?.(this.view.source, slow),
       lateReady: (range) => this.events.lateReady?.(this.view.source, range),
+      noReadyHostHeld: () => this.events.noReadyHostHeld?.(this.view.source),
+      closedBlank: (range) => this.events.closedBlank?.(this.view.source, range),
       noReady: () => {
         this.events.noReady?.(this.view.source);
         // The page never mounted, so its crash screen cannot show: the host
