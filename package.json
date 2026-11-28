@@ -606,7 +606,7 @@
       {
         "view": "erdStudio.domainTree",
         "contents": "Loading diagrams…",
-        "when": "erdStudio.hasProject && erdStudio.diagramsLoading"
+        "when": "erdStudio.diagramsLoading"
       },
       {
         "view": "erdStudio.domainTree",

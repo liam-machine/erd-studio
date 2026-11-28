@@ -160,6 +160,19 @@ describe('App load-error page and the reconnect overlay', () => {
     expect(overlay()).not.toBeNull();
   });
 
+  it('a dbt project being read says so under the table count, and only then (#371)', () => {
+    render(<App />);
+    postFromHost({ type: 'loading', payload: { tables: 40, reading: 'dbt' } });
+    expect(screen.getByText('Loading 40 tables…')).toBeTruthy();
+    expect(screen.getByText('Reading your dbt project\'s files…')).toBeTruthy();
+    // A later count without it (or any other value) drops the line.
+    postFromHost({ type: 'loading', payload: { tables: 40 } });
+    expect(screen.getByText('Loading 40 tables…')).toBeTruthy();
+    expect(screen.queryByText(/Reading your dbt project/)).toBeNull();
+    postFromHost({ type: 'loading', payload: { tables: 40, reading: 'catalog' } as never });
+    expect(screen.queryByText(/Reading your dbt project/)).toBeNull();
+  });
+
   it('one table is "1 table"', () => {
     render(<App />);
     postFromHost({ type: 'loading', payload: { tables: 1 } });

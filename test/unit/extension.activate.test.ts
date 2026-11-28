@@ -599,7 +599,7 @@ describe('activate() with a dbt project', () => {
     expect(refreshes).toBeGreaterThanOrEqual(2);
   });
 
-  it('the ERD Studio view has a provider from where hasProject is set and shows "Loading diagrams…" (no rows) until the real listing, so neither "no data provider" nor "No diagrams yet" shows', async () => {
+  it('the ERD Studio view has a provider before the folder look and hasProject (#357) and shows "Loading diagrams…" (no rows) until the real listing, so neither "no data provider" nor "No diagrams yet" shows', async () => {
     const order: string[] = [];
     const exec = vi.spyOn(vscode.commands, 'executeCommand');
     exec.mockImplementation((async (command: string, ...args: unknown[]) => {
@@ -612,12 +612,14 @@ describe('activate() with a dbt project', () => {
     }) as never);
     const registerEditor = vi.spyOn(vscode.window, 'registerCustomEditorProvider');
     await activate(context);
-    // Registered once, right where hasProject is set: before any service,
-    // the canvas's editor provider or any other view.
+    // Registered once, before the look for dbt projects and hasProject (#357:
+    // the walk can take seconds, and the panel was blank for all of it), and
+    // before any service, the canvas's editor provider or any other view.
+    // The walk itself is held open in test/unit/activationBlankPanel357.test.ts.
     expect(createTreeView.mock.calls.filter((c) => c[0] === 'erdStudio.domainTree')).toHaveLength(1);
     const at = (entry: string): number => order.indexOf(entry);
     expect(at('erdStudio.diagramsLoading=true')).toBeLessThan(at('createTreeView:erdStudio.domainTree'));
-    expect(at('erdStudio.hasProject=true')).toBeLessThan(at('createTreeView:erdStudio.domainTree'));
+    expect(at('createTreeView:erdStudio.domainTree')).toBeLessThan(at('erdStudio.hasProject=true'));
     expect(at('createTreeView:erdStudio.domainTree')).toBeLessThan(at('erdStudio.hasMultipleDbtProjects=false'));
     // Both views' loading keys are set before hasProject, so neither empty state can show first.
     expect(at('erdStudio.tablesLoading=true')).toBeLessThan(at('erdStudio.hasProject=true'));

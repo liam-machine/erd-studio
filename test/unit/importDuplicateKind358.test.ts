@@ -122,13 +122,15 @@ afterEach(() => {
 });
 
 describe('#358 what kind of table was defined twice (red on origin/develop)', () => {
-  it('the four keys exist in FEATURES and the Worker list, appended last, in the same order', () => {
+  it('the four keys exist in FEATURES and the Worker list, as one block in the same order', () => {
     const worker = fs.readFileSync(path.join(__dirname, '../../telemetry/src/index.js'), 'utf8');
     for (const key of NEW_KEYS) {
       expect((FEATURES as readonly string[]).includes(key), `FEATURES has ${key}`).toBe(true);
       expect(worker.includes(`'${key}'`), `Worker has ${key}`).toBe(true);
     }
-    expect(FEATURES.slice(FEATURES.indexOf('importDuplicateSame'))).toEqual(NEW_KEYS);
+    // Later keys follow the block (#371's were the first); the exact tail is pinned in telemetryPayload.test.ts.
+    const at = FEATURES.indexOf('importDuplicateSame');
+    expect(FEATURES.slice(at, at + NEW_KEYS.length)).toEqual(NEW_KEYS);
     expect(Math.max(...NEW_KEYS.map((k) => k.length))).toBeLessThanOrEqual(35);
   });
 

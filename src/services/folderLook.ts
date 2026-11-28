@@ -59,6 +59,12 @@ import { pathKey } from './pathKey';
 export const FOLDER_LOOK_MAX_FOLDERS = 20_000;
 /** A look's walk stops after this long spent walking, with what it has found (a disk that stopped answering never holds it). */
 export const FOLDER_LOOK_MAX_MS = 60_000;
+/**
+ * A look the user asked to run for longer (#357, Look for Longer in the
+ * sidebar) gets this many times the time and the folders of the one before
+ * it: 5 minutes and 100,000 folders after the first, 25 minutes after that.
+ */
+export const FOLDER_LOOK_LONGER_FACTOR = 5;
 /** A look is reused for this long from when it began. */
 export const FOLDER_LOOK_FRESH_MS = 60_000;
 /** Reading git's index may take this long before the walk alone answers. */
@@ -143,6 +149,26 @@ export interface FolderLookStats {
   capped: boolean;
 }
 
+/** How far a look's search for dbt projects has got: what the sidebar says while activation waits on it (#357). */
+export interface DbtSearchStats {
+  /** Folders listed so far. */
+  folders: number;
+  /** Milliseconds of walking the look has left before it stops by itself (undefined: no limit). */
+  msLeft: number | undefined;
+  /** Every folder the search goes to ({@link DBT_SEARCH_MAX_DEPTH} deep) has been listed: nothing was missed. */
+  complete: boolean;
+  /**
+   * Why a search that is not complete went no further, once nobody is waiting
+   * on it: its time ran out, or it reached its number of folders. Undefined
+   * while it runs, and when it is complete.
+   */
+  stopped: 'time' | 'folders' | undefined;
+  /** The most time the look walks for, in milliseconds. */
+  maxMs: number;
+  /** The most folders the search lists before it stops: the dbt search's own bound, or the look's for one asked to list every folder. */
+  maxFolders: number;
+}
+
 export interface FolderLooksOptions {
   /** The ERD Studio folder (`erdStudio.semanticDir`): its files are the model itself, never files to import. */
   semanticDir: string;
@@ -177,8 +203,19 @@ export class FolderLookRun {
   /** When the look began: its age counts from here, however often it is read. */
   private readonly beganAt: number;
   private cancelled = false;
+  private readonly maxMs: number;
+  private readonly maxFolders: number;
+  /** The most folders the search for dbt projects lists (the widest a caller has asked for). */
+  private dbtFolderBound: number;
+  /** Callers waiting on {@link dbtProjects} right now. */
+  private dbtWaiting = 0;
+  /** When the asking by name ({@link askByName}) gives up, while it runs. */
+  private byNameUntil: number | undefined;
 
   constructor(readonly root: string, private readonly io: FolderLookIo, options: Required<Pick<FolderLooksOptions, 'semanticDir' | 'maxFolders' | 'maxMs' | 'indexMs'>>) {
+    this.maxMs = options.maxMs;
+    this.maxFolders = options.maxFolders;
+    this.dbtFolderBound = Math.min(DBT_SEARCH_MAX_DIRS, options.maxFolders);
     this.own = new Set([options.semanticDir.replace(/[\\/]+$/, ''), 'erd-studio'].map((d) => d.replace(/\\/g, '/').toLowerCase()));
     this.beganAt = io.now();
     this.scan = new FolderScan(root, io.reader, {
@@ -215,10 +252,23 @@ export class FolderLookRun {
    * {@link DBT_SEARCH_MAX_DIRS} folders in all (as far as the dbt project
    * walk has always gone: activation waits on this, never on the rest of the
    * walk). Unsorted (`sortDbtCandidates` orders them).
+   *
+   * `everyFolder`: no bound of its own on the folders, only the look's (a
+   * look the user asked to run for longer, {@link FolderLooks.longer}).
    */
-  async dbtProjects(): Promise<string[]> {
+  async dbtProjects(options: { everyFolder?: boolean } = {}): Promise<string[]> {
+    this.dbtWaiting++;
+    if (options.everyFolder) this.dbtFolderBound = this.maxFolders;
+    try {
+      return await this.findDbtProjects(options.everyFolder ? undefined : DBT_SEARCH_MAX_DIRS);
+    } finally {
+      this.dbtWaiting--;
+    }
+  }
+
+  private async findDbtProjects(maxFolders: number | undefined): Promise<string[]> {
     // The walk starts now (after its short head start), whatever the index read takes.
-    const walking = this.walkTo(DBT_SEARCH_MAX_DEPTH, DBT_SEARCH_MAX_DIRS);
+    const walking = this.walkTo(DBT_SEARCH_MAX_DEPTH, maxFolders);
     const stage = await this.index;
     await walking;
     const below = [...dbtProjectFolders(this.scan.snapshot().marked), ...await this.dbtProjectsNotListedYet()]
@@ -271,10 +321,12 @@ export class FolderLookRun {
     let timer: ReturnType<typeof setTimeout> | undefined;
     // A disk that stops answering never holds whoever waits (activation does).
     const outOfTime = new Promise<void>((resolve) => { timer = setTimeout(resolve, DBT_BY_NAME_MS); });
+    this.byNameUntil = this.io.now() + DBT_BY_NAME_MS;
     try {
       await Promise.race([Promise.all(Array.from({ length: LISTINGS_AT_ONCE }, ask)), outOfTime]);
     } finally {
       stopped = true;
+      this.byNameUntil = undefined;
       if (timer) clearTimeout(timer);
     }
     return found.sort(compareNames);
@@ -319,6 +371,24 @@ export class FolderLookRun {
   stats(): FolderLookStats {
     const snapshot = this.scan.snapshot();
     return { folders: snapshot.folders, finished: snapshot.done, capped: snapshot.capped };
+  }
+
+  /**
+   * How far the search for dbt projects has got (#357). `complete` once every
+   * folder it goes to has been listed; otherwise, once nobody waits on
+   * {@link dbtProjects}, `stopped` says what ended it. A look that was
+   * cancelled is not complete and says `folders`. `msLeft` is the walk's time
+   * left, or, once the walk has stopped at its number of folders and the
+   * folders it did not list are being asked by name, the time that asking has
+   * left: either way, the most a caller of `dbtProjects` still waits.
+   */
+  dbtSearchStats(): DbtSearchStats {
+    const snapshot = this.scan.snapshot();
+    const complete = snapshot.depthDone >= DBT_SEARCH_MAX_DEPTH && !this.cancelled;
+    const walkLeft = this.scan.timeLeftMs();
+    const msLeft = this.byNameUntil !== undefined ? Math.max(0, this.byNameUntil - this.io.now()) : walkLeft;
+    const stopped = complete || this.dbtWaiting > 0 ? undefined : walkLeft !== undefined && walkLeft <= 0 ? 'time' as const : 'folders' as const;
+    return { folders: snapshot.folders, msLeft, complete, stopped, maxMs: this.maxMs, maxFolders: this.dbtFolderBound };
   }
 
   /**
@@ -494,6 +564,25 @@ export class FolderLooks {
     const run = new FolderLookRun(root, this.io, this.settings);
     if (this.disposed) run.cancel();
     this.runs.set(key, run);
+    return run;
+  }
+
+  /**
+   * A new look at `root` that may walk for `factor` times as long, and list
+   * `factor` times as many folders, as this window's looks do: the one a user
+   * asks for when the first stopped at a limit (#357). It takes the folder's
+   * place, so whoever asks about the folder while it runs shares it.
+   */
+  longer(root: string, factor: number): FolderLookRun {
+    const times = Number.isFinite(factor) && factor > 1 ? factor : 1;
+    const run = new FolderLookRun(root, this.io, {
+      ...this.settings,
+      maxFolders: Math.round(this.settings.maxFolders * times),
+      maxMs: Math.round(this.settings.maxMs * times),
+    });
+    if (this.disposed) run.cancel();
+    // The look it replaces is left as it is for whoever still holds it.
+    this.runs.set(pathKey(root), run);
     return run;
   }
 

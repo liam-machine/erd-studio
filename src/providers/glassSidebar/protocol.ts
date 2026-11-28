@@ -164,6 +164,30 @@ export interface GlassFilterGuide {
   debounceMs: number;
 }
 
+/**
+ * A block at the top of a section's body saying what ERD Studio is doing
+ * there, or what it just did (#357: the look through the open folders while
+ * activation waits on it, and a look that stopped early). Host text, drawn as
+ * text and never as HTML. Send `statusAction` with an action's index.
+ */
+export interface GlassSectionStatus {
+  /** What is happening, or what happened, in a sentence. */
+  title: string;
+  /** How far it has got, or what that means: a quieter line. */
+  detail?: string;
+  /** Work is under way: a spinner beside the title. Absent: a notice. */
+  working?: boolean;
+  /**
+   * The work stops by itself in `msLeft` milliseconds (as of when this state
+   * was built). The page shows `text` with `{time}` replaced by the time left
+   * (`48 s`, `4 min 12 s`) and counts it down each second by its own clock,
+   * so the host need not send a state per second.
+   */
+  countdown?: { msLeft: number; text: string };
+  /** Buttons under it, the first one primary. */
+  actions?: string[];
+}
+
 export interface GlassSection {
   key: GlassSectionKey;
   /** The native view's name: `Diagrams`, `Table Library`, `Relationships`, `Help & Feedback`. */
@@ -206,6 +230,8 @@ export interface GlassSection {
    * The page draws a thin moving bar along the section's header. Absent: idle.
    */
   busy?: boolean;
+  /** What ERD Studio is doing in this section, above its rows or its empty state. Absent: nothing to say. */
+  status?: GlassSectionStatus;
   /** Shown when `nodes` is empty. A sole `Loading…` paragraph means the view is still listing. */
   welcome: GlassWelcomeEntry[];
   nodes: SerialisedNode[];
@@ -289,6 +315,8 @@ export type GlassWebviewMessage =
   | { type: 'invoke'; section: GlassSectionKey; id?: string; menu: string; index: number; selection?: string[] }
   /** A link or button in an empty state: `entry` from GlassWelcomeEntry, `link` from its part. */
   | { type: 'welcomeLink'; section: GlassSectionKey; entry: number; link: number }
+  /** A button of the section's status block was pressed: `index` into the `actions` the host last sent. */
+  | { type: 'statusAction'; section: GlassSectionKey; index: number }
   /**
    * A drag of these rows (each with a `drag` kind, all the same) has begun:
    * the host runs the native view's own `handleDrag` for them and keeps what
@@ -327,4 +355,4 @@ export type GlassWebviewMessage =
 /** The longest search text the host takes (longer is refused). */
 export const GLASS_SEARCH_MAX_LENGTH = 512;
 
-export const GLASS_WEBVIEW_MESSAGE_TYPES: ReadonlyArray<GlassWebviewMessage['type']> = ['ready', 'activate', 'doubleClick', 'expand', 'itemMenu', 'invoke', 'welcomeLink', 'dragStart', 'drop', 'dragEnd', 'search', 'sectionsShown'];
+export const GLASS_WEBVIEW_MESSAGE_TYPES: ReadonlyArray<GlassWebviewMessage['type']> = ['ready', 'activate', 'doubleClick', 'expand', 'itemMenu', 'invoke', 'welcomeLink', 'statusAction', 'dragStart', 'drop', 'dragEnd', 'search', 'sectionsShown'];

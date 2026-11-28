@@ -647,9 +647,9 @@ describe('validation — acceptance and normalisation', () => {
       }),
     );
     assert.deepEqual(JSON.parse(params[17]), features);
-    // Everything after #333's keys: the newest keys close the list.
+    // Everything after #333's keys, up to #371's.
     assert.deepEqual(
-      WORKER_FEATURES.slice(WORKER_FEATURES.indexOf('canvasPaintOver5s') + 1),
+      WORKER_FEATURES.slice(WORKER_FEATURES.indexOf('canvasPaintOver5s') + 1, WORKER_FEATURES.indexOf('importPartialDuplicateOnly') + 1),
       [
         'startLookFromIndex', 'startLookIndexFallback',
         'startLookFoldersUnder200', 'startLookFolders200to2000', 'startLookFoldersOver2000',
@@ -692,9 +692,8 @@ describe('validation — acceptance and normalisation', () => {
     );
     assert.deepEqual(JSON.parse(params[17]), features);
     assert.equal(params[18], '{}');
-    // The newest keys close the list.
     assert.deepEqual(
-      WORKER_FEATURES.slice(WORKER_FEATURES.indexOf('noReadyClosedOver60s') + 1),
+      WORKER_FEATURES.slice(WORKER_FEATURES.indexOf('noReadyClosedOver60s') + 1, WORKER_FEATURES.indexOf('importPartialDuplicateOnly') + 1),
       ['importDuplicateSame', 'importDuplicateDiffers', 'importDuplicateDiffersDefaultSchema', 'importPartialDuplicateOnly'],
     );
   });
@@ -723,6 +722,42 @@ describe('validation — acceptance and normalisation', () => {
         'loggedErrorUnlistedTag',
         'projectPathInvalidUser', 'projectPathInvalidWorkspace', 'projectPathInvalidRelative', 'projectPathInvalidAbsolute',
       ],
+    );
+  });
+
+  it('keeps which step held a slow open (#371), after #358\'s keys, and drops a time, a look-alike or an error-side copy', async () => {
+    const features = { canvasLoadOver20s: 1, canvasLoadSlowManifest: 1, canvasLoadSlowYml: 1, canvasLoadSlowOther: 1 };
+    const params = await storedParams(
+      heartbeat({
+        features: { ...features, canvasLoadSlowYmlMs: 5800, canvasLoadSlowDbt: 1, canvasLoadSlow: 1 },
+        errors: { canvasLoadSlowYml: 1 },
+      }),
+    );
+    assert.deepEqual(JSON.parse(params[17]), features);
+    assert.deepEqual(
+      WORKER_FEATURES.slice(WORKER_FEATURES.indexOf('importPartialDuplicateOnly') + 1, WORKER_FEATURES.indexOf('canvasLoadSlowOther') + 1),
+      [
+        'canvasLoadSlowManifest', 'canvasLoadSlowYml', 'canvasLoadSlowCatalog', 'canvasLoadSlowRead',
+        'canvasLoadSlowPositions', 'canvasLoadSlowPhysical', 'canvasLoadSlowDisplay', 'canvasLoadSlowOther',
+      ],
+    );
+    assert.equal(params[18], '{}');
+  });
+
+  it('keeps what a look that stopped early led to (#357), after #371\'s keys, and drops a count, a time, a look-alike or an error-side copy', async () => {
+    const features = { dbtLookStopped: 1, dbtLookLonger: 2, dbtLookLongerFound: 1 };
+    const params = await storedParams(
+      heartbeat({
+        features: { ...features, dbtLookStoppedFolders: 5000, dbtLookLongerMs: 300000, dbtLookFound: 1, dbtLook: 1 },
+        errors: { dbtLookStopped: 1, dbtLookLonger: 1 },
+      }),
+    );
+    assert.deepEqual(JSON.parse(params[17]), features);
+    assert.equal(params[18], '{}');
+    // The newest keys close the list.
+    assert.deepEqual(
+      WORKER_FEATURES.slice(WORKER_FEATURES.indexOf('canvasLoadSlowOther') + 1),
+      ['dbtLookStopped', 'dbtLookLonger', 'dbtLookLongerFound'],
     );
   });
 

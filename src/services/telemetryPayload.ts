@@ -873,6 +873,28 @@ export const FEATURES = [
   'importDuplicateDiffers',
   'importDuplicateDiffersDefaultSchema',
   'importPartialDuplicateOnly',
+  // #371: which step held the day's slowest open, when that open took over 5 s
+  // (canvasLoad5to20s or canvasLoadOver20s), as one fixed key per step of the
+  // `ready` → diagram posted span (recordCanvasLoad): dbt's manifest.json, its
+  // schema yml, catalog.json, the diagram and its tables, the positions for
+  // new tables, the Physical or Logical canvas's build, and anything else
+  // (the host busy before or after them). Never a time. Off the onboarding trail.
+  'canvasLoadSlowManifest',
+  'canvasLoadSlowYml',
+  'canvasLoadSlowCatalog',
+  'canvasLoadSlowRead',
+  'canvasLoadSlowPositions',
+  'canvasLoadSlowPhysical',
+  'canvasLoadSlowDisplay',
+  'canvasLoadSlowOther',
+  // #357: the look activation waited on stopped before it had been everywhere
+  // and the host's own search had not answered either, so the sidebar's notice
+  // was due (counted whether or not it was shown: a workspace that dismissed
+  // it still counts; off the onboarding trail); the user pressed Look for
+  // Longer on it; and a longer look found a dbt project the window did not know.
+  'dbtLookStopped',
+  'dbtLookLonger',
+  'dbtLookLongerFound',
 ] as const;
 export type TelemetryFeature = (typeof FEATURES)[number];
 
@@ -1648,21 +1670,89 @@ export const CANVAS_PAINT_FEATURES = [
 export type CanvasPaintFeature = (typeof CANVAS_PAINT_FEATURES)[number];
 
 /**
+ * #371: the step of a canvas open that held it, one key per
+ * {@link SubjectAreaLoadStep}, in the steps' order. Recorded only with the
+ * day's `canvasLoad5to20s` or `canvasLoadOver20s` (see {@link recordCanvasLoad}).
+ */
+export const CANVAS_LOAD_SLOW_FEATURES = [
+  'canvasLoadSlowManifest',
+  'canvasLoadSlowYml',
+  'canvasLoadSlowCatalog',
+  'canvasLoadSlowRead',
+  'canvasLoadSlowPositions',
+  'canvasLoadSlowPhysical',
+  'canvasLoadSlowDisplay',
+  'canvasLoadSlowOther',
+] as const satisfies readonly TelemetryFeature[];
+export type CanvasLoadSlowFeature = (typeof CANVAS_LOAD_SLOW_FEATURES)[number];
+
+/** #371: the key for each step of a canvas open (every step has one, `other` included). */
+export const CANVAS_LOAD_SLOW_STEP_FEATURES: Record<SubjectAreaLoadStep, CanvasLoadSlowFeature> = {
+  manifest: 'canvasLoadSlowManifest',
+  yml: 'canvasLoadSlowYml',
+  catalog: 'canvasLoadSlowCatalog',
+  read: 'canvasLoadSlowRead',
+  positions: 'canvasLoadSlowPositions',
+  physical: 'canvasLoadSlowPhysical',
+  display: 'canvasLoadSlowDisplay',
+  other: 'canvasLoadSlowOther',
+};
+
+/** The ranges an open must reach for the step that held it to be recorded (#371): over 5 s. */
+const CANVAS_LOAD_SLOW_RANGES: ReadonlySet<CanvasLoadFeature> = new Set<CanvasLoadFeature>(['canvasLoad5to20s', 'canvasLoadOver20s']);
+
+/**
+ * #371: the step that held a canvas open of `totalMs` (ready → diagram
+ * posted), from the time `timing` gave each step it ran. Whatever `totalMs`
+ * holds beyond the named steps (the `loading` posts and their yields, the
+ * line style, a host that was busy before ERD Studio read anything) counts
+ * as `other`, with the time after the diagram went out. The longest step
+ * wins; a tie goes to the earlier step.
+ */
+export function slowestLoadStep(timing: Partial<Record<SubjectAreaLoadStep, number>>, totalMs: number): SubjectAreaLoadStep {
+  const steps = Object.keys(CANVAS_LOAD_SLOW_STEP_FEATURES) as SubjectAreaLoadStep[];
+  const spent = (ms: number | undefined): number => (ms !== undefined && Number.isFinite(ms) && ms > 0 ? ms : 0);
+  const named = steps.filter((s) => s !== 'other').reduce((sum, s) => sum + spent(timing[s]), 0);
+  const total = Number.isFinite(totalMs) ? totalMs : 0;
+  // totalMs already holds timing.other; never less than it (a clock that went backwards).
+  const other = Math.max(spent(timing.other), total - named);
+  let slowest: SubjectAreaLoadStep = steps[0];
+  let longest = -1;
+  for (const s of steps) {
+    const ms = s === 'other' ? other : spent(timing[s]);
+    if (ms > longest) { slowest = s; longest = ms; }
+  }
+  return slowest;
+}
+
+/**
  * #333: one canvas open whose load fell in `key`'s range; `cold` when it
  * read at least one table file from disk. The day keeps only its slowest
  * range (as {@link recordLargestOf}), and `canvasLoadCold` describes the
  * opens in that range: a slower range replaces the flag with this open's, the
  * same range adds it, a faster one changes nothing (the same object back, so
- * nothing is written). Never a time.
+ * nothing is written). #371: `slowStep`, the step that held this open, adds
+ * its `canvasLoadSlow*` key by the same rule, only in the ranges over 5 s: a
+ * slower range drops every step key (and the cold flag) and adds this open's,
+ * the same range adds it beside the others, a faster one changes nothing.
+ * Never a time.
  */
-export function recordCanvasLoad(state: DailyCounters, key: CanvasLoadFeature, cold: boolean): DailyCounters {
+export function recordCanvasLoad(state: DailyCounters, key: CanvasLoadFeature, cold: boolean, slowStep?: SubjectAreaLoadStep): DailyCounters {
   const at = CANVAS_LOAD_FEATURES.indexOf(key);
   const top = CANVAS_LOAD_FEATURES.reduce((max, f, i) => (state.features[f] ? i : max), -1);
   if (at < top) return state;
-  if (at === top) return cold ? recordFeatureOnce(state, 'canvasLoadCold') : state;
+  const slowKey = slowStep !== undefined && CANVAS_LOAD_SLOW_RANGES.has(key) ? CANVAS_LOAD_SLOW_STEP_FEATURES[slowStep] : undefined;
+  if (at === top) {
+    const withCold = cold ? recordFeatureOnce(state, 'canvasLoadCold') : state;
+    return slowKey ? recordFeatureOnce(withCold, slowKey) : withCold;
+  }
   const raised = recordLargestOf(state, CANVAS_LOAD_FEATURES, key);
-  const { canvasLoadCold: _cold, ...features } = raised.features;
-  return { ...raised, features: cold ? { ...features, canvasLoadCold: 1 } : features };
+  const features: Partial<Record<TelemetryFeature, number>> = { ...raised.features };
+  delete features.canvasLoadCold;
+  for (const f of CANVAS_LOAD_SLOW_FEATURES) delete features[f];
+  if (cold) features.canvasLoadCold = 1;
+  if (slowKey) features[slowKey] = 1;
+  return { ...raised, features };
 }
 
 /** #333: one canvas's first paint fell in `key`'s range. The slowest range of the day wins. */
@@ -2380,8 +2470,9 @@ export const MODEL_SHARE_FEATURES = [
  * Never dropped by {@link trimHeartbeat}: the send markers describe the send
  * itself; the project's size ranges (#331, at most one of each family a day),
  * where outside changes came from (#329, seven presence flags), whether
- * the model is shared (#332, four) and how long the slowest open took (#333,
- * at most one of each family a day, and the cold flag) are the newest keys,
+ * the model is shared (#332, four), how long the slowest open took (#333,
+ * at most one of each family a day, and the cold flag) and the step that held
+ * it (#371, the slowest range's steps) are the newest keys,
  * so the trim would take them first, and an oversized day is most likely a
  * large project's.
  */
@@ -2404,6 +2495,7 @@ const UNTRIMMED_FEATURES: ReadonlySet<string> = new Set<string>([
   ...CANVAS_LOAD_FEATURES,
   'canvasLoadCold',
   ...CANVAS_PAINT_FEATURES,
+  ...CANVAS_LOAD_SLOW_FEATURES,
 ]);
 
 /**
