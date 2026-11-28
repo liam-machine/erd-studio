@@ -328,7 +328,7 @@ describe('Regenerate dbt selectors.yml where dbt names a diagram table different
     expect(aboutSelectors(warn)).toEqual([]);
   });
 
-  it('a manifest kept from before a failed parse is not trusted for names: nothing is claimed', async () => {
+  it('a manifest kept from an earlier parse, when the newest could not be read, is not trusted for names: nothing is claimed', async () => {
     orderIsOrdersFact(dbt);
     vi.spyOn(ManifestService.prototype, 'isStale', 'get').mockReturnValue(true);
     await regenerate();
