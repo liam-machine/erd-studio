@@ -782,6 +782,8 @@ export class GettingStartedPanel {
   private disposed = false;
   /** Did the page come up (2.0 B13)? Timed while the panel is visible. */
   private readonly readyWatch: ReadyWatch;
+  /** Hidden since it was last shown: this panel does not keep its page while hidden, so the next show loads a new one. */
+  private pageHidden = false;
 
   /** Open the panel, or reveal it (with fresh deps and status) when it is already open. */
   static createOrShow(context: vscode.ExtensionContext, deps: GettingStartedDeps): GettingStartedPanel {
@@ -823,8 +825,8 @@ export class GettingStartedPanel {
         if (slow) telemetry.feature('readySlowOver10s');
       },
       noReady: () => telemetry.error('webviewNoReadyWelcome'),
-      // Beside it (#364): the host was busy at 30 s; the panel closed still blank (a hide
-      // replaces this panel's page, so a panel hidden since is never counted).
+      // Beside it (#364): the host was busy at 30 s; the panel closed still blank (showing it
+      // again after a hide loads a new page, so a panel shown again since is never counted).
       noReadyHostHeld: () => telemetry.feature('noReadyHostHeld'),
       closedBlank: (range) => telemetry.feature(closedBlankFeature(range)),
       // The panel was slow, not broken (#320).
@@ -833,8 +835,14 @@ export class GettingStartedPanel {
     this.disposables.push(
       panel.onDidChangeViewState((e) => {
         // This panel does not keep its page while hidden: the one shown next is a new page, and
-        // its ready is not a late one from the page that was reported (#320).
-        if (!e.webviewPanel.visible) this.readyWatch.reloaded();
+        // its ready is not a late one from the page that was reported (#320). Marked when it is
+        // shown again, not at the hide: VS Code may hide a tab as it closes it, and a panel closed
+        // while hidden still went away blank (#364).
+        if (!e.webviewPanel.visible) this.pageHidden = true;
+        else if (this.pageHidden) {
+          this.pageHidden = false;
+          this.readyWatch.reloaded();
+        }
         this.readyWatch.visibility(e.webviewPanel.visible);
       }),
       panel.webview.onDidReceiveMessage((message: unknown) => {

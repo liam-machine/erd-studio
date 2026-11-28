@@ -285,12 +285,25 @@ describe('#364 the Welcome panel records the keys', () => {
     });
   });
 
-  it('hidden after its 30 s (its page is replaced), then closed: no closed key', async () => {
+  it('hidden after its 30 s and closed while hidden: one closed key (VS Code may hide a tab as it closes it)', async () => {
     await withWelcome(async (panel) => {
       await step(READY_TIMEOUT_MS);
       expect(errorKeys()).toContain('webviewNoReadyWelcome');
       panel._simulateViewStateChange(false);
       await step(10_000);
+      panel._simulateDispose();
+      expect(featureKeys().filter((k) => k.startsWith('noReadyClosed'))).toEqual(['noReadyClosed30to60s']);
+    });
+  });
+
+  it('hidden after its 30 s and shown again (a new page), then closed: no closed key', async () => {
+    await withWelcome(async (panel) => {
+      await step(READY_TIMEOUT_MS);
+      expect(errorKeys()).toContain('webviewNoReadyWelcome');
+      panel._simulateViewStateChange(false);
+      await step(5_000);
+      panel._simulateViewStateChange(true);
+      await step(5_000);
       panel._simulateDispose();
       expect(featureKeys().filter((k) => k.startsWith('noReadyClosed'))).toEqual([]);
     });
