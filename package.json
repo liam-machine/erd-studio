@@ -1535,7 +1535,7 @@
         "erdStudio.projectPath": {
           "type": "string",
           "default": "",
-          "markdownDescription": "Folder that holds your ERD Studio data (`erdStudio.semanticDir` is created inside it). Usually a dbt project root, and auto-detected from the workspace when empty — but any folder works, with or without `dbt_project.yml`; without one there is no dbt manifest to compare against. Absolute, or relative to a workspace folder. Changing this requires a window reload."
+          "markdownDescription": "Folder that holds your ERD Studio data (`erdStudio.semanticDir` is created inside it). Usually a dbt project root, and auto-detected from the workspace when empty — but any folder works, with or without `dbt_project.yml`; without one there is no dbt manifest to compare against. Absolute, or relative to a workspace folder. Set it in Workspace settings: a value in User settings applies to every folder you open. Changing this requires a window reload."
         },
         "erdStudio.semanticDir": {
           "type": "string",
