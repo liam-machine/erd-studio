@@ -391,6 +391,53 @@ describe('#370 boundary: a bad path in the workspace settings is still reported 
   });
 });
 
+describe('#370: where a relative User value was looked for', () => {
+  it('names the workspace folder it was tried in, not a dbt project ERD Studio found below it', async () => {
+    const nested = path.join(ws, 'analytics');
+    fs.mkdirSync(nested);
+    fs.writeFileSync(path.join(nested, 'dbt_project.yml'), "name: 'analytics'\nversion: '1.0.0'\nprofile: 'x'\n");
+    vscode._setMockConfiguration('erdStudio', 'projectPath', { globalValue: 'transform' });
+    await activate(context);
+    const [message] = projectPathWarnings()[0] ?? [''];
+    expect(message).toContain('("transform") names a folder that isn\'t in my-folder, so ERD Studio opened analytics instead.');
+    expect(message).not.toContain("isn't in analytics");
+  });
+
+  it('with several folders open, says it is in none of them', async () => {
+    const other = path.join(root, 'other-folder');
+    fs.mkdirSync(other);
+    vscode.workspace.workspaceFolders = [
+      { uri: vscode.Uri.file(ws), name: 'my-folder', index: 0 },
+      { uri: vscode.Uri.file(other), name: 'other-folder', index: 1 },
+    ];
+    vscode._setMockConfiguration('erdStudio', 'projectPath', { globalValue: 'transform' });
+    await activate(context);
+    const [message] = projectPathWarnings()[0] ?? [''];
+    expect(message).toContain('("transform") names a folder that isn\'t in any of the open folders, so ERD Studio opened');
+  });
+
+  it('a value with a pasted space is still said as a User setting, counted as one and shown once', async () => {
+    const error = vi.spyOn(telemetry, 'error');
+    vscode._setMockConfiguration('erdStudio', 'projectPath', { globalValue: 'transform \n' });
+    await activate(context);
+    await reload();
+    expect(projectPathWarnings()).toHaveLength(1);
+    expect(projectPathWarnings()[0][0]).toContain('your setting erdStudio.projectPath ("transform") names a folder');
+    expect(projectPathWarnings()[0][1]).toBe(OPEN_USER_SETTINGS_BUTTON);
+    expect(error.mock.calls.map((c) => c[0]).filter((c) => c === 'projectPathInvalidUser')).toHaveLength(2);
+  });
+});
+
+describe('projectPathInvalidMessage: the folders searched', () => {
+  it('names the one folder searched, or none of several, and keeps the folder that opened', () => {
+    const base = { value: 'transform', settingKey: 'erdStudio.projectPath', scope: 'user' as const, absolute: false, opened: 'analytics' };
+    expect(projectPathInvalidMessage({ ...base, searched: ['repo'] }).message)
+      .toContain('names a folder that isn\'t in repo, so ERD Studio opened analytics instead.');
+    expect(projectPathInvalidMessage({ ...base, searched: ['a', 'b'] }).message)
+      .toContain("names a folder that isn't in any of the open folders, so ERD Studio opened analytics instead.");
+  });
+});
+
 describe('#370: an empty window', () => {
   beforeEach(() => {
     vscode.workspace.workspaceFolders = [];
@@ -403,6 +450,14 @@ describe('#370: an empty window', () => {
     expect(projectPathWarnings()).toEqual([]);
     // Still counted: the setting did not resolve.
     expect(error.mock.calls.map((c) => c[0])).toContain('projectPathInvalid');
+  });
+
+  it('says nothing about a relative value when the only folder is not on disk (no project to resolve it in)', async () => {
+    vscode.workspace.workspaceFolders = [{ uri: vscode.Uri.file(path.join(root, 'gone')), name: 'gone', index: 0 }];
+    vscode._setMockConfiguration('erdStudio', 'projectPath', { globalValue: 'transform' });
+    await activate(context);
+    await reload();
+    expect(projectPathWarnings()).toEqual([]);
   });
 
   it('still reports an absolute path, without naming a folder it opened', async () => {

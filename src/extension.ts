@@ -950,8 +950,9 @@ const PROJECT_PATH_INVALID_SHOWN_KEY = 'erdStudio.projectPathInvalidShown';
  * any gate, with its scope and form beside it. The warning names the key and
  * the scope that hold the value (#370):
  *
- * - a relative value in an empty window gets none: there is no folder to
- *   resolve it against, so it is not wrong there;
+ * - a relative value with no project opened (an empty window, or folders
+ *   that are not on disk) gets none: there is no folder to resolve it
+ *   against, so it is not wrong there;
  * - a relative value in User settings is said once per workspace (it applies
  *   to every folder, so it misses in every folder it was not written for);
  * - anything else (a value in the workspace's settings, an absolute path) is
@@ -963,12 +964,13 @@ function reportInvalidProjectPath(context: vscode.ExtensionContext, invalidSetti
   const found = erdStudioSettingSource<string>('projectPath');
   // The resolver's read and this one disagree only if the setting changed while
   // the window started: then where it is set is unknown, and the plain words say it.
-  const source = found && found.value === invalidSetting ? found : undefined;
+  // The resolver trims the value (a pasted space or newline), so this compares it trimmed too.
+  const source = found && typeof found.value === 'string' && found.value.trim() === invalidSetting ? found : undefined;
   const absolute = path.isAbsolute(invalidSetting);
   telemetry.error('projectPathInvalid');
   for (const code of projectPathInvalidDetailCodes(source?.scope, absolute)) telemetry.error(code);
 
-  if (opened === undefined && !absolute && !vscode.workspace.workspaceFolders?.length) return;
+  if (opened === undefined && !absolute) return;
   if (source?.scope === 'user' && !absolute && opened !== undefined) {
     const shown = `${source.settingKey}|${source.scope}|${source.value}`;
     if (context.workspaceState.get<string>(PROJECT_PATH_INVALID_SHOWN_KEY) === shown) return;
@@ -980,6 +982,8 @@ function reportInvalidProjectPath(context: vscode.ExtensionContext, invalidSetti
     scope: source?.scope,
     absolute,
     opened,
+    // Where a relative value was looked for: each workspace folder, not the folder that opened.
+    searched: (vscode.workspace.workspaceFolders ?? []).map((folder) => folder.name),
   });
   showErrorWithActions(
     (message, ...items) => vscode.window.showWarningMessage(message, ...items),
@@ -1939,8 +1943,8 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     // extension activates on any of its commands), and the sidebar's welcome
     // view already says how to open a folder. An explicit
     // erdStudio.projectPath that points nowhere is a mistake, though, and is
-    // still reported (an absolute one; a relative one has nothing to miss in
-    // an empty window, #370).
+    // still reported (an absolute one; a relative one has nothing to miss
+    // with no folder to resolve it against, #370).
     if (projectResolution.invalidSetting !== undefined) {
       reportInvalidProjectPath(context, projectResolution.invalidSetting, undefined);
     }

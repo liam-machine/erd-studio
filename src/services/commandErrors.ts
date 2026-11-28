@@ -109,6 +109,13 @@ export interface ProjectPathInvalidInput {
   absolute: boolean;
   /** The name of the folder ERD Studio opened instead; absent with no folder open. */
   opened?: string;
+  /**
+   * The names of the workspace folders a relative value was tried against
+   * (the resolver tries it against each one, not against `opened`, which can
+   * be a dbt project nested below them or a Select dbt Project pick).
+   * Absent: `opened`, the one folder.
+   */
+  searched?: readonly string[];
 }
 
 /** A projectPath warning: its words, its one button, and the command (with its arguments) the button runs. */
@@ -127,18 +134,25 @@ export interface ProjectPathInvalidWarning {
  * rather than reading as a mistake to clear. A value in the workspace's
  * settings (or one folder's, which ERD Studio reads as the workspace's) is a
  * fault in this window, and is said as one. A relative path is said to name a
- * folder that isn't in the opened one; an absolute path, a folder that isn't
- * on this computer. User settings open with `workbench.action.openSettings`
+ * folder that isn't in the workspace folder it was tried against (or in any
+ * of them, with several open), which need not be the folder ERD Studio
+ * opened; an absolute path, a folder that isn't on this computer. User
+ * settings open with `workbench.action.openSettings`
  * (the User tab) and the workspace's with `openWorkspaceSettings`, both
  * searched for the key; VS Code 1.85 takes a query for each.
  */
 export function projectPathInvalidMessage(input: ProjectPathInvalidInput): ProjectPathInvalidWarning {
   const { value, settingKey, scope, absolute, opened } = input;
+  const searched = input.searched ?? (opened !== undefined ? [opened] : []);
   const instead = opened !== undefined ? `, so ERD Studio opened ${opened} instead` : '';
   if (scope === 'user') {
-    const where = absolute || opened === undefined
+    const where = absolute
       ? "isn't a folder on this computer"
-      : `names a folder that isn't in ${opened}`;
+      : searched.length === 1
+        ? `names a folder that isn't in ${searched[0]}`
+        : searched.length > 1
+          ? "names a folder that isn't in any of the open folders"
+          : "isn't a folder";
     return {
       message: `ERD Studio: your setting ${settingKey} ("${value}") ${where}${instead}. ` +
         'It is in your User settings, so it applies to every folder you open. ' +
