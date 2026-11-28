@@ -117,7 +117,7 @@ export class DbtLookNotice {
     const say = (): void => {
       const stats = this.activationStats();
       if (stats.length === 0) return;
-      this.deps.show(lookingStatus({ folderNames: this.folderNames(), folders: sum(stats), msLeft: longestLeft(stats) }));
+      this.deps.show(lookingStatus({ folderNames: this.folderNames(), folders: sum(stats), maxFolders: mostFolders(stats), msLeft: longestLeft(stats) }));
     };
     this.delay = setTimeout(() => {
       this.delay = undefined;
@@ -191,7 +191,7 @@ export class DbtLookNotice {
     };
     const say = (): void => {
       const stats = runs.map((run) => run.dbtSearchStats());
-      this.deps.show(lookingStatus({ folderNames: this.folderNames(), folders: sum(stats), msLeft: longestLeft(stats), canStop: true }), stop);
+      this.deps.show(lookingStatus({ folderNames: this.folderNames(), folders: sum(stats), maxFolders: mostFolders(stats), msLeft: longestLeft(stats), canStop: true }), stop);
     };
     const walking = Promise.all(runs.map((run) => run.dbtProjects({ everyFolder: true }).catch((): string[] => [])));
     const host = this.deps.hostSearch(maxMs).catch(() => ({ outcome: 'error' as const, paths: undefined }));
@@ -289,6 +289,11 @@ export class DbtLookNotice {
 
 function sum(stats: readonly DbtSearchStats[]): number {
   return stats.reduce((total, s) => total + s.folders, 0);
+}
+
+/** The most folders the looks list between them (each folder's look has its own bound). */
+function mostFolders(stats: readonly DbtSearchStats[]): number {
+  return stats.reduce((total, s) => total + s.maxFolders, 0);
 }
 
 /** The most any look that is not done still has: when they have all stopped (undefined when one has no limit, or all are done). */

@@ -165,6 +165,8 @@ export interface DbtSearchStats {
   stopped: 'time' | 'folders' | undefined;
   /** The most time the look walks for, in milliseconds. */
   maxMs: number;
+  /** The most folders the search lists before it stops: the dbt search's own bound, or the look's for one asked to list every folder. */
+  maxFolders: number;
 }
 
 export interface FolderLooksOptions {
@@ -202,6 +204,9 @@ export class FolderLookRun {
   private readonly beganAt: number;
   private cancelled = false;
   private readonly maxMs: number;
+  private readonly maxFolders: number;
+  /** The most folders the search for dbt projects lists (the widest a caller has asked for). */
+  private dbtFolderBound: number;
   /** Callers waiting on {@link dbtProjects} right now. */
   private dbtWaiting = 0;
   /** When the asking by name ({@link askByName}) gives up, while it runs. */
@@ -209,6 +214,8 @@ export class FolderLookRun {
 
   constructor(readonly root: string, private readonly io: FolderLookIo, options: Required<Pick<FolderLooksOptions, 'semanticDir' | 'maxFolders' | 'maxMs' | 'indexMs'>>) {
     this.maxMs = options.maxMs;
+    this.maxFolders = options.maxFolders;
+    this.dbtFolderBound = Math.min(DBT_SEARCH_MAX_DIRS, options.maxFolders);
     this.own = new Set([options.semanticDir.replace(/[\\/]+$/, ''), 'erd-studio'].map((d) => d.replace(/\\/g, '/').toLowerCase()));
     this.beganAt = io.now();
     this.scan = new FolderScan(root, io.reader, {
@@ -251,6 +258,7 @@ export class FolderLookRun {
    */
   async dbtProjects(options: { everyFolder?: boolean } = {}): Promise<string[]> {
     this.dbtWaiting++;
+    if (options.everyFolder) this.dbtFolderBound = this.maxFolders;
     try {
       return await this.findDbtProjects(options.everyFolder ? undefined : DBT_SEARCH_MAX_DIRS);
     } finally {
@@ -380,7 +388,7 @@ export class FolderLookRun {
     const walkLeft = this.scan.timeLeftMs();
     const msLeft = this.byNameUntil !== undefined ? Math.max(0, this.byNameUntil - this.io.now()) : walkLeft;
     const stopped = complete || this.dbtWaiting > 0 ? undefined : walkLeft !== undefined && walkLeft <= 0 ? 'time' as const : 'folders' as const;
-    return { folders: snapshot.folders, msLeft, complete, stopped, maxMs: this.maxMs };
+    return { folders: snapshot.folders, msLeft, complete, stopped, maxMs: this.maxMs, maxFolders: this.dbtFolderBound };
   }
 
   /**

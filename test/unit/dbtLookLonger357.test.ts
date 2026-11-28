@@ -69,7 +69,7 @@ describe('#357 how far a look\'s search for dbt projects has got', () => {
     const run = looksOf().run(root);
     expect(await run.dbtProjects()).toEqual([path.join(root, 'z-last')]);
     const stats = run.dbtSearchStats();
-    expect(stats).toMatchObject({ folders: 11, complete: true, stopped: undefined, maxMs: FOLDER_LOOK_MAX_MS });
+    expect(stats).toMatchObject({ folders: 11, complete: true, stopped: undefined, maxMs: FOLDER_LOOK_MAX_MS, maxFolders: 5000 });
     expect(stats.msLeft).toBeGreaterThan(0);
   });
 
@@ -77,7 +77,7 @@ describe('#357 how far a look\'s search for dbt projects has got', () => {
     const root = wideFolder();
     const run = looksOf({ maxFolders: 4 }).run(root);
     expect(await run.dbtProjects()).toEqual([]);
-    expect(run.dbtSearchStats()).toMatchObject({ folders: 4, complete: false, stopped: 'folders' });
+    expect(run.dbtSearchStats()).toMatchObject({ folders: 4, complete: false, stopped: 'folders', maxFolders: 4 });
   });
 
   it('a look that ran out of time says time, with none left', async () => {
@@ -119,6 +119,8 @@ describe('#357 a longer look', () => {
     expect(longer).not.toBe(first);
     expect(longer.dbtSearchStats().maxMs).toBe(FOLDER_LOOK_MAX_MS * FOLDER_LOOK_LONGER_FACTOR);
     expect(await longer.dbtProjects({ everyFolder: true })).toEqual([path.join(root, 'z-last')]);
+    // Asked to list every folder: its bound is the look's own, five times the first look's.
+    expect(longer.dbtSearchStats().maxFolders).toBe(4 * FOLDER_LOOK_LONGER_FACTOR);
     expect(longer.dbtSearchStats()).toMatchObject({ folders: 11, complete: true, stopped: undefined });
     // It took the folder's place: whoever asks next shares it. The first look is left as it was.
     expect(looks.peek(root)).toBe(longer);

@@ -99,10 +99,18 @@ export function lookedThrough(folderNames: readonly string[]): string {
 }
 
 /** A look that is running: what, how far, and how long until it stops by itself. */
-export function lookingStatus(options: { folderNames: readonly string[]; folders: number; msLeft: number | undefined; canStop?: boolean }): LookStatus {
+export function lookingStatus(options: {
+  folderNames: readonly string[];
+  folders: number;
+  /** The most folders the look lists before it stops (so a stop at that number is no surprise). */
+  maxFolders?: number;
+  msLeft: number | undefined;
+  canStop?: boolean;
+}): LookStatus {
+  const most = options.maxFolders !== undefined && Number.isFinite(options.maxFolders) ? `, of ${Math.floor(options.maxFolders).toLocaleString('en-US')} at most` : '';
   return {
     title: `Looking through ${lookedThrough(options.folderNames)}…`,
-    ...(options.folders > 0 ? { detail: `${folderCount(options.folders)} checked so far.` } : {}),
+    ...(options.folders > 0 ? { detail: `${folderCount(options.folders)} checked so far${most}.` } : {}),
     working: true,
     ...(options.msLeft !== undefined ? { countdown: { msLeft: Math.max(0, Math.round(options.msLeft)), text: COUNTDOWN_TEXT } } : {}),
     ...(options.canStop ? { actions: [LOOK_STOP_BUTTON] } : {}),

@@ -27,7 +27,7 @@ import type { DbtSearchStats } from '../../src/services/folderLook';
 import * as fs from 'fs';
 import * as path from 'path';
 
-const stats = (over: Partial<DbtSearchStats> = {}): DbtSearchStats => ({ folders: 100, msLeft: 50_000, complete: true, stopped: undefined, maxMs: 60_000, ...over });
+const stats = (over: Partial<DbtSearchStats> = {}): DbtSearchStats => ({ folders: 100, msLeft: 50_000, complete: true, stopped: undefined, maxMs: 60_000, maxFolders: 5000, ...over });
 
 describe('#357 a look as one outcome', () => {
   it('every folder complete: not stopped early', () => {
@@ -37,7 +37,7 @@ describe('#357 a look as one outcome', () => {
   it('one folder short: stopped early, by what stopped it; time wins over folders', () => {
     expect(lookOutcome([stats(), stats({ complete: false, stopped: 'folders', folders: 5000 })]).stopped).toBe('folders');
     expect(lookOutcome([stats({ complete: false, stopped: 'folders' }), stats({ complete: false, stopped: 'time' })]).stopped).toBe('time');
-    expect(lookOutcome([stats({ complete: false, stopped: 'time', maxMs: 300_000 })])).toEqual({ folders: 100, stoppedEarly: true, stopped: 'time', maxMs: 300_000 });
+    expect(lookOutcome([stats({ complete: false, stopped: 'time', maxMs: 300_000, maxFolders: 100_000 })])).toEqual({ folders: 100, stoppedEarly: true, stopped: 'time', maxMs: 300_000 });
   });
 
   it('a project may have been missed only when the host search did not answer either', () => {
@@ -58,10 +58,12 @@ describe('#357 the words', () => {
   });
 
   it('looking: what, how far, how long until it stops; no dbt word (nobody knows yet)', () => {
-    const s = lookingStatus({ folderNames: ['shop'], folders: 1240, msLeft: 48_200 });
+    // Without a bound, only how far.
+    expect(lookingStatus({ folderNames: ['shop'], folders: 1240, msLeft: 48_200 }).detail).toBe('1,240 folders checked so far.');
+    const s = lookingStatus({ folderNames: ['shop'], folders: 1240, maxFolders: 5000, msLeft: 48_200 });
     expect(s).toEqual({
       title: 'Looking through shop…',
-      detail: '1,240 folders checked so far.',
+      detail: '1,240 folders checked so far, of 5,000 at most.',
       working: true,
       countdown: { msLeft: 48_200, text: 'Stops in {time} if it has not finished.' },
     });
@@ -90,7 +92,7 @@ describe('#357 the words', () => {
   });
 
   it('a folder with no dbt project is never told about dbt; a longer look that stopped again says still', () => {
-    const outcome = lookOutcome([stats({ complete: false, stopped: 'time', folders: 90_000, maxMs: 300_000 })]);
+    const outcome = lookOutcome([stats({ complete: false, stopped: 'time', folders: 90_000, maxMs: 300_000, maxFolders: 100_000 })]);
     const plain = stoppedStatus({ folderNames: ['shop'], outcome, opened: 'shop', hasDbt: false, again: true });
     expect(plain.title).toBe('Stopped looking after 5 minutes.');
     expect(plain.detail).toBe('ERD Studio checked 90,000 folders in shop, still not all of them. It opened shop. A project deeper down may have been missed.');

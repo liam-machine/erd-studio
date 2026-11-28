@@ -13,15 +13,15 @@ import { LOOK_DISMISS_BUTTON, LOOK_LONGER_BUTTON, LOOK_SELECT_PROJECT_BUTTON, LO
 import { FOLDER_LOOK_LONGER_FACTOR, type DbtSearchStats } from '../../src/services/folderLook';
 
 const ROOT = path.join(path.sep, 'ws', 'shop');
-const complete: DbtSearchStats = { folders: 40, msLeft: 59_000, complete: true, stopped: undefined, maxMs: 60_000 };
-const outOfTime: DbtSearchStats = { folders: 3200, msLeft: 0, complete: false, stopped: 'time', maxMs: 60_000 };
+const complete: DbtSearchStats = { folders: 40, msLeft: 59_000, complete: true, stopped: undefined, maxMs: 60_000, maxFolders: 5000 };
+const outOfTime: DbtSearchStats = { folders: 3200, msLeft: 0, complete: false, stopped: 'time', maxMs: 60_000, maxFolders: 5000 };
 
 /** A longer look the test finishes by hand. */
 function fakeRun(maxMs: number) {
   let finish!: (found: string[]) => void;
   const done = new Promise<string[]>((r) => { finish = r; });
   const run = {
-    stats: { folders: 0, msLeft: maxMs, complete: false, stopped: undefined, maxMs } as DbtSearchStats,
+    stats: { folders: 0, msLeft: maxMs, complete: false, stopped: undefined, maxMs, maxFolders: 100_000 } as DbtSearchStats,
     cancelled: false,
     asked: [] as Array<{ everyFolder?: boolean } | undefined>,
     dbtSearchStats(): DbtSearchStats { return run.stats; },
@@ -93,18 +93,18 @@ describe('#357 while activation waits on the look', () => {
 
   it('a slow look says what it is doing, how far it has got and the time left, again every second', () => {
     const h = harness();
-    h.state.activation = { folders: 310, msLeft: 58_900, complete: false, stopped: undefined, maxMs: 60_000 };
+    h.state.activation = { folders: 310, msLeft: 58_900, complete: false, stopped: undefined, maxMs: 60_000, maxFolders: 5000 };
     h.notice.watch([ROOT]);
     vi.advanceTimersByTime(LOOK_STATUS_DELAY_MS);
     expect(h.last()).toEqual({
       title: 'Looking through shop…',
-      detail: '310 folders checked so far.',
+      detail: '310 folders checked so far, of 5,000 at most.',
       working: true,
       countdown: { msLeft: 58_900, text: 'Stops in {time} if it has not finished.' },
     });
-    h.state.activation = { folders: 1240, msLeft: 57_900, complete: false, stopped: undefined, maxMs: 60_000 };
+    h.state.activation = { folders: 1240, msLeft: 57_900, complete: false, stopped: undefined, maxMs: 60_000, maxFolders: 5000 };
     vi.advanceTimersByTime(LOOK_STATUS_EVERY_MS);
-    expect(h.last()?.detail).toBe('1,240 folders checked so far.');
+    expect(h.last()?.detail).toBe('1,240 folders checked so far, of 5,000 at most.');
     expect(h.last()?.countdown?.msLeft).toBe(57_900);
     // It went everywhere: the status goes and nothing takes its place.
     h.state.activation = complete;
@@ -120,19 +120,19 @@ describe('#357 while activation waits on the look', () => {
     const h = harness({
       looks: {
         peek: (root) => ({ dbtSearchStats: () => (root.endsWith('shop')
-          ? { folders: 100, msLeft: 20_000, complete: false, stopped: undefined, maxMs: 60_000 }
-          : { folders: 50, msLeft: 45_000, complete: false, stopped: undefined, maxMs: 60_000 }) }),
+          ? { folders: 100, msLeft: 20_000, complete: false, stopped: undefined, maxMs: 60_000, maxFolders: 5000 }
+          : { folders: 50, msLeft: 45_000, complete: false, stopped: undefined, maxMs: 60_000, maxFolders: 5000 }) }),
         longer: () => { throw new Error('not asked'); },
       },
     });
     h.notice.watch([ROOT, path.join(path.sep, 'ws', 'data')]);
     vi.advanceTimersByTime(LOOK_STATUS_DELAY_MS);
-    expect(h.last()).toMatchObject({ title: 'Looking through shop and data…', detail: '150 folders checked so far.', countdown: { msLeft: 45_000 } });
+    expect(h.last()).toMatchObject({ title: 'Looking through shop and data…', detail: '150 folders checked so far, of 10,000 at most.', countdown: { msLeft: 45_000 } });
   });
 
   it('a failed activation takes the status away and stops the clock', () => {
     const h = harness();
-    h.state.activation = { folders: 3, msLeft: 50_000, complete: false, stopped: undefined, maxMs: 60_000 };
+    h.state.activation = { folders: 3, msLeft: 50_000, complete: false, stopped: undefined, maxMs: 60_000, maxFolders: 5000 };
     h.notice.watch([ROOT]);
     vi.advanceTimersByTime(LOOK_STATUS_DELAY_MS);
     h.notice.clear();
@@ -198,7 +198,7 @@ describe('#357 a look that stopped early', () => {
     });
     run.stats = { ...run.stats, folders: 12_400, msLeft: 252_000 };
     vi.advanceTimersByTime(LOOK_STATUS_EVERY_MS);
-    expect(h.last()).toMatchObject({ detail: '12,400 folders checked so far.', countdown: { msLeft: 252_000 } });
+    expect(h.last()).toMatchObject({ detail: '12,400 folders checked so far, of 100,000 at most.', countdown: { msLeft: 252_000 } });
     // A second press while it runs starts nothing.
     run.finish([]);
     await settle();
@@ -209,7 +209,7 @@ describe('#357 a look that stopped early', () => {
     stopEarly(h);
     h.press(LOOK_LONGER_BUTTON);
     const { run } = h.state.longer[0];
-    run.stats = { folders: 20_000, msLeft: 200_000, complete: true, stopped: undefined, maxMs: 300_000 };
+    run.stats = { folders: 20_000, msLeft: 200_000, complete: true, stopped: undefined, maxMs: 300_000, maxFolders: 100_000 };
     run.finish([path.join(ROOT, 'analytics', 'dbt')]);
     await vi.advanceTimersByTimeAsync(LONGER_HOST_SEARCH_GRACE_MS);
     expect(h.state.found).toEqual([[path.join(ROOT, 'analytics', 'dbt')]]);
@@ -246,7 +246,7 @@ describe('#357 a look that stopped early', () => {
     stopEarly(h);
     h.press(LOOK_LONGER_BUTTON);
     const { run } = h.state.longer[0];
-    run.stats = { folders: 31_204, msLeft: 100_000, complete: true, stopped: undefined, maxMs: 300_000 };
+    run.stats = { folders: 31_204, msLeft: 100_000, complete: true, stopped: undefined, maxMs: 300_000, maxFolders: 100_000 };
     run.finish([]);
     await vi.advanceTimersByTimeAsync(LONGER_HOST_SEARCH_GRACE_MS);
     expect(h.last()).toEqual({
@@ -265,7 +265,7 @@ describe('#357 a look that stopped early', () => {
     stopEarly(h);
     h.press(LOOK_LONGER_BUTTON);
     const first = h.state.longer[0].run;
-    first.stats = { folders: 90_000, msLeft: 0, complete: false, stopped: 'time', maxMs: 300_000 };
+    first.stats = { folders: 90_000, msLeft: 0, complete: false, stopped: 'time', maxMs: 300_000, maxFolders: 100_000 };
     first.finish([]);
     await settle();
     expect(h.last()).toEqual({

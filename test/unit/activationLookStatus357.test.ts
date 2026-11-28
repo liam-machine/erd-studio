@@ -114,14 +114,14 @@ function stubLook(stats: () => DbtSearchStats, hold = false) {
 const diagramsStatus = (glass: GlassSidebarProvider): GlassSectionStatus | undefined =>
   glass.snapshot().sections.find((s) => s.key === 'diagrams')!.status;
 
-const complete: DbtSearchStats = { folders: 40, msLeft: 59_000, complete: true, stopped: undefined, maxMs: 60_000 };
-const outOfTime: DbtSearchStats = { folders: 3200, msLeft: 0, complete: false, stopped: 'time', maxMs: 60_000 };
+const complete: DbtSearchStats = { folders: 40, msLeft: 59_000, complete: true, stopped: undefined, maxMs: 60_000, maxFolders: 5000 };
+const outOfTime: DbtSearchStats = { folders: 3200, msLeft: 0, complete: false, stopped: 'time', maxMs: 60_000, maxFolders: 5000 };
 /** The host's own search never answers, so activation gives up on it (`timeout`). */
 const hostSearchSilent = (): void => { vi.spyOn(vscode.workspace, 'findFiles').mockImplementation((() => new Promise(() => {})) as never); };
 
 describe('#357 the Diagrams section says what activation is doing', () => {
   it('a slow look: activate() resolves so the sidebar can draw, with folders checked and the time left; gone when the look is over', async () => {
-    let stats: DbtSearchStats = { folders: 1240, msLeft: 48_000, complete: false, stopped: undefined, maxMs: 60_000 };
+    let stats: DbtSearchStats = { folders: 1240, msLeft: 48_000, complete: false, stopped: undefined, maxMs: 60_000, maxFolders: 5000 };
     const look = stubLook(() => stats, true);
     const glass = captureGlass();
     const began = Date.now();
@@ -150,7 +150,7 @@ describe('#357 the Diagrams section says what activation is doing', () => {
     const status = diagramsStatus(glass());
     expect(status).toEqual({
       title: `Looking through ${path.basename(root)}…`,
-      detail: '1,240 folders checked so far.',
+      detail: '1,240 folders checked so far, of 5,000 at most.',
       working: true,
       countdown: { msLeft: 48_000, text: 'Stops in {time} if it has not finished.' },
     });
