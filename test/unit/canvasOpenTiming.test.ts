@@ -101,7 +101,7 @@ describe('the ranges (#333)', () => {
     }
   });
 
-  it('the families are listed in FEATURES, fastest first, and the new keys are appended after #332\'s (only #347\'s and #371\'s follow them)', () => {
+  it('the families are listed in FEATURES, fastest first, and the new keys are appended after #332\'s (only #347\'s, #364\'s, #358\'s and #371\'s follow them)', () => {
     expect([...CANVAS_LOAD_FEATURES]).toEqual(['canvasLoadUnder1s', 'canvasLoad1to5s', 'canvasLoad5to20s', 'canvasLoadOver20s']);
     expect([...CANVAS_PAINT_FEATURES]).toEqual(['canvasPaintUnder1s', 'canvasPaint1to5s', 'canvasPaintOver5s']);
     expect(FEATURES.slice(FEATURES.indexOf('modelRepoHasRemote') + 1)).toEqual([
@@ -111,6 +111,10 @@ describe('the ranges (#333)', () => {
       'startLookFromIndex', 'startLookIndexFallback',
       'startLookFoldersUnder200', 'startLookFolders200to2000', 'startLookFoldersOver2000',
       'startLookFoundAfterDeadline', 'dbtSearchFromIndex',
+      // #364: what a panel that never said ready met.
+      'noReadyHostHeld', 'noReadyClosed30to60s', 'noReadyClosedOver60s',
+      // #358: what a SQL import's tables defined twice were.
+      'importDuplicateSame', 'importDuplicateDiffers', 'importDuplicateDiffersDefaultSchema', 'importPartialDuplicateOnly',
       // #371: which step held a slow open.
       'canvasLoadSlowManifest', 'canvasLoadSlowYml', 'canvasLoadSlowCatalog', 'canvasLoadSlowRead',
       'canvasLoadSlowPositions', 'canvasLoadSlowPhysical', 'canvasLoadSlowDisplay', 'canvasLoadSlowOther',

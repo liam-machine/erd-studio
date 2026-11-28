@@ -569,7 +569,7 @@ describe('Delete Table File after a remove (#205)', () => {
 
     await vi.waitFor(() => expect(error).toHaveBeenCalled());
     expect(error).toHaveBeenCalledTimes(1);
-    expect(error).toHaveBeenCalledWith(expect.stringMatching(/could not put back .*dim_task\.yml.*Restore these from source control\.$/), { modal: true });
+    expect(error).toHaveBeenCalledWith(expect.stringMatching(/left part-changed: .*dim_task\.yml.*Restore them from source control/), { modal: true }, 'Show Files', 'Send Feedback');
   });
 
   it('the delete is one edit with the canvas\'s diagram (its undo anchor), so Cmd+Z there undoes it before the remove (#274)', async () => {

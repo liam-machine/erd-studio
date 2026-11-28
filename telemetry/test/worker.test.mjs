@@ -649,11 +649,15 @@ describe('validation — acceptance and normalisation', () => {
     assert.deepEqual(JSON.parse(params[17]), features);
     // Everything after #333's keys, up to #371's.
     assert.deepEqual(
-      WORKER_FEATURES.slice(WORKER_FEATURES.indexOf('canvasPaintOver5s') + 1, WORKER_FEATURES.indexOf('dbtSearchFromIndex') + 1),
+      WORKER_FEATURES.slice(WORKER_FEATURES.indexOf('canvasPaintOver5s') + 1, WORKER_FEATURES.indexOf('importPartialDuplicateOnly') + 1),
       [
         'startLookFromIndex', 'startLookIndexFallback',
         'startLookFoldersUnder200', 'startLookFolders200to2000', 'startLookFoldersOver2000',
         'startLookFoundAfterDeadline', 'dbtSearchFromIndex',
+        // #364: what a panel that never said ready met.
+        'noReadyHostHeld', 'noReadyClosed30to60s', 'noReadyClosedOver60s',
+        // #358: what a SQL import's tables defined twice were.
+        'importDuplicateSame', 'importDuplicateDiffers', 'importDuplicateDiffersDefaultSchema', 'importPartialDuplicateOnly',
       ],
     );
     // The keys whose meaning shifted with #347 keep their places from 2.0.0 and after 2.0.4.
@@ -662,7 +666,66 @@ describe('validation — acceptance and normalisation', () => {
     assert.equal(params[18], '{}');
   });
 
-  it('keeps which step held a slow open (#371), after the one look at the folder, and drops a time, a look-alike or an error-side copy', async () => {
+  it('keeps what a panel that never said ready met (#364), after the folder look\'s keys, and drops a time, a look-alike or an error-side copy', async () => {
+    const features = { noReadyHostHeld: 2, noReadyClosed30to60s: 1, noReadyClosedOver60s: 1 };
+    const params = await storedParams(
+      heartbeat({
+        features: { ...features, noReadyClosedMs: 45000, noReadyClosedUnder60s: 1, noReadyHostHeldMs: 12000, noReadyClosed: 1 },
+        errors: { webviewNoReadyCanvas: 2, noReadyHostHeld: 1, noReadyClosed30to60s: 1 },
+      }),
+    );
+    assert.deepEqual(JSON.parse(params[17]), features);
+    assert.deepEqual(JSON.parse(params[18]), { webviewNoReadyCanvas: 2 });
+    assert.deepEqual(
+      WORKER_FEATURES.slice(WORKER_FEATURES.indexOf('dbtSearchFromIndex') + 1, WORKER_FEATURES.indexOf('noReadyClosedOver60s') + 1),
+      ['noReadyHostHeld', 'noReadyClosed30to60s', 'noReadyClosedOver60s'],
+    );
+  });
+
+  it('keeps what a SQL import\'s tables defined twice were (#358), after #364\'s keys, and drops a count, a look-alike or an error-side copy', async () => {
+    const features = { importCauseDuplicate: 2, importDuplicateSame: 1, importDuplicateDiffers: 1, importDuplicateDiffersDefaultSchema: 1, importPartialDuplicateOnly: 2 };
+    const params = await storedParams(
+      heartbeat({
+        features: { ...features, importDuplicateNoSchema: 1, importDuplicateSameCount: 3, importDuplicateDiffersNoSchema: 1, importDuplicates: 4 },
+        errors: { importDuplicateSame: 1, importPartialDuplicateOnly: 1 },
+      }),
+    );
+    assert.deepEqual(JSON.parse(params[17]), features);
+    assert.equal(params[18], '{}');
+    assert.deepEqual(
+      WORKER_FEATURES.slice(WORKER_FEATURES.indexOf('noReadyClosedOver60s') + 1, WORKER_FEATURES.indexOf('importPartialDuplicateOnly') + 1),
+      ['importDuplicateSame', 'importDuplicateDiffers', 'importDuplicateDiffersDefaultSchema', 'importPartialDuplicateOnly'],
+    );
+  });
+
+  it('keeps which site a logged error came from (#354), then the list ends with #370\'s, and drops a look-alike, a tag or a feature-side copy', async () => {
+    const errors = {
+      loggedError: 3, loggedErrorOther: 3,
+      loggedErrorAtWatcher: 1, loggedErrorAtLegacyRename: 1, loggedErrorAtRedraw: 2, loggedErrorAtExplorerMove: 1,
+      loggedErrorAtFeedbackSend: 1, loggedErrorAtFailureAction: 1, loggedErrorAtTrackingSession: 1, loggedErrorAtTrackingRefresh: 1,
+      loggedErrorUnlistedTag: 1,
+    };
+    const params = await storedParams(
+      heartbeat({
+        features: { loggedErrorAtTrackingRefresh: 1, loggedErrorUnlistedTag: 1 },
+        errors: { ...errors, loggedErrorAtSomethingNew: 1, 'loggedErrorAt[ERD Studio]': 1, loggedErrorUnlisted: 1, loggedErrorAtTracking: 1 },
+      }),
+    );
+    assert.equal(params[17], '{}');
+    assert.deepEqual(JSON.parse(params[18]), errors);
+    // The newest codes close the list, after #319's: #354's, then what a projectPath that is not a folder was like (#370).
+    assert.deepEqual(
+      WORKER_ERROR_CODES.slice(WORKER_ERROR_CODES.indexOf('handlerFailedJson') + 1),
+      [
+        'loggedErrorAtWatcher', 'loggedErrorAtLegacyRename', 'loggedErrorAtRedraw', 'loggedErrorAtExplorerMove',
+        'loggedErrorAtFeedbackSend', 'loggedErrorAtFailureAction', 'loggedErrorAtTrackingSession', 'loggedErrorAtTrackingRefresh',
+        'loggedErrorUnlistedTag',
+        'projectPathInvalidUser', 'projectPathInvalidWorkspace', 'projectPathInvalidRelative', 'projectPathInvalidAbsolute',
+      ],
+    );
+  });
+
+  it('keeps which step held a slow open (#371), after #358\'s keys, and drops a time, a look-alike or an error-side copy', async () => {
     const features = { canvasLoadOver20s: 1, canvasLoadSlowManifest: 1, canvasLoadSlowYml: 1, canvasLoadSlowOther: 1 };
     const params = await storedParams(
       heartbeat({
@@ -673,7 +736,7 @@ describe('validation — acceptance and normalisation', () => {
     assert.deepEqual(JSON.parse(params[17]), features);
     // The newest keys close the list.
     assert.deepEqual(
-      WORKER_FEATURES.slice(WORKER_FEATURES.indexOf('dbtSearchFromIndex') + 1),
+      WORKER_FEATURES.slice(WORKER_FEATURES.indexOf('importPartialDuplicateOnly') + 1),
       [
         'canvasLoadSlowManifest', 'canvasLoadSlowYml', 'canvasLoadSlowCatalog', 'canvasLoadSlowRead',
         'canvasLoadSlowPositions', 'canvasLoadSlowPhysical', 'canvasLoadSlowDisplay', 'canvasLoadSlowOther',

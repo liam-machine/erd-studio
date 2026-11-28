@@ -447,6 +447,7 @@ describe('#335: a move in the Explorer', () => {
       takeOwnRename: () => false,
       applyWrites: async (_w, r) => { if (r) renames.push(...r); return { ok: true, unsaved: [], unrestored: [] }; },
       afterUpdated: async () => undefined,
+      saveFile: async () => true,
       ...over,
     };
     return { deps, renames };

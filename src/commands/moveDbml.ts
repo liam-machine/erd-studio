@@ -32,6 +32,7 @@ import type { TableFileEntry, TableLibraryService } from '../services/logicalMod
 import { isRefusedWrite } from '../services/newSubjectAreaWriter';
 import { log } from '../services/logger';
 import { SUBJECT_AREA_EDITOR_VIEW_TYPE } from '../services/recoveryService';
+import { telemetry } from '../services/telemetryService';
 import { firstUnwritable, showCommandFailure } from './commandFailure';
 import { dbmlMoveTouches, planDbmlDiagramLayerMove, planDbmlTableMoves } from './dbmlLifecycle';
 import { showRefusedWrite } from './openModelFile';
@@ -500,7 +501,10 @@ export async function moveDbmlDiagram(deps: MoveDbmlDeps, filePath: string, toLa
       (message, ...items) => vscode.window.showErrorMessage(message, ...items),
       `${MOVE_DIAGRAM_TITLE}: ${diagramNameTakenMessage(name, label)} Rename one of them first. Nothing was moved.`,
       { [OPEN_IT_BUTTON]: () => vscode.commands.executeCommand('vscode.openWith', vscode.Uri.file(taken), SUBJECT_AREA_EDITOR_VIEW_TYPE) },
-      (choice, err) => log.error(`[ERD Studio] ${MOVE_DIAGRAM_TITLE}: "${choice}" failed:`, err),
+      (choice, err) => {
+        log.error(`[ERD Studio] ${MOVE_DIAGRAM_TITLE}: "${choice}" failed:`, err);
+        telemetry.error('loggedErrorAtFailureAction');
+      },
     );
     return undefined;
   }

@@ -28,16 +28,25 @@
  * whose file is gone is re-created from the text read before, and a replaced
  * document that holds the planned text is set back with a text edit (saved
  * only if it was saved before). When that fails too, a modal names every file
- * it could not put back ("Restore these from source control"); nothing is
- * retried.
+ * it could not put back, says they are left part-changed and how to restore
+ * them, and offers Show Files and Send Feedback (#355); nothing is retried.
  */
 
 import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 
+import { nearestExisting } from '../commands/commandFailure';
+import {
+  SEND_FEEDBACK_BUTTON,
+  SHOW_FILES_BUTTON,
+  feedbackPrefill,
+  partChangedMessage,
+  showErrorWithActions,
+} from '../services/commandErrors';
 import type { FileWrite } from '../services/fileWrites';
 import { mergeFileWrites, orderFileWrites } from '../services/fileWrites';
+import { log } from '../services/logger';
 import { ownFileOperations } from '../services/ownFileOperations';
 import { saveWithoutFormatting } from './documentSave';
 
@@ -283,13 +292,53 @@ export async function applyFileWrites(writes: readonly FileWrite[], options: App
         ...[...planned.values()].filter((w) => !isBack(w)).map((w) => w.path),
         ...renames.filter((r) => !exists(r.from)).map((r) => r.from),
       ];
-      if (unrestored.length === 0) unrestored = [...planned.keys(), ...renames.map((r) => r.from)];
-      const shown = unrestored.map((p) => vscode.workspace.asRelativePath?.(p) ?? p);
-      void vscode.window.showErrorMessage(
-        `ERD Studio could not apply the edit, and could not put back ${shown.join(', ')}. Restore these from source control.`,
-        { modal: true },
-      );
+      const certain = unrestored.length > 0;
+      if (!certain) unrestored = [...planned.keys(), ...renames.map((r) => r.from)];
+      showPartChanged(unrestored, renames, certain);
     }
   }
   return { ok: false, replaced, created, deleted, renamed, unrestored };
+}
+
+/**
+ * The modal for files the reconcile could not put back (#355): which files
+ * are left part-changed and how to restore them, with Show Files (the first
+ * of them where it is now) and Send Feedback. Still modal, because the files
+ * are left inconsistent. A renamed file still at its new path is named there
+ * ("old, now at new"), so Show Files finds it. Send Feedback's report holds
+ * counts only: `asRelativePath` output (table and diagram names) is not
+ * something `redactPaths` reduces.
+ */
+function showPartChanged(unrestored: readonly string[], renames: ReadonlyArray<{ from: string; to: string }>, certain: boolean): void {
+  const rel = (p: string): string => vscode.workspace.asRelativePath?.(p) ?? p;
+  // Where each file is now: a rename that was not moved back is at its new path.
+  const now = unrestored.map((p) => {
+    const moved = renames.find((r) => samePath(r.from, p) && !fs.existsSync(r.from) && fs.existsSync(r.to));
+    return moved ? { at: moved.to, shown: `${rel(p)} (now at ${rel(moved.to)})` } : { at: p, shown: rel(p) };
+  });
+  const showFiles = async (): Promise<void> => {
+    const first = now.find((f) => fs.existsSync(f.at));
+    if (first) {
+      const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(first.at));
+      await vscode.window.showTextDocument(doc, { preview: false });
+      return;
+    }
+    // Every one is gone (a delete that was not put back): its folder.
+    const gone = now[0]?.at;
+    if (gone) await vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(nearestExisting(path.dirname(gone))));
+  };
+  const count = unrestored.length;
+  showErrorWithActions(
+    (m, ...items) => vscode.window.showErrorMessage(m, { modal: true }, ...items),
+    partChangedMessage(now.map((f) => f.shown), certain),
+    {
+      [SHOW_FILES_BUTTON]: showFiles,
+      [SEND_FEEDBACK_BUTTON]: () => vscode.commands.executeCommand('erdStudio.reportBug', feedbackPrefill(
+        'ERD Studio',
+        'while putting back a change VS Code did not apply',
+        new Error(`applyEdit returned false twice; ${count} file${count === 1 ? '' : 's'} not put back${certain ? '' : ' (could not tell which)'}`),
+      )),
+    },
+    (choice, err) => log.error(`[ApplyFileWrites] "${choice}" failed:`, err),
+  );
 }

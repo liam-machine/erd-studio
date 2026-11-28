@@ -14,14 +14,22 @@
  * diagram just before. The drag is then used up (the canvases take their
  * hint down). The write is Add to Diagram's own route (`addTables`: the
  * canvas's Add Existing Tables edit, one undo step). A tab that was open
- * before the drop is left open; only tabs the drop opened are closed.
+ * before the drop is left open; only tabs the drop opened are closed. A
+ * failed add is said as the Diagrams view's drop says it (#355): a refusal
+ * in its own words, a folder ERD Studio may not write in plain words, and
+ * anything else as ERD Studio's problem, never the exception's text.
  */
 import * as vscode from 'vscode';
 
 import { SUBJECT_AREA_EDITOR_VIEW_TYPE } from '../services/recoveryService';
 import { ADDED_TO_DIAGRAM_STATUS_MS, addedToDiagramStatus } from '../commands/goToTable';
+import { showCommandFailure } from '../commands/commandFailure';
+import { writeFailure } from '../services/diagramCommandErrors';
+import { log } from '../services/logger';
+import { isRefusedWrite } from '../services/newSubjectAreaWriter';
 import { samePath } from '../services/projectDiscovery';
 import { missedCanvasDrop, type DroppableTableFile } from '../services/tableDrop';
+import { ADD_TO_DIAGRAM_TITLE } from './DomainTreeProvider';
 
 export interface MissedCanvasDropDeps {
   /** The remembered Table Library drag, not used up (`SemanticEditorProvider.peekRememberedLibraryDrag`). */
@@ -35,6 +43,8 @@ export interface MissedCanvasDropDeps {
   dropSeen?(filePath: string): void;
   /** Add to Diagram's add: bring the diagram forward and add the tables in one edit; resolves to the tables it added. */
   addTables(filePath: string, tables: readonly string[], files?: readonly string[]): Promise<readonly string[] | undefined | unknown>;
+  /** The project folder, to name a folder ERD Studio may not write when the add fails. */
+  workspaceRoot: string;
   /** Tests pass their own clock. */
   now?(): number;
 }
@@ -109,15 +119,28 @@ export function watchMissedCanvasDrops(deps: MissedCanvasDropDeps): vscode.Dispo
         } catch {
           // Timing must never stop the add.
         }
-        void Promise.resolve(deps.addTables(missed.diagramPath, missed.names, missed.files)).then((added) => {
+        const { diagramPath, names } = missed;
+        const run = (): Promise<void> => Promise.resolve(deps.addTables(diagramPath, names, missed.files)).then((added) => {
           // What the canvas added; nothing when all were there already or it refused (the canvas said so).
           const fresh = Array.isArray(added) ? [...new Set(added as string[])] : [];
           if (fresh.length === 0) return;
           const what = fresh.length === 1 ? `"${fresh[0]}"` : `${fresh.length} tables`;
           vscode.window.setStatusBarMessage(addedToDiagramStatus(what, diagram), ADDED_TO_DIAGRAM_STATUS_MS);
         }).catch((err: unknown) => {
-          void vscode.window.showErrorMessage(`Add to Diagram: ${err instanceof Error ? err.message : String(err)}`);
+          log.error('[MissedCanvasDrop] Adding the dropped tables to a diagram failed:', err);
+          // A refusal written for the user keeps its words.
+          if (isRefusedWrite(err)) {
+            void vscode.window.showErrorMessage(`ERD Studio: The tables weren't added to ${diagram}. ${err.message}`);
+            return;
+          }
+          // As the Diagrams view's drop says it (DomainTreeProvider.dropTables): a folder ERD Studio
+          // may not write, or a full disk, in words; anything else is ours, never the exception's text.
+          showCommandFailure(writeFailure(ADD_TO_DIAGRAM_TITLE, err, {
+            workspaceRoot: deps.workspaceRoot, target: diagramPath, doing: 'while adding the tables',
+            outcome: `Nothing was added to ${diagram}.`, retry: true,
+          }), err, { retry: run });
         });
+        void run();
         return;
       }
     } finally {

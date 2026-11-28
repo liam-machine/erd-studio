@@ -11,6 +11,10 @@ import * as vscode from 'vscode';
 import { MISSED_DROP_MS, missedCanvasDrop } from '../../src/services/tableDrop';
 import { MISSED_DROP_CLOSE_MS, watchMissedCanvasDrops } from '../../src/providers/missedCanvasDrop';
 import { SUBJECT_AREA_EDITOR_VIEW_TYPE } from '../../src/services/recoveryService';
+import { SEND_FEEDBACK_BUTTON, TRY_AGAIN_BUTTON } from '../../src/services/commandErrors';
+import { SHOW_FOLDER_BUTTON } from '../../src/services/diagramCommandErrors';
+import { telemetry } from '../../src/services/telemetryService';
+import { DbmlEditRefused } from '@erd-studio/core/dbml';
 
 const SEM = '/p/.erd-studio';
 const SHOWCASE = `${SEM}/silver/diagrams/showcase.dbml`;
@@ -97,6 +101,7 @@ describe('watchMissedCanvasDrops', () => {
       listTableFiles: () => library,
       diagramName: () => 'showcase',
       addTables: vi.fn(async () => ['dim_location']),
+      workspaceRoot: '/p',
       now: () => T0 + 1_500,
     };
     watcher = watchMissedCanvasDrops(deps);
@@ -199,5 +204,64 @@ describe('watchMissedCanvasDrops', () => {
     dropOpensFile(DIM_LOCATION);
     expect(deps.addTables).not.toHaveBeenCalled();
     expect(closed).toEqual([]);
+  });
+
+  // #355: a failed add is said as the Diagrams view's drop says it (DomainTreeProvider.dropTables).
+  describe('an add that fails (#355)', () => {
+    let shown: ReturnType<typeof vi.spyOn>;
+    beforeEach(() => {
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      shown = vi.spyOn(vscode.window, 'showErrorMessage').mockResolvedValue(undefined as never);
+    });
+    const failedWith = async (err: Error): Promise<[string, ...string[]]> => {
+      deps.addTables = vi.fn(async () => { throw err; });
+      dropOpensFile();
+      await vi.waitFor(() => expect(shown).toHaveBeenCalled());
+      return shown.mock.calls[0] as unknown as [string, ...string[]];
+    };
+
+    it('ours: never the exception\'s text; says nothing was added and whose problem it is; Send Feedback and Try Again, counted as ours', async () => {
+      const recorded = vi.spyOn(telemetry, 'error');
+      const [message, ...items] = await failedWith(new Error('Cannot read properties of undefined (reading \'filePath\') at /Users/someone/secret/x.ts'));
+      expect(message).not.toContain('Cannot read properties');
+      expect(message).not.toContain('/Users/someone');
+      expect(message).toBe("Add to Diagram hit a problem in ERD Studio while adding the tables, so nothing was added to showcase. This isn't something you did. Please send us a report.");
+      expect(items).toEqual([SEND_FEEDBACK_BUTTON, TRY_AGAIN_BUTTON]);
+      expect(recorded).toHaveBeenCalledWith('commandFailedOurs');
+      // Logged with its stack under its own tag (never a bare [ERD Studio]).
+      expect(console.error).toHaveBeenCalledWith(expect.stringContaining('[MissedCanvasDrop]'), expect.any(Error));
+    });
+
+    it('a folder ERD Studio may not write: names the folder, Show Folder and Try Again, no report', async () => {
+      const recorded = vi.spyOn(telemetry, 'error');
+      const err = Object.assign(new Error(`EACCES: permission denied, open '${SHOWCASE}'`), { code: 'EACCES', path: SHOWCASE });
+      const [message, ...items] = await failedWith(err);
+      expect(message).not.toContain('EACCES');
+      expect(message).toBe("Add to Diagram: ERD Studio isn't allowed to write to .erd-studio/silver/diagrams/. Check the folder's permissions, then try again. Nothing was added to showcase.");
+      expect(items).toEqual([SHOW_FOLDER_BUTTON, TRY_AGAIN_BUTTON]);
+      expect(recorded).not.toHaveBeenCalledWith('commandFailedOurs');
+    });
+
+    it('a refusal written for the user keeps its words, with no buttons', async () => {
+      const [message, ...items] = await failedWith(new DbmlEditRefused('silver/diagrams/showcase.dbml', 'Fix the DBML first.'));
+      expect(message).toBe('ERD Studio: The tables weren\'t added to showcase. Fix the DBML first.');
+      expect(items).toEqual([]);
+    });
+
+    it('Try Again adds the same tables to the same diagram again, and a retry that works names the add in the status bar', async () => {
+      const status = vi.spyOn(vscode.window, 'setStatusBarMessage');
+      let calls = 0;
+      deps.addTables = vi.fn(async () => {
+        calls++;
+        if (calls === 1) throw new Error('boom');
+        return ['dim_location'];
+      });
+      shown.mockResolvedValueOnce(TRY_AGAIN_BUTTON as never);
+      dropOpensFile();
+      await vi.waitFor(() => expect(deps.addTables).toHaveBeenCalledTimes(2));
+      expect(deps.addTables).toHaveBeenNthCalledWith(2, SHOWCASE, ['dim_location'], undefined);
+      await vi.waitFor(() => expect(status).toHaveBeenCalledWith('$(check) ERD Studio: Added "dim_location" to showcase', expect.any(Number)));
+      expect(shown).toHaveBeenCalledTimes(1);
+    });
   });
 });

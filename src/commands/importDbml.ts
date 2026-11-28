@@ -104,7 +104,7 @@ import {
 } from '../services/importReport';
 import { recordImportReport, updateImportReport } from '../services/importReportStore';
 import { recordImportOutcome, type ImportGuideSource, type ImportOutcome, type ImportOutcomeImporter } from '../services/importOutcomeTelemetry';
-import type { SqlDialect } from '../services/sqlDdlModel';
+import type { SqlDialect, SqlDuplicateClass } from '../services/sqlDdlModel';
 import { WHICH_LAYER_FOR_DIAGRAM, defaultDiagramLayer } from '../services/layerWording';
 
 export const IMPORT_DBML_COMMAND = 'erdStudio.importDbml';
@@ -278,6 +278,11 @@ export interface ImportDbmlDeps {
   /** With `'sql'`: the dialect the conversion ran with (counted with the import's outcome, nothing else). */
   sqlDialect?: SqlDialect;
   /**
+   * With `'sql'`: what each table defined twice was (the conversion's `duplicateTable`
+   * problems, #358), counted with the import's outcome and nothing else.
+   */
+  sqlDuplicates?: readonly SqlDuplicateClass[];
+  /**
    * With `'sql'`: the import guide card the import started from (the Fabric
    * card's SQL buttons), counted with the import's outcome and nothing else.
    * It travels with `deps`, so Try Again and Choose Another Name keep it.
@@ -407,7 +412,7 @@ interface ImportRunProgress {
 function countImportOutcome(
   deps: Pick<ImportDbmlDeps, 'source' | 'sqlDialect' | 'guideSource'>,
   progress: ImportRunProgress,
-  report: { outcome?: ImportOutcome; ledger?: readonly LedgerEntry[] },
+  report: { outcome?: ImportOutcome; ledger?: readonly LedgerEntry[]; duplicates?: readonly SqlDuplicateClass[] },
 ): void {
   const importer = IMPORT_OUTCOME_IMPORTERS[deps.source ?? 'file'];
   if (!importer || progress.outcomeCounted) return;
@@ -465,7 +470,10 @@ function reportUnexpectedImportFailure(ui: ImportDbmlUi, source: ImportDbmlSourc
     (m, ...items) => ui.showErrorMessage(m, ...items),
     message,
     actions,
-    (choice, actionErr) => log.error(`[ERD Studio] ${title}: "${choice}" failed:`, actionErr),
+    (choice, actionErr) => {
+      log.error(`[ERD Studio] ${title}: "${choice}" failed:`, actionErr);
+      telemetry.error('loggedErrorAtFailureAction');
+    },
   );
   const written = progress.written;
   if (written) {
@@ -556,6 +564,7 @@ async function runImportDbml(
     // A button that fails (a re-run whose read throws) still says so, rather than seeming to do nothing.
     showErrorWithActions((m, ...items) => ui.showErrorMessage(m, ...items), message, actions, (choice, err) => {
       log.error(`[ERD Studio] ${title}: "${choice}" failed:`, err);
+      telemetry.error('loggedErrorAtFailureAction');
       const doing = `while running ${choice}`;
       showError(oursMessage(title, doing, 'nothing was changed'), { [SEND_FEEDBACK_BUTTON]: sendFeedback(doing, err) });
     });
@@ -870,7 +879,11 @@ async function runImportDbml(
   }
   // The import has its result (the plan, about to show): how the reading went and the
   // ledger's cause classes, the conversion's and the plan's. Never again on a redraw of it.
-  countImportOutcome(deps, progress, { ledger: [...(plan.report.ledger ?? []), ...(deps.origin?.ledger ?? [])] });
+  // What its tables defined twice were (#358) goes with that ledger only, never with a failure's outcome.
+  countImportOutcome(deps, progress, {
+    ledger: [...(plan.report.ledger ?? []), ...(deps.origin?.ledger ?? [])],
+    ...(deps.source === 'sql' && deps.sqlDuplicates?.length ? { duplicates: deps.sqlDuplicates } : {}),
+  });
 
   // 5. The draft: the plan as a read-only diagram, what it creates, reuses and
   // leaves out, before any write (or, with no preview, the dry run's modal).
@@ -1091,7 +1104,10 @@ async function runImportDbml(
     if (partial) {
       void Promise.resolve(ui.showInformationMessage(partial, SHOW_IMPORT_REPORT_LABEL))
         .then((choice) => (choice === SHOW_IMPORT_REPORT_LABEL ? ui.showImportReport?.(reportId) : undefined))
-        .catch((err: unknown) => log.error(`[ERD Studio] ${title}: "${SHOW_IMPORT_REPORT_LABEL}" failed:`, err));
+        .catch((err: unknown) => {
+          log.error(`[ERD Studio] ${title}: "${SHOW_IMPORT_REPORT_LABEL}" failed:`, err);
+          telemetry.error('loggedErrorAtFailureAction');
+        });
     }
     return { domainPath, plan };
   }
