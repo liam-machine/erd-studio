@@ -50,7 +50,7 @@ import { StartIntentTracker } from '../../src/commands/startIntent';
 import { execFileSync } from 'child_process';
 import * as dbtProjectSearch from '../../src/services/dbtProjectSearch';
 import { resolveDbtProject } from '../../src/services/projectDiscovery';
-import { DRAFT_SCOPE_EMPTY_NOTICE } from '../../src/services/draftModel';
+import { DBT_KEEP_SELECTORS_SENTENCE, DBT_NO_SELECTORS_SENTENCE, DRAFT_SCOPE_EMPTY_NOTICE } from '../../src/services/draftModel';
 import { SHOW_RELATIONSHIPS_BUTTON } from '../../src/commands/goToTable';
 import { START_SUGGESTION_ALREADY_KEPT_MESSAGE } from '../../src/services/startSuggestion';
 import { GlassSidebarProvider } from '../../src/providers/glassSidebar/GlassSidebarProvider';
@@ -3151,6 +3151,27 @@ describe('erdStudio.drawFromDbt', () => {
     expect(validate('showcase')).toBe('There is already a diagram named "showcase" in this layer');
     expect(validate('Bad Name')).toBeDefined();
     expect(validate('brand-new')).toBeUndefined();
+  });
+
+  it('the draft promises a selector in selectors.yml only when the project has the file (Keep creates none)', async () => {
+    await activate(context);
+    answer('silver');
+    const detailOf = (d: unknown): string => (d as { banner?: { detail?: string } }).banner?.detail ?? '';
+
+    expect(fs.existsSync(path.join(root, 'selectors.yml'))).toBe(true);
+    const withFile = await drawToDraft();
+    expect(detailOf(withFile.draft)).toContain(DBT_KEEP_SELECTORS_SENTENCE);
+    expect(detailOf(withFile.draft)).not.toContain(DBT_NO_SELECTORS_SENTENCE);
+    closeDraft();
+    await withFile.run;
+
+    fs.rmSync(path.join(root, 'selectors.yml'));
+    const without = await drawToDraft();
+    expect(detailOf(without.draft)).toContain(DBT_NO_SELECTORS_SENTENCE);
+    expect(detailOf(without.draft)).not.toContain(DBT_KEEP_SELECTORS_SENTENCE);
+    closeDraft();
+    await without.run;
+    expect(fs.existsSync(path.join(root, 'selectors.yml'))).toBe(false);
   });
 
   it('says how to get models when dbt has none to draw', async () => {
