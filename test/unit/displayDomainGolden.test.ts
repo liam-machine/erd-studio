@@ -11,8 +11,9 @@
  * Outputs (packages/core/test/fixtures/golden):
  *   <case>.host.json                 posted[0] of sendSubjectAreaData (logical stage)
  *   <case>.unified.json              subjectAreaService.getSubjectArea(), JSON round-tripped
- *   missing-positions.persist.json   sendSubjectAreaData with persistPositions: the
- *                                    posted message plus the WorkspaceEdit applied
+ *   missing-positions.persist.json   the first load of a partly placed diagram (it
+ *                                    writes nothing) plus the WorkspaceEdit its first
+ *                                    layout edit applies, which saves the drawn positions
  *   showcase.stage-logical.json      the stageData reply of a switch to logical
  *   dbt-project.stage-physical.json  the stageData reply of a switch to physical
  *   dbt-project.physical.host.json   sendSubjectAreaData on a panel showing physical
@@ -338,7 +339,7 @@ type Posted = { type: string; payload?: unknown };
 async function sendSubjectAreaData(
   host: Host,
   filePath: string,
-  options: { stage?: 'logical' | 'physical'; persistPositions?: boolean; persistDocument?: boolean } = {},
+  options: { stage?: 'logical' | 'physical'; persistDocument?: boolean } = {},
 ): Promise<Posted[]> {
   const panel = createMockWebviewPanel();
   const doc = openDocument(filePath, { persist: options.persistDocument });
@@ -348,8 +349,34 @@ async function sendSubjectAreaData(
     panelKey = 'golden-panel';
     internals.openPanels.set(panelKey, { document: doc, webview: panel.webview, activeStage: options.stage });
   }
-  await internals.sendSubjectAreaData(doc, panel.webview, panelKey, { persistPositions: options.persistPositions });
+  await internals.sendSubjectAreaData(doc, panel.webview, panelKey);
   return JSON.parse(JSON.stringify(panel._postedMessages)) as Posted[];
+}
+
+/**
+ * A canvas's first load of `filePath` (the `ready` path, which writes
+ * nothing), then the user's first layout edit: the tables in `drop` are
+ * dropped where the canvas drew them. That edit saves every position the
+ * canvas drew but the file did not store. Returns the load's posts and the
+ * positions it drew.
+ */
+async function openThenDropWhereDrawn(
+  host: Host,
+  filePath: string,
+  drop: readonly string[],
+): Promise<{ posted: Posted[]; editsAtOpen: number }> {
+  const panel = createMockWebviewPanel();
+  const doc = openDocument(filePath, { persist: true });
+  const internals = host.provider as any;
+  // A canvas's panel is keyed by its document, as resolveCustomTextEditor keys it.
+  const panelKey = doc.uri.toString();
+  internals.openPanels.set(panelKey, { document: doc, webview: panel.webview, activeStage: 'logical' });
+  await internals.sendSubjectAreaData(doc, panel.webview, panelKey, { firstLoad: true });
+  const posted = JSON.parse(JSON.stringify(panel._postedMessages)) as Posted[];
+  const editsAtOpen = _appliedEdits.length;
+  const drawn = (posted[posted.length - 1].payload as { viewConfig: { positions: Record<string, { x: number; y: number }> } }).viewConfig.positions;
+  await internals.handleUpdatePositions(doc, panel.webview, Object.fromEntries(drop.map((name) => [name, { ...drawn[name] }])));
+  return { posted, editsAtOpen };
 }
 
 /** Run the switchStage handler once and return what was posted. */
@@ -415,7 +442,7 @@ describe('DisplaySubjectArea golden output (extension host)', () => {
     });
   });
 
-  describe('missing-positions with persistPositions', () => {
+  describe('missing-positions: the first load, then the first layout edit', () => {
     let tmpRoot: string;
 
     beforeEach(() => {
@@ -427,14 +454,15 @@ describe('DisplaySubjectArea golden output (extension host)', () => {
       fs.rmSync(tmpRoot, { recursive: true, force: true });
     });
 
-    it('posts the domain and writes the computed positions through one WorkspaceEdit', async () => {
+    // The golden's WorkspaceEdit is the one the first load wrote before opening
+    // stopped writing: the first layout edit (fct_order dropped where it was
+    // drawn) now saves the same positions, dim_date's folded in, byte for byte.
+    it('posts the domain without a write; the first layout edit writes the drawn positions through one WorkspaceEdit', async () => {
       const file = subjectAreaFile(tmpRoot, SUBJECT_AREA_CASES['missing-positions']);
-      const posted = await sendSubjectAreaData(buildHost(tmpRoot), file, {
-        persistPositions: true,
-        persistDocument: true,
-      });
+      const { posted, editsAtOpen } = await openThenDropWhereDrawn(buildHost(tmpRoot), file, ['fct_order']);
       expect(posted).toHaveLength(1);
       expect(posted[0].type).toBe('domainLoaded');
+      expect(editsAtOpen).toBe(0);
       expect(_appliedEdits).toHaveLength(1);
 
       const applyEdit = _appliedEdits.map((edit) =>
@@ -539,16 +567,19 @@ describe('DisplaySubjectArea golden output (extension host)', () => {
       fs.rmSync(tmpRoot, { recursive: true, force: true });
     });
 
-    it('opens with a model missing its position, and saves it into the v6 file under the v6 keys', async () => {
+    it('opens with a model missing its position without a write, and its first layout edit saves it into the v6 file under the v6 keys', async () => {
       const file = subjectAreaFile(tmpRoot, 'silver/showcase.json');
       const doc = JSON.parse(fs.readFileSync(file, 'utf-8'));
       delete doc.viewConfig.positions.dim_task;
       fs.writeFileSync(file, JSON.stringify(doc, null, 2) + '\n');
-      const posted = await sendSubjectAreaData(buildHost(tmpRoot), file, { persistPositions: true, persistDocument: true });
+      const unopened = fs.readFileSync(file, 'utf-8');
+      const { posted, editsAtOpen } = await openThenDropWhereDrawn(buildHost(tmpRoot), file, ['dim_task']);
+      expect(editsAtOpen).toBe(0);
       expect(posted[posted.length - 1].type).toBe('domainLoaded');
       const payload = posted[posted.length - 1].payload as { readOnly: boolean; viewConfig: { positions: Record<string, unknown> } };
       expect(payload.readOnly).toBe(false);
       expect(_appliedEdits).toHaveLength(1);
+      expect(fs.readFileSync(file, 'utf-8')).not.toBe(unopened);
       const after = JSON.parse(fs.readFileSync(file, 'utf-8'));
       // Only the new position: the file keeps the v6 keys, in their order.
       expect(after.viewConfig.positions.dim_task).toEqual(payload.viewConfig.positions.dim_task);

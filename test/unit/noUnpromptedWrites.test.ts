@@ -3,9 +3,9 @@
  * something the user did in it. Opening a window or a diagram never writes.
  *
  * Every test states the RULE. On origin/develop (242f93f5) the S1 / S2 cases
- * (selectors.yml) and the ones still marked "FAILS on develop" (positions)
- * failed, proving the unprompted write; the rest are guards that passed
- * then and must keep passing.
+ * (selectors.yml) and the P1 ones (positions: a partly placed diagram, and a
+ * fresh one's first-open layout) failed, proving the unprompted write; the
+ * rest are guards that passed then and must keep passing.
  *
  * Runs the real activate() on temp copies of test/fixtures/dbt-project and
  * its DBML twin.
@@ -18,6 +18,7 @@ import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 
+import { _appliedEdits } from '../__mocks__/vscode';
 import { activate, _resetFirstRunGuardForTests } from '../../src/extension';
 import type { SemanticEditorProvider } from '../../src/providers/SemanticEditorProvider';
 
@@ -134,9 +135,15 @@ describe.each([
     provider = registerEditor.mock.calls[0][1] as unknown as SemanticEditorProvider;
   }
 
+  /** Saves of the diagram's document, counted from its open. */
+  let saves = 0;
+
   async function openShowcase(): Promise<Panel> {
     const file = showcasePath();
     const document = vscode.createMockTextDocument(file, fs.readFileSync(file, 'utf-8'), { persist: true });
+    const save = document.save.bind(document);
+    saves = 0;
+    document.save = async () => { saves++; return save(); };
     (vscode.workspace.textDocuments as unknown[]).push(document);
     const panel = vscode.createMockWebviewPanel();
     await provider.resolveCustomTextEditor(document as never, panel as never, {} as vscode.CancellationToken);
@@ -239,7 +246,7 @@ describe.each([
 
   // ---- P1: opening a diagram ------------------------------------------------
 
-  it('P1 opening a diagram with a table that has no saved position writes nothing (FAILS on develop)', async () => {
+  it('P1 opening a diagram with a table that has no saved position writes nothing', async () => {
     forgetDimDatePosition();
     await start();
     await settle();
@@ -253,22 +260,53 @@ describe.each([
     expect(fs.readFileSync(showcasePath(), 'utf-8')).toBe(before);
   });
 
-  it('fresh diagram (no positions): ready writes nothing itself, but asks the webview to auto layout', async () => {
+  it('P1 a fresh diagram (no positions): opening, the webview\'s unsaved first-open layout and layoutFinished write nothing', async () => {
     forgetAllPositions();
     await start();
     await settle();
-    const before = fs.readFileSync(showcasePath(), 'utf-8');
+    const before = snapshot(ws);
     const panel = await openShowcase();
     const loaded = posted(panel).find((m) => m.type === 'domainLoaded')!;
     expect(loaded.autoLayout).toBe(true);
-    expect(fs.readFileSync(showcasePath(), 'utf-8')).toBe(before);
-    // The webview's first-open ELK run then posts one updatePositions with every
-    // table (Toolbar.runLayout(true), pinned by firstOpenAutoLayout.test.tsx).
-    // The host cannot tell it from a drag and writes it: an open that writes.
-    const positions = Object.fromEntries(Object.keys(loaded.payload.viewConfig.positions).map((n, i) => [n, { x: i * 300, y: 0 }]));
-    await panel._simulateMessage({ type: 'updatePositions', payload: { positions } });
+    expect(loaded).not.toHaveProperty('saveLayout');
+    // What the webview's first-open ELK run sends back (Toolbar.runLayout(true, false), pinned by
+    // firstOpenAutoLayout.test.tsx): every table, marked unsaved, then its timing.
+    const elk = Object.fromEntries(Object.keys(loaded.payload.viewConfig.positions).map((n, i) => [n, { x: i * 300, y: 0 }]));
+    const editsAtOpen = _appliedEdits.length;
+    await panel._simulateMessage({ type: 'updatePositions', payload: { positions: elk, unsaved: true } });
+    await panel._simulateMessage({ type: 'layoutFinished', payload: { ms: 80, ok: true, firstOpen: true } });
     await settle();
-    expect(fs.readFileSync(showcasePath(), 'utf-8')).not.toBe(before);
+    expect(_appliedEdits.length).toBe(editsAtOpen);
+    expect(saves).toBe(0);
+    expect(changed(before, snapshot(ws))).toEqual([]);
+    // Still a position for every table on the canvas, and a refresh draws the layout it holds.
+    const models = (loaded.payload.models as Array<{ name: string }>).map((m) => m.name);
+    for (const name of models) expect(loaded.payload.viewConfig.positions[name]).toBeDefined();
+    await provider.refreshAllOpenSubjectAreas();
+    const redrawn = posted(panel).filter((m) => m.type === 'domainLoaded').at(-1)!;
+    expect(redrawn).not.toHaveProperty('autoLayout');
+    expect(redrawn.payload.viewConfig.positions).toEqual(elk);
+    expect(changed(before, snapshot(ws))).toEqual([]);
+  });
+
+  it('boundary: the first drag of that fresh diagram saves the layout the user saw', async () => {
+    forgetAllPositions();
+    await start();
+    await settle();
+    const panel = await openShowcase();
+    const loaded = posted(panel).find((m) => m.type === 'domainLoaded')!;
+    const elk = Object.fromEntries(Object.keys(loaded.payload.viewConfig.positions).map((n, i) => [n, { x: i * 300, y: 0 }]));
+    await panel._simulateMessage({ type: 'updatePositions', payload: { positions: elk, unsaved: true } });
+    const before = fs.readFileSync(showcasePath(), 'utf-8');
+    await panel._simulateMessage({ type: 'updatePositions', payload: { positions: { dim_date: { x: 5, y: 5 } } } });
+    await settle();
+    const after = fs.readFileSync(showcasePath(), 'utf-8');
+    expect(after).not.toBe(before);
+    for (const [name, p] of Object.entries({ ...elk, dim_date: { x: 5, y: 5 } })) {
+      expect(after).toMatch(storage === 'yaml'
+        ? new RegExp(`"${name}": \\{\\s*"x": ${p.x},\\s*"y": ${p.y}\\s*\\}`)
+        : new RegExp(`\\n {4}${name} ${p.x} ${p.y}\\n`));
+    }
   });
 
   // ---- The whole picture ----------------------------------------------------
@@ -282,7 +320,7 @@ describe.each([
     expect(changed(before, snapshot(ws))).toEqual([]);
   });
 
-  it('opening the window with selectors.yml gone and a table unplaced changes no file (FAILS on develop)', async () => {
+  it('opening the window with selectors.yml gone and a table unplaced changes no file', async () => {
     fs.rmSync(selectorsPath());
     forgetDimDatePosition();
     const before = snapshot(ws);

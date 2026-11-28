@@ -6,9 +6,10 @@
  * faked: it never answers, as a layout past the 30 s guard does) against the
  * real store, and checks what the issue's acceptance criteria ask for:
  *
- *  - a first-open layout that times out leaves the diagram with saved
- *    positions (one `updatePositions` for every table), so the next open does
- *    not start another 30-second layout;
+ *  - a first-open layout that times out still sends positions for every
+ *    table (one `updatePositions`; `unsaved`, since opening writes nothing,
+ *    so the host holds them), and the host's next load carries them without
+ *    the flag, so the canvas does not start another 30-second layout;
  *  - no toast contains "ELK" or a raw error message, for any failure class:
  *    each class's words and buttons are pinned below (`layoutFailureNotice`).
  */
@@ -99,7 +100,7 @@ afterEach(() => {
 });
 
 describe('#294 first-open layout of a large import that times out', () => {
-  it('saves positions for every table once, and the next open does not lay out again', async () => {
+  it('sends positions for every table once, and the host\'s next load (carrying them) does not lay out again', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     act(() => {
       useEditorStore.getState().setDomain(importedSubjectArea(hostFallback));
@@ -115,6 +116,8 @@ describe('#294 first-open layout of a large import that times out', () => {
     const saved = posts('updatePositions');
     expect(saved).toHaveLength(1);
     expect(Object.keys(saved[0].payload.positions)).toHaveLength(TABLES);
+    // An open's layout: held by the host, not written.
+    expect(saved[0].payload.unsaved).toBe(true);
     expect(posts('layoutFinished')[0].payload).toMatchObject({ ok: true, firstOpen: true, rung: 3 });
     // The timeout's plain words, with Send Feedback only (trying again would wait again).
     expect(useEditorStore.getState().toastMessage).toBe(
@@ -122,7 +125,7 @@ describe('#294 first-open layout of a large import that times out', () => {
     );
     expect(useEditorStore.getState().toastActions).toEqual(['layoutFeedback']);
 
-    // The host's next load carries the saved positions and no autoLayout flag.
+    // The host's next load carries the positions it holds and no autoLayout flag.
     act(() => {
       useEditorStore.getState().setDomain(importedSubjectArea(saved[0].payload.positions));
       useEditorStore.getState().setPendingAutoLayout(false);

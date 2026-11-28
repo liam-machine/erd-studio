@@ -296,7 +296,8 @@ function EditorCanvas() {
           applySubjectAreaPayload(msg.payload);
           // Set on a fresh domain (no stored positions), cleared by every other
           // payload — a later load without the flag cancels a pending layout.
-          useEditorStore.getState().setPendingAutoLayout(msg.autoLayout === true);
+          // `saveLayout`: the layout is the user's own (saved); else it is sent unsaved.
+          useEditorStore.getState().setPendingAutoLayout(msg.autoLayout === true, msg.saveLayout === true);
           // Follows every payload: one without the flag (dbt has since run)
           // hides the logical "Run dbt parse" hint.
           useEditorStore.getState().setManifestMissing(msg.manifestMissing === true);

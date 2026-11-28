@@ -796,12 +796,19 @@ describe('Turn Round (commitRelationshipWrite) on a DBML diagram', () => {
   });
 });
 
-describe('the ready load\'s position save (autoPositionNewTables, §5.3)', () => {
+describe('a partly placed diagram: opening writes nothing, the first drag saves the drawn positions (§5.3)', () => {
   /** sales.dbml without bridge_empty's erd_layout line: a partially positioned diagram. */
   const dropPosition = (): void => {
     fs.writeFileSync(at('gold/diagrams/sales.dbml'), fs.readFileSync(at('gold/diagrams/sales.dbml'), 'utf-8').replace('    bridge_empty 760 400\n', ''));
   };
-  async function openAndReady(prepare?: () => void): Promise<{ r: Run; posted: Array<{ type: string; payload?: unknown }> }> {
+  type Posted = Array<{ type: string; payload?: unknown }>;
+  const errorsIn = (posted: Posted): string[] => posted.filter((m) => m.type === 'error').map((m) => (m.payload as { message: string }).message);
+  /** Open sales.dbml (its ready load done): what the load did, and a `drag` that reports what a drag does. */
+  async function openAndReady(prepare?: () => void): Promise<{
+    r: Run;
+    posted: Posted;
+    drag: (positions: Record<string, { x: number; y: number }>) => Promise<{ errors: string[]; before: Record<string, string>; after: Record<string, string> }>;
+  }> {
     const tracker = new OwnWriteTracker();
     const recorded: string[] = [];
     vi.spyOn(tracker, 'recordWrite').mockImplementation((p: string) => { recorded.push(relOf(p)); });
@@ -816,40 +823,66 @@ describe('the ready load\'s position save (autoPositionNewTables, §5.3)', () =>
     panel._postedMessages.length = 0;
     const before = snapshot();
     await panel._simulateMessage({ type: 'ready' });
-    const posted = panel._postedMessages as Array<{ type: string; payload?: unknown }>;
-    const errors = posted.filter((m) => m.type === 'error').map((m) => (m.payload as { message: string }).message);
+    const posted = [...panel._postedMessages] as Posted;
     const written = [...new Set(_appliedEdits.flatMap((e) => e._ops.map((op) => relOf((op as { uri: { fsPath: string } }).uri.fsPath))))].sort();
-    return { r: { errors, written, before, after: snapshot(), provider, tracker, recorded }, posted };
+    const drag = async (positions: Record<string, { x: number; y: number }>) => {
+      panel._postedMessages.length = 0;
+      const dragBefore = snapshot();
+      await panel._simulateMessage({ type: 'updatePositions', payload: { positions } });
+      return { errors: errorsIn(panel._postedMessages as Posted), before: dragBefore, after: snapshot() };
+    };
+    return { r: { errors: errorsIn(posted), written, before, after: snapshot(), provider, tracker, recorded }, posted, drag };
   }
+  const drawnIn = (posted: Posted): Record<string, { x: number; y: number }> =>
+    (posted.find((m) => m.type === 'domainLoaded') as { payload: { viewConfig: { positions: Record<string, { x: number; y: number }> } } }).payload.viewConfig.positions;
 
-  it('a partially positioned diagram: only erd_layout changes, every other byte of the .dbml stays', async () => {
+  it('opening writes nothing; dragging a neighbour rewrites only erd_layout, with the unstored table where it was drawn', async () => {
     dropPosition();
-    const { r, posted } = await openAndReady();
-    expectWrote(r, ['gold/diagrams/sales.dbml']);
-    const cut = (t: string): string => t.replace(/ {2}erd_layout: '''[^]*?'''\n/, '');
-    expect(cut(r.after['gold/diagrams/sales.dbml'])).toBe(cut(r.before['gold/diagrams/sales.dbml']));
-    expect(layoutIn(r.after['gold/diagrams/sales.dbml'])).toMatch(/\n {4}bridge_empty -?\d/);
-    expect(posted.some((m) => m.type === 'domainLoaded')).toBe(true);
+    const { r, posted, drag } = await openAndReady();
+    expect(_appliedEdits).toHaveLength(0);
+    expect(r.after).toEqual(r.before);
+    const drawn = drawnIn(posted).bridge_empty;
+    expect(drawn).toBeDefined();
+
+    const moved = await drag({ fct_order: { x: 444, y: 222 } });
+    expect(moved.errors).toEqual([]);
+    expect(_appliedEdits).toHaveLength(1);
+    const cut = (t: string): string => t.replace(/ {2}erd_layout: \'\'\'[^]*?\'\'\'\n/, '');
+    expect(cut(moved.after['gold/diagrams/sales.dbml'])).toBe(cut(moved.before['gold/diagrams/sales.dbml']));
+    expect(layoutIn(moved.after['gold/diagrams/sales.dbml'])).toContain(`\n    bridge_empty ${drawn.x} ${drawn.y}\n`);
+    expect(layoutIn(moved.after['gold/diagrams/sales.dbml'])).toContain('\n    fct_order 444 222\n');
+    expect(Object.keys(moved.after).filter((k) => moved.after[k] !== moved.before[k])).toEqual(['gold/diagrams/sales.dbml']);
   });
 
   it.each([
     ['the diagram is read-only (a second Project)', () => {
       fs.appendFileSync(at('gold/diagrams/sales.dbml'), "\nProject other {\n  Note: 'x'\n}\n");
-    }, undefined],
+    }],
     ['its erd_layout holds a git merge conflict', () => {
       fs.writeFileSync(at('gold/diagrams/sales.dbml'), fs.readFileSync(at('gold/diagrams/sales.dbml'), 'utf-8')
         .replace('    fct_order 400 200\n', '<<<<<<< HEAD\n    fct_order 400 200\n=======\n    fct_order 500 200\n>>>>>>> theirs\n'));
-    }, undefined],
-  ] as const)('%s: nothing is written, and the canvas still loads with the computed positions', async (_label, onDisk, whileOpen) => {
+    }],
+  ] as const)('%s: opening writes nothing and the canvas loads with the computed positions; a drag says no more than it would with every table stored', async (_label, onDisk) => {
+    // A drag on the same diagram with bridge_empty stored: the answer a drag gets today.
+    onDisk();
+    const stored = await openAndReady();
+    const expected = await stored.drag({ fct_order: { x: 444, y: 222 } });
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.cpSync(NATIVE, root, { recursive: true });
+    _appliedEdits.length = 0;
+
     dropPosition();
-    (onDisk as (() => void) | undefined)?.();
-    const { r, posted } = await openAndReady(whileOpen as (() => void) | undefined);
+    onDisk();
+    const { r, posted, drag } = await openAndReady();
     expect(_appliedEdits).toHaveLength(0);
     expect(r.after).toEqual(r.before);
     expect(r.errors).toEqual([]);
-    const domain = posted.find((m) => m.type === 'domainLoaded') as { payload: { viewConfig: { positions: Record<string, unknown> } } } | undefined;
-    expect(domain).toBeDefined();
-    expect(Object.keys(domain!.payload.viewConfig.positions)).toContain('bridge_empty');
+    expect(Object.keys(drawnIn(posted))).toContain('bridge_empty');
+    const moved = await drag({ fct_order: { x: 444, y: 222 } });
+    // The same words (the file is one erd_layout line shorter, so a line number may differ by one).
+    const unnumbered = (errors: string[]): string[] => errors.map((e) => e.replace(/\b([Ll]ine) \d+/g, '$1 N'));
+    expect(unnumbered(moved.errors)).toEqual(unnumbered(expected.errors));
+    expect(layoutIn(moved.after['gold/diagrams/sales.dbml'])).not.toMatch(/\n {4}bridge_empty /);
   });
 });
 

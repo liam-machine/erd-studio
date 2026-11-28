@@ -507,13 +507,19 @@ describe('removeModels viewConfig cleanup (H35)', () => {
     expect(afterV5.logical.models).not.toContain('dim_task');
     expect(afterV5).not.toHaveProperty('viewConfig');
 
-    // Same for the V4 arm, which used to write an empty viewConfig stub.
+    // Same for the V4 arm, which used to write an empty viewConfig stub. The
+    // refresh after the first remove drew every table where the host placed it
+    // (the file stores no position), and a remove is a layout edit, so it saves
+    // what the canvas drew for the tables left: never an empty stub, and never
+    // a position for the table it removed.
     downgradeToV4(file, doc);
     await panel._simulateMessage({ type: 'removeModels', payload: { modelNames: ['dim_project'] } });
 
     const afterV4 = readSubjectArea(file);
-    expect(afterV4.logical.models.map((m: { name: string }) => m.name)).not.toContain('dim_project');
-    expect(afterV4).not.toHaveProperty('viewConfig');
+    const left = afterV4.logical.models.map((m: { name: string }) => m.name);
+    expect(left).not.toContain('dim_project');
+    expect(Object.keys(afterV4.viewConfig)).toEqual(['positions']);
+    expect(Object.keys(afterV4.viewConfig.positions).sort()).toEqual([...left].sort());
     expect(lastError(panel)).toBeUndefined();
   });
 });

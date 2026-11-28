@@ -186,13 +186,24 @@ export interface DomainLoadedMessage {
   /**
    * Set on a logical-stage load when the domain has at least one model and
    * NONE of them has a stored `viewConfig.positions` entry — typically a
-   * domain an AI assistant has just written with `viewConfig: {}`. The
-   * payload still carries fallback positions (so nothing paints at 0,0), but
-   * the host has not persisted them: the webview runs the ELK auto layout
-   * once and persists that through `updatePositions` instead. Absent means
-   * "do nothing" — partially positioned domains keep the host's placement.
+   * domain an AI assistant has just written with `viewConfig: {}` — and this
+   * canvas does not already hold its first-open layout. The payload still
+   * carries fallback positions (so nothing paints at 0,0), and the host has
+   * written nothing: the webview runs the ELK auto layout once and sends it
+   * back through `updatePositions`, with `unsaved` unless `saveLayout` is
+   * set. Absent means "do nothing" — partially positioned domains keep the
+   * host's placement, and a refresh of a domain whose layout the host holds
+   * carries those positions instead of asking again.
    */
   autoLayout?: boolean;
+  /**
+   * With `autoLayout`: this layout is the user's own doing (they just created
+   * the diagram in this window, or added tables to an empty one), so the
+   * webview saves it — a plain `updatePositions`, as the Layout button posts.
+   * Absent: opening a diagram writes nothing, so the layout is posted with
+   * `unsaved` and saved only by the user's first edit of the layout.
+   */
+  saveLayout?: true;
   /**
    * Logical stage only (#113): the dbt project has no `manifest.json` yet and
    * this workspace has not dismissed the hint. The webview shows the "Run dbt
@@ -958,12 +969,20 @@ export interface AddModelsFromDbtMessage {
  * `annotations` carries the final positions of any annotation nodes moved in
  * the same drag so a multi-drag of models and notes is one WorkspaceEdit and
  * one undo step. Unknown annotation ids are ignored.
+ *
+ * `unsaved` (only `true`): the first-open auto layout of a load without
+ * `saveLayout` (`DomainLoadedMessage`). The host validates the positions as
+ * for any other, holds those of tables the diagram stores no position for as
+ * what the canvas draws, and writes nothing; the user's first edit of the
+ * layout saves them. Absent: a drag, the Layout button or Shift+L, or a
+ * saved first-open layout, written as before.
  */
 export interface UpdatePositionsMessage {
   type: 'updatePositions';
   payload: {
     positions: Record<string, { x: number; y: number }>;
     annotations?: Array<{ id: string; x: number; y: number }>;
+    unsaved?: true;
   };
 }
 

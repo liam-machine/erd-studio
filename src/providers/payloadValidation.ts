@@ -1166,6 +1166,14 @@ export function validatePositions(value: unknown): string | null {
   return null;
 }
 
+/**
+ * Validate `updatePositions`' optional `unsaved` flag (the first-open auto
+ * layout of a diagram whose layout is not to be saved): absent, or `true`.
+ */
+export function validateUnsavedPositionsFlag(value: unknown): string | null {
+  return value === undefined || value === true ? null : '"unsaved" must be true when present.';
+}
+
 export interface AnnotationPositionPayload {
   id: string;
   x: number;

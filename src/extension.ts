@@ -3276,6 +3276,8 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
   const refreshAfterNewSubjectArea = ({ domainPath, modelNames, changedModelNames }: {
     domainPath: string; modelNames: string[]; changedModelNames: string[];
   }): void => {
+    // The user just made this diagram: its first open's automatic layout is saved with it.
+    editorProvider.saveFirstLayoutWhenOpened(domainPath);
     layerService.invalidateCache();
     treeProvider.invalidateSubjectArea(domainPath);
     treeProvider.refresh();
@@ -3445,6 +3447,8 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
     refreshContextKeys();
     treeProvider.refresh();
     selectorsService.scheduleRegenerate();
+    // The user just made this diagram: its first open's automatic layout is saved with it.
+    editorProvider.saveFirstLayoutWhenOpened(filePath);
     await vscode.commands.executeCommand(
       'vscode.openWith',
       vscode.Uri.file(filePath),
