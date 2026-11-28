@@ -32,6 +32,7 @@ heading — `## Unreleased — 1.0.0` — and the workflow releases exactly that
 
 ### Fixed
 
+- **The side panel no longer says a look through a folder stopped at its number of folders when it ran out of time.** A look that hit its time limit could, now and then, be reported as having hit its folder limit instead, with time shown as left. The side panel's note, and the anonymous daily report if you have usage telemetry on, now name the limit that ended it.
 - **Undo and redo keep `selectors.yml` up to date.** Undoing an edit that added or removed a table on a diagram left that table's selector as it was until your next edit. An existing `selectors.yml` is now updated after an undo or redo too.
 - **The standard ERD Studio side panel says Loading diagrams… straight away when a folder opens**, instead of staying blank while ERD Studio looks for dbt projects in it, which on a slow disk (often Windows) can take 10 seconds or more. The wait itself, and the project that opens, are unchanged. (#357)
 - **A command run while ERD Studio is still starting in a large folder waits for it, as before.** With the glass side panel now showing during a long look, a command from the Command Palette that ERD Studio has not set up yet is held and runs once it has. (#357)

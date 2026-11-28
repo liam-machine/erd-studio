@@ -249,6 +249,8 @@ export class FolderScan {
   private depthDone = -1;
   private done = false;
   private capped = false;
+  /** `maxMs` ended the walk. Recorded when it does: a timer may fire a millisecond before the clock agrees. */
+  private timedOut = false;
   private truncated = false;
 
   private started = false;
@@ -472,7 +474,7 @@ export class FolderScan {
         this.startClock();
         const msLeft = this.msLeft();
         if (msLeft !== undefined && msLeft <= 0) {
-          this.end(true);
+          this.endOutOfTime();
           return;
         }
         const slot = this.slotsTaken++;
@@ -600,6 +602,12 @@ export class FolderScan {
 
   // ── Ending, waiting, telling ────────────────────────────────────────────
 
+  /** `maxMs` ran out: the walk is over, and has no time left whatever the clock reads when it is next asked. */
+  private endOutOfTime(): void {
+    if (!this.done) this.timedOut = true;
+    this.end(true);
+  }
+
   /** The walk is over. Reads still in flight are abandoned, and whoever waits is let go. */
   private end(capped: boolean): void {
     if (this.done) return;
@@ -699,8 +707,15 @@ export class FolderScan {
     this.walkingSince = undefined;
   }
 
-  /** Milliseconds of `maxMs` left, never below 0 (undefined: no limit): what a countdown shows. A pause uses none. */
+  /**
+   * Milliseconds of `maxMs` left, never below 0 (undefined: no limit): what a
+   * countdown shows. A pause uses none. 0 once `maxMs` has ended the walk,
+   * which is how a caller tells that limit from `maxFolders`: the timer that
+   * ends it can fire a millisecond early by the clock, and the time walked
+   * then adds up to just under `maxMs`.
+   */
   timeLeftMs(): number | undefined {
+    if (this.timedOut) return 0;
     const left = this.msLeft();
     return left === undefined ? undefined : Math.max(0, left);
   }
@@ -722,7 +737,7 @@ export class FolderScan {
   private guarded<T>(read: () => Promise<T>, left: number | undefined = this.msLeft()): Promise<Guarded<T>> {
     if (this.done) return Promise.resolve(STOPPED);
     if (left !== undefined && left <= 0) {
-      this.end(true);
+      this.endOutOfTime();
       return Promise.resolve(STOPPED);
     }
     return new Promise<Guarded<T>>((resolve) => {
@@ -734,7 +749,7 @@ export class FolderScan {
       };
       const abandon = (): void => settle(STOPPED);
       this.inFlight.add(abandon);
-      if (left !== undefined && left <= MAX_TIMER_MS) timer = setTimeout(() => this.end(true), left);
+      if (left !== undefined && left <= MAX_TIMER_MS) timer = setTimeout(() => this.endOutOfTime(), left);
       let pending: Promise<T>;
       try {
         pending = Promise.resolve(read());
