@@ -24,7 +24,7 @@ import {
   draftShownQualityFeatures,
   type DraftQuality,
 } from '../services/draftTelemetry';
-import { lateReadyFeatures } from '../services/readyWatch';
+import { closedBlankFeature, lateReadyFeatures } from '../services/readyWatch';
 import { crashFeedbackPrefill, noReadyFeedbackPrefill, type FeedbackPrefill } from '../services/commandErrors';
 import type { TelemetryErrorCode, TelemetryFeature } from '../services/telemetryPayload';
 import { draftLayoutFeatures, layoutFailureCodes, webviewErrorCodes } from '../services/telemetryCanvas';
@@ -228,6 +228,9 @@ export function draftPreviewEvents(
       if (slow) feature('readySlowOver10s');
     },
     noReady: () => error('webviewNoReadyDraft'),
+    // Beside it (#364): the host was busy at 30 s; the preview went away still blank.
+    noReadyHostHeld: () => feature('noReadyHostHeld'),
+    closedBlank: (_source, range) => feature(closedBlankFeature(range)),
     // The page was slow, not broken (#320): it opened after the no-ready notification.
     lateReady: (_source, range) => {
       for (const key of lateReadyFeatures(range)) feature(key);

@@ -946,6 +946,19 @@ const FEATURES = [
   'startLookFoldersOver2000',
   'startLookFoundAfterDeadline',
   'dbtSearchFromIndex',
+  // Added after 2.0.12 (#364): beside a webviewNoReady* code, the 30 s no-ready timer ran
+  // 5 s or more late (the extension host was busy), and the tab went away still blank,
+  // as a fixed range from the show, never a time.
+  'noReadyHostHeld',
+  'noReadyClosed30to60s',
+  'noReadyClosedOver60s',
+  // Added after 2.0.12 (#358): beside importCauseDuplicate, what a SQL import's tables defined
+  // twice were (a copy or not, one that differed in the default schema) and a partial import
+  // whose only problems were those. Presence flags per import, never a name or a count.
+  'importDuplicateSame',
+  'importDuplicateDiffers',
+  'importDuplicateDiffersDefaultSchema',
+  'importPartialDuplicateOnly',
 ];
 
 /** The only keys `errors` may carry; anything else is dropped. */
@@ -1217,6 +1230,17 @@ const ERROR_CODES = [
   'handlerFailedAtOther',
   'handlerFailedDbml',
   'handlerFailedJson',
+  // Added after 2.0.12 (#354): which site a loggedErrorOther line came from, and a tag the
+  // extension's area table does not list. Fixed keys, never the tag or the line's text.
+  'loggedErrorAtWatcher',
+  'loggedErrorAtLegacyRename',
+  'loggedErrorAtRedraw',
+  'loggedErrorAtExplorerMove',
+  'loggedErrorAtFeedbackSend',
+  'loggedErrorAtFailureAction',
+  'loggedErrorAtTrackingSession',
+  'loggedErrorAtTrackingRefresh',
+  'loggedErrorUnlistedTag',
 ];
 
 /** Every event the trail may carry: a marker, a feature key, or an error code written `!code`. */

@@ -72,6 +72,7 @@ import {
   type DbtProjectConfig,
 } from '../services/dbtProjectConfig';
 import { log, plural } from '../services/logger';
+import { telemetry } from '../services/telemetryService';
 
 const DEBOUNCE_DELAY_MS = 300;
 
@@ -773,6 +774,7 @@ export class FileWatcherService implements vscode.Disposable {
       fireFn();
     } catch (err) {
       log.error('[FileWatcherService] Error in event handler:', err);
+      telemetry.error('loggedErrorAtWatcher');
     }
   }
 

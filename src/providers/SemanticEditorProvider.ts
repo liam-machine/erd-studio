@@ -184,7 +184,7 @@ import {
   subjectAreaLoadDetailCode,
   webviewErrorCodes,
 } from '../services/telemetryCanvas';
-import { lateReadyFeatures, ReadyWatch } from '../services/readyWatch';
+import { closedBlankFeature, lateReadyFeatures, ReadyWatch } from '../services/readyWatch';
 import { saveDocument, saveDocumentByUri, saveWithoutFormatting } from './documentSave';
 import { dirtyFiles } from './dirtyDocuments';
 import { subjectAreaLoadErrorCode, subjectAreaLoadStepCode, layoutFeature, saveFailureCodes, type SaveFailure, type SubjectAreaLoadFailure, type SubjectAreaLoadStep, type TelemetryFeature } from '../services/telemetryPayload';
@@ -2546,6 +2546,10 @@ export class SemanticEditorProvider implements vscode.CustomTextEditorProvider {
       ready: (slow) => { if (slow) telemetry.feature('readySlowOver10s'); },
       // The canvas was slow, not broken (#320): it opened after the notification below.
       lateReady: (range) => { for (const key of lateReadyFeatures(range)) telemetry.feature(key); },
+      // Beside webviewNoReadyCanvas (#364): the host was busy at 30 s, and the tab went away still
+      // blank. The closed key is recorded by readyWatch.dispose() in onDidDispose, before canvasClosed.
+      noReadyHostHeld: () => telemetry.feature('noReadyHostHeld'),
+      closedBlank: (range) => telemetry.feature(closedBlankFeature(range)),
       noReady: () => {
         telemetry.error('webviewNoReadyCanvas');
         // The page never mounted, so its crash screen cannot show: the host

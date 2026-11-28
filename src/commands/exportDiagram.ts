@@ -237,6 +237,7 @@ function showFailure(ui: ExportDiagramUi, failure: ShownFailure): void {
   // A button that fails (Open File on a file deleted since) still says so, rather than seeming to do nothing.
   showErrorWithActions((m, ...items) => ui.showErrorMessage(m, ...items), failure.message, failure.actions, (choice, err) => {
     log.error(`[ERD Studio] ${COMMAND_NAME}: "${choice}" failed:`, err);
+    telemetry.error('loggedErrorAtFailureAction');
     showFailure(ui, oursFailure(err, ui, `while running ${choice}`));
   });
 }
