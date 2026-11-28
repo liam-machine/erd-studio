@@ -299,9 +299,13 @@ describe('B19: the logger error hook', () => {
       CliLauncher: 'Harness',
     };
     for (const [source, area] of Object.entries(before)) expect(LOGGED_ERROR_AREAS[source], source).toBe(area);
-    // Everything added since is Other, so it counts exactly as it did while unlisted.
+    // Tags #355 introduced with their own area: no released version logged under them,
+    // so there was nothing for them to count as before.
+    const newTags: Record<string, string> = { MissedCanvasDrop: 'Sidebar', ApplyFileWrites: 'Canvas' };
+    for (const [source, area] of Object.entries(newTags)) expect(LOGGED_ERROR_AREAS[source], source).toBe(area);
+    // Everything else added since is Other, so it counts exactly as it did while unlisted.
     for (const [source, area] of Object.entries(LOGGED_ERROR_AREAS)) {
-      if (!(source in before)) expect(area, source).toBe('Other');
+      if (!(source in before) && !(source in newTags)) expect(area, source).toBe('Other');
     }
   });
 

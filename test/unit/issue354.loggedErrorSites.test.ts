@@ -146,9 +146,11 @@ describe('#354: each loggedErrorOther site names itself', () => {
 });
 
 describe('#354: the site codes are fixed keys that never trigger anything', () => {
-  it('every #354 code is an allowlisted error code that starts with loggedError, closing the list', async () => {
+  it('every #354 code is an allowlisted error code that starts with loggedError, in one block in order', async () => {
     const { ERROR_CODES, FEATURES } = await import('../../src/services/telemetryPayload');
-    expect(ERROR_CODES.slice(-SITE_CODES.length)).toEqual([...SITE_CODES]);
+    // Later codes are appended after the block (#370's were the first); the exact tail is pinned in telemetryPayload.test.ts.
+    const at = ERROR_CODES.indexOf(SITE_CODES[0]);
+    expect(ERROR_CODES.slice(at, at + SITE_CODES.length)).toEqual([...SITE_CODES]);
     for (const code of SITE_CODES) {
       expect(code.startsWith('loggedError'), code).toBe(true);
       expect(code.length, code).toBeLessThanOrEqual(34);
@@ -257,7 +259,7 @@ describe('#354: every failure-button line records loggedErrorAtFailureAction', (
     }
     console.log(`${lineCount} failure-button lines, ${codeCount} codes, missing: ${missing.join(', ') || 'none'}`);
     expect(missing).toEqual([]);
-    expect(lineCount).toBeGreaterThanOrEqual(22);
+    expect(lineCount).toBeGreaterThanOrEqual(23);
     expect(codeCount).toBe(lineCount);
   });
 });

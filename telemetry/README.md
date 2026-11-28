@@ -2028,7 +2028,7 @@ never with the tag or the text:
 - `loggedErrorAtRedraw` (error) — redrawing an open diagram from its file after an outside change, or after a `fields.yml` change, failed (two sites in `src/extension.ts`).
 - `loggedErrorAtExplorerMove` (error) — following a move made in the Explorer failed (`src/extension.ts`, `onDidRenameFiles`).
 - `loggedErrorAtFeedbackSend` (error) — Send Feedback without a canvas could not record the report it opened, or copy what the user typed after a failure of ours (two sites in `src/extension.ts`).
-- `loggedErrorAtFailureAction` (error) — a button on one of our messages threw (Try Again, Send Feedback, Open It, Show Import Report, …): every line of the form `[ERD Studio] <title>: "<button>" failed:`. That is Send Feedback's, Migrate to v5's (two) and Refresh Manifest's (`src/extension.ts`), every diagram or layer command's (`src/commands/commandFailure.ts`, where `commandFailedOurs` follows too), and the buttons the imports, the exports, Move Diagram, Move Relationships to Library, Migrate to Table Naming, Draw from dbt, Open Example Project and a refused model write show (`src/commands/`): 22 sites in all. `test/unit/issue354.loggedErrorSites.test.ts` finds them by scanning `src/`, so a new site without the code fails the build. All of them run only after the user pressed a button.
+- `loggedErrorAtFailureAction` (error) — a button on one of our messages threw (Try Again, Send Feedback, Open It, Show Import Report, …): every line of the form `[ERD Studio] <title>: "<button>" failed:`. That is Send Feedback's, Migrate to v5's (two) and Refresh Manifest's (`src/extension.ts`), every diagram or layer command's (`src/commands/commandFailure.ts`, where `commandFailedOurs` follows too), and the buttons the imports, the exports, Move Diagram, Move Relationships to Library, Migrate to Table Naming, Draw from dbt, Open Example Project, a refused model write and a move in the Explorer whose files did not save (#355) show (`src/commands/`): 23 sites in all. `test/unit/issue354.loggedErrorSites.test.ts` finds them by scanning `src/`, so a new site without the code fails the build. All of them run only after the user pressed a button.
 - `loggedErrorAtTrackingSession` (error) — My Reports' **silent** GitHub session lookup threw, for example no GitHub sign-in provider (`src/services/reportTrackingService.ts`, `getHandle`).
 - `loggedErrorAtTrackingRefresh` (error) — My Reports' search of GitHub failed: a 403 rate limit, offline, a proxy (`reportTrackingService.ts`, `refresh`). It runs in the background at every start when the user is signed in to GitHub, `erdStudio.feedback.trackReports` is on (the default) and the cache is over 6 hours old, with no canvas needed: the strongest fit for the "at start, no diagram opened" shape #354 reported.
 - `loggedErrorUnlistedTag` (error) — the line's tag is in no entry of the fixed area table, exactly or by its part before the first `.`. It reads 0 in a correct build: every literal `createLogger` scope, `log.error('[Tag]…')` tag and `hostErrorLog.record('…')` source is listed, which `test/unit/runtimeTelemetry.test.ts` checks, so above 0 means a tag built at run time or a hole in that test. An untagged line (`''`) stays plain `loggedErrorOther`.
@@ -2036,7 +2036,7 @@ never with the tag or the text:
 How to read them:
 
 - **Every new code starts with `loggedError`**, so like the rest of B19 none starts the known-fixes check (`knownFixesService.ts`) or asks for an interim copy (`provisionalTrigger`). A background poll failing on every offline start costs nothing extra.
-- **One code can cover several sites**: `loggedErrorAtRedraw` two, `loggedErrorAtFeedbackSend` two, `loggedErrorAtFailureAction` 22.
+- **One code can cover several sites**: `loggedErrorAtRedraw` two, `loggedErrorAtFeedbackSend` two, `loggedErrorAtFailureAction` 23.
 - **Every canvas load failure also lights `loggedErrorOther`.** It writes two error lines, `hostErrorLog.record('sendDomainData', …)` (listed as `Other`, as it always counted) and `[SemanticEditorProvider] Failed to load domain…` (`Canvas`), so `loggedError` counts twice and `loggedErrorOther` sits beside `loggedErrorCanvas` and a `domainLoad*` code. The feedback dialog's own sources (`feedbackAnalysis.*`, `submitFeedback*`, `setLineStyle`, …) are listed as `Other` too. Only "`loggedErrorOther` with no other code beside it" is a clean reading.
 - **Not given a site code**: `src/services/recoveryService.ts` (Save All threw, Show Files failed), `src/providers/ConvertToDbmlPanel.ts` (the Convert review panel's handler, opening a file from it), Migrate to v5 itself failing (`src/extension.ts`, `${MIGRATE_V5_TITLE} failed:`; its buttons are covered above), and the SQL and semantic-model imports' `could not read a file` lines (`src/commands/importSqlDdl.ts`, `src/commands/importSemanticModel.ts`). Each runs only after the user started it, so none can explain a day with no canvas; they stay `loggedErrorOther` alone. Convert to DBML's own button line (`convertProjectToDbml.ts`) is scoped `Convert to DBML`, also `Other`, and has no code either; the canvas's Turn Round and Suggest Relationships buttons log as `Canvas`.
 - **An oversized body's trim (`trimHeartbeat`) drops error codes only after every feature it may drop**, newest first, so these codes, the newest, would go first among the errors; such a day keeps `heartbeatTrimmed`, and is very unlikely to lose an error code at all.
@@ -2060,6 +2060,26 @@ ours. `loggedErrorAtLegacyRename`: a `ux` question (is the user told?).
 `loggedErrorUnlistedTag`: find the line whose tag is built at run time. Still
 alone on the new release (the second query): a site this list missed, or
 one of the "Not given a site code" lines above; list the `Other` sites again.
+
+**What a projectPath that is not a folder was like** (added after 2.0.12,
+#370). `projectPathInvalid` counts every start whose `erdStudio.projectPath`
+(or the deprecated `dbtSemantic.projectPath`) named no folder. Since 2.0 ERD
+Studio starts in any folder with a `.sql` or `.dbml` file, so a relative path
+saved in User settings for one project misses in every other folder: the
+warning now says so, and is shown once per workspace for that case, but the
+total is still counted on every start. These say which case it was, decided
+on the device from `inspect()` and `path.isAbsolute`, never the path itself.
+At most one scope and exactly one form are counted beside each
+`projectPathInvalid`; a start whose setting changed while the window started
+gets the form only, so the scope keys can sum to a little less than the total.
+
+- `projectPathInvalidUser` (error) — the value is in User settings, so it applies to every folder the user opens.
+- `projectPathInvalidWorkspace` (error) — the value is in the workspace's settings (or one folder's): a fault in that window.
+- `projectPathInvalidRelative` (error) — a relative path. A Windows path (`C:\…`) read on macOS or Linux is not absolute there, so it counts here.
+- `projectPathInvalidAbsolute` (error) — an absolute path, which names no folder on this computer.
+
+`projectPathInvalidUser` with `projectPathInvalidRelative` is the case #370
+was about: a setting written for another project, not a mistake in this one.
 
 ## The local archive
 

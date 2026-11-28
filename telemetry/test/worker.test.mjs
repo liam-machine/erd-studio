@@ -699,7 +699,7 @@ describe('validation — acceptance and normalisation', () => {
     );
   });
 
-  it('keeps which site a logged error came from (#354), closing the error list, and drops a look-alike, a tag or a feature-side copy', async () => {
+  it('keeps which site a logged error came from (#354), then the list ends with #370\'s, and drops a look-alike, a tag or a feature-side copy', async () => {
     const errors = {
       loggedError: 3, loggedErrorOther: 3,
       loggedErrorAtWatcher: 1, loggedErrorAtLegacyRename: 1, loggedErrorAtRedraw: 2, loggedErrorAtExplorerMove: 1,
@@ -714,13 +714,14 @@ describe('validation — acceptance and normalisation', () => {
     );
     assert.equal(params[17], '{}');
     assert.deepEqual(JSON.parse(params[18]), errors);
-    // The newest codes close the list, after #319's.
+    // The newest codes close the list, after #319's: #354's, then what a projectPath that is not a folder was like (#370).
     assert.deepEqual(
       WORKER_ERROR_CODES.slice(WORKER_ERROR_CODES.indexOf('handlerFailedJson') + 1),
       [
         'loggedErrorAtWatcher', 'loggedErrorAtLegacyRename', 'loggedErrorAtRedraw', 'loggedErrorAtExplorerMove',
         'loggedErrorAtFeedbackSend', 'loggedErrorAtFailureAction', 'loggedErrorAtTrackingSession', 'loggedErrorAtTrackingRefresh',
         'loggedErrorUnlistedTag',
+        'projectPathInvalidUser', 'projectPathInvalidWorkspace', 'projectPathInvalidRelative', 'projectPathInvalidAbsolute',
       ],
     );
   });

@@ -51,6 +51,9 @@ import {
   SAMPLE_CONFIRM_MESSAGE,
   SAMPLE_DOWNLOAD_ACTION,
   SAMPLE_FALLBACK_MESSAGE,
+  SAMPLE_CLONE_FAILED_MESSAGE,
+  COPILOT_CHAT_NOT_OPENED_MESSAGE,
+  COPILOT_CHAT_OPENED_MESSAGE,
   SAMPLE_OPEN_ON_GITHUB_ACTION,
   TRY_SAMPLE_COMMAND,
   GETTING_STARTED_MEDIA,
@@ -1345,6 +1348,24 @@ describe('openClaudeCode', () => {
     expect(vscode.window.terminals).toHaveLength(0);
   });
 
+  it('with only the VS Code extension whose open command throws: never says Claude Code is open, plain or nested (#355)', async () => {
+    vscode._setMockExtensions(['anthropic.claude-code']);
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vscode.commands.registerCommand('claude-vscode.sidebar.open', () => { throw new Error('nope'); });
+    const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined);
+    await openClaudeCode({ dbtRoot: '/w', clipboardText: SETUP_PROMPT });
+    expect(String(info.mock.calls.at(-1)![0])).toMatch(/^Open Claude Code from its icon in the sidebar\. /);
+    await openClaudeCode({ dbtRoot: '/w/analytics', clipboardText: `cd '/w/analytics' && claude "/erd-studio-setup"` });
+    expect(String(info.mock.calls.at(-1)![0])).toMatch(/^Open Claude Code from its icon in the sidebar\. /);
+    expect(info.mock.calls.map((c) => String(c[0])).join('\n')).not.toContain('Claude Code is open.');
+
+    // One that runs still says it is open.
+    vscode._resetRegisteredCommands();
+    vscode.commands.registerCommand('claude-vscode.sidebar.open', () => {});
+    await openClaudeCode({ dbtRoot: '/w', clipboardText: SETUP_PROMPT });
+    expect(String(info.mock.calls.at(-1)![0])).toMatch(/^Claude Code is open\. /);
+  });
+
   it('with only the VS Code extension and a nested project: offers to open the dbt folder itself', async () => {
     vscode._setMockExtensions(['anthropic.claude-code']);
     const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue('Open analytics' as never);
@@ -1414,6 +1435,34 @@ describe('openCopilotChat', () => {
     await openCopilotChat({ dbtRoot: '/w/analytics', workspaceFolder: '/w' });
     expect(calls).toEqual([[{ query: SETUP_PROMPT, isPartialQuery: true, mode: 'agent' }], []]);
     expect(String(info.mock.calls[0][0])).toContain('File > Open Folder');
+  });
+
+  it('both opens throwing: never says Copilot Chat is open, plain or nested (#355)', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vscode.commands.registerCommand(COPILOT_CHAT_OPEN_COMMAND, () => { throw new Error('broken'); });
+    const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined);
+    await openCopilotChat({ dbtRoot: '/w', workspaceFolder: '/w' });
+    expect(info).toHaveBeenLastCalledWith(COPILOT_CHAT_NOT_OPENED_MESSAGE);
+    await openCopilotChat({ dbtRoot: '/w/analytics', workspaceFolder: '/w' });
+    expect(String(info.mock.calls.at(-1)![0]).startsWith(`${COPILOT_CHAT_NOT_OPENED_MESSAGE} `)).toBe(true);
+    expect(info.mock.calls.map((c) => String(c[0])).join('\n')).not.toContain('Copilot Chat is open.');
+    expect(COPILOT_CHAT_NOT_OPENED_MESSAGE).toContain(SETUP_PROMPT);
+  });
+
+  it('a nested project: the note offers Open <folder>, which opens that folder (#355)', async () => {
+    vscode.commands.registerCommand(COPILOT_CHAT_OPEN_COMMAND, () => {});
+    const info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue('Open analytics' as never);
+    const exec = vi.spyOn(vscode.commands, 'executeCommand');
+    await openCopilotChat({ dbtRoot: '/w/analytics', workspaceFolder: '/w' });
+    const [message, ...items] = info.mock.calls.at(-1) as unknown as [string, ...string[]];
+    expect(message.startsWith(`${COPILOT_CHAT_OPENED_MESSAGE} `)).toBe(true);
+    expect(message).toContain('File > Open Folder');
+    expect(items).toEqual(['Open analytics']);
+    const openFolder = exec.mock.calls.find((c) => c[0] === 'vscode.openFolder')!;
+    expect((openFolder[1] as { fsPath: string }).fsPath).toBe('/w/analytics');
+    // Not nested: no button.
+    await openCopilotChat({ dbtRoot: '/w', workspaceFolder: '/w' });
+    expect(info).toHaveBeenLastCalledWith(COPILOT_CHAT_OPENED_MESSAGE);
   });
 
   it('nested project message: "Your dbt project" only when the folder is a dbt project', async () => {
@@ -1894,17 +1943,22 @@ describe('trySampleProject', () => {
     expect(String(open.mock.calls[0][0])).toBe('https://github.com/liam-machine/erd-studio-sample');
   });
 
-  it('falls back when git.clone throws, and opens nothing if the notice is dismissed', async () => {
+  it('falls back when git.clone throws, never saying Git is not available (it is), and opens nothing if the notice is dismissed (#355)', async () => {
     vscode._setMockExtensions(['vscode.git']);
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     const info = vi.spyOn(vscode.window, 'showInformationMessage')
       .mockResolvedValueOnce(SAMPLE_DOWNLOAD_ACTION as never)
       .mockResolvedValueOnce(undefined);
-    vscode.commands.registerCommand('git.clone', () => { throw new Error('git not found'); });
+    vscode.commands.registerCommand('git.clone', () => { throw new Error('remote hung up'); });
     const open = vi.spyOn(vscode.env, 'openExternal');
 
     await expect(trySampleProject()).resolves.toBe('fallback');
-    expect(info).toHaveBeenLastCalledWith(SAMPLE_FALLBACK_MESSAGE, 'Download ZIP', 'Open on GitHub');
+    expect(info).toHaveBeenLastCalledWith(SAMPLE_CLONE_FAILED_MESSAGE, 'Download ZIP', 'Open on GitHub');
+    expect(SAMPLE_CLONE_FAILED_MESSAGE).toMatch(/^The download with Git didn't finish, so get the sample as a ZIP instead/);
+    expect(SAMPLE_CLONE_FAILED_MESSAGE).not.toMatch(/Git isn't available/);
+    // The same steps as the no-Git note, which keeps its words.
+    expect(SAMPLE_CLONE_FAILED_MESSAGE).toContain('erd-studio-sample-main');
+    expect(SAMPLE_FALLBACK_MESSAGE).toMatch(/^Git isn't available here/);
     expect(open).not.toHaveBeenCalled();
   });
 

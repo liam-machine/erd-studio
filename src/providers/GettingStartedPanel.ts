@@ -145,6 +145,10 @@ export const SAMPLE_DOWNLOAD_ZIP_ACTION = 'Download ZIP';
 export const SAMPLE_FALLBACK_MESSAGE =
   "Git isn't available here, so get the sample as a ZIP instead (Download ZIP below, or Code \u2192 Download ZIP on GitHub). " +
   'Unzip it, then File \u2192 Open Folder\u2026 and pick the erd-studio-sample-main folder.';
+/** A `git.clone` that threw (#355): Git is there, so the note never says it isn't. Same buttons as the no-Git note. */
+export const SAMPLE_CLONE_FAILED_MESSAGE =
+  "The download with Git didn't finish, so get the sample as a ZIP instead (Download ZIP below, or Code \u2192 Download ZIP on GitHub). " +
+  'Unzip it, then File \u2192 Open Folder\u2026 and pick the erd-studio-sample-main folder.';
 
 export type TrySampleOutcome = 'cancelled' | 'cloned' | 'fallback';
 
@@ -184,6 +188,7 @@ export async function trySampleProject(): Promise<TrySampleOutcome> {
     return 'cancelled';
   }
 
+  let cloneFailed = false;
   if (await gitCloneAvailable()) {
     try {
       await vscode.commands.executeCommand('git.clone', SAMPLE_REPO_CLONE_URL);
@@ -193,6 +198,7 @@ export async function trySampleProject(): Promise<TrySampleOutcome> {
       return 'cloned';
     } catch (err) {
       telemetry.error('sampleCloneFailed');
+      cloneFailed = true;
       log.warn('[ERD Studio] git.clone of the sample project failed; offering the GitHub page instead:', err);
     }
   } else {
@@ -200,7 +206,7 @@ export async function trySampleProject(): Promise<TrySampleOutcome> {
   }
 
   const pick = await vscode.window.showInformationMessage(
-    SAMPLE_FALLBACK_MESSAGE,
+    cloneFailed ? SAMPLE_CLONE_FAILED_MESSAGE : SAMPLE_FALLBACK_MESSAGE,
     SAMPLE_DOWNLOAD_ZIP_ACTION,
     SAMPLE_OPEN_ON_GITHUB_ACTION,
   );
@@ -498,9 +504,12 @@ export async function openClaudeCode(opts: { dbtRoot: string; clipboardText: str
     await vscode.env.clipboard.writeText(SETUP_PROMPT);
     const available = new Set(await vscode.commands.getCommands(true));
     const open = CLAUDE_CODE_OPEN_COMMANDS.find((c) => available.has(c));
+    // Only a command that ran says Claude Code is open (#355): one that threw left it closed.
+    let opened = false;
     if (open) {
       try {
         await vscode.commands.executeCommand(open);
+        opened = true;
       } catch (err) {
         telemetry.error('claudeOpenFailed');
         log.warn('[GettingStarted] Could not open Claude Code:', err);
@@ -509,7 +518,7 @@ export async function openClaudeCode(opts: { dbtRoot: string; clipboardText: str
       // CLAUDE_CODE_OPEN_COMMANDS are best guesses: this says they have gone stale.
       telemetry.error('claudeOpenCommandMissing');
     }
-    const lead = `${open ? 'Claude Code is open.' : 'Open Claude Code from its icon in the sidebar.'} ` +
+    const lead = `${opened ? 'Claude Code is open.' : 'Open Claude Code from its icon in the sidebar.'} ` +
       `Paste ${SETUP_PROMPT} (it's on your clipboard) and press Enter. `;
     const folder = path.basename(opts.dbtRoot);
     if (opts.clipboardText === SETUP_PROMPT) {
@@ -551,6 +560,9 @@ export const SETUP_HELPER_ACTION = 'Set Up My AI Helper';
 
 export const COPILOT_CHAT_OPENED_MESSAGE =
   `Copilot Chat is open. If it isn't in Agent mode, switch it with the mode picker under the input, then send ${SETUP_PROMPT} (it's on your clipboard).`;
+/** Both ways of opening the chat threw (#355): never "is open". */
+export const COPILOT_CHAT_NOT_OPENED_MESSAGE =
+  `Open Copilot Chat from its icon in VS Code's title bar or sidebar. Switch it to Agent mode with the mode picker under the input, then send ${SETUP_PROMPT} (it's on your clipboard).`;
 
 /**
  * "Open Copilot Chat": copy the prompt, then open the chat view in Agent mode
@@ -568,6 +580,8 @@ export async function openCopilotChat(opts: { dbtRoot: string | null; workspaceF
     await vscode.env.openExternal(vscode.Uri.parse(GETTING_STARTED_EXTERNAL_URLS.copilotDocs));
     return;
   }
+  // Only an open that ran says the chat is open (#355): both throwing left it closed.
+  let opened = true;
   try {
     await vscode.commands.executeCommand(COPILOT_CHAT_OPEN_COMMAND, { query: SETUP_PROMPT, isPartialQuery: true, mode: 'agent' });
   } catch {
@@ -575,17 +589,32 @@ export async function openCopilotChat(opts: { dbtRoot: string | null; workspaceF
       await vscode.commands.executeCommand(COPILOT_CHAT_OPEN_COMMAND);
       telemetry.feature('copilotChatNoArgs');
     } catch (err) {
+      opened = false;
       telemetry.error('copilotChatOpenFailed');
       log.warn('[GettingStarted] Could not open Copilot Chat:', err);
     }
   }
-  const nested = opts.dbtRoot && opts.workspaceFolder
-    && path.resolve(opts.dbtRoot) !== path.resolve(opts.workspaceFolder);
-  void vscode.window.showInformationMessage(nested
-    ? `${COPILOT_CHAT_OPENED_MESSAGE} Your ${projectNoun(opts.dbtRoot!, opts.logicalOnly)}, ${path.basename(opts.dbtRoot!)}, is a subfolder here and ` +
+  const lead = opened ? COPILOT_CHAT_OPENED_MESSAGE : COPILOT_CHAT_NOT_OPENED_MESSAGE;
+  const dbtRoot = opts.dbtRoot;
+  const nested = dbtRoot && opts.workspaceFolder
+    && path.resolve(dbtRoot) !== path.resolve(opts.workspaceFolder);
+  if (!nested) {
+    void vscode.window.showInformationMessage(lead);
+    return;
+  }
+  // Nested project: Copilot reads skills from the open folder, so the way on
+  // is to open the project folder itself, offered as a button (as Claude Code's note does).
+  const folder = path.basename(dbtRoot);
+  const OPEN_FOLDER = `Open ${folder}`;
+  const pick = await vscode.window.showInformationMessage(
+    `${lead} Your ${projectNoun(dbtRoot, opts.logicalOnly)}, ${folder}, is a subfolder here and ` +
       `Copilot looks for skills in the folder VS Code has open — if the guide isn't found, open ` +
-      `${path.basename(opts.dbtRoot!)} itself (File > Open Folder…).`
-    : COPILOT_CHAT_OPENED_MESSAGE);
+      `${folder} itself (File > Open Folder…).`,
+    OPEN_FOLDER,
+  );
+  if (pick === OPEN_FOLDER) {
+    await vscode.commands.executeCommand('vscode.openFolder', vscode.Uri.file(dbtRoot));
+  }
 }
 
 // ---------------------------------------------------------------------------

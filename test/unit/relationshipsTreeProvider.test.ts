@@ -12,6 +12,7 @@ import { RelationshipsTreeProvider, type RelationshipsNode, type RelationshipNod
 import { dbmlFileIcon } from '../../src/providers/dbmlFileKinds';
 import { diagramsShowing, openInDiagram, openRelationshipSource, relationshipLineInYaml, revealTarget, type RelationshipsViewDeps } from '../../src/commands/relationshipsView';
 import type { TableLibraryService } from '../../src/services/logicalModelService';
+import { RELOAD_DIAGRAMS_BUTTON } from '../../src/services/commandErrors';
 import type { SubjectAreaService } from '../../src/services/domainService';
 import type { SemanticTable, SubjectAreaSummary } from '../../src/types/semantic';
 
@@ -205,6 +206,20 @@ describe('Relationships view actions', () => {
     const [, uri, options] = exec.mock.calls[0] as [string, vscode.Uri, { selection: vscode.Range }];
     expect(uri.fsPath).toBe(file);
     expect(options.selection.start.line).toBe(3);
+  });
+
+  it('a YAML table with no file: says why and offers Reload Diagrams from Disk, which reloads them (#355)', async () => {
+    const warn = vi.spyOn(vscode.window, 'showWarningMessage').mockResolvedValue(RELOAD_DIAGRAMS_BUTTON as never);
+    await openRelationshipSource(await relationshipNode(), deps({ findTableFile: () => null }));
+    expect(warn).toHaveBeenCalledWith(
+      'ERD Studio: The table "fct_order" has no file in the Table Library, so this relationship has nowhere to open. ' +
+        'The file may have been moved, renamed or deleted outside ERD Studio.',
+      'Reload Diagrams from Disk',
+    );
+    await vi.waitFor(() => expect(exec).toHaveBeenCalledWith('erdStudio.reloadFromDisk'));
+    // The button's label is the command's own title.
+    const pkg = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../../package.json'), 'utf-8')) as { contributes: { commands: Array<{ command: string; title: string }> } };
+    expect(pkg.contributes.commands.find((c) => c.command === 'erdStudio.reloadFromDisk')?.title).toBe(RELOAD_DIAGRAMS_BUTTON);
   });
 
   it('finds the diagrams showing both tables (case-insensitive), opens the only one and shows the line on it', async () => {

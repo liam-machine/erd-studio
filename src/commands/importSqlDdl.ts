@@ -56,6 +56,8 @@ import * as vscode from 'vscode';
 import {
   OPEN_FILE_BUTTON,
   SEND_FEEDBACK_BUTTON,
+  SHOW_FILE_BUTTON,
+  TRY_AGAIN_BUTTON,
   feedbackPrefill,
   oursMessage,
   showErrorWithActions,
@@ -237,6 +239,8 @@ export interface ImportSqlDdlUi {
   /** Resolves the button picked; the flow never awaits it. */
   showErrorMessage(message: string, ...items: string[]): Promise<string | undefined>;
   openFileAt(filePath: string, line?: number): Promise<void>;
+  /** Shows a file in the system's file manager (`revealFileInOS`). Absent: no Show File button on a script that does not read. */
+  revealFile?(filePath: string): Promise<void>;
   sendFeedback(prefill: FeedbackPrefill): Promise<void>;
   /** Opens the ERD Studio output channel (`erdStudio.showLogs`). Absent: no Show Logs button. */
   showLogs?(): Promise<void>;
@@ -499,14 +503,25 @@ function sqlRun(ui: ImportSqlDdlUi, quiet = false, draft?: ImportSqlDdlDeps['dra
     });
     return undefined;
   };
-  /** A gather that gave a message: say it (an error or a plain note). */
-  const gatherMessage = (gathered: { message: string; error: boolean; invalid?: boolean; limit?: ImportInputLimit }): undefined => {
+  /**
+   * A gather that gave a message: say it (an error or a plain note). A
+   * script that did not read (#355) offers Show File and, given `retry`
+   * (the same scripts read again, never the picker), Try Again.
+   */
+  const gatherMessage = (gathered: GatherMessage, retry?: () => unknown): undefined => {
     if (gathered.invalid && !quiet) telemetry.feature('importSqlDdlInvalid');
     if (gathered.limit && !quiet) telemetry.feature(IMPORT_LIMIT_FEATURES[gathered.limit]);
     // No scripts in the folder, a limit or a file that does not read; "no files were picked" is neither.
     if (gathered.error || gathered.invalid) failed();
-    if (gathered.error) showError(gathered.message);
-    else void ui.showInformationMessage(gathered.message);
+    if (gathered.error) {
+      const unread = gathered.filePath;
+      const actions: Record<string, () => unknown> = {};
+      if (unread !== undefined && !quiet) {
+        if (ui.revealFile) actions[SHOW_FILE_BUTTON] = () => ui.revealFile!(unread);
+        if (retry) actions[TRY_AGAIN_BUTTON] = retry;
+      }
+      showError(gathered.message, actions);
+    } else void ui.showInformationMessage(gathered.message);
     return undefined;
   };
   /**
@@ -795,7 +810,7 @@ export async function importSqlDdl(deps: ImportSqlDdlDeps, resume?: SqlResume, p
     const sources = await ui.pickSources(deps.workspaceRoot || undefined);
     if (!sources) return cancelled();
     const gathered = await gatherSqlFiles(sources, ui, deps.workspaceRoot || undefined);
-    if ('message' in gathered) return gatherMessage(gathered);
+    if ('message' in gathered) return gatherMessage(gathered, () => importSameSqlSources(deps, sources, preset, deps.workspaceRoot || undefined));
     read = gathered;
   }
   const { files, fullPaths } = read;
@@ -1193,7 +1208,6 @@ async function sqlDdlScriptsOf(
 export async function quickImportSqlDdl(deps: ImportSqlDdlDeps): Promise<ImportDbmlResult | undefined> {
   const ui = sqlUiOf(deps);
   const quiet = deps.draft?.quiet === true;
-  const { ours, gatherMessage, stoppedBeforeATable } = sqlRun(ui, quiet, deps.draft);
   const found = await findSqlDdlScripts(deps.workspaceRoot, deps.semanticDir, ui, deps.listImportFiles)
     .catch(() => ({ files: [] as string[], truncated: false }));
   if (found.truncated && found.files.length > 0) {
@@ -1210,10 +1224,23 @@ export async function quickImportSqlDdl(deps: ImportSqlDdlDeps): Promise<ImportD
     telemetry.feature('quickImportFellBack');
     return importSqlDdl(deps);
   }
-  const gathered = await gatherSqlFiles({ files: found.files, root: deps.workspaceRoot }, ui);
+  return quickImportScripts(deps, found.files);
+}
+
+/**
+ * The quick path from the scripts it found: read them, pick the dialect, and
+ * on. A script that does not read offers Try Again, which reads these same
+ * scripts again (#355): never the folder search again, which would drop a
+ * file that still does not read and fall back to the picker.
+ */
+async function quickImportScripts(deps: ImportSqlDdlDeps, foundFiles: readonly string[]): Promise<ImportDbmlResult | undefined> {
+  const ui = sqlUiOf(deps);
+  const quiet = deps.draft?.quiet === true;
+  const { ours, gatherMessage, stoppedBeforeATable } = sqlRun(ui, quiet, deps.draft);
+  const gathered = await gatherSqlFiles({ files: [...foundFiles], root: deps.workspaceRoot }, ui);
   if ('message' in gathered) {
     if (quiet) dropQuietly(deps.draft, 'unreadable');
-    return gatherMessage(gathered);
+    return gatherMessage(gathered, () => quickImportScripts(deps, foundFiles));
   }
 
   // The dialect: the one that reads the most tables (the detected one first; every dialect
@@ -1282,7 +1309,7 @@ export async function quickImportSqlDdl(deps: ImportSqlDdlDeps): Promise<ImportD
     }
   }
   return importConvertedSql(deps, gathered, chosenDialect, best.result, { quick: true },
-    ({ layer, name }) => changeSqlOptions(deps, found.files, { dialect: chosenDialect, layer, name, partitions: 'fold' }));
+    ({ layer, name }) => changeSqlOptions(deps, foundFiles, { dialect: chosenDialect, layer, name, partitions: 'fold' }));
 }
 
 /**
@@ -1307,9 +1334,33 @@ export async function changeSqlOptions(quickDeps: ImportSqlDdlDeps, found: reado
   );
   if (!picked || picked.length === 0) return cancelled();
   if (picked.some((item) => item.filePath === undefined)) return importSqlDdl(deps, undefined, preset);
-  const gathered = await gatherSqlFiles({ files: picked.map((item) => item.filePath!), root: deps.workspaceRoot }, ui);
-  if ('message' in gathered) return gatherMessage(gathered);
+  const sources: SqlSources = { files: picked.map((item) => item.filePath!), root: deps.workspaceRoot };
+  const gathered = await gatherSqlFiles(sources, ui);
+  if ('message' in gathered) return gatherMessage(gathered, () => importSameSqlSources(deps, sources, preset));
   return importSqlDdl(deps, gathered, preset);
+}
+
+/**
+ * Try Again after a script that did not read (#355): the same scripts read
+ * again, then the import goes on from the dialect with the same answers
+ * (`preset`, its guide card included). Never the picker again.
+ */
+async function importSameSqlSources(deps: ImportSqlDdlDeps, sources: SqlSources, preset: SqlPreset, projectRoot?: string): Promise<ImportDbmlResult | undefined> {
+  const ui = sqlUiOf(deps);
+  const { gatherMessage } = sqlRun(ui, deps.draft?.quiet === true, deps.draft, preset.guideSource);
+  const gathered = await gatherSqlFiles(sources, ui, projectRoot);
+  if ('message' in gathered) return gatherMessage(gathered, () => importSameSqlSources(deps, sources, preset, projectRoot));
+  return importSqlDdl(deps, gathered, preset);
+}
+
+/** What a gather says instead of the scripts: the message, and the file that did not read (`limit: 'unreadable'`). */
+export interface GatherMessage {
+  message: string;
+  error: boolean;
+  invalid?: boolean;
+  limit?: ImportInputLimit;
+  /** The script that could not be read, for Show File (#355). */
+  filePath?: string;
 }
 
 /** The button that reads the same scripts again as another dialect. */
@@ -1325,7 +1376,7 @@ export async function gatherSqlFiles(
   sources: SqlSources,
   ui: Pick<ImportSqlDdlUi, 'readDirectory' | 'readFile' | 'fileSize'>,
   projectRoot?: string,
-): Promise<SqlResume | { message: string; error: boolean; invalid?: boolean; limit?: ImportInputLimit }> {
+): Promise<SqlResume | GatherMessage> {
   let entries: Array<{ name: string; fullPath: string }>;
   let fileName: string;
   let sourceLabel: string;
@@ -1396,7 +1447,7 @@ export async function gatherSqlFiles(
       raw = await ui.readFile(entry.fullPath);
     } catch (err) {
       log.error(`[ERD Studio] ${TITLE}: could not read a file:`, err);
-      return { message: `${TITLE} couldn't read ${entry.name}. Check that the file still exists and that you can open it, then try again.`, error: true, limit: 'unreadable' };
+      return { message: `${TITLE} couldn't read ${entry.name}. Check that the file still exists and that you can open it, then try again.`, error: true, limit: 'unreadable', filePath: entry.fullPath };
     }
     const unmarked = raw.charCodeAt(0) === 0xfeff ? raw.slice(1) : raw;
     if (catalogs > 0) {
@@ -1491,6 +1542,7 @@ export function vscodeImportSqlDdlUi(): ImportSqlDdlUi {
     showInformationMessage: async (message, ...items) => vscode.window.showInformationMessage(message, ...items),
     showErrorMessage: async (message, ...items) => vscode.window.showErrorMessage(message, ...items),
     openFileAt: (filePath, line) => openTableFileAt(filePath, line),
+    revealFile: async (filePath) => { await vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(filePath)); },
     sendFeedback: async (prefill) => { await vscode.commands.executeCommand('erdStudio.reportBug', prefill); },
     showLogs: async () => { await vscode.commands.executeCommand(SHOW_LOGS_COMMAND); },
     withProgress: (title, task) => withDelayedProgress(title, task),

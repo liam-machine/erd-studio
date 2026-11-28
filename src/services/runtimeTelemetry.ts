@@ -130,6 +130,25 @@ export function dbtSearchFailureCodes(reason: DbtSearchFailure): TelemetryErrorC
   return ['dbtSearchFailed', DBT_SEARCH_FAILED[reason]];
 }
 
+/**
+ * What an `erdStudio.projectPath` that is not a folder was like (#370),
+ * counted beside `projectPathInvalid` (the total, which the caller records
+ * first): the scope that held it (a folder's own settings count as the
+ * workspace's; none when that could not be told) and the path's form. Only
+ * the two facts, never the path. A Windows path read on macOS or Linux is
+ * not absolute there, so it counts as relative.
+ */
+export function projectPathInvalidDetailCodes(
+  scope: 'user' | 'workspace' | 'folder' | undefined,
+  absolute: boolean,
+): TelemetryErrorCode[] {
+  const codes: TelemetryErrorCode[] = [];
+  if (scope === 'user') codes.push('projectPathInvalidUser');
+  else if (scope !== undefined) codes.push('projectPathInvalidWorkspace');
+  codes.push(absolute ? 'projectPathInvalidAbsolute' : 'projectPathInvalidRelative');
+  return codes;
+}
+
 // ---------------------------------------------------------------------------
 // B10 and B16: a write the environment refused
 // ---------------------------------------------------------------------------
@@ -429,6 +448,10 @@ export const LOGGED_ERROR_AREAS: Readonly<Record<string, LoggedErrorArea>> = {
   RefreshGate: 'Canvas',
   ConvertToDbmlPanel: 'Other',
   DomainTreeProvider: 'Sidebar',
+  // A Table Library drop the canvas missed (#355): the Diagrams view drop's twin.
+  MissedCanvasDrop: 'Sidebar',
+  // A half-applied edit that could not be put back (#355): the edit pipeline.
+  ApplyFileWrites: 'Canvas',
   FileWatcherService: 'Other',
   GettingStarted: 'Other',
   LayerService: 'Other',

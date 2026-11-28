@@ -93,6 +93,122 @@ export function diagramNameTakenMessage(name: string, layerLabel: string): strin
   return `A diagram named "${name}" already exists in the ${layerLabel} layer.`;
 }
 
+/** The buttons of a projectPath warning (#370): each opens the settings that hold the value. */
+export const OPEN_USER_SETTINGS_BUTTON = 'Open User Settings';
+export const OPEN_WORKSPACE_SETTINGS_BUTTON = 'Open Workspace Settings';
+
+/** What {@link projectPathInvalidMessage} needs: the value, and where it came from. */
+export interface ProjectPathInvalidInput {
+  /** The configured value the resolver could not use. */
+  value: string;
+  /** The key that holds it, as the user would search for it (`dbtSemantic.projectPath` for the deprecated key). */
+  settingKey: string;
+  /** Where it is set; undefined when that could not be told (the setting changed while the window started). */
+  scope: 'user' | 'workspace' | 'folder' | undefined;
+  /** The value is an absolute path (so it names no folder on this computer, whatever is open). */
+  absolute: boolean;
+  /** The name of the folder ERD Studio opened instead; absent with no folder open. */
+  opened?: string;
+  /**
+   * The names of the workspace folders a relative value was tried against
+   * (the resolver tries it against each one, not against `opened`, which can
+   * be a dbt project nested below them or a Select dbt Project pick).
+   * Absent: `opened`, the one folder.
+   */
+  searched?: readonly string[];
+}
+
+/** A projectPath warning: its words, its one button, and the command (with its arguments) the button runs. */
+export interface ProjectPathInvalidWarning {
+  message: string;
+  button: string;
+  command: string;
+  args: unknown[];
+}
+
+/**
+ * The warning for an `erdStudio.projectPath` that names no folder (#370),
+ * said for the scope that holds it. A value in User settings applies to every
+ * folder the user opens, so a relative path written for one project misses in
+ * all the others: the words say so, and how to keep it to that project,
+ * rather than reading as a mistake to clear. A value in the workspace's
+ * settings (or one folder's, which ERD Studio reads as the workspace's) is a
+ * fault in this window, and is said as one. A relative path is said to name a
+ * folder that isn't in the workspace folder it was tried against (or in any
+ * of them, with several open), which need not be the folder ERD Studio
+ * opened; an absolute path, a folder that isn't on this computer. User
+ * settings open with `workbench.action.openSettings`
+ * (the User tab) and the workspace's with `openWorkspaceSettings`, both
+ * searched for the key; VS Code 1.85 takes a query for each.
+ */
+export function projectPathInvalidMessage(input: ProjectPathInvalidInput): ProjectPathInvalidWarning {
+  const { value, settingKey, scope, absolute, opened } = input;
+  const searched = input.searched ?? (opened !== undefined ? [opened] : []);
+  const instead = opened !== undefined ? `, so ERD Studio opened ${opened} instead` : '';
+  if (scope === 'user') {
+    const where = absolute
+      ? "isn't a folder on this computer"
+      : searched.length === 1
+        ? `names a folder that isn't in ${searched[0]}`
+        : searched.length > 1
+          ? "names a folder that isn't in any of the open folders"
+          : "isn't a folder";
+    return {
+      message: `ERD Studio: your setting ${settingKey} ("${value}") ${where}${instead}. ` +
+        'It is in your User settings, so it applies to every folder you open. ' +
+        "If it is meant for one project, move it to that project's Workspace settings.",
+      button: OPEN_USER_SETTINGS_BUTTON,
+      command: 'workbench.action.openSettings',
+      args: [settingKey],
+    };
+  }
+  if (scope === 'workspace' || scope === 'folder') {
+    return {
+      message: `ERD Studio: ${settingKey} ("${value}") in this workspace's settings is not a folder${instead}. ` +
+        'Correct the path, or clear it to let ERD Studio find the project.',
+      button: OPEN_WORKSPACE_SETTINGS_BUTTON,
+      command: 'workbench.action.openWorkspaceSettings',
+      args: [{ query: settingKey }],
+    };
+  }
+  // Where it is set is unknown: the plain warning, and the Settings editor's merged view.
+  return {
+    message: `ERD Studio: ${settingKey} ("${value}") is not a folder${instead}.`,
+    button: 'Open Settings',
+    command: 'workbench.action.openSettings',
+    args: [settingKey],
+  };
+}
+
+/**
+ * VS Code applied part of an edit and then refused to put that part back
+ * (#355): which files are left part-changed and how to restore them. Said
+ * neutrally, because the usual cause is the environment (a file another
+ * program has open, a folder the user can't write to), as
+ * `editNotAccepted` says it. `certain` is false when the files could not be
+ * told apart and every planned file is listed ("may be left").
+ */
+export function partChangedMessage(shown: readonly string[], certain: boolean): string {
+  return "ERD Studio couldn't finish this change, and VS Code didn't accept putting back the part already made. " +
+    "This is usually a file another program has open or a folder you can't write to. " +
+    `These files ${certain ? 'are' : 'may be'} left part-changed: ${shown.join(', ')}. ` +
+    'Restore them from source control (for example, Discard Changes in the Source Control view), then try again.';
+}
+
+/** The button that reloads every open diagram from disk (`erdStudio.reloadFromDisk`, as the palette names it). */
+export const RELOAD_DIAGRAMS_BUTTON = 'Reload Diagrams from Disk';
+
+/**
+ * An update was made (the files hold it, open in VS Code) but saving them
+ * failed (#355): say the update landed, so the user saves rather than redoes
+ * it. `shown` are the files as the user sees them (project-relative).
+ */
+export function unsavedAfterUpdateMessage(shown: readonly string[], what: string): string {
+  const list = shown.length > 1 ? `${shown.slice(0, -1).join(', ')} and ${shown[shown.length - 1]}` : shown[0] ?? 'the files';
+  return `ERD Studio updated ${list} for ${what} but couldn't save ${shown.length === 1 ? 'it' : 'them'}. ` +
+    `${shown.length === 1 ? 'It has' : 'They have'} unsaved changes in VS Code.`;
+}
+
 /** A failure's buttons, by label, and what each one does. */
 export type ErrorActions = Readonly<Record<string, () => unknown>>;
 

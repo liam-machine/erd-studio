@@ -231,9 +231,11 @@ describe('activate() with no folder open (empty window)', () => {
   it('still reports an erdStudio.projectPath that points at no dbt project', async () => {
     vscode._setMockConfiguration('erdStudio', 'projectPath', { workspaceValue: '/nowhere/analytics' });
     await activate(context);
+    // #370: worded for the scope that holds it; no folder was opened, so none is named.
     expect(warn).toHaveBeenCalledWith(
-      'ERD Studio: erdStudio.projectPath "/nowhere/analytics" is not a folder.',
-      'Open Settings',
+      'ERD Studio: erdStudio.projectPath ("/nowhere/analytics") in this workspace\'s settings is not a folder. ' +
+        'Correct the path, or clear it to let ERD Studio find the project.',
+      'Open Workspace Settings',
     );
   });
 
@@ -2020,7 +2022,7 @@ describe('erdStudio.resolveDuplicateModel (issue #76: same table name in two lay
     await vscode.commands.executeCommand('erdStudio.resolveDuplicateModel', ignored());
 
     expect(error).toHaveBeenCalledTimes(1);
-    expect(error).toHaveBeenCalledWith(expect.stringMatching(/could not put back .*silver_date\.yml.*Restore these from source control\.$/), { modal: true });
+    expect(error).toHaveBeenCalledWith(expect.stringMatching(/left part-changed: .*silver_date\.yml.*Restore them from source control/), { modal: true }, 'Show Files', 'Send Feedback');
   });
 
   it('reports and counts a repointed diagram it could not save as a rename save failure', async () => {
@@ -2121,7 +2123,7 @@ describe('erdStudio.renameDomain on a JSON diagram (D23: one edit through applyF
     vscode._mockWorkspaceState.applyEditPrefixes.push(1, 0);
     await vscode.commands.executeCommand('erdStudio.renameDomain', element());
     expect(error).toHaveBeenCalledTimes(1);
-    expect(error).toHaveBeenCalledWith(expect.stringMatching(/could not put back .*robert\.json.*Restore these from source control\.$/), { modal: true });
+    expect(error).toHaveBeenCalledWith(expect.stringMatching(/left part-changed: .*robert\.json.*Restore them from source control/), { modal: true }, 'Show Files', 'Send Feedback');
   });
 });
 
@@ -2322,8 +2324,9 @@ describe('Select dbt Project… (#82)', () => {
     await activate(context);
 
     expect(warn).toHaveBeenCalledWith(
-      'ERD Studio: erdStudio.projectPath "/Users/someone-else/datamodels" is not a folder, so ERD Studio opened a instead.',
-      'Open Settings',
+      'ERD Studio: erdStudio.projectPath ("/Users/someone-else/datamodels") in this workspace\'s settings is not a folder, ' +
+        'so ERD Studio opened a instead. Correct the path, or clear it to let ERD Studio find the project.',
+      'Open Workspace Settings',
     );
   });
 });
