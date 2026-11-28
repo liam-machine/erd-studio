@@ -227,6 +227,36 @@ describe('copyDbtCommand', () => {
     expect(`dbt build --select ${members?.join(' ')}`).toBe(write.mock.calls[0][0]);
   });
 
+  it('past the length limit, the diagram\'s selector stands in only when it selects every model the list names', async () => {
+    // dim_region and customer_profile are dbt models with very long names, found through their warehouse relations.
+    const long = (stem: string): string => `${stem}_${'x'.repeat(4200)}`;
+    const manifestModels = [manifestNode(long('stg_region'), 'gold', 'dim_region'), manifestNode(long('stg_profile'), 'gold', 'customer_profile')];
+    const write = vi.spyOn(vscode.env.clipboard, 'writeText');
+    const { panel } = await loaded({ dbt: { manifestModels } });
+
+    // selectors.yml is current, and lists those two tables by their names on the diagram: it does not select their models.
+    const subjectAreas = new SubjectAreaService(new LayerService(root, '.erd-studio'));
+    subjectAreas.setTableLibraryService(new TableLibraryService(root, '.erd-studio'));
+    const selectors = new SelectorsService(subjectAreas, root, '.erd-studio');
+    selectors.regenerate();
+    const selector = selectors.currentSelectorMembersFor(at(SALES));
+    expect(selector?.members).toContain('dim_region');
+    await panel._simulateMessage({ type: 'copyDbtCommand', payload: { verb: 'build' } });
+    const copied = String(write.mock.calls.at(-1)?.[0]);
+    expect(copied.startsWith('dbt build --select ')).toBe(true);
+    expect(copied).toContain(long('stg_region'));
+    expect(copied.length).toBeGreaterThan(8000);
+    expect(notices(panel).at(-1)).toMatch(/may be too long for the Windows command prompt/);
+
+    // A selector that lists dbt's names for them does stand in.
+    vi.spyOn(SelectorsService.prototype, 'currentSelectorMembersFor').mockReturnValue({
+      name: selector!.name,
+      members: ['fct_order', 'dim_customer', long('stg_region'), long('stg_profile')],
+    });
+    await panel._simulateMessage({ type: 'copyDbtCommand', payload: { verb: 'build' } });
+    expect(write).toHaveBeenLastCalledWith(`dbt build --selector ${selector!.name}`);
+  });
+
   it('works the same on the Physical tab (it is on the read-only allowlist)', async () => {
     const write = vi.spyOn(vscode.env.clipboard, 'writeText');
     const { provider, panel } = await loaded();

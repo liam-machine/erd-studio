@@ -19,6 +19,8 @@ import * as vscode from 'vscode';
 
 import { activate, _resetFirstRunGuardForTests, SELECTOR_NAMES_CHECK_MS } from '../../src/extension';
 import { SHOW_LOGS_BUTTON, SHOW_LOGS_COMMAND } from '../../src/services/showLogs';
+import { SelectorsService } from '../../src/services/selectorsService';
+import { clearLogBuffer, recentLogLines } from '../../src/services/logger';
 import { SubjectAreaService } from '../../src/services/domainService';
 import { LayerService } from '../../src/services/layerService';
 import { TableLibraryService } from '../../src/services/logicalModelService';
@@ -134,6 +136,7 @@ beforeEach(() => {
   vi.spyOn(console, 'error').mockImplementation(() => {});
   warn = vi.spyOn(vscode.window, 'showWarningMessage').mockResolvedValue(undefined);
   info = vi.spyOn(vscode.window, 'showInformationMessage').mockResolvedValue(undefined as never);
+  clearLogBuffer();
   vi.useFakeTimers();
 });
 
@@ -207,14 +210,49 @@ describe('Regenerate dbt selectors.yml where dbt names a diagram table different
     orderIsOrdersFact(dbt);
     customerInAnotherCase(dbt);
     warn.mockImplementation((async (message: string) => (/selector/i.test(message) ? SHOW_LOGS_BUTTON : undefined)) as never);
-    const logged = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const run = vi.spyOn(vscode.commands, 'executeCommand');
     await regenerate();
     await vi.advanceTimersByTimeAsync(0);
     expect(run).toHaveBeenCalledWith(SHOW_LOGS_COMMAND);
-    const lines = logged.mock.calls.map((c) => String(c[0]));
+    const lines = recentLogLines().map((line) => line.replace(/^.*?(?=\[Selectors\])/, ''));
     expect(lines).toContain('[Selectors] domain_silver_showcase lists fct_order; dbt names that model orders_fact.');
     expect(lines).toContain('[Selectors] domain_silver_showcase lists dim_customer; dbt names that model DIM_Customer.');
+  });
+
+  it('a table added to a diagram while dbt\'s files were being read is not reported: only a table dbt names otherwise is', async () => {
+    orderIsOrdersFact(dbt);
+    await activate(context);
+    await vi.advanceTimersByTimeAsync(1000);
+    // The write knew the diagram without dim_date; by the time it is read again for the comparison, dim_date is on it.
+    const write = SelectorsService.prototype.regenerateWhenReady;
+    vi.spyOn(SelectorsService.prototype, 'regenerateWhenReady').mockImplementation(async function (this: SelectorsService, ...args: Parameters<typeof write>) {
+      const result = await write.apply(this, args);
+      if (result.status !== 'written') return result;
+      return { ...result, selectors: result.selectors.map((s) => ({ ...s, members: s.members.filter((m) => m !== 'dim_date') })) };
+    });
+    await vscode.commands.executeCommand('erdStudio.syncDomainTags');
+    expect(aboutSelectors(warn)).toHaveLength(1);
+    expect(aboutSelectors(warn)[0]).toMatch(/1 table has another name/);
+    expect(aboutSelectors(warn)[0]).not.toMatch(/dim_date/);
+  });
+
+  it('the wait for dbt\'s files starts before they are read, so a slow schema yml read does not add to it', async () => {
+    orderIsOrdersFact(dbt);
+    await activate(context);
+    await vi.advanceTimersByTimeAsync(1000);
+    const order: string[] = [];
+    const setTimer = globalThis.setTimeout;
+    vi.spyOn(globalThis, 'setTimeout').mockImplementation(((...args: Parameters<typeof setTimeout>) => {
+      if (args[1] === SELECTOR_NAMES_CHECK_MS) order.push('wait');
+      return setTimer(...args);
+    }) as never);
+    const load = YmlParserService.prototype.loadYmlData;
+    vi.spyOn(YmlParserService.prototype, 'loadYmlData').mockImplementation(function (this: YmlParserService, ...args: Parameters<typeof load>) {
+      order.push('read');
+      return load.apply(this, args);
+    });
+    await vscode.commands.executeCommand('erdStudio.syncDomainTags');
+    expect(order.slice(0, 2)).toEqual(['wait', 'read']);
   });
 
   it('names agree: the plain message, as before, and no warning', async () => {

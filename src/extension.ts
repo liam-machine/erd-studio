@@ -2347,23 +2347,25 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
   const selectorNameGapsOf = async (selectors: readonly WrittenSelector[]): Promise<SelectorNameGap[]> => {
     let giveUp: ReturnType<typeof setTimeout> | undefined;
     try {
+      // The wait starts before the read: reading the schema yml files is
+      // synchronous, so a timer started after it would add to it.
+      const waitedLongEnough = new Promise<undefined>((resolve) => { giveUp = setTimeout(() => resolve(undefined), SELECTOR_NAMES_CHECK_MS); });
       const read = (async () => {
         const ymlData = await ymlParserService.loadYmlData(workspaceRoot);
         const manifest = await manifestService.loadManifest(workspaceRoot);
+        // Asked of this load, before anyone else's load can change the answer.
+        const manifestIsStale = manifestService.isStale;
         const catalog = await catalogService.loadCatalog(workspaceRoot);
-        return { ymlData, manifest, catalog };
+        return { ymlData, manifest, manifestIsStale, catalog };
       })();
       // A read that outlives the wait may still fail: nobody is listening by then.
       read.catch(() => undefined);
-      const dbt = await Promise.race([
-        read,
-        new Promise<undefined>((resolve) => { giveUp = setTimeout(() => resolve(undefined), SELECTOR_NAMES_CHECK_MS); }),
-      ]);
+      const dbt = await Promise.race([read, waitedLongEnough]);
       if (!dbt) {
         log.info('[Selectors] dbt\'s files were not read in time to compare model names; none reported.');
         return [];
       }
-      if (manifestService.isStale) {
+      if (dbt.manifestIsStale) {
         log.info('[Selectors] The manifest could not be read just now, so model names were not compared.');
         return [];
       }
@@ -2373,8 +2375,11 @@ async function activateInner(context: vscode.ExtensionContext): Promise<void> {
           const unified = subjectAreaService.getSubjectArea(selector.diagramPath);
           const dbtNodes = subjectAreaService.dbtNodeNamesOf(unified, dbt.ymlData, dbt.manifest, dbt.catalog);
           const tables = unified.logical.models.map((model) => ({ name: model.name, dbtModel: dbtNodes.get(model.name.toLowerCase()) ?? null }));
-          const found = selectorNameGaps(tables, selector.members);
-          for (const gap of found) log.warn(`[Selectors] ${selector.name} lists ${gap.table}; dbt names that model ${gap.dbtModel}.`);
+          // The diagram is read again here: a table added since the write is
+          // not among the members yet, under its own name too. Only a table
+          // dbt names otherwise is one to report.
+          const found = selectorNameGaps(tables, selector.members).filter((gap) => gap.table !== gap.dbtModel);
+          for (const gap of found) log.info(`[Selectors] ${selector.name} lists ${gap.table}; dbt names that model ${gap.dbtModel}.`);
           gaps.push(...found);
         } catch (err) {
           log.warn(`[Selectors] Could not compare model names for ${selector.name}: ${err instanceof Error ? err.message : String(err)}`);
